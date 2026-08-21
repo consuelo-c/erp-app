@@ -29,7 +29,27 @@ y `variant_name`, aunque no se usen todavía.
       permisos con usuarios multi-rol
 - [ ] PWA: copiar `marca/` a `static/`, manifiesto, service worker, `/` prerenderizada
 - [ ] `.github/workflows/deploy.yml`
-- [ ] `wrangler.jsonc` con `env.production` y `env.staging` — **bloqueado**
+- [x] `wrangler.jsonc` con `env.production` y `env.staging`
+
+## Plan: despliegue de humo a staging antes de cerrar la fase 0
+
+Se decidió desplegar staging temprano para validar la configuración de
+Cloudflare y de GitHub Actions antes de que haya código encima. **No cambia la
+planeación** —la sección 21 ya pone el CI/CD dentro de la fase 0—, solo el orden
+interno de la fase.
+
+1. `datetime.ts` + su prueba: `vitest run` sale con código 1 si no encuentra
+   ningún archivo de prueba y el workflow se detendría ahí.
+2. `/` con el logotipo + PWA: algo que mirar en la URL de staging.
+3. `.github/workflows/deploy.yml`, con `migrations/.gitkeep` para que
+   `wrangler d1 migrations apply` reporte "nada que aplicar" en vez de fallar.
+4. Después, las seis tablas + migración + seed: ese despliegue es el que valida
+   de verdad la conexión a D1, porque ya hay migraciones que aplicar.
+
+**Crear también los recursos de producción**, no solo los de staging: el
+workflow despliega producción al hacer push a `main`, que es la rama de trabajo.
+**Activar Cloudflare Access sobre staging después** del primer despliegue, para
+no confundir un 403 de Access con un error de despliegue.
 
 ## Decisiones tomadas (no volver a preguntar)
 
@@ -48,15 +68,27 @@ y `variant_name`, aunque no se usen todavía.
   (§16.2, valor día 58.363,50 × 30) y `PAYROLL_TRANSPORT_ALLOWANCE = 249095`
   (§16.3, 49.819 por 6 días).
 
-## Pendiente de Mario (bloquea cerrar la fase 0)
+## Recursos de Cloudflare
 
-**Cloudflare** — sin esto no se puede escribir `wrangler.jsonc`:
+`account_id` `d3898719718f3c05aa6c5bb85a15ea95`. Los bindings se llaman **`DB` y
+`PHOTOS` en los dos entornos**, apuntando a recursos distintos: el código nunca
+sabe en qué entorno corre.
 
-- `account_id`
-- Nombre del Worker en producción y en staging
-- Nombre y `database_id` de la D1 de producción
-- Nombre y `database_id` de la D1 de staging
-- Nombre del bucket R2 de producción y del de staging
+| | Producción | Staging |
+|---|---|---|
+| Worker | `consueloc-erp` | `consueloc-erp-staging` |
+| D1 | `consueloc-db-prod` | `consueloc-db-stg` |
+| R2 | `consueloc-buck-prod` | `consueloc-buck-stg` |
+
+En desarrollo, `vite dev` usa la configuración del entorno staging vía
+`platformProxy`, pero con la simulación local de Miniflare: D1 y R2 viven en
+`.wrangler/state` y el recurso remoto nunca se toca.
+
+`worker-configuration.d.ts` va versionado aunque sean 572 KB generados, porque
+`npm run build` corre `wrangler types --check` y falla si está ausente o
+desactualizado. **Al cambiar `wrangler.jsonc` hay que correr `npx wrangler types`.**
+
+## Pendiente de Mario
 
 **`settings`** — sin esto el seed queda incompleto (no bloquea la fase 0, sí la 4):
 

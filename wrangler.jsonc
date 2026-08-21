@@ -1,15 +1,53 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "consueloc-erp",
+	"account_id": "d3898719718f3c05aa6c5bb85a15ea95",
 	"compatibility_date": "2026-08-21",
-	"compatibility_flags": [
-		"nodejs_als"
-	],
+	"compatibility_flags": ["nodejs_als"],
 	"main": ".svelte-kit/cloudflare/_worker.js",
 	"assets": {
 		"binding": "ASSETS",
 		"directory": ".svelte-kit/cloudflare"
 	},
-	"workers_dev": true,
-	"preview_urls": true
+	"observability": { "enabled": true },
+	"env": {
+		"production": {
+			"name": "consueloc-erp",
+			"workers_dev": true,
+			"observability": { "enabled": true },
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "consueloc-db-prod",
+					"database_id": "98cf57f8-fefb-4de1-861a-2b881a408682",
+					"migrations_dir": "migrations"
+				}
+			],
+			"r2_buckets": [
+				{
+					"binding": "PHOTOS",
+					"bucket_name": "consueloc-buck-prod"
+				}
+			]
+		},
+		"staging": {
+			"name": "consueloc-erp-staging",
+			"workers_dev": true,
+			"observability": { "enabled": true },
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "consueloc-db-stg",
+					"database_id": "6be6b202-8e77-4c90-8bd4-5be25d7a245c",
+					"migrations_dir": "migrations"
+				}
+			],
+			"r2_buckets": [
+				{
+					"binding": "PHOTOS",
+					"bucket_name": "consueloc-buck-stg"
+				}
+			]
+		}
+	}
 }

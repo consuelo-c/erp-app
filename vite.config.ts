@@ -9,7 +9,8 @@ export default defineConfig({
 				// Force runes mode for the project, except for libraries. Can be removed in svelte 6.
 				runes: ({ filename }) => filename.split(/[/\\]/).includes('node_modules') ? undefined : true
 			},
-			adapter: adapter(),
+			// Miniflare: D1 y R2 viven en .wrangler/state
+			adapter: adapter({ platformProxy: { environment: 'staging' } }),
 			typescript: {
 				config: (config) => {
 					config.include.push('../drizzle.config.ts');
