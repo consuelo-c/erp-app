@@ -1,11 +1,18 @@
 <script lang="ts">
-	import favicon from '$lib/assets/favicon.svg';
-
 	let { children } = $props();
 </script>
 
-<svelte:head>
-	<link rel="icon" href={favicon} />
-</svelte:head>
-
 {@render children()}
+
+<style>
+	:global(html) {
+		color-scheme: only light;
+	}
+
+	:global(body) {
+		margin: 0;
+		background: #ffffff;
+		color: #333333;
+		font-family: system-ui, sans-serif;
+	}
+</style>

@@ -348,7 +348,12 @@ No diseñar nada de esto:
 | `icon-512.png` · `icon-192.png` | Iconos PWA, declarados `"purpose": "any maskable"` |
 | `apple-touch-icon.png` | Icono iOS, 180 × 180 |
 
-Los dos logotipos están **completamente trazados** —un `<path>` cada uno, sin texto ni referencias a tipografía— y llevan `fill="currentColor"` para heredar el color del contexto y tomar el `#333333` de la marca en vez de negro puro. Se renderizan en cualquier entorno sin instalar nada: **no hace falta ningún `.woff2`**.
+Los dos logotipos están **completamente trazados** —un `<path>` cada uno, sin texto ni referencias a tipografía— así que se renderizan en cualquier entorno sin instalar nada: **no hace falta ningún `.woff2`**.
+
+Cada uno lleva un color distinto y es a propósito:
+
+- `banquetes-consuelo-c-logo.svg` lleva **`fill="#333333"` fijo**. Se usa siempre en el gris de marca —landing, encabezados de los tres impresos, barra lateral expandida— y siempre como `<img>`. Un SVG cargado con `<img>` se renderiza en un documento aislado y el CSS de la página no le cascadea, así que ahí `currentColor` resolvería a negro puro, no al gris.
+- `c-logo.svg` lleva **`fill="currentColor"`**, porque en la barra lateral colapsada sí cambia de contexto. Para que eso funcione hay que **incrustarlo en línea**, no referenciarlo con `<img>`.
 
 ### Reglas de uso
 
