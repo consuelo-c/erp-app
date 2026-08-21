@@ -13,10 +13,10 @@
 		"gen": "wrangler types",
 		"test:unit": "vitest",
 		"test": "npm run test:unit -- --run",
-		"db:push": "drizzle-kit push",
 		"db:generate": "drizzle-kit generate",
-		"db:migrate": "drizzle-kit migrate",
-		"db:studio": "drizzle-kit studio"
+		"db:migrate:local": "wrangler d1 migrations apply DB --env staging --local",
+		"db:migrate:staging": "wrangler d1 migrations apply DB --env staging --remote",
+		"db:migrate:prod": "wrangler d1 migrations apply DB --env production --remote"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-cloudflare": "^7.2.8",

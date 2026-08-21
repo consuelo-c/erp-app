@@ -28,7 +28,7 @@ y `variant_name`, aunque no se usen todavía.
 - [ ] Vitest: `getTodaysDate` (incluido el caso de las 7 p.m. en Colombia) y
       permisos con usuarios multi-rol
 - [x] PWA: manifiesto, service worker, `/` prerenderizada con el logotipo
-- [ ] `.github/workflows/deploy.yml`
+- [x] `.github/workflows/deploy.yml`
 - [x] `wrangler.jsonc` con `env.production` y `env.staging`
 
 ## Plan: despliegue de humo a staging antes de cerrar la fase 0
