@@ -19,7 +19,7 @@ y `variant_name`, aunque no se usen todavía.
 
 - [x] Scaffold SvelteKit + adapter-cloudflare + Drizzle D1 + Vitest; Zod instalado
 - [x] `CLAUDE.md`, `docs/reglas-duras.md`, `docs/estado.md`
-- [ ] `src/lib/datetime.ts`
+- [x] `src/lib/datetime.ts` + prueba (incluido el caso de las 7 p.m. en Colombia)
 - [ ] `src/lib/schemas.ts`, `labels.ts`, `settings.ts`
 - [ ] `src/lib/server/actor.ts`, `audit.ts`, `services/README.md`
 - [ ] Drizzle: las 6 tablas + migración generada
