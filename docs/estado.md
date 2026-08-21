@@ -68,6 +68,36 @@ no confundir un 403 de Access con un error de despliegue.
   (§16.2, valor día 58.363,50 × 30) y `PAYROLL_TRANSPORT_ALLOWANCE = 249095`
   (§16.3, 49.819 por 6 días).
 
+## Diseño: proyecto de Claude Design
+
+Las pantallas están diseñadas en el proyecto **"ERP Consuelo C"**,
+`006ed22e-09bb-4114-a78f-4fe4d654254e`. Se leen con la herramienta `DesignSync`
+(`get_project`, `list_files`, `get_file`) pasando ese id.
+
+`list_projects` **no lo muestra**: filtra a proyectos de tipo sistema de diseño
+y este es `PROJECT_TYPE_PROJECT`. Hay que pasar el id explícito.
+
+**Leer solo el tablero de la fase que se esté construyendo**, no los trece:
+
+| Tablero `.dc.html` | Fase |
+|---|---|
+| `1. Wireframes App Pedidos` | panorama general |
+| `2.1 Autenticación y Landing` | 1 |
+| `2.2 Navegación` | 2 |
+| `2.5 Registro de horas` | 3 |
+| `2.3 Configuración`, `2.4 Liquidación de nómina` | 4 |
+| `2.6 Catálogo de productos` | 5 |
+| `2.7 Registro y edición de pedidos`, `3. Nuevo Pedido - Diseño Final` | 6 |
+| `2.8 Despachos, Recogidas y Transiciones` | 7 |
+| `2.9 Inventario` | 8 |
+| `2.10 Consulta de clientes` | 9 |
+| `2.11 Impresos` | 4 y 6 |
+
+El proyecto también tiene `browser-window.jsx`, `ios-frame.jsx` y `support.js`
+(andamiaje de presentación de los tableros, no componentes de la app) y una
+carpeta `uploads/` con copias de la planeación y del brief. **Esas copias no son
+la fuente de verdad**: manda `docs/` en este repositorio.
+
 ## Recursos de Cloudflare
 
 `account_id` `d3898719718f3c05aa6c5bb85a15ea95`. Los bindings se llaman **`DB` y
