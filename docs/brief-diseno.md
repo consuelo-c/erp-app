@@ -339,6 +339,30 @@ No diseñar nada de esto:
 
 ## 9. Archivos de marca
 
-Todos en la carpeta `marca/`, con su propio `LEEME.md`: el logotipo horizontal, la "C" sola, el icono de la app en SVG editable y los PNG de 512, 192 y 180.
+**Nada de esto queda pendiente de diseñar.** Los archivos servidos viven en `static/`:
 
-**Nada de esto queda pendiente de diseñar.**
+| Archivo | Uso |
+|---|---|
+| `banquetes-consuelo-c-logo.svg` | Logotipo horizontal, 80 × 22 (3,6 : 1) |
+| `c-logo.svg` | La "C" sola, 14 × 17 |
+| `icon-512.png` · `icon-192.png` | Iconos PWA, declarados `"purpose": "any maskable"` |
+| `apple-touch-icon.png` | Icono iOS, 180 × 180 |
+
+Los dos logotipos están **completamente trazados** —un `<path>` cada uno, sin texto ni referencias a tipografía— y llevan `fill="currentColor"` para heredar el color del contexto y tomar el `#333333` de la marca en vez de negro puro. Se renderizan en cualquier entorno sin instalar nada: **no hace falta ningún `.woff2`**.
+
+### Reglas de uso
+
+- El logotipo horizontal es **3,6 : 1**. Sirve centrado en la landing, en los encabezados de los tres impresos y en la barra lateral expandida. **No sirve** como icono de app ni en la barra lateral colapsada — para eso está la "C".
+- **Nunca sobre el amarillo `#FFD313`.** El trazo fino desaparece.
+- Fijar un **tamaño mínimo de uso** y no bajar de ahí.
+- La caligrafía **no se usa para texto de interfaz**, solo para la marca.
+
+### El icono de la app
+
+Fondo `#333333`, "C" en blanco, sin transparencia — un icono transparente se ve mal sobre los fondos de la pantalla de inicio. **Sus colores son fijos: no recolorear.**
+
+**La "C" ocupa el 58% de la altura del lienzo**, centrada. No es un número arbitrario: Android puede recortar el icono a un círculo o un cuadrado redondeado y solo garantiza el **80% central** (la zona segura *maskable*). Con 58% las esquinas quedan a 192 px del centro contra 205 de margen seguro — entra por poco, y más grande se saldría. Se probó al 50% y se descartó: el trazo es una caligrafía muy fina y **a 64 px, el tamaño real en la pantalla de inicio, casi desaparece**.
+
+Conviene **revisarlo en un teléfono real** antes de dar la fase 0 por cerrada.
+
+> La fuente editable del icono (`icon-maskable.svg`) y los originales con `fill="black"` no se conservan en el repositorio: están en el commit `0209d1b` y se recuperan con `git checkout` si hacen falta. El logotipo es una conversión de tipografía a trazo, así que también se puede regenerar desde la fuente.

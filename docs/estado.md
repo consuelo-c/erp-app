@@ -27,7 +27,7 @@ y `variant_name`, aunque no se usen todavía.
       valores por defecto de `settings`, ~10 productos con un grupo de variantes
 - [ ] Vitest: `getTodaysDate` (incluido el caso de las 7 p.m. en Colombia) y
       permisos con usuarios multi-rol
-- [ ] PWA: copiar `marca/` a `static/`, manifiesto, service worker, `/` prerenderizada
+- [ ] PWA: manifiesto, service worker, `/` prerenderizada con el logotipo
 - [ ] `.github/workflows/deploy.yml`
 - [x] `wrangler.jsonc` con `env.production` y `env.staging`
 

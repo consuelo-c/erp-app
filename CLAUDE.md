@@ -53,7 +53,7 @@ un `wrangler secret` y no va en ningún archivo. Los secretos de *aplicación*
 
 ```
 docs/            planeacion.md · brief-diseno.md · reglas-duras.md · estado.md
-marca/           originales de marca        static/  marca + manifest
+static/          logotipos, iconos PWA, manifiesto, robots.txt
 migrations/      SQL generado por drizzle-kit
 scripts/seed.ts  seed idempotente → SQL por stdout
 src/
