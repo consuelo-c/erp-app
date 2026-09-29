@@ -10,12 +10,13 @@
 		"prepare": "husky",
 		"check": "wrangler types --check && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-		"lint": "prettier --check . && eslint .",
+		"lint": "eslint . && stylelint \"src/**/*.{css,svelte}\" --allow-empty-input",
 		"format": "prettier --write .",
 		"test:unit": "vitest",
 		"test": "npm run test:unit -- --run",
 		"gen": "wrangler types",
-		"db:generate": "drizzle-kit generate"
+		"db:generate": "drizzle-kit generate",
+		"format:css": "stylelint \"src/**/*.{css,svelte}\" --fix --allow-empty-input"
 	},
 	"devDependencies": {
 		"@commitlint/cli": "^21.2.3",

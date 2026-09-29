@@ -1,1 +1,2 @@
-npm test
+gitleaks git --pre-commit --staged --redact --no-banner
+npx lint-staged --concurrent false
