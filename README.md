@@ -162,14 +162,16 @@ git add README.md .markdownlint.json static/
 git commit -m "chore: add brand files, README and markdownlint config"
 git push
 gh pr create --fill --body "Closes #14" # El PR cierra el issue al hacer merge
-gh pr merge --squash --delete-branch   # O hacer merge en la web de GH
+gh pr merge <N> --squash --delete-branch   # O hacer merge en la web de GH
 git checkout main && git pull
 ```
 
 Al hacer _merge_ del PR a `main`, el _issue_ se cierra (y el Workflow del proyecto lo mueve a _Done_).
 
+
 > [!TIP]
 > `gh issue develop 12 --list` muestra las ramas vinculadas a un _issue_
+> `gh pr list` Muestra los PRs que están abiertos en
 
 <!-- vim: spelllang=es
 -->
