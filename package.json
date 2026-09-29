@@ -15,10 +15,7 @@
 		"test:unit": "vitest",
 		"test": "npm run test:unit -- --run",
 		"gen": "wrangler types",
-		"db:push": "drizzle-kit push",
-		"db:generate": "drizzle-kit generate",
-		"db:migrate": "drizzle-kit migrate",
-		"db:studio": "drizzle-kit studio"
+		"db:generate": "drizzle-kit generate"
 	},
 	"devDependencies": {
 		"@commitlint/cli": "^21.2.3",

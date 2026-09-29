@@ -1,9 +1,6 @@
-import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { integer, sqliteTable } from 'drizzle-orm/sqlite-core';
 
-export const task = sqliteTable('task', {
-	id: text('id')
-		.primaryKey()
-		.$defaultFn(() => crypto.randomUUID()),
-	title: text('title').notNull(),
-	priority: integer('priority').notNull().default(1)
+// Throwaway table: it only proves the migration step runs in CI. Phase 02 squashes it away.
+export const skeleton = sqliteTable('skeleton', {
+	id: integer('id').primaryKey()
 });
