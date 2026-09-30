@@ -1,2 +1,5 @@
-<h1>Welcome to SvelteKit</h1>
-<p>Visit <a href="https://svelte.dev/docs/kit">svelte.dev/docs/kit</a> to read the documentation</p>
+<script lang="ts">
+	// STUB: phase 3 replaces this with the landing page (logo + "Empleados" link).
+</script>
+
+<img src="/banquetes-consuelo-c-logo.svg" alt="Banquetes Consuelo C" />
