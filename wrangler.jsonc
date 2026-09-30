@@ -1,0 +1,28 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "consueloc-erp",
+	"account_id": "d3898719718f3c05aa6c5bb85a15ea95",
+	"compatibility_date": "2026-09-29",
+	"compatibility_flags": ["nodejs_als"],
+	"main": ".svelte-kit/cloudflare/_worker.js",
+	"assets": {
+		"binding": "ASSETS",
+		"directory": ".svelte-kit/cloudflare"
+	},
+	"workers_dev": true,
+	"preview_urls": true,
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "consueloc-erp-db",
+			"database_id": "0af29ce1-8c74-466c-878f-9ad7d3371a00",
+			"migrations_dir": "migrations"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "BUCKET",
+			"bucket_name": "consueloc-erp-arch"
+		}
+	]
+}

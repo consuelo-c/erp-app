@@ -1,0 +1,47 @@
+{
+	"permissions": {
+		"defaultMode": "plan",
+		"deny": [
+			"Bash(git add:*)",
+			"Bash(git commit:*)",
+			"Bash(git push:*)",
+			"Bash(git checkout -b:*)",
+			"Bash(git switch -c:*)",
+			"Bash(git merge:*)",
+			"Bash(git rebase:*)",
+			"Bash(git reset:*)",
+			"Bash(npm install:*)",
+			"Bash(npm i:*)",
+			"Bash(npm ci:*)",
+			"Bash(npm uninstall:*)",
+			"Bash(npm run format:*)",
+			"Bash(wrangler deploy:*)",
+			"Bash(npx wrangler deploy:*)",
+			"Bash(wrangler d1 create:*)",
+			"Bash(npx wrangler d1 create:*)",
+			"Bash(wrangler d1 migrations apply:*)",
+			"Bash(npx wrangler d1 migrations apply:*)",
+			"Bash(wrangler d1 execute:*)",
+			"Bash(npx wrangler d1 execute:*)",
+			"Bash(wrangler r2 bucket create:*)",
+			"Bash(npx wrangler r2 bucket create:*)",
+			"Bash(wrangler secret put:*)",
+			"Bash(npx wrangler secret put:*)",
+			"Bash(gh issue create:*)",
+			"Bash(gh issue close:*)",
+			"Bash(gh pr create:*)",
+			"Bash(gh pr merge:*)"
+		]
+	},
+	"extraKnownMarketplaces": {
+		"svelte": {
+			"source": {
+				"source": "github",
+				"repo": "sveltejs/ai-tools"
+			}
+		}
+	},
+	"enabledPlugins": {
+		"svelte@svelte": true
+	}
+}
