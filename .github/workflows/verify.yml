@@ -1,0 +1,22 @@
+name: Verify
+
+on:
+  pull_request:
+
+jobs:
+  # The job name is the required status check in the main ruleset: keep it "test".
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx vitest run
+      # Tests block; linting only reports.
+      - run: npx eslint .
+        continue-on-error: true
+      - run: npx stylelint "src/**/*.{css,svelte}" --allow-empty-input
+        continue-on-error: true
