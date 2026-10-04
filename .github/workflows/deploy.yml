@@ -21,7 +21,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx vitest run
-      # The pre-launch wipe (a later Phase 01 unit) goes before this step.
+      # Wipes production only if migrations/ was squashed and `orders` is empty; fails otherwise.
+      - run: node scripts/wipe-d1-if-squashed.js --remote --yes
       - run: npx wrangler d1 migrations apply consueloc-erp-db --remote
       - run: npm run build
       - run: npx wrangler deploy
