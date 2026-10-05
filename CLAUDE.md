@@ -18,7 +18,9 @@ SvelteKit app for Banquetes Consuelo C, deployed as a Cloudflare Worker.
 
 ## Rules
 
-- The developer runs every write command (git add/commit/push, npm install, wrangler create/deploy/apply, gh issue/pr create); the deny list is in `.claude/settings.json`. Claude proposes Conventional Commits with Spanish descriptions
+- The developer runs every write command (git add/commit/push, npm install, wrangler create/deploy/apply, gh issue/pr create, gh project item-edit); the deny list is in `.claude/settings.json`. Claude proposes Conventional Commits with Spanish descriptions
+- Issues, issue comments and pull requests are written in Spanish (title and body); code identifiers, paths and commands inside them stay as they are
+- Code follows [../planning/07-Working-Methodology.md §13 Code standards](https://github.com/consuelo-c/erp-planning/blob/main/07-Working-Methodology.md#13-code-standards); read it before writing code. Run `npm run lint` and fix every error before proposing a commit
 - Deploys only happen from CI (`.github/workflows/deploy.yml` on merge to `main`), never by hand. `verify.yml` runs on PRs; its `test` job is the required check
 - Build only what the current unit's issue asks for. Anything temporary gets a `STUB: phase N replaces this with …` comment and a `debt` issue
 - No secrets in the repo: `.env.example` lists keys only; local values go in `.dev.vars`
