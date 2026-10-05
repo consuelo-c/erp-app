@@ -20,6 +20,9 @@ Thumbs.db
 .dev.vars
 .dev.vars.*
 
+# D1 export (npm run db:export)
+/db-export.sql
+
 # Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*

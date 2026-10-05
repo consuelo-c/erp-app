@@ -16,6 +16,9 @@
 		"test": "npm run test:unit -- --run",
 		"gen": "wrangler types",
 		"db:generate": "drizzle-kit generate",
+		"env:create": "wrangler d1 create consueloc-erp-db && wrangler r2 bucket create consueloc-erp-arch",
+		"db:reset": "rm -rf .wrangler/state/v3/d1 && wrangler d1 migrations apply consueloc-erp-db --local",
+		"db:export": "wrangler d1 export consueloc-erp-db --remote --output db-export.sql",
 		"format:css": "stylelint \"src/**/*.{css,svelte}\" --fix --allow-empty-input"
 	},
 	"devDependencies": {

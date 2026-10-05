@@ -14,6 +14,9 @@ SvelteKit app for Banquetes Consuelo C, deployed as a Cloudflare Worker.
 - `npm run test` — unit tests (Claude runs this)
 - `npm run lint` / `npm run format` — ESLint + Stylelint / Prettier
 - `npm run db:generate` — new migration from the schema
+- `npm run db:reset` — local only: deletes the on-disk D1 and applies every migration
+- `npm run db:export` — SQL dump of production to `db-export.sql` (git-ignored)
+- `npm run env:create` — creates the D1 database and the R2 bucket; copy the printed IDs into `wrangler.jsonc`
 - `npm run build`, `npx wrangler dev` — local run on the Workers runtime
 
 ## Rules

@@ -47,13 +47,16 @@ npx wrangler r2 bucket create consueloc-erp-arch
 npx wrangler r2 bucket list --json
 ```
 
+> [!TIP]
+> `npm run env:create` crea ambos (la base de datos y el bucket). El `database_id` que imprime se copia en `wrangler.jsonc`
+
 ## Github
 
 Se asume que ya existe el repositorio
 
 ### Proteger la rama `main` de GitHub
 
-Acceder _Settings -> Rules -> Rulesets ->  New branch ruleset_ y crear una nueva regla con los siguientes parámetros:
+Acceder _Settings -> Rules -> Rulesets -> New branch ruleset_ y crear una nueva regla con los siguientes parámetros:
 
 - _Enforcement status_: `Active`
 - Rama `main`
@@ -167,7 +170,6 @@ git checkout main && git pull
 ```
 
 Al hacer _merge_ del PR a `main`, el _issue_ se cierra (y el Workflow del proyecto lo mueve a _Done_).
-
 
 > [!TIP]
 > `gh issue develop 12 --list` muestra las ramas vinculadas a un _issue_
