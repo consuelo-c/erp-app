@@ -11,8 +11,10 @@ SvelteKit app for Banquetes Consuelo C, deployed as a Cloudflare Worker.
 
 ## Commands
 
-- `npm run test` — unit tests (Claude runs this)
-- `npm run lint` / `npm run format` — ESLint + Stylelint / Prettier
+- `npm run test` — unit tests, once (Claude runs this); `npm run test:watch` re-runs them on save
+- `npm run lint` — `lint:js` (ESLint) and `lint:css` (Stylelint) in parallel
+- `npm run format` — `format:css` (Stylelint `--fix`), then `format:js` (Prettier)
+- `npm run typecheck` — `wrangler types`, `svelte-kit sync` and `svelte-check` over the whole project
 - `npm run db:generate` — new migration from the schema
 - `npm run db:reset` — local only: deletes the on-disk D1 and applies every migration
 - `npm run db:export` — SQL dump of production to `db-export.sql` (git-ignored)

@@ -16,7 +16,7 @@ jobs:
       - run: npm ci
       - run: npx vitest run
       # Tests block; linting only reports.
-      - run: npx eslint .
+      - run: npm run lint:js
         continue-on-error: true
-      - run: npx stylelint "src/**/*.{css,svelte}" --allow-empty-input
+      - run: npm run lint:css
         continue-on-error: true
