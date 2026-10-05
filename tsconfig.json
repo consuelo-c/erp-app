@@ -3,7 +3,9 @@
 	"compilerOptions": {
 		"rewriteRelativeImportExtensions": true,
 		"allowJs": true,
-		"checkJs": true,
+		// Off: after a build, `wrangler types` imports .svelte-kit/cloudflare/_worker.js (mainModule)
+		// and checkJs would type-check the compiled output. The code is TypeScript.
+		"checkJs": false,
 		"esModuleInterop": true,
 		"forceConsistentCasingInFileNames": true,
 		"resolveJsonModule": true,
