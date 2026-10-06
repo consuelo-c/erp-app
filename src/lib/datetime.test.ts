@@ -8,11 +8,6 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
-// Intl separates "p. m." with non-breaking spaces.
-function normalizeSpaces(text: string): string {
-	return text.replace(/\s/g, ' ');
-}
-
 test("getTodaysDate returns Bogotá's day when UTC is already on the next one", () => {
 	vi.useFakeTimers();
 	vi.setSystemTime(BOGOTA_10PM);
@@ -26,6 +21,14 @@ test('getTodaysDate rolls over at midnight in Bogotá', () => {
 });
 
 test('formatInstant shows the instant in Bogotá time', () => {
-	const epochSeconds = BOGOTA_10PM.getTime() / 1000;
-	expect(normalizeSpaces(formatInstant(epochSeconds))).toBe('14 de agosto de 2026, 10:00 p. m.');
+	expect(formatInstant(BOGOTA_10PM.getTime() / 1000)).toBe('14 de agosto de 2026, 10:00 p.m.');
+});
+
+test('formatInstant writes midnight and noon as 12', () => {
+	expect(formatInstant(Date.parse('2026-01-01T05:05:00Z') / 1000)).toBe(
+		'1 de enero de 2026, 12:05 a.m.'
+	);
+	expect(formatInstant(Date.parse('2026-01-01T17:00:00Z') / 1000)).toBe(
+		'1 de enero de 2026, 12:00 p.m.'
+	);
 });
