@@ -30,6 +30,7 @@ Claude runs `test`, `lint` and `typecheck`; the developer runs every other one.
 
 - `src/routes/` — only `/`, a stub that phase 3 replaces
 - `src/lib/server/db/schema.ts` — Drizzle schema, source of `migrations/`
+- `src/lib/settings.ts` — `SETTINGS`: each key's module, Spanish label, unit and Zod schema (parses the stored `value` TEXT)
 - `src/service-worker.ts` — PWA shell cache; `static/` — icons and `manifest.json`
 - `migrations/` — generated SQL; squashed freely until launch, append-only after
 - `scripts/` — `wipe-d1-if-squashed.js`: the deploy's pre-launch production wipe
