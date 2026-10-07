@@ -32,6 +32,7 @@ Claude runs `test`, `lint` and `typecheck`; the developer runs every other one.
 - `src/routes/` — only `/`, a stub that phase 3 replaces
 - `src/lib/server/db/schema.ts` — Drizzle schema, source of `migrations/`
 - `src/lib/server/audit.ts` — `auditedInsert` / `auditedUpdate`: audit columns from the `Actor` plus the `events` row, as statements for one `db.batch()`
+- `src/lib/server/timeline.ts` — `filterTimelineForActor`: which `events` rows of an order's timeline each role sees, money stripped for `WAREHOUSE`/`DRIVER`
 - `src/lib/server/services/` — business logic, one file per module; its `README.md` has the service-layer rule
 - `src/lib/settings.ts` — `SETTINGS`: each key's module, Spanish label, unit and Zod schema (parses the stored `value` TEXT)
 - `src/service-worker.ts` — PWA shell cache; `static/` — icons and `manifest.json`
