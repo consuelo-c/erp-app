@@ -6,8 +6,8 @@ INSERT INTO settings (key, value, created_at, created_by, updated_at, updated_by
 SELECT column1, column2, unixepoch(), 'system', unixepoch(), 'system'
 FROM (VALUES
 	('COMPANY_NAME', 'Banquetes Consuelo C'),
-	('COMPANY_ADDRESS', 'Medellín'),
-	('COMPANY_PHONE', '000 000 0000'),
+	('COMPANY_ADDRESS', 'Calle 38a #79-18, Medellín, Colombia'),
+	('COMPANY_PHONE', '(+57) 604 411 44 29'),
 	('ORDERS_SUGGESTED_ADVANCE_PCT', '50'),
 	('PAYROLL_MINIMUM_WAGE', '1750905'),
 	('PAYROLL_TRANSPORT_ALLOWANCE', '249095'),
