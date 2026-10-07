@@ -22,7 +22,7 @@ Claude runs `test`, `lint` and `typecheck`; the developer runs every other one.
 - `npm run db:generate` — new migration from the schema
 - `npx wrangler d1 migrations apply consueloc-erp-db --local` — apply migrations locally; remote is applied only by `deploy.yml`
 - `npm run db:reset` — local only: deletes the on-disk D1, applies every migration and runs the seed
-- `npm run db:seed` — local only: loads `scripts/seed.sql` (default `settings`, holidays included); idempotent, writes no `events`
+- `npm run db:seed` — local only: loads `scripts/settings-defaults.sql` (default `settings`, holidays included); idempotent, writes no `events`. `deploy.yml` applies the same file to production
 - `npm run db:export` — SQL dump of production to `db-export.sql` (git-ignored)
 - `npm run env:create` — creates the D1 database and the R2 bucket; copy the printed IDs into `wrangler.jsonc`
 - `npm run build`, `npx wrangler dev` — local run on the Workers runtime
@@ -37,7 +37,7 @@ Claude runs `test`, `lint` and `typecheck`; the developer runs every other one.
 - `src/lib/settings.ts` — `SETTINGS`: each key's module, Spanish label, unit and Zod schema (parses the stored `value` TEXT)
 - `src/service-worker.ts` — PWA shell cache; `static/` — icons and `manifest.json`
 - `migrations/` — generated SQL; squashed freely until launch, append-only after
-- `scripts/` — `wipe-d1-if-squashed.js`: the deploy's pre-launch production wipe; `seed.sql`: the development seed
+- `scripts/` — `wipe-d1-if-squashed.js`: the deploy's pre-launch production wipe; `settings-defaults.sql`: default `settings`, applied locally by `db:seed` and to production by the deploy
 - `.github/workflows/` — `verify.yml` (PRs), `deploy.yml` (merge to `main`)
 - `.husky/` — `pre-commit`, `commit-msg`; `.claude/settings.json` — plan mode and the deny list
 

@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import { SETTINGS, type SettingKey } from '$lib/settings';
 
-const seed = readFileSync('scripts/seed.sql', 'utf8');
+const defaults = readFileSync('scripts/settings-defaults.sql', 'utf8');
 
 let database: DatabaseSync;
 
@@ -15,7 +15,7 @@ beforeEach(() => {
 	for (const file of files) {
 		database.exec(readFileSync(`migrations/${file}`, 'utf8'));
 	}
-	database.exec(seed);
+	database.exec(defaults);
 });
 
 function readSettings() {
@@ -43,7 +43,7 @@ test('loads the 2026 and 2027 holidays', () => {
 test('a second run duplicates and overwrites nothing', () => {
 	database.exec("update settings set value = '99' where key = 'PAYROLL_PENSION_RATE'");
 	const before = readSettings();
-	database.exec(seed);
+	database.exec(defaults);
 	expect(readSettings()).toEqual(before);
 });
 
