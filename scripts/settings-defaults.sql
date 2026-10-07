@@ -1,7 +1,8 @@
--- Development seed: default settings, 2026 and 2027 Colombian holidays included. Only run by
--- `npm run db:seed` (and `db:reset`), which always target the local D1. Idempotent: an existing
--- key is left as is. Writes no events row and creates no logins (phase 3's Worker creates admin).
--- Every value must pass its Zod schema in src/lib/settings.ts; seed.test.ts checks it.
+-- Default settings, 2026 and 2027 Colombian holidays included. Not sample data: production needs
+-- them too. deploy.yml applies this file on every deploy, and `npm run db:seed` loads it into the
+-- local D1. Idempotent: an existing key is left as is, so an edit made in the app survives every
+-- deploy. Writes no events row and creates no logins (phase 3's Worker creates admin).
+-- Every value must pass its Zod schema in src/lib/settings.ts; settings-defaults.test.ts checks it.
 INSERT INTO settings (key, value, created_at, created_by, updated_at, updated_by)
 SELECT column1, column2, unixepoch(), 'system', unixepoch(), 'system'
 FROM (VALUES
