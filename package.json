@@ -18,7 +18,8 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"db:generate": "drizzle-kit generate",
-		"db:reset": "rm -rf .wrangler/state/v3/d1 && wrangler d1 migrations apply consueloc-erp-db --local",
+		"db:reset": "rm -rf .wrangler/state/v3/d1 && wrangler d1 migrations apply consueloc-erp-db --local && npm run db:seed",
+		"db:seed": "wrangler d1 execute consueloc-erp-db --local --file scripts/seed.sql",
 		"db:export": "wrangler d1 export consueloc-erp-db --remote --output db-export.sql",
 		"env:create": "wrangler d1 create consueloc-erp-db && wrangler r2 bucket create consueloc-erp-arch"
 	},
