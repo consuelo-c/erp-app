@@ -73,6 +73,12 @@ Copied in full from [../planning/02-planning/hard-rules.md](https://github.com/c
 - Code, columns, and enum values in **English**. Documents in **English**, UI in **Spanish**.
 - No raw enum value ever reaches the screen: everything goes through the label maps.
 
+### Design
+
+- Screens are built with the Design System's tokens and components, pulled into `app/` with `/design-sync`. **No token value is written by hand.**
+- **A new visual pattern is never introduced in the code**: if a screen needs one, it's added to the Design System first and then synced.
+- A unit builds only the screens handed off into its session, never those of another unit or phase.
+
 ### Data
 
 - Money is always `INTEGER`, **whole pesos**, never `REAL`, never cents. Each line rounds to the peso as it's calculated; totals are the sum of the rounded lines.
@@ -121,6 +127,8 @@ Copied in full from [../planning/02-planning/hard-rules.md](https://github.com/c
 - All money goes to `cash_movements`. The sign indicates the direction; there's no "inflow/outflow" column.
 - A movement's links are **typed, nullable foreign keys**, never `subject_type` + `subject_id`.
 - There are no edit or delete routes for `cash_movements` or `events`. The correction is an offsetting movement.
+- **Money in: `SALES`, `MANAGER`, `ADMIN`. Money out — refunds included — only `MANAGER` and `ADMIN`.** An outflow keeps a copy of the `bank_account` the money went to.
+- A contact's `bank_account` can be set by `SALES` while it's empty; once it has a value, only `MANAGER` and `ADMIN` change it. Only `MANAGER` and `ADMIN` edit `services`. Enforced in the service layer.
 - The driver **doesn't record payments**: they leave notes on the order. The movement is recorded when the money reaches the office.
 - The cash book **doesn't reconcile cash**: no opening balance, no tracking of who holds the money.
 - No per-employee loan balance is kept: it's typed in every week.
@@ -130,7 +138,7 @@ Copied in full from [../planning/02-planning/hard-rules.md](https://github.com/c
 - No transactions or inventory reservations, and no validation that blocks for overbooking, a minimum amount, or a schedule clash: **warnings never block**.
 - No VAT, no tax fields.
 - No email password recovery, no dark theme.
-- No carrier table: `carrier_name` and `carrier_phone` are free text on the order.
+- No separate carrier or provider table: providers are `contacts` with `services`, and the order keeps `carrier_id` plus a `carrier_name`/`carrier_phone` snapshot.
 - What the company pays the external carrier is a `CARRIER_PAYMENT` outflow in `cash_movements`, never subtracted from the order total.
 - The system **doesn't decide** whether the deposit is withheld: it only records who's responsible and the outcome.
 - **No "repaired" action** on a recoverable incident. The partial count resolves it. Overlapping counts warn, they don't block; the last approval wins.
