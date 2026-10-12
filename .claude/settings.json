@@ -1,6 +1,5 @@
 {
 	"permissions": {
-		"defaultMode": "plan",
 		"deny": [
 			"Bash(gh issue close:*)",
 			"Bash(gh issue comment:*)",
@@ -38,7 +37,11 @@
 			"Bash(wrangler deploy:*)",
 			"Bash(wrangler r2 bucket create:*)",
 			"Bash(wrangler secret put:*)"
-		]
+		],
+		"defaultMode": "plan"
+	},
+	"enabledPlugins": {
+		"svelte@svelte": true
 	},
 	"extraKnownMarketplaces": {
 		"svelte": {
@@ -47,8 +50,5 @@
 				"repo": "sveltejs/ai-tools"
 			}
 		}
-	},
-	"enabledPlugins": {
-		"svelte@svelte": true
 	}
 }
