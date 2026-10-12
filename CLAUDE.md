@@ -15,7 +15,7 @@ SvelteKit app for Banquetes Consuelo C, deployed as a Cloudflare Worker. Plannin
 All in [../planning/07-Working-Methodology.md](https://github.com/consuelo-c/erp-planning/blob/main/07-Working-Methodology.md) (`07`) unless named.
 
 - **Opening a session** — `07` [§7](https://github.com/consuelo-c/erp-planning/blob/main/07-Working-Methodology.md#7-opening-and-closing-a-session): the milestone's open issues, not the planning
-- **Opening a phase** — `07` [Opening a phase](https://github.com/consuelo-c/erp-planning/blob/main/07-Working-Methodology.md#opening-a-phase) (screens first, then one issue per unit); [../planning/02-planning/README.md](https://github.com/consuelo-c/erp-planning/blob/main/02-planning/README.md) for which planning files the phase needs
+- **Opening a phase** — from Phase 03 on, the developer runs `/start-phase NN` (`.claude/skills/start-phase/`); asked to open a phase without it, suggest it. The process stays in `07` [Opening a phase](https://github.com/consuelo-c/erp-planning/blob/main/07-Working-Methodology.md#opening-a-phase) (screens first, then one issue per unit); [../planning/02-planning/README.md](https://github.com/consuelo-c/erp-planning/blob/main/02-planning/README.md) for which planning files the phase needs
 - **Starting a unit** — `07` [The cycle](https://github.com/consuelo-c/erp-planning/blob/main/07-Working-Methodology.md#the-cycle) (branch, move to `Doing`; if that command fails or its `--id` is empty, ask the developer to move it by hand); the phase's whole criteria file, both halves: `../planning/05-acceptance/phase-NN.md`
 - **Building a screen** — `07` [Opening a phase](https://github.com/consuelo-c/erp-planning/blob/main/07-Working-Methodology.md#opening-a-phase): only the screens handed off into the session; ask for a missing one of the same phase
 - **Needing something another unit or phase owns** — `07` [Stubs are the way out](https://github.com/consuelo-c/erp-planning/blob/main/07-Working-Methodology.md#stubs-are-the-way-out)
@@ -66,7 +66,7 @@ Claude runs `test`, `lint` and `typecheck`; the developer runs every other one.
 - `migrations/` — generated SQL; squashed freely until launch, append-only after
 - `scripts/` — `wipe-d1-if-squashed.js`: the deploy's pre-launch production wipe; `settings-defaults.sql`: default `settings`, applied locally by `db:seed` and to production by the deploy
 - `.github/workflows/` — `verify.yml` (PRs), `deploy.yml` (merge to `main`)
-- `.husky/` — `pre-commit`, `commit-msg`; `.claude/settings.json` — plan mode and the deny list
+- `.husky/` — `pre-commit`, `commit-msg`; `.claude/settings.json` — plan mode and the deny list; `.claude/skills/` — `start-phase`
 
 ## Hard rules
 
