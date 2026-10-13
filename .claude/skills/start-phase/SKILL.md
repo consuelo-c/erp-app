@@ -9,18 +9,18 @@ argument-hint: <phase number>
 
 Open Phase $ARGUMENTS. `NN` below is that number, zero-padded (`3` → `03`).
 
-This is a planning session: it writes no code; its only file is the issue script in the session's scratchpad (section 6). The process is `../planning/07-Working-Methodology.md` "Opening a phase"; this skill adds only what that section leaves to the session.
+This is a planning session: it writes no code; its only file is the issue script in the session's scratchpad (section 6). The process is `../planning/working-methodology.md` "Opening a phase"; this skill adds only what that section leaves to the session.
 
 ## 1. Preconditions
 
-- `../planning/05-acceptance/phase-NN.md` exists. If it doesn't, stop: the criteria are written in a planning session in `../planning/` before the phase opens.
-- Phases 00–02 are not opened here: 00 is done by hand, 01–02 use Prompt 0 in `../planning/04-Prompts-Phases-01-02.md`.
+- `../planning/phase-NN/acceptance.md` exists. If it doesn't, stop: the criteria are written in a planning session in `../planning/` before the phase opens.
+- Phases 00–02 are not opened here: 00 is done by hand, 01–02 use Prompt 0 in `../planning/phase-01/prompts.md`.
 
 ## 2. Read
 
-- `../planning/07-Working-Methodology.md`: "Opening a phase" and section 4 ("The issues").
-- `../planning/05-acceptance/phase-NN.md` whole, both halves.
-- The planning files the table in `../planning/02-planning/README.md` lists for Phase NN.
+- `../planning/working-methodology.md`: "Opening a phase" and section 4 ("The issues").
+- `../planning/phase-NN/acceptance.md` whole, both halves.
+- `../planning/foundations.md` and `../planning/phase-NN/planning.md`, whose _Screens_ section lists the phase's screens.
 
 ## 3. Existing issues
 
@@ -37,7 +37,7 @@ Follow "Opening a phase" → "Screens first". Use Claude in Chrome on the Design
 
 ## 5. Units
 
-- Every criterion of `phase-NN.md` falls in exactly one unit; the "MUST NOT exist" list applies to all of them.
+- Every criterion of `acceptance.md` falls in exactly one unit; the "MUST NOT exist" list applies to all of them.
 - Each unit fits one short session and leaves the repository coherent.
 - Walking the criteria to close the phase is a separate session, not a unit.
 
@@ -67,8 +67,8 @@ create() {
 create "<título de la unidad>" <<'EOF'
 <Una oración: qué construye o arregla la unidad.>
 
-Implementa [`<file>.md#<heading>`](https://github.com/consuelo-c/erp-planning/blob/<sha>/02-planning/<file>.md#<heading>).
-Criterios: [`phase-NN.md#<heading>`](https://github.com/consuelo-c/erp-planning/blob/<sha>/05-acceptance/phase-NN.md#<heading>).
+Implementa [`phase-NN/planning.md#<heading>`](https://github.com/consuelo-c/erp-planning/blob/<sha>/phase-NN/planning.md#<heading>).
+Criterios: [`phase-NN/acceptance.md#<heading>`](https://github.com/consuelo-c/erp-planning/blob/<sha>/phase-NN/acceptance.md#<heading>).
 EOF
 
 # Ideas placed in this phase
