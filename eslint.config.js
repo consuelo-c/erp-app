@@ -50,7 +50,18 @@ export default defineConfig(
 			'id-length': ['error', { min: 2, exceptions: ['i', 'j', '_'] }],
 			'unicorn/name-replacements': [
 				'error',
-				{ allowList: { db: true, env: true, params: true, props: true, i: true, j: true } }
+				// `Props` is Svelte's convention for a component's props type.
+				{
+					allowList: {
+						db: true,
+						env: true,
+						params: true,
+						props: true,
+						Props: true,
+						i: true,
+						j: true
+					}
+				}
 			],
 			'@typescript-eslint/naming-convention': [
 				'error',
