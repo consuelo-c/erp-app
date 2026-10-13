@@ -1,6 +1,6 @@
 # erp-app
 
-SvelteKit app for Banquetes Consuelo C, deployed as a Cloudflare Worker. Planning lives in the sibling repository `../planning/` ([`consuelo-c/erp-planning`](https://github.com/consuelo-c/erp-planning)), never copied here. All issues, milestones (`Phase 00` to `Phase 12`) and labels live in `consuelo-c/erp-app`: pass `--repo consuelo-c/erp-app` to every `gh` command.
+SvelteKit app for Banquetes Consuelo C, deployed as a Cloudflare Worker. Planning lives in the sibling repository `../planning/` ([`consuelo-c/erp-planning`](https://github.com/consuelo-c/erp-planning)), never copied here. All issues, milestones (`Phase 00`, `Phase 01`, …) and labels live in `consuelo-c/erp-app`: pass `--repo consuelo-c/erp-app` to every `gh` command.
 
 ## Always
 
@@ -12,20 +12,20 @@ SvelteKit app for Banquetes Consuelo C, deployed as a Cloudflare Worker. Plannin
 
 ## When to read what
 
-All in [../planning/07-Working-Methodology.md](https://github.com/consuelo-c/erp-planning/blob/main/07-Working-Methodology.md) (`07`) unless named.
+All in [../planning/working-methodology.md](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md) (`methodology`) unless named.
 
-- **Opening a session** — `07` [§7](https://github.com/consuelo-c/erp-planning/blob/main/07-Working-Methodology.md#7-opening-and-closing-a-session): the milestone's open issues, not the planning
-- **Opening a phase** — from Phase 03 on, the developer runs `/start-phase NN` (`.claude/skills/start-phase/`); asked to open a phase without it, suggest it. The process stays in `07` [Opening a phase](https://github.com/consuelo-c/erp-planning/blob/main/07-Working-Methodology.md#opening-a-phase) (screens first, then one issue per unit); [../planning/02-planning/README.md](https://github.com/consuelo-c/erp-planning/blob/main/02-planning/README.md) for which planning files the phase needs
-- **Starting a unit** — `07` [The cycle](https://github.com/consuelo-c/erp-planning/blob/main/07-Working-Methodology.md#the-cycle) (branch, move to `Doing`; if that command fails or its `--id` is empty, ask the developer to move it by hand); the phase's whole criteria file, both halves: `../planning/05-acceptance/phase-NN.md`
-- **Building a screen** — `07` [Opening a phase](https://github.com/consuelo-c/erp-planning/blob/main/07-Working-Methodology.md#opening-a-phase): only the screens handed off into the session; ask for a missing one of the same phase
-- **Needing something another unit or phase owns** — `07` [Stubs are the way out](https://github.com/consuelo-c/erp-planning/blob/main/07-Working-Methodology.md#stubs-are-the-way-out)
-- **Finding a gap, ambiguity, error or contradiction in the planning** — `07` [Gaps in the planning](https://github.com/consuelo-c/erp-planning/blob/main/07-Working-Methodology.md#gaps-in-the-planning) and [§4](https://github.com/consuelo-c/erp-planning/blob/main/07-Working-Methodology.md#4-the-issues)
-- **Writing code** — `07` [§13 Code standards](https://github.com/consuelo-c/erp-planning/blob/main/07-Working-Methodology.md#13-code-standards)
-- **Creating an issue** — `07` [§4](https://github.com/consuelo-c/erp-planning/blob/main/07-Working-Methodology.md#4-the-issues)
-- **Closing a unit** — `07` [§3 Commits](https://github.com/consuelo-c/erp-planning/blob/main/07-Working-Methodology.md#3-commits)
-- **Closing a session** — `07` [§7](https://github.com/consuelo-c/erp-planning/blob/main/07-Working-Methodology.md#7-opening-and-closing-a-session)
-- **Closing a phase** — `07` [§9](https://github.com/consuelo-c/erp-planning/blob/main/07-Working-Methodology.md#9-closing-a-phase)
-- **Using a skill that reviews or trims code (ponytail)** — `07` [§10](https://github.com/consuelo-c/erp-planning/blob/main/07-Working-Methodology.md#10-the-skills): the planning wins over the skill
+- **Opening a session** — `methodology` [§7](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#7-opening-and-closing-a-session): the milestone's open issues, not the planning
+- **Opening a phase** — from Phase 03 on, the developer runs `/start-phase NN` (`.claude/skills/start-phase/`); asked to open a phase without it, suggest it. The process stays in `methodology` [Opening a phase](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#opening-a-phase) (screens first, then one issue per unit); the phase's plan is `../planning/phase-NN/planning.md`, read with [../planning/foundations.md](https://github.com/consuelo-c/erp-planning/blob/main/foundations.md)
+- **Starting a unit** — `methodology` [The cycle](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#the-cycle) (branch, move to `Doing`; if that command fails or its `--id` is empty, ask the developer to move it by hand); the phase's whole criteria file, both halves: `../planning/phase-NN/acceptance.md`
+- **Building a screen** — `methodology` [Opening a phase](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#opening-a-phase): only the screens handed off into the session; ask for a missing one of the same phase
+- **Needing something another unit or phase owns** — `methodology` [Stubs are the way out](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#stubs-are-the-way-out)
+- **Finding a gap, ambiguity, error or contradiction in the planning** — `methodology` [Gaps in the planning](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#gaps-in-the-planning) and [§4](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#4-the-issues)
+- **Writing code** — `methodology` [§13 Code standards](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#13-code-standards)
+- **Creating an issue** — `methodology` [§4](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#4-the-issues)
+- **Closing a unit** — `methodology` [§3 Commits](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#3-commits)
+- **Closing a session** — `methodology` [§7](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#7-opening-and-closing-a-session)
+- **Closing a phase** — `methodology` [§9](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#9-closing-a-phase)
+- **Using a skill that reviews or trims code (ponytail)** — `methodology` [§10](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#10-the-skills): the planning wins over the skill
 
 ## Stack
 
@@ -72,4 +72,4 @@ Claude runs `test`, `lint` and `typecheck`; the developer runs every other one.
 
 Imported from the planning, so they are always current. Cited by name, not by number.
 
-@../planning/02-planning/hard-rules.md
+@../planning/hard-rules.md
