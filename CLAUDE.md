@@ -54,7 +54,9 @@ Claude runs `test`, `lint` and `typecheck`; the developer runs every other one.
 
 ## Folder structure
 
-- `src/routes/` — only `/`, a stub that phase 3 replaces
+- `src/routes/` — only `/`, a stub that phase 3 replaces; `+layout.svelte` loads `app.css`
+- `src/app.css` — the Design System's tokens as CSS custom properties, its base and text roles (`.meta`, `.note`, `.section-title`), and the `.form-stack` / `.chip-row` wrappers
+- `src/lib/components/` — the Design System's components translated to Svelte, keeping its BEM class names; only the ones a screen uses so far. Icons are `static/icons.svg`, the system's sprite
 - `src/lib/datetime.ts` — `getTodaysDate`, `formatInstant`: Bogotá dates and times
 - `src/lib/server/actor.ts` — `Actor` and the permission helpers (`requireRole`, `hasAnyRole`, …)
 - `src/lib/server/db/schema.ts` — Drizzle schema, source of `migrations/`
@@ -62,7 +64,7 @@ Claude runs `test`, `lint` and `typecheck`; the developer runs every other one.
 - `src/lib/server/timeline.ts` — `filterTimelineForActor`: which `events` rows of an order's timeline each role sees, money stripped for `WAREHOUSE`/`DRIVER`
 - `src/lib/server/services/` — business logic, one file per module; its `README.md` has the service-layer rule
 - `src/lib/settings.ts` — `SETTINGS`: each key's module, Spanish label, unit and Zod schema (parses the stored `value` TEXT)
-- `src/service-worker.ts` — PWA shell cache; `static/` — icons and `manifest.json`
+- `src/service-worker.ts` — PWA shell cache; `static/` — app icons, the icon sprite and `manifest.json`
 - `migrations/` — generated SQL; squashed freely until launch, append-only after
 - `scripts/` — `wipe-d1-if-squashed.js`: the deploy's pre-launch production wipe; `settings-defaults.sql`: default `settings`, applied locally by `db:seed` and to production by the deploy
 - `.github/workflows/` — `verify.yml` (PRs), `deploy.yml` (merge to `main`)

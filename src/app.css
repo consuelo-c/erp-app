@@ -1,0 +1,242 @@
+/* Design System tokens (Consuelo C Design System, tokens/*.css), plus its base and layout text roles. */
+
+:root {
+	/* Brand */
+	--brand-yellow: #ffd313;
+	--brand-yellow-tint: #fffbeb;
+	--brand-ink: #333;
+	--brand-white: #fff;
+
+	/* Neutrals */
+	--neutral-0: #fff;
+	--neutral-50: #f7f7f7;
+	--neutral-200: #e5e5e5;
+	--neutral-300: #d4d4d4;
+	--neutral-400: #a3a3a3;
+	--neutral-600: #6b6b6b;
+	--neutral-800: #333;
+	--neutral-900: #1e1e1e;
+
+	/* Semantic (text on fill) */
+	--success-fg: #1b7f4b;
+	--success-bg: #dcfce7;
+	--warning-fg: #b45309;
+	--warning-bg: #fef3c7;
+	--warning-border: #fde68a;
+	--error-fg: #b3261e;
+	--error-bg: #fee2e2;
+	--info-fg: #1d4ed8;
+	--info-bg: #dbeafe;
+	--info-fg-hover: #1b3fae;
+	--teal-fg: #0f766e;
+	--teal-bg: #ccfbf1;
+	--violet-fg: #6d28d9;
+	--violet-bg: #ede9fe;
+
+	/* Order states */
+	--status-draft-bg: var(--neutral-50);
+	--status-draft-fg: var(--neutral-600);
+	--status-confirmed-bg: var(--brand-yellow);
+	--status-confirmed-fg: var(--brand-ink);
+	--status-picked-bg: var(--warning-bg);
+	--status-picked-fg: var(--warning-fg);
+	--status-out-delivery-bg: var(--info-bg);
+	--status-out-delivery-fg: var(--info-fg);
+	--status-delivered-bg: var(--teal-bg);
+	--status-delivered-fg: var(--teal-fg);
+	--status-out-pickup-bg: var(--violet-bg);
+	--status-out-pickup-fg: var(--violet-fg);
+	--status-completed-bg: var(--success-bg);
+	--status-completed-fg: var(--success-fg);
+	--status-cancelled-bg: var(--error-bg);
+	--status-cancelled-fg: var(--error-fg);
+
+	/* Semantic aliases */
+	--surface-page: var(--neutral-0);
+	--surface-subtle: var(--neutral-50);
+	--surface-card: var(--neutral-0);
+	--surface-sidebar: var(--neutral-900);
+	--surface-highlight: var(--brand-yellow-tint);
+	--surface-canvas: #efeae0;
+	--text-body: var(--neutral-800);
+	--text-secondary: var(--neutral-600);
+	--text-disabled: var(--neutral-400);
+	--text-on-dark: var(--neutral-300);
+	--text-on-accent: var(--brand-ink);
+	--border-default: var(--neutral-200);
+	--border-strong: var(--neutral-800);
+	--border-accent: var(--brand-yellow);
+	--border-sidebar: #333;
+	--action-primary-bg: var(--brand-yellow);
+	--action-primary-bg-hover: #f2c500;
+	--action-primary-fg: var(--brand-ink);
+	--action-secondary-border: var(--neutral-800);
+	--link: var(--info-fg);
+	--link-hover: var(--info-fg-hover);
+	--income: var(--success-fg);
+	--expense: var(--error-fg);
+
+	/* Overlays and states */
+	--scrim: rgb(0 0 0 / 35%);
+	--opacity-dimmed: 0.55;
+
+	/* Typography */
+	--font-sans: 'Work Sans', sans-serif;
+	--font-mono: ui-monospace, monospace;
+	--weight-regular: 400;
+	--weight-medium: 500;
+	--weight-semibold: 600;
+	--weight-bold: 700;
+
+	/* Screen scale */
+	--text-xs: 11px;
+	--text-label: 12px;
+	--text-sm: 13px;
+	--text-md: 14px;
+	--text-base: 15px;
+	--text-input: 16px;
+	--text-lg: 17px;
+	--text-xl: 19px;
+	--text-2xl: 20px;
+	--text-3xl: 22px;
+	--text-display: 30px;
+	--text-button-xl: 18px;
+	--leading-loose: 2;
+
+	/* Print scale (half-letter sheets) */
+	--print-xs: 9.5px;
+	--print-sm: 10px;
+	--print-md: 10.5px;
+	--print-base: 11.5px;
+	--print-lg: 13px;
+	--print-title: 15px;
+	--print-amount: 20px;
+
+	/* Semantic type */
+	--type-screen-title: 700 19px/1.25 var(--font-sans);
+	--type-section-title: 700 16px/1.3 var(--font-sans);
+	--type-label: 600 12px/1.3 var(--font-sans);
+	--type-body: 400 15px/1.45 var(--font-sans);
+	--type-input: 400 16px/1.3 var(--font-sans);
+	--type-meta: 400 13px/1.4 var(--font-sans);
+	--type-badge: 700 12px/1.2 var(--font-sans);
+	--type-amount: 700 17px/1.2 var(--font-sans);
+	--type-total: 700 22px/1.2 var(--font-sans);
+	--type-net: 700 30px/1.1 var(--font-sans);
+	--type-button: 700 17px/1.2 var(--font-sans);
+	--type-nav: 400 11px/1.2 var(--font-sans);
+
+	/* Spacing */
+	--space-1: 2px;
+	--space-2: 4px;
+	--space-3: 6px;
+	--space-4: 8px;
+	--space-5: 10px;
+	--space-6: 12px;
+	--space-7: 14px;
+	--space-8: 16px;
+	--space-9: 18px;
+	--space-10: 20px;
+	--space-11: 22px;
+	--space-12: 24px;
+	--space-14: 32px;
+	--screen-pad-x: 20px;
+	--screen-header-top: 56px;
+	--control-gap: 10px;
+	--field-gap: 14px;
+	--section-gap: 20px;
+
+	/* Radii */
+	--radius-sm: 6px;
+	--radius-md: 8px;
+	--radius-input: 10px;
+	--radius-card: 12px;
+	--radius-net: 14px;
+	--radius-dialog: 16px;
+	--radius-pill: 20px;
+	--radius-chip: 16px;
+	--radius-round: 50%;
+
+	/* Borders */
+	--border-w-hair: 1px;
+	--border-w: 1.5px;
+	--border-w-strong: 2px;
+
+	/* Shadows (rare: dialogs and paper only) */
+	--shadow-dialog: 0 8px 24px rgb(0 0 0 / 12%);
+	--shadow-paper: 0 4px 20px rgb(0 0 0 / 15%);
+
+	/* Sizing */
+	--tap-min: 48px;
+	--back-btn: 36px;
+	--sidebar-w: 240px;
+	--sidebar-w-collapsed: 68px;
+	--sidebar-item: 44px;
+	--phone-w: 402px;
+	--print-sheet-w: 528px;
+	--print-sheet-h: 816px;
+	--dialog-max-w: 360px;
+
+	/* Component padding */
+	--button-pad-xl: 17px;
+	--button-pad-sm: 9px;
+	--chip-pad-md: 7px 14px;
+	--input-icon-pad: 38px;
+	--input-icon-inset: 13px;
+
+	/* Layers */
+	--z-modal: 10;
+}
+
+/* Base. `height` lets a Screen fill the viewport; the system's frames assume no body margin. */
+html,
+body {
+	height: 100%;
+}
+
+body {
+	margin: 0;
+	font-family: var(--font-sans);
+	color: var(--text-body);
+	background: var(--surface-page);
+}
+
+a {
+	color: var(--link);
+}
+
+a:hover {
+	color: var(--link-hover);
+}
+
+/* Text roles */
+.section-title {
+	margin: 0 0 var(--space-5);
+	font: var(--type-section-title);
+}
+
+.meta {
+	margin: 0;
+	font: var(--type-meta);
+	color: var(--text-secondary);
+}
+
+.note {
+	margin: 0;
+	font-size: var(--text-label);
+	font-style: italic;
+	color: var(--text-secondary);
+}
+
+/* Layout wrappers around components */
+.form-stack {
+	display: flex;
+	flex-direction: column;
+	gap: var(--field-gap);
+}
+
+.chip-row {
+	display: flex;
+	gap: var(--space-4);
+	overflow-x: auto;
+}
