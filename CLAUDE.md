@@ -60,6 +60,7 @@ Claude runs `test`, `lint` and `typecheck`; the developer runs every other one.
 - `src/lib/datetime.ts` — `getTodaysDate`, `formatInstant`: Bogotá dates and times
 - `src/lib/server/actor.ts` — `Actor` and the permission helpers (`requireRole`, `hasAnyRole`, …)
 - `src/lib/server/db/schema.ts` — Drizzle schema, source of `migrations/`
+- `src/lib/server/password.ts` — `hashPassword` / `verifyPassword` / `needsRehash`: PBKDF2-SHA512 over the peppered password
 - `src/lib/server/audit.ts` — `auditedInsert` / `auditedUpdate`: audit columns from the `Actor` plus the `events` row, as statements for one `db.batch()`
 - `src/lib/server/timeline.ts` — `filterTimelineForActor`: which `events` rows of an order's timeline each role sees, money stripped for `WAREHOUSE`/`DRIVER`
 - `src/lib/server/services/` — business logic, one file per module; its `README.md` has the service-layer rule

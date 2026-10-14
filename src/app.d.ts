@@ -14,6 +14,11 @@ declare global {
 		// interface PageData {}
 		// interface PageState {}
 	}
+
+	// A Workers extension. The DOM types SvelteKit loads shadow the Workers declaration of SubtleCrypto.
+	interface SubtleCrypto {
+		timingSafeEqual(a: ArrayBuffer | ArrayBufferView, b: ArrayBuffer | ArrayBufferView): boolean;
+	}
 }
 
 export {};
