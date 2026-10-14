@@ -39,3 +39,14 @@ test('a hash with a lower count still verifies and asks to be re-hashed with the
 	expect(await verifyPassword('secreto', PEPPER, rehashed)).toBe(true);
 	expect(needsRehash(rehashed)).toBe(false);
 });
+
+test('verification works without crypto.subtle.timingSafeEqual, as under vite dev on Node', async () => {
+	const stored = await hashPassword('secreto', PEPPER, 1);
+	Reflect.deleteProperty(crypto.subtle, 'timingSafeEqual');
+	try {
+		expect(await verifyPassword('secreto', PEPPER, stored)).toBe(true);
+		expect(await verifyPassword('otro', PEPPER, stored)).toBe(false);
+	} finally {
+		Object.assign(crypto.subtle, { timingSafeEqual });
+	}
+});

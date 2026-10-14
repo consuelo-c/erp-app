@@ -10,14 +10,18 @@ declare global {
 		}
 
 		// interface Error {}
-		// interface Locals {}
+		interface Locals {
+			// Null without a valid session; set by hooks.server.ts.
+			user: import('$lib/server/actor').Actor | null;
+		}
 		// interface PageData {}
 		// interface PageState {}
 	}
 
-	// A Workers extension. The DOM types SvelteKit loads shadow the Workers declaration of SubtleCrypto.
+	// A Workers extension, missing under `vite dev` (Node). The DOM types SvelteKit loads shadow the
+	// Workers declaration of SubtleCrypto.
 	interface SubtleCrypto {
-		timingSafeEqual(a: ArrayBuffer | ArrayBufferView, b: ArrayBuffer | ArrayBufferView): boolean;
+		timingSafeEqual?(a: ArrayBuffer | ArrayBufferView, b: ArrayBuffer | ArrayBufferView): boolean;
 	}
 }
 

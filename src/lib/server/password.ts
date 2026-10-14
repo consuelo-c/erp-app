@@ -58,7 +58,19 @@ export async function hashPassword(
 	return { hash: toBase64(new Uint8Array(hash)), salt: toBase64(salt), iterations };
 }
 
-// timingSafeEqual, never ===: an early-exit comparison leaks through its timing how much matched.
+// Never ===: an early-exit comparison leaks through its timing how much matched.
+function timingSafeEqual(computed: Uint8Array, stored: Uint8Array): boolean {
+	if (undefined !== crypto.subtle.timingSafeEqual) {
+		return computed.length === stored.length && crypto.subtle.timingSafeEqual(computed, stored);
+	}
+	// `vite dev` runs the server on Node, which lacks it: the same constant-time comparison by hand.
+	let difference = computed.length ^ stored.length;
+	for (const [index, byte] of computed.entries()) {
+		difference |= byte ^ (stored[index] ?? 0);
+	}
+	return 0 === difference;
+}
+
 export async function verifyPassword(
 	password: string,
 	pepper: string,
@@ -66,7 +78,7 @@ export async function verifyPassword(
 ): Promise<boolean> {
 	const peppered = await pepperPassword(password, pepper);
 	const hash = await pbkdf2(peppered, fromBase64(stored.salt), stored.iterations);
-	return crypto.subtle.timingSafeEqual(hash, fromBase64(stored.hash));
+	return timingSafeEqual(new Uint8Array(hash), fromBase64(stored.hash));
 }
 
 /** A hash made with another count is re-hashed with the current one on the next successful login. */

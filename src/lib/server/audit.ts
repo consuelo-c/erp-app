@@ -23,7 +23,7 @@ function assertIdentifiers(names: string[]): void {
 	}
 }
 
-function nowInSeconds(): number {
+export function nowInSeconds(): number {
 	return Math.floor(Date.now() / 1000);
 }
 
