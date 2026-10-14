@@ -20,7 +20,6 @@ export const actions: Actions = {
 			return fail(400, { username: String(credentials.username ?? ''), invalid: true });
 		}
 		setSessionCookie(cookies, session.token, session.expiresAt);
-		// STUB: #79 sends each role to its own page after login.
-		redirect(303, resolve('/'));
+		redirect(303, resolve('/inicio'));
 	}
 };

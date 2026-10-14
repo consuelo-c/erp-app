@@ -54,7 +54,7 @@ Claude runs `test`, `lint` and `typecheck`; the developer runs every other one.
 
 ## Folder structure
 
-- `src/routes/` — `/` (a stub that phase 3 replaces) and `/login`; `+layout.svelte` loads `app.css`
+- `src/routes/` — `/` (a stub that phase 3 replaces), `/login`, `/logout` (`POST` only) and `/inicio`, where every role lands after login (a stub that phase 4's shell replaces); `+layout.svelte` loads `app.css`
 - `src/hooks.server.ts` — resolves the session cookie into `locals.user` (an `Actor`, or null) and slides its expiry
 - `src/app.css` — the Design System's tokens as CSS custom properties, its base and text roles (`.meta`, `.note`, `.section-title`), and the `.form-stack` / `.chip-row` wrappers
 - `src/lib/components/` — the Design System's components translated to Svelte, keeping its BEM class names; only the ones a screen uses so far. Icons are `static/icons.svg`, the system's sprite

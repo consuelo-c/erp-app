@@ -13,7 +13,7 @@ const TOKEN_BYTES = 32;
 /** The Worker's secrets: `ADMIN_PASSWORD` is only read while `users` is empty. */
 export type AuthSecrets = { pepper: string; adminPassword?: string };
 
-/** Who's knocking, for the LOGIN / LOGIN_FAILED rows in `events`. */
+/** Who's knocking, for the LOGIN / LOGIN_FAILED / LOGOUT rows in `events`. */
 export type RequestInfo = { ip: string | null; userAgent: string | null };
 
 export type NewSession = { token: string; expiresAt: number };
@@ -53,7 +53,7 @@ function storedHash(user: UserRow): PasswordHash {
 // A failed login has no single row to point at, so its entity_id is null.
 function accessEvent(
 	db: D1Database,
-	action: 'LOGIN' | 'LOGIN_FAILED',
+	action: 'LOGIN' | 'LOGIN_FAILED' | 'LOGOUT',
 	attempt: RequestInfo & { username: string; userId: number | null }
 ): D1PreparedStatement {
 	return db
@@ -189,4 +189,22 @@ export async function validateSession(db: D1Database, token: string): Promise<Se
 	const actor: Actor = { username: row.username, employeeId: row.employee_id, roles, kind: 'user' };
 	const session = { actor, expiresAt: row.expires_at };
 	return { actor, expiresAt: await renewIfHalfGone(db, sessionId, session) };
+}
+
+/** Deletes the session behind a cookie's token and logs the LOGOUT; an unknown token does nothing. */
+export async function logOut(db: D1Database, token: string, request: RequestInfo): Promise<void> {
+	const sessionId = await sessionIdFor(token);
+	const user = await db
+		.prepare(
+			'select users.id, users.username from sessions join users on users.id = sessions.user_id where sessions.id = ?'
+		)
+		.bind(sessionId)
+		.first<{ id: number; username: string }>();
+	if (null === user) {
+		return;
+	}
+	await db.batch([
+		db.prepare('delete from sessions where id = ?').bind(sessionId),
+		accessEvent(db, 'LOGOUT', { ...request, username: user.username, userId: user.id })
+	]);
 }

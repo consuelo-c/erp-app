@@ -24,7 +24,7 @@ export function hasRole(actor: Actor, role: Role): boolean {
 	return actor.roles.includes(role);
 }
 
-export function hasAnyRole(actor: Actor, roles: Role[]): boolean {
+export function hasAnyRole(actor: Actor, roles: readonly Role[]): boolean {
 	return roles.some((role) => hasRole(actor, role));
 }
 
@@ -38,8 +38,11 @@ export function isAdminOrManager(actor: Actor): boolean {
 	return hasAnyRole(actor, ['ADMIN', 'MANAGER']);
 }
 
-/** Throws a 403 unless the actor holds at least one of `roles`. */
-export function requireRole(actor: Actor, roles: Role[]): void {
+/** Throws a 401 without an actor (no session), a 403 unless it holds at least one of `roles`. */
+export function requireRole(actor: Actor | null, roles: readonly Role[]): asserts actor is Actor {
+	if (null === actor) {
+		error(401, 'Inicie sesión para continuar');
+	}
 	if (!hasAnyRole(actor, roles)) {
 		error(403, 'No tiene permiso para esta acción');
 	}

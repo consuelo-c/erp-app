@@ -44,6 +44,15 @@ test('requireRole throws a 403 only when no role matches', () => {
 	}
 });
 
+test('requireRole throws a 401 without an actor, whatever the roles', () => {
+	try {
+		requireRole(null, ['SALES']);
+		expect.unreachable();
+	} catch (thrown) {
+		expect(isHttpError(thrown, 401)).toBe(true);
+	}
+});
+
 test('rolesSchema rejects an empty array, CLIENT and duplicates', () => {
 	expect(rolesSchema.safeParse(['WAREHOUSE', 'DRIVER']).success).toBe(true);
 	expect(rolesSchema.safeParse([]).success).toBe(false);
