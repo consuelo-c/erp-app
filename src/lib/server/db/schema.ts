@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { check, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { check, index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 const auditColumns = {
 	createdAt: integer('created_at').notNull(),
@@ -39,4 +39,44 @@ export const events = sqliteTable(
 			sql`${table.actorKind} IN ('user', 'system', 'agent', 'integration')`
 		)
 	]
+);
+
+// The people on payroll. Salary, position and employment periods live in `attributes` (JSON,
+// validated with Zod); "currently employed" is the last period having no end, so there's no `active`.
+export const employees = sqliteTable('employees', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	fullName: text('full_name').notNull(),
+	idNumber: text('id_number').notNull().unique(),
+	attributes: text('attributes').notNull().default('{}'),
+	...auditColumns
+});
+
+// The logins. A login isn't a person: `employee_id` is null for a login not on payroll, and moves
+// to the new hire when a login is reassigned.
+export const users = sqliteTable('users', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	username: text('username').notNull().unique(), // lowercase
+	roles: text('roles').notNull(), // JSON, validated with Zod
+	employeeId: integer('employee_id')
+		.unique()
+		.references(() => employees.id),
+	passwordHash: text('password_hash').notNull(),
+	passwordSalt: text('password_salt').notNull(),
+	passwordIterations: integer('password_iterations').notNull(),
+	active: integer('active').notNull().default(1),
+	...auditColumns
+});
+
+// `id` is the SHA-256 of the session token, never the token: a leaked table hands over no sessions.
+export const sessions = sqliteTable(
+	'sessions',
+	{
+		id: text('id').primaryKey(),
+		userId: integer('user_id')
+			.notNull()
+			.references(() => users.id),
+		expiresAt: integer('expires_at').notNull(),
+		...auditColumns
+	},
+	(table) => [index('sessions_user_id').on(table.userId)]
 );
