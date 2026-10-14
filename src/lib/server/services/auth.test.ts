@@ -3,7 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import { createMemoryD1 } from '../db/memory-d1';
 import { hashPassword, PASSWORD_ITERATIONS } from '../password';
-import { logIn, SESSION_SECONDS, validateSession } from './auth';
+import { logIn, logOut, SESSION_SECONDS, validateSession } from './auth';
 
 // Workers adds timingSafeEqual to crypto.subtle; Node doesn't, so the tests lend it node:crypto's.
 Object.assign(crypto.subtle, { timingSafeEqual });
@@ -120,4 +120,21 @@ test('an expired or unknown token gives no session, and the expired row is remov
 	expect(await validateSession(db, token)).toBeNull();
 	expect(database.prepare('select count(*) as count from sessions').get()?.count).toBe(0);
 	expect(await validateSession(db, 'not-a-token')).toBeNull();
+});
+
+test('logging out deletes the session row and logs LOGOUT; an unknown token does nothing', async () => {
+	await addUser('ventas');
+	const { token } = (await attempt('ventas', 'clave'))!;
+	await logOut(db, token, request);
+	expect(database.prepare('select count(*) as count from sessions').get()?.count).toBe(0);
+	expect(await validateSession(db, token)).toBeNull();
+	expect(database.prepare("select * from events where action = 'LOGOUT'").get()).toMatchObject({
+		actor_username: 'ventas',
+		ip: request.ip,
+		user_agent: request.userAgent
+	});
+	await logOut(db, token, request);
+	expect(
+		database.prepare("select count(*) as count from events where action = 'LOGOUT'").get()?.count
+	).toBe(1);
 });
