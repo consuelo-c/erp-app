@@ -175,5 +175,31 @@ Al hacer _merge_ del PR a `main`, el _issue_ se cierra (y el Workflow del proyec
 > `gh issue develop 12 --list` muestra las ramas vinculadas a un _issue_
 > `gh pr list` Muestra los PRs que están abiertos en
 
+## Creando la contraseña de `admin`
+
+En ambiente local `npx run dev` buscara estos datos en las variables de ambiente o en el archivo `.dev.vars`.
+
+```bash
+echo "ADMIN_PASSWORD=password" >> .dev.vars
+echo "PASSWORD_PEPPER=$(openssl rand -base64 32)" >> .dev.vars
+```
+
+En Cloudflare la contraseña es un _secret_, al igual que `PASSWORD_PEPPER` por lo que debemos usar `wrangler`
+
+```bash
+npx wrangler secret put ADMIN_PASSWORD
+openssl rand -base64 32 | npx wrangler secret put PASSWORD_PEPPER
+```
+
+> [!DANGER]
+> Si se cambia el `PASSWORD_PEPER` en producción todas los usuarios perderán acceso. Por eso podría ser buena idea guardar la salida de `openssl` en Bitwarden
+
+> [!IMPORTANT]
+> Solo hay 2 formas de cambiar la contraseña de `admin` en producción:
+>
+> 1. Ejecutando `npx wrangler secret put ADMIN_PASSWORD`
+> 1. Usando el [dashboard](https://dash.cloudflare.com/d3898719718f3c05aa6c5bb85a15ea95/workers/services/view/consueloc-erp/production/settings) de Cloudflare
+
 <!-- vim: spelllang=es
+n,
 -->
