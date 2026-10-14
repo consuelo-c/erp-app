@@ -1,7 +1,8 @@
 // PBKDF2-SHA512 through WebCrypto: bcrypt and argon2 are native Node bindings that don't run on Workers.
-// 100,000 is the most Workers accepts; it's lowered if login exceeds the free plan's 10 ms of CPU.
+// 100,000 (the most Workers accepts) measured ~62 ms of login CPU in production, over the free
+// plan's 10 ms; this count fits it. The pepper is what keeps it safe against a leaked database.
 // Each hash keeps its own count, so lowering it never breaks the hashes already stored.
-export const PASSWORD_ITERATIONS = 100_000;
+export const PASSWORD_ITERATIONS = 10_000;
 
 const SALT_BYTES = 16;
 const HASH_BITS = 512;
