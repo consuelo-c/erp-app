@@ -64,16 +64,18 @@ function eventStatement(db: D1Database, event: EventRow) {
 
 /**
  * Inserts `values` with the four audit columns filled from `actor`, plus its `CREATED` event.
+ * `unlogged` columns are inserted but left out of the event: a password hash never reaches `events`.
  * Returns both statements for the caller's `db.batch()`, in this order: the event takes
  * `entity_id` from `last_insert_rowid()`, so it must run right after the insert.
  */
 export function auditedInsert(
 	db: D1Database,
-	write: AuditedWrite & { values: Row }
+	write: AuditedWrite & { values: Row; unlogged?: Row }
 ): D1PreparedStatement[] {
 	const now = nowInSeconds();
 	const row = {
 		...write.values,
+		...write.unlogged,
 		created_at: now,
 		created_by: write.actor.username,
 		updated_at: now,
