@@ -19,14 +19,17 @@ export function createMemoryD1(): { db: D1Database; database: DatabaseSync } {
 	for (const file of files) {
 		database.exec(readFileSync(`migrations/${file}`, 'utf8'));
 	}
-	// D1's batch is atomic: all statements or none.
+	// D1's batch is atomic: all statements or none. Each result carries D1's `meta.last_row_id`.
 	const batch = async (statements: ReturnType<typeof statement>[]) => {
 		database.exec('begin');
 		try {
+			const results = [];
 			for (const each of statements) {
-				await each.run();
+				const { lastInsertRowid } = await each.run();
+				results.push({ meta: { last_row_id: Number(lastInsertRowid) } });
 			}
 			database.exec('commit');
+			return results;
 		} catch (error) {
 			database.exec('rollback');
 			throw error;
