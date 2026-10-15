@@ -57,7 +57,7 @@ Claude runs `test`, `lint` and `typecheck`; the developer runs every other one.
 - `src/routes/` — `/` (the public landing: logo and the icon link to `/login`), `/login`, `/logout` (`POST` only), `/inicio`, where every role lands after login (a stub that phase 4's shell replaces), and `/personal` (Employees: list, `nuevo`, `[id]`; reached by URL until phase 4's navigation); `+layout.svelte` loads `app.css`
 - `src/hooks.server.ts` — resolves the session cookie into `locals.user` (an `Actor`, or null) and slides its expiry
 - `src/app.css` — the Design System's tokens as CSS custom properties, its base and text roles (`.meta`, `.note`, `.section-title`), and the `.form-stack` / `.chip-row` wrappers
-- `src/lib/components/` — the Design System's components translated to Svelte, keeping its BEM class names; only the ones a screen uses so far. Icons are `static/icons.svg`, the system's sprite
+- `src/lib/components/` — the Design System's components translated to Svelte, keeping its BEM class names; only the ones a screen uses so far. Icons are `static/icons.svg`, the system's sprite. `UnsavedChangesGuard` is behavior, not a system component: mounted with a form's id, it asks before leaving with unsaved changes
 - `src/lib/datetime.ts` — `getTodaysDate`, `formatInstant`, `formatCivilDate`: Bogotá dates and times
 - `src/lib/format.ts` — `formatPesos`, `formatIdNumber`: Colombian number display
 - `src/lib/server/actor.ts` — `Actor` and the permission helpers (`requireRole`, `hasAnyRole`, …)

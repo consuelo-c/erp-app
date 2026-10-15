@@ -10,6 +10,7 @@
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
+	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import { formatCivilDate } from '$lib/datetime';
 	import { formatIdNumber, formatPesos } from '$lib/format';
 	import type { SubmitFunction } from '@sveltejs/kit';
@@ -48,6 +49,8 @@
 			<LogoutButton />
 		</ScreenHeader>
 	{/snippet}
+
+	<UnsavedChangesGuard form="save" />
 
 	<!-- Every submit button sits outside its form (footer, dialogs) and points at it by id. -->
 	<form id="save" class="form-stack" method="POST" action="?/save" use:enhance>
