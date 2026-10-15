@@ -14,12 +14,12 @@
 </script>
 
 <svelte:head>
-	<title>Empleados · Banquetes Consuelo C</title>
+	<title>Personal · Banquetes Consuelo C</title>
 </svelte:head>
 
 <Screen>
 	{#snippet header()}
-		<ScreenHeader title="Empleados">
+		<ScreenHeader title="Personal">
 			<LogoutButton />
 		</ScreenHeader>
 	{/snippet}
