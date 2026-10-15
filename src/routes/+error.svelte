@@ -6,18 +6,24 @@
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 
-	// A MANAGER reaching a Logins URL sees why, inside the screen, instead of a bare error page.
+	// Every route's error screen. A 403 means a session without the role: it says why and leads back
+	// to /inicio. Anything else (401, 404, 500) may have no session, so it leads to the landing.
 	const isForbidden = $derived(403 === page.status);
 </script>
 
 <svelte:head>
-	<title>Logins · Banquetes Consuelo C</title>
+	<title>{isForbidden ? 'Acceso restringido' : 'Error'} · Banquetes Consuelo C</title>
 </svelte:head>
 
 <Screen>
 	{#snippet header()}
-		<ScreenHeader title="Logins" backHref={resolve('/personal')}>
-			<LogoutButton />
+		<ScreenHeader
+			title={isForbidden ? 'Acceso restringido' : 'Error'}
+			backHref={isForbidden ? resolve('/inicio') : resolve('/')}
+		>
+			{#if isForbidden}
+				<LogoutButton />
+			{/if}
 		</ScreenHeader>
 	{/snippet}
 
