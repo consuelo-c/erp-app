@@ -8,6 +8,7 @@
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
+	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import type { PageProps } from './$types';
 
 	let { data, form }: PageProps = $props();
@@ -26,6 +27,8 @@
 			<LogoutButton />
 		</ScreenHeader>
 	{/snippet}
+
+	<UnsavedChangesGuard form="employee" />
 
 	<!-- The submit button lives in the footer and reaches this form through its `form` attribute. -->
 	<form id="employee" class="form-stack" method="POST" use:enhance>
