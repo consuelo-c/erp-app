@@ -76,6 +76,13 @@
 		width: auto;
 	}
 
+	/* Full width on a phone; capped on a wide screen so it doesn't stretch across the column. */
+	@media (width >= 1024px) {
+		.btn {
+			max-width: var(--button-max-w);
+		}
+	}
+
 	/* Hover only where a pointer can hover; touch screens stay unchanged. */
 	@media (hover: hover) {
 		.btn:hover:not(:disabled, [aria-disabled='true']) {
