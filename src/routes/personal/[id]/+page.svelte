@@ -52,7 +52,7 @@
 
 	<UnsavedChangesGuard form="save" />
 
-	<!-- Every submit button sits outside its form (footer, dialogs) and points at it by id. -->
+	<!-- Every submit button sits outside its form (end of the body, dialogs) and points at it by id. -->
 	<form id="save" class="form-stack" method="POST" action="?/save" use:enhance>
 		{#if form?.message}
 			<Notice tone="error">{form.message}</Notice>
@@ -149,9 +149,9 @@
 		{/snippet}
 	</Modal>
 
-	{#snippet footer()}
+	<div class="screen__action">
 		<Button type="submit" form="save">Guardar cambios</Button>
-	{/snippet}
+	</div>
 </Screen>
 
 <style>

@@ -1,8 +1,9 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 
-	// Mobile screen: header, scrolling body, and a footer with the one primary action. On a wide
-	// screen the body and the footer's action keep to one centered column.
+	// Mobile screen: header, scrolling body, and a fixed footer with the one primary action, only on
+	// screens without the bottom navigation. On a wide screen the body and the footer's action keep
+	// to one centered column.
 	interface Props {
 		header?: Snippet;
 		children: Snippet;

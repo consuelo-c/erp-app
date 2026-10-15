@@ -40,16 +40,22 @@
 			{/if}
 		</Card>
 	{:else}
+		<!-- Empty state: the action sits centered under the message. -->
 		<div class="empty">
 			<p><strong>Aún no hay empleados</strong></p>
 			<p class="meta">Crea el primero con Nuevo empleado.</p>
+			<div class="empty__action">{@render newEmployee()}</div>
 		</div>
 	{/each}
 
-	{#snippet footer()}
-		<Button href={resolve('/personal/nuevo')}>Nuevo empleado</Button>
-	{/snippet}
+	{#if data.employees.length}
+		<div class="screen__action">{@render newEmployee()}</div>
+	{/if}
 </Screen>
+
+{#snippet newEmployee()}
+	<Button href={resolve('/personal/nuevo')}>Nuevo empleado</Button>
+{/snippet}
 
 <style>
 	p {
@@ -61,5 +67,9 @@
 		place-content: center;
 		height: 100%;
 		text-align: center;
+	}
+
+	.empty__action {
+		margin-top: var(--space-8);
 	}
 </style>
