@@ -60,6 +60,11 @@
 		margin: 0 auto;
 	}
 
+	/* The form is already narrow: its button keeps the fields' width, as on a phone. */
+	.login :global(.btn) {
+		max-width: none;
+	}
+
 	/* Wide enough for the script logo's thin strokes to stay legible. */
 	.login__logo {
 		width: 75%;
