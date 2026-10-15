@@ -41,9 +41,9 @@ export function isAdminOrManager(actor: Actor): boolean {
 /** Throws a 401 without an actor (no session), a 403 unless it holds at least one of `roles`. */
 export function requireRole(actor: Actor | null, roles: readonly Role[]): asserts actor is Actor {
 	if (null === actor) {
-		error(401, 'Inicie sesión para continuar');
+		error(401, 'Inicia sesión para continuar');
 	}
 	if (!hasAnyRole(actor, roles)) {
-		error(403, 'No tiene permiso para esta acción');
+		error(403, 'No tienes permiso para esta acción');
 	}
 }
