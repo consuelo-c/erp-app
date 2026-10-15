@@ -47,3 +47,9 @@ export function formatInstant(epochSeconds: number): string {
 	const date = `${part('day')} de ${MONTH_NAMES[part('month') - 1]} de ${part('year')}`;
 	return `${date}, ${hour % 12 || 12}:${minute} ${period}`;
 }
+
+/** A civil date (YYYY-MM-DD) as `3 feb 2025`. Split, never parsed into a Date: it has no zone. */
+export function formatCivilDate(date: string): string {
+	const [year, month, day] = date.split('-');
+	return `${Number(day)} ${MONTH_NAMES[Number(month) - 1].slice(0, 3)} ${year}`;
+}

@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { formatInstant, getTodaysDate } from './datetime';
+import { formatCivilDate, formatInstant, getTodaysDate } from './datetime';
 
 // 10:00 p.m. on 14 August in Bogotá (UTC−5) is already 15 August in UTC.
 const BOGOTA_10PM = new Date('2026-08-15T03:00:00Z');
@@ -31,4 +31,9 @@ test('formatInstant writes midnight and noon as 12', () => {
 	expect(formatInstant(Date.parse('2026-01-01T17:00:00Z') / 1000)).toBe(
 		'1 de enero de 2026, 12:00 p.m.'
 	);
+});
+
+test('formatCivilDate writes the day, the short month and the year', () => {
+	expect(formatCivilDate('2025-02-03')).toBe('3 feb 2025');
+	expect(formatCivilDate('2024-12-31')).toBe('31 dic 2024');
 });
