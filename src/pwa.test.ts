@@ -8,12 +8,15 @@ test('manifest declares name and theme color', () => {
 	expect(manifest.theme_color).toBe('#333333');
 });
 
-test('manifest icons are maskable and exist in static/', () => {
-	expect(manifest.icons).toHaveLength(2);
-	for (const icon of manifest.icons) {
-		expect(icon.purpose).toBe('any maskable');
-		expect(existsSync(`static${icon.src}`)).toBe(true);
+test('each manifest icon is declared once as any and once as maskable, and exists in static/', () => {
+	for (const path of ['/icon-192.png', '/icon-512.png']) {
+		const purposes = manifest.icons
+			.filter((icon: { src: string }) => path === icon.src)
+			.map((icon: { purpose: string }) => icon.purpose);
+		expect(purposes.sort()).toEqual(['any', 'maskable']);
+		expect(existsSync(`static${path}`)).toBe(true);
 	}
+	expect(manifest.icons).toHaveLength(4);
 });
 
 test('logo inherits its color instead of hard-coding black', () => {
