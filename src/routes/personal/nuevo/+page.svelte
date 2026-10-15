@@ -30,7 +30,7 @@
 
 	<UnsavedChangesGuard form="employee" />
 
-	<!-- The submit button lives in the footer and reaches this form through its `form` attribute. -->
+	<!-- The submit button sits after the form and reaches this form through its `form` attribute. -->
 	<form id="employee" class="form-stack" method="POST" use:enhance>
 		{#if form?.message}
 			<Notice tone="error">{form.message}</Notice>
@@ -78,7 +78,7 @@
 		</Field>
 	</form>
 
-	{#snippet footer()}
+	<div class="screen__action">
 		<Button type="submit" form="employee">Crear empleado</Button>
-	{/snippet}
+	</div>
 </Screen>

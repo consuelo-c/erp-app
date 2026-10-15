@@ -242,3 +242,18 @@ a:hover {
 	gap: var(--space-4);
 	overflow-x: auto;
 }
+
+/* The primary action, last in the body on screens with the bottom navigation (a fixed footer
+   would cover it). On a wide screen it sits at the column's right edge. */
+.screen__action {
+	width: 100%;
+	padding-bottom: var(--space-5);
+	margin-top: var(--space-5);
+}
+
+@media (width >= 1024px) {
+	.screen__action {
+		display: flex;
+		justify-content: flex-end;
+	}
+}
