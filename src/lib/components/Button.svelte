@@ -77,7 +77,7 @@
 	}
 
 	/* Full width on a phone; capped on a wide screen so it doesn't stretch across the column. */
-	@media (width >= 1024px) {
+	@container (width >= 1024px) {
 		.btn {
 			max-width: var(--button-max-w);
 		}

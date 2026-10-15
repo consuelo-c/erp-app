@@ -196,8 +196,11 @@ body {
 	height: 100%;
 }
 
+/* The width rules ask `@container`, not `@media`: in the app body is the viewport's width, and a
+   design canvas can make each phone frame its own container. */
 body {
 	margin: 0;
+	container-type: inline-size;
 	font-family: var(--font-sans);
 	color: var(--text-body);
 	background: var(--surface-page);
@@ -251,7 +254,7 @@ a:hover {
 	margin-top: var(--space-5);
 }
 
-@media (width >= 1024px) {
+@container (width >= 1024px) {
 	.screen__action {
 		display: flex;
 		justify-content: flex-end;

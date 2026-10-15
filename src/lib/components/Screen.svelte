@@ -53,7 +53,7 @@
 		border-top: var(--border-w-hair) solid var(--border-default);
 	}
 
-	@media (width >= 1024px) {
+	@container (width >= 1024px) {
 		.screen__footer {
 			display: flex;
 			flex-direction: column;
