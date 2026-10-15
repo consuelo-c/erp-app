@@ -54,7 +54,7 @@ Claude runs `test`, `lint` and `typecheck`; the developer runs every other one.
 
 ## Folder structure
 
-- `src/routes/` — `/` (the public landing: logo and the icon link to `/login`), `/login`, `/logout` (`POST` only), `/inicio`, where every role lands after login (a stub that phase 4's shell replaces), `/personal` (Employees: list, `nuevo`, `[id]`; reached by URL until phase 4's navigation) and `/logins` (Logins, `ADMIN` only: list, `nuevo`, `[id]`; reached by URL until phase 4's navigation); `+layout.svelte` loads `app.css`
+- `src/routes/` — `/` (the public landing: logo and the icon link to `/login`), `/login`, `/logout` (`POST` only), `/inicio`, where every role lands after login (a stub that phase 4's shell replaces), `/personal` (Employees: list, `nuevo`, `[id]`; reached by URL until phase 4's navigation) and `/logins` (Logins, `ADMIN` only: list, `nuevo`, `[id]` with its `contrasena` and `reasignar`; reached by URL until phase 4's navigation); `+layout.svelte` loads `app.css`
 - `src/hooks.server.ts` — resolves the session cookie into `locals.user` (an `Actor`, or null) and slides its expiry
 - `src/app.css` — the Design System's tokens as CSS custom properties, its base and text roles (`.meta`, `.note`, `.section-title`), and the `.form-stack` / `.chip-row` wrappers
 - `src/lib/components/` — the Design System's components translated to Svelte, keeping its BEM class names; only the ones a screen uses so far. Icons are `static/icons.svg`, the system's sprite. `UnsavedChangesGuard` is behavior, not a system component: mounted with a form's id, it asks before leaving with unsaved changes
@@ -66,7 +66,7 @@ Claude runs `test`, `lint` and `typecheck`; the developer runs every other one.
 - `src/lib/server/password.ts` — `hashPassword` / `verifyPassword` / `needsRehash`: PBKDF2-SHA512 over the peppered password
 - `src/lib/server/audit.ts` — `auditedInsert` / `auditedUpdate`: audit columns from the `Actor` plus the `events` row, as statements for one `db.batch()`
 - `src/lib/server/timeline.ts` — `filterTimelineForActor`: which `events` rows of an order's timeline each role sees, money stripped for `WAREHOUSE`/`DRIVER`
-- `src/lib/server/services/` — business logic, one file per module; its `README.md` has the service-layer rule. `auth.ts`: login, first administrator, sessions; `employees.ts`: employees and their employment periods; `logins.ts`: logins and their roles
+- `src/lib/server/services/` — business logic, one file per module; its `README.md` has the service-layer rule. `auth.ts`: login, first administrator, sessions; `employees.ts`: employees and their employment periods; `logins.ts`: logins, their roles, passwords, reassignment, deactivation and reactivation
 - `src/lib/server/session-cookie.ts` — the session cookie's name and flags
 - `src/lib/server/db/memory-d1.ts` — tests only: a D1 stand-in over `node:sqlite` with every migration applied
 - `src/lib/settings.ts` — `SETTINGS`: each key's module, Spanish label, unit and Zod schema (parses the stored `value` TEXT)

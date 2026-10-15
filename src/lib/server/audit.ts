@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { Actor } from './actor';
 
 type ColumnValue = string | number | null;
-type Row = Record<string, ColumnValue>;
+export type Row = Record<string, ColumnValue>;
 
 /** `events.before` / `events.after`: only the changed fields, never a snapshot of the whole row. */
 export const eventFieldsSchema = z.record(z.string(), z.union([z.string(), z.number(), z.null()]));
@@ -111,29 +111,37 @@ export function diffFields(current: Row, changes: Row): { before: Row; after: Ro
 /**
  * Updates the row `id` (matched on `idColumn`, `id` by default) with the fields of `changes`
  * that differ from `current`, refreshes `updated_at`/`updated_by`, and logs an `EDITED` event
- * with those fields only. Returns the statements for the caller's `db.batch()`, or none when
+ * (or `action`) with those fields only. `unlogged` columns are always written but never logged:
+ * a new password hash. Returns the statements for the caller's `db.batch()`, or none when
  * nothing changed: an edit that changes nothing writes nothing.
  */
 export function auditedUpdate(
 	db: D1Database,
-	write: AuditedWrite & { id: number | string; idColumn?: string; current: Row; changes: Row }
+	write: AuditedWrite & {
+		id: number | string;
+		idColumn?: string;
+		current: Row;
+		changes: Row;
+		unlogged?: Row;
+		action?: string;
+	}
 ): D1PreparedStatement[] {
 	const { before, after } = diffFields(write.current, write.changes);
-	const changedColumns = Object.keys(after);
-	if (0 === changedColumns.length) {
+	const columns = { ...after, ...write.unlogged };
+	if (0 === Object.keys(columns).length) {
 		return [];
 	}
 	const idColumn = write.idColumn ?? 'id';
-	assertIdentifiers([write.table, idColumn, ...changedColumns]);
+	assertIdentifiers([write.table, idColumn, ...Object.keys(columns)]);
 	const now = nowInSeconds();
-	const assignments = [...changedColumns, 'updated_at', 'updated_by'].map(
+	const assignments = [...Object.keys(columns), 'updated_at', 'updated_by'].map(
 		(column) => `${column} = ?`
 	);
 	const update = db
 		.prepare(`update ${write.table} set ${assignments.join(', ')} where ${idColumn} = ?`)
-		.bind(...Object.values(after), now, write.actor.username, write.id);
+		.bind(...Object.values(columns), now, write.actor.username, write.id);
 	// entity_id is INTEGER: rows keyed by text, like settings, log it as null.
 	const entityId = 'number' === typeof write.id ? write.id : null;
-	const event = { ...write, action: 'EDITED', before, after, now, entityId };
+	const event = { ...write, action: write.action ?? 'EDITED', before, after, now, entityId };
 	return [update, eventStatement(db, event)];
 }

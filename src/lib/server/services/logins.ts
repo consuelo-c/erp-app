@@ -3,11 +3,16 @@
 
 import { z } from 'zod';
 import { requireRole, ROLES, rolesSchema, type Actor, type Role } from '../actor';
-import { auditedInsert, auditedUpdate } from '../audit';
+import { auditedInsert, auditedUpdate, type Row } from '../audit';
 import { hashPassword } from '../password';
 import { listEmployees, type Result } from './employees';
 
 const MANAGES_LOGINS = ['ADMIN'] as const;
+
+/** Hashing a password needs the pepper, which lives only in the Worker's secrets. */
+type Environment = { db: D1Database; pepper: string };
+
+const NOT_FOUND = 'Ese login no existe';
 
 export type Login = {
 	id: number;
@@ -32,6 +37,10 @@ const employeeIdSchema = z.preprocess(
 	z.coerce.number().int().positive().nullable()
 );
 
+const idSchema = z.coerce.number().int().positive();
+
+const passwordSchema = z.string().min(8, 'La contraseña debe tener al menos 8 caracteres');
+
 // Checkboxes post the chosen roles; kept in ROLES order, so re-saving the same set logs nothing.
 const formRolesSchema = z
 	.array(z.string())
@@ -49,18 +58,22 @@ const createSchema = z.object({
 		.refine((username) => 'system' !== username, 'Ese usuario está reservado'),
 	roles: formRolesSchema,
 	employee_id: employeeIdSchema,
-	password: z.string().min(8, 'La contraseña debe tener al menos 8 caracteres')
+	password: passwordSchema
 });
 
-// The foreign key guarantees `full_name` whenever `employee_id` is set.
-const rolesUpdateSchema = z.object({
-	id: z.coerce.number().int().positive(),
-	roles: formRolesSchema
+const rolesUpdateSchema = z.object({ id: idSchema, roles: formRolesSchema });
+const passwordUpdateSchema = z.object({ id: idSchema, password: passwordSchema });
+const reassignSchema = z.object({
+	id: idSchema,
+	employee_id: employeeIdSchema,
+	password: passwordSchema
 });
+const loginIdSchema = z.object({ id: idSchema });
 
 const SELECT_LOGIN =
 	'select users.id, users.username, users.roles, users.active, users.employee_id, employees.full_name from users left join employees on employees.id = users.employee_id';
 
+// The foreign key guarantees `full_name` whenever `employee_id` is set.
 function toLogin(row: LoginRow): Login {
 	return {
 		id: row.id,
@@ -110,6 +123,14 @@ async function findConflict(
 	) {
 		return 'Ya existe un login con ese usuario';
 	}
+	return findEmployeeProblem(db, employeeId, actor);
+}
+
+async function findEmployeeProblem(
+	db: D1Database,
+	employeeId: number | null,
+	actor: Actor
+): Promise<string | null> {
 	const assignable = await listEmployeesWithoutLogin(db, actor);
 	if (null !== employeeId && !assignable.some((employee) => employee.id === employeeId)) {
 		return 'Ese empleado ya tiene login o no está trabajando';
@@ -117,9 +138,19 @@ async function findConflict(
 	return null;
 }
 
+// Only the hash is secret, but the three columns travel together and stay out of `events`.
+async function passwordColumns(password: string, pepper: string): Promise<Row> {
+	const stored = await hashPassword(password, pepper);
+	return {
+		password_hash: stored.hash,
+		password_salt: stored.salt,
+		password_iterations: stored.iterations
+	};
+}
+
 /** Creates a login with one or more roles and, optionally, the employee it belongs to. */
 export async function createLogin(
-	{ db, pepper }: { db: D1Database; pepper: string },
+	{ db, pepper }: Environment,
 	input: unknown,
 	actor: Actor | null
 ): Promise<Result> {
@@ -133,17 +164,12 @@ export async function createLogin(
 	if (null !== conflict) {
 		return { ok: false, message: conflict };
 	}
-	const stored = await hashPassword(password, pepper);
 	const [insert, event] = auditedInsert(db, {
 		table: 'users',
 		entityType: 'USER',
 		actor,
 		values: { username, roles: JSON.stringify(roles), employee_id },
-		unlogged: {
-			password_hash: stored.hash,
-			password_salt: stored.salt,
-			password_iterations: stored.iterations
-		}
+		unlogged: await passwordColumns(password, pepper)
 	});
 	const [inserted] = await db.batch<{ id: number }>([insert, event]);
 	return { ok: true, id: inserted.meta.last_row_id };
@@ -162,7 +188,7 @@ export async function getLogin(
 // Logins are only managed by ADMIN: dropping it from your own login could leave nobody able to.
 function findRolesProblem(login: Login | null, roles: Role[], actor: Actor): string | null {
 	if (null === login) {
-		return 'Ese login no existe';
+		return NOT_FOUND;
 	}
 	if (login.username === actor.username && !roles.includes('ADMIN')) {
 		return 'No puedes quitarte el rol de Administrador';
@@ -199,4 +225,157 @@ export async function updateRoles(
 		await db.batch(statements);
 	}
 	return { ok: true, id };
+}
+
+type SessionEndingWrite = {
+	login: Login;
+	current: Row;
+	changes: Row;
+	unlogged?: Row;
+	action?: string;
+};
+
+// Who can log in as this login changed: every session it has ends, so the previous person's phone
+// is logged out. Sessions aren't audited rows: deleting them is the one exception to "never delete".
+async function applySessionEndingWrite(
+	db: D1Database,
+	actor: Actor,
+	{ login, ...write }: SessionEndingWrite
+): Promise<Result> {
+	const update = auditedUpdate(db, {
+		table: 'users',
+		entityType: 'USER',
+		actor,
+		id: login.id,
+		...write
+	});
+	const endSessions = db.prepare('delete from sessions where user_id = ?').bind(login.id);
+	await db.batch([...update, endSessions]);
+	return { ok: true, id: login.id };
+}
+
+/** Sets a new password directly: no token, no email. The hash never reaches `events`. */
+export async function setPassword(
+	{ db, pepper }: Environment,
+	input: unknown,
+	actor: Actor | null
+): Promise<Result> {
+	requireRole(actor, MANAGES_LOGINS);
+	const parsed = passwordUpdateSchema.safeParse(input);
+	if (!parsed.success) {
+		return { ok: false, message: parsed.error.issues[0].message };
+	}
+	const login = await getLogin(db, parsed.data.id, actor);
+	if (null === login) {
+		return { ok: false, message: NOT_FOUND };
+	}
+	return applySessionEndingWrite(db, actor, {
+		login,
+		action: 'PASSWORD_SET',
+		current: {},
+		changes: {},
+		unlogged: await passwordColumns(parsed.data.password, pepper)
+	});
+}
+
+async function findReassignProblem(
+	db: D1Database,
+	{ login, employeeId }: { login: Login | null; employeeId: number | null },
+	actor: Actor
+): Promise<string | null> {
+	if (null === login) {
+		return NOT_FOUND;
+	}
+	if ((login.employee?.id ?? null) === employeeId) {
+		return 'Escoge un empleado distinto al actual';
+	}
+	return findEmployeeProblem(db, employeeId, actor);
+}
+
+/**
+ * Points the login at another employee (or none) with a new password. The previous employee's
+ * rows stay as they are; the event holds the old and new `employee_id`.
+ */
+export async function reassignLogin(
+	{ db, pepper }: Environment,
+	input: unknown,
+	actor: Actor | null
+): Promise<Result> {
+	requireRole(actor, MANAGES_LOGINS);
+	const parsed = reassignSchema.safeParse(input);
+	if (!parsed.success) {
+		return { ok: false, message: parsed.error.issues[0].message };
+	}
+	const { id, employee_id, password } = parsed.data;
+	const login = await getLogin(db, id, actor);
+	const problem = await findReassignProblem(db, { login, employeeId: employee_id }, actor);
+	if (null !== problem) {
+		return { ok: false, message: problem };
+	}
+	return applySessionEndingWrite(db, actor, {
+		login: login!,
+		current: { employee_id: login!.employee?.id ?? null },
+		changes: { employee_id },
+		unlogged: await passwordColumns(password, pepper)
+	});
+}
+
+// Deactivating your own login would end your session and could leave nobody to manage logins.
+function findDeactivateProblem(login: Login | null, actor: Actor): string | null {
+	if (null === login) {
+		return NOT_FOUND;
+	}
+	if (login.username === actor.username) {
+		return 'No puedes desactivar tu propio login';
+	}
+	if (!login.isActive) {
+		return 'Este login ya está inactivo';
+	}
+	return null;
+}
+
+/** Blocks the login: `active = 0`, never deleted, since logins sign orders and records. */
+export async function deactivateLogin(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<Result> {
+	requireRole(actor, MANAGES_LOGINS);
+	const parsed = loginIdSchema.safeParse(input);
+	if (!parsed.success) {
+		return { ok: false, message: parsed.error.issues[0].message };
+	}
+	const login = await getLogin(db, parsed.data.id, actor);
+	const problem = findDeactivateProblem(login, actor);
+	if (null !== problem) {
+		return { ok: false, message: problem };
+	}
+	return applySessionEndingWrite(db, actor, {
+		login: login!,
+		current: { active: 1 },
+		changes: { active: 0 }
+	});
+}
+
+/** Lets a deactivated login in again, with the password it had. */
+export async function reactivateLogin(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<Result> {
+	requireRole(actor, MANAGES_LOGINS);
+	const parsed = loginIdSchema.safeParse(input);
+	if (!parsed.success) {
+		return { ok: false, message: parsed.error.issues[0].message };
+	}
+	const login = await getLogin(db, parsed.data.id, actor);
+	if (null === login) {
+		return { ok: false, message: NOT_FOUND };
+	}
+	if (login.isActive) {
+		return { ok: false, message: 'Este login ya está activo' };
+	}
+	const write = { table: 'users', entityType: 'USER', actor, id: login.id };
+	await db.batch(auditedUpdate(db, { ...write, current: { active: 0 }, changes: { active: 1 } }));
+	return { ok: true, id: login.id };
 }
