@@ -180,7 +180,7 @@ Al hacer _merge_ del PR a `main`, el _issue_ se cierra (y el Workflow del proyec
 En ambiente local `npx run dev` buscara estos datos en las variables de ambiente o en el archivo `.dev.vars`.
 
 ```bash
-echo "ADMIN_PASSWORD=password" >> .dev.vars
+echo "ADMIN_PASSWORD=..." >> .dev.vars
 echo "PASSWORD_PEPPER=$(openssl rand -base64 32)" >> .dev.vars
 ```
 
