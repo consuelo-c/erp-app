@@ -1,5 +1,6 @@
-// Hours punches: four a day per employee, typed by hand, never taken from the clock. The punches
-// here are the actor's own: the employee is always the actor's, never one sent by the client.
+// Hours punches: four a day per employee, typed by hand, never taken from the clock. One's own
+// punches always go to the actor's employee, never one sent by the client; only ADMIN and MANAGER
+// pick the employee, through the selector.
 
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
@@ -30,7 +31,13 @@ export type TimesheetDay = {
 export type Result = { ok: true } | { ok: false; message: string };
 
 type Period = z.infer<typeof employmentSchema>[number];
-type OwnEmployee = { id: number; fullName: string; employment: Period[] };
+type HoursEmployee = { id: number; fullName: string; employment: Period[] };
+export type Hours = {
+	employeeId: number;
+	employeeName: string;
+	day: TimesheetDay;
+	week: TimesheetDay[];
+};
 type TimesheetRow = Punches & { id: number; workDate: string };
 
 const NO_PUNCHES: Punches = {
@@ -75,6 +82,11 @@ function toClockTime(hour: number, minute: number, period: 'am' | 'pm'): string 
 	return `${String(hour24).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 const dateSchema = z.iso.date();
+const employeeIdSchema = z.coerce.number().int().positive();
+const employeeChoiceSchema = z.object({ employee_id: employeeIdSchema });
+
+// Logging hours for anyone: the selector's employee is trusted only for them.
+const LOGS_EVERYONES_HOURS = ['ADMIN', 'MANAGER'] as const;
 
 const NO_EMPLOYEE: Result = { ok: false, message: 'Tu usuario no está vinculado a un empleado' };
 const OUT_OF_ORDER: Result = {
@@ -82,13 +94,13 @@ const OUT_OF_ORDER: Result = {
 	message: 'Las marcas deben ir en orden: inicio y finalización de la mañana, luego de la tarde'
 };
 
-async function findOwnEmployee(db: D1Database, actor: Actor): Promise<OwnEmployee | null> {
-	if (null === actor.employeeId) {
+async function findEmployee(db: D1Database, id: number | null): Promise<HoursEmployee | null> {
+	if (null === id) {
 		return null;
 	}
 	const row = await db
 		.prepare('select id, full_name, attributes from employees where id = ?')
-		.bind(actor.employeeId)
+		.bind(id)
 		.first<{ id: number; full_name: string; attributes: string }>();
 	if (null === row) {
 		return null;
@@ -153,20 +165,42 @@ function pickPunches(row: TimesheetRow | undefined): Partial<Punches> {
 	return { morningIn, morningOut, afternoonIn, afternoonOut };
 }
 
+type HoursInput = { date: string; week?: string | null };
+
 /**
  * The actor's own day and the week shown under it (the day's week unless `week` names another).
  * Null when the login has no employee: it can't punch. A future or malformed day is a 404.
  */
 export async function getOwnHours(
 	db: D1Database,
-	input: { date: string; week?: string | null },
+	input: HoursInput,
 	actor: Actor | null
-): Promise<{ employeeName: string; day: TimesheetDay; week: TimesheetDay[] } | null> {
+): Promise<Hours | null> {
 	requireRole(actor, ROLES);
-	const employee = await findOwnEmployee(db, actor);
+	const employee = await findEmployee(db, actor.employeeId);
+	return null === employee ? null : buildHours(db, employee, input);
+}
+
+/** Any employee's day and week, for ADMIN and MANAGER. An unknown employee is a 404. */
+export async function getEmployeeHours(
+	db: D1Database,
+	input: HoursInput & { employeeId: unknown },
+	actor: Actor | null
+): Promise<Hours> {
+	requireRole(actor, LOGS_EVERYONES_HOURS);
+	const id = employeeIdSchema.safeParse(input.employeeId);
+	const employee = id.success ? await findEmployee(db, id.data) : null;
 	if (null === employee) {
-		return null;
+		error(404, 'Ese empleado no existe');
 	}
+	return buildHours(db, employee, input);
+}
+
+async function buildHours(
+	db: D1Database,
+	employee: HoursEmployee,
+	input: HoursInput
+): Promise<Hours> {
 	const date = dateSchema.safeParse(input.date);
 	if (!date.success || date.data > getTodaysDate()) {
 		error(404, 'Ese día no existe');
@@ -179,7 +213,7 @@ export async function getOwnHours(
 		buildDays(db, employee.id, [date.data]),
 		buildDays(db, employee.id, weekDates)
 	]);
-	return { employeeName: employee.fullName, day, week };
+	return { employeeId: employee.id, employeeName: employee.fullName, day, week };
 }
 
 // Within a block the clock-out comes after the clock-in; between blocks, the afternoon may start
@@ -198,14 +232,14 @@ function arePunchesInOrder(punches: Punches): boolean {
 
 async function findRefusal(
 	db: D1Database,
-	employee: OwnEmployee,
+	employee: HoursEmployee,
 	workDate: string
 ): Promise<string | null> {
 	if (workDate > getTodaysDate()) {
 		return 'Ese día todavía no ha llegado';
 	}
 	if (!isWithinEmployment(employee.employment, workDate)) {
-		return 'Ese día no estabas trabajando en la empresa';
+		return 'Ese día no hace parte de ningún período laboral';
 	}
 	if (await isDayPaid(db, { employeeId: employee.id, workDate })) {
 		return 'Ese día ya se pagó en la nómina: no se puede cambiar';
@@ -213,7 +247,7 @@ async function findRefusal(
 	return null;
 }
 
-type PunchChange = { employee: OwnEmployee; workDate: string; punch: Punch; time: string };
+type PunchChange = { employee: HoursEmployee; workDate: string; punch: Punch; time: string };
 
 function writeStatements(
 	db: D1Database,
@@ -272,9 +306,29 @@ export async function saveOwnPunch(
 	if (!parsed.success) {
 		return { ok: false, message: parsed.error.issues[0].message };
 	}
-	const employee = await findOwnEmployee(db, actor);
+	const employee = await findEmployee(db, actor.employeeId);
 	if (null === employee) {
 		return NO_EMPLOYEE;
+	}
+	const { work_date, punch, time } = parsed.data;
+	return savePunch(db, actor, { employee, workDate: work_date, punch, time });
+}
+
+/** Records or corrects a punch of the employee in `employee_id`, for ADMIN and MANAGER. */
+export async function saveEmployeePunch(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<Result> {
+	requireRole(actor, LOGS_EVERYONES_HOURS);
+	const parsed = saveSchema.safeParse(input);
+	if (!parsed.success) {
+		return { ok: false, message: parsed.error.issues[0].message };
+	}
+	const choice = employeeChoiceSchema.safeParse(input);
+	const employee = choice.success ? await findEmployee(db, choice.data.employee_id) : null;
+	if (null === employee) {
+		return { ok: false, message: 'Escoge el empleado' };
 	}
 	const { work_date, punch, time } = parsed.data;
 	return savePunch(db, actor, { employee, workDate: work_date, punch, time });

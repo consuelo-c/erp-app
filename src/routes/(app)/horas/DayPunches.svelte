@@ -20,11 +20,13 @@
 		isToday: boolean;
 		// Above the date on one's own hours; left out where the employee is already on screen.
 		employeeName?: string;
+		// The selector's employee, posted with the punch; left out on one's own hours.
+		employeeId?: number;
 		// The last save's refusal, shown in the dialog.
 		message?: string;
 	}
 
-	let { day, isToday, employeeName, message }: Props = $props();
+	let { day, isToday, employeeName, employeeId, message }: Props = $props();
 
 	const punches = Object.keys(PUNCH_LABELS) as Punch[];
 	const formId = $props.id();
@@ -102,6 +104,9 @@
 <form id={formId} method="POST" action="?/marcar" use:enhance={closeOnSave} hidden>
 	<input type="hidden" name="work_date" value={day.workDate} />
 	<input type="hidden" name="punch" value={selected} />
+	{#if undefined !== employeeId}
+		<input type="hidden" name="employee_id" value={employeeId} />
+	{/if}
 </form>
 
 <!-- Esc closes the dialog from inside Modal: the setter clears the tile's ink border too. -->

@@ -1,13 +1,18 @@
-import { error, fail } from '@sveltejs/kit';
+import { error, fail, redirect } from '@sveltejs/kit';
+import { resolve } from '$app/paths';
 import { getTodaysDate } from '$lib/datetime';
-import { requireRole, ROLES } from '$lib/server/actor';
+import { isAdminOrManager, requireRole, ROLES } from '$lib/server/actor';
 import { getOwnHours, saveOwnPunch } from '$lib/server/services/timesheets';
 import type { Actions, PageServerLoad } from './$types';
 
 // One screen: the punches of the day tapped in the week (`?dia=`, today by default) above that
-// day's week, or the week `?semana=` names. A future or malformed day is a 404.
+// day's week, or the week `?semana=` names. A future or malformed day is a 404. ADMIN and MANAGER
+// open Horas on Empleado, where they pick anyone, themselves included.
 export const load: PageServerLoad = async ({ locals, platform, url }) => {
 	requireRole(locals.user, ROLES);
+	if (isAdminOrManager(locals.user)) {
+		redirect(303, resolve('/(app)/horas/empleado'));
+	}
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
