@@ -47,7 +47,7 @@ Show the list (title, criteria covered, order) and wait for approval.
 
 Write `phase-NN-issues.sh` in the session's scratchpad: one `create` per unit, in order, so the issue numbers follow it; then the idea placements from section 3. Titles and bodies in Spanish; each body opens with one sentence naming what the unit builds or fixes, so the issue reads on its own, then links the criteria heading and the planning heading it implements, without copying or restating them: a paraphrase drifts from the hard rules and the criteria. Quoted heredocs keep backticks and `$` in the bodies literal.
 
-Planning links are pinned to the commit the session read, so they keep showing the text the issue was written from; `git diff <sha> main -- <file>` in `../planning/` shows what changed since. Get it with `git -C ../planning rev-parse HEAD`, after `git -C ../planning fetch` and `git -C ../planning status -sb` show no changes and no `ahead`; otherwise ask the developer to commit and push the planning first.
+Planning links are pinned to the commit the session read, so they keep showing the text the issue was written from; `git diff <sha> main -- <file>` in `../planning/` shows what changed since. Get it with `git -C ../planning rev-parse --short HEAD` (GitHub resolves the short hash in `blob/` links), after `git -C ../planning fetch` and `git -C ../planning status -sb` show no changes and no `ahead`; otherwise ask the developer to commit and push the planning first.
 
 ```bash
 #!/usr/bin/env bash
