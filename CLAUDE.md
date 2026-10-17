@@ -67,6 +67,7 @@ Claude runs `test`, `lint` and `typecheck`; the developer runs every other one.
 - `src/lib/server/password.ts` — `hashPassword` / `verifyPassword` / `needsRehash`: PBKDF2-SHA512 over the peppered password
 - `src/lib/server/audit.ts` — `auditedInsert` / `auditedUpdate`: audit columns from the `Actor` plus the `events` row, as statements for one `db.batch()`
 - `src/lib/server/timeline.ts` — `filterTimelineForActor`: which `events` rows of an order's timeline each role sees, money stripped for `WAREHOUSE`/`DRIVER`
+- `src/lib/server/overtime.ts` — `deriveOvertime`: a day's punches to the five overtime rows, in minutes. Pure; the caller passes the holiday flag and the settings values
 - `src/lib/server/services/` — business logic, one file per module; its `README.md` has the service-layer rule. `auth.ts`: login, first administrator, sessions; `employees.ts`: employees and their employment periods; `logins.ts`: logins, their roles, passwords, reassignment, deactivation and reactivation
 - `src/lib/server/session-cookie.ts` — the session cookie's name and flags
 - `src/lib/server/db/memory-d1.ts` — tests only: a D1 stand-in over `node:sqlite` with every migration applied
