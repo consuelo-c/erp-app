@@ -1,4 +1,5 @@
 import { isHttpError } from '@sveltejs/kit';
+import { readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Actor } from '../actor';
@@ -42,6 +43,7 @@ beforeEach(async () => {
 	vi.useFakeTimers({ toFake: ['Date'] });
 	vi.setSystemTime(new Date(`${TODAY}T17:00:00Z`)); // noon in Bogotá
 	({ db, database } = createMemoryD1());
+	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
 	const employeeId = await hire('1036452118', '2026-07-01');
 	ana = { username: 'ventas', employeeId, roles: ['WAREHOUSE'], kind: 'user' };
 });
@@ -254,6 +256,27 @@ test('the team week has everyone employed that week, by name, with seven days of
 		workDate: '2026-07-29',
 		punches: { morningIn: '06:30', morningOut: null, afternoonIn: null, afternoonOut: null }
 	});
+});
+
+// The week of Monday 2026-07-20, Independence Day: overtime is the four overtime rows, holiday hours
+// included; the night surcharge stays in regular hours.
+test("the team week totals each employee's regular hours and overtime", async () => {
+	const punches = [
+		['2026-07-20', 'morningIn', '08:00'], // holiday: all 4h are overtime
+		['2026-07-20', 'morningOut', '12:00'],
+		['2026-07-21', 'morningIn', '08:00'], // 8h: 7 regular, 1 overtime
+		['2026-07-21', 'morningOut', '12:00'],
+		['2026-07-21', 'afternoonIn', '13:00'],
+		['2026-07-21', 'afternoonOut', '17:00'],
+		['2026-07-25', 'afternoonIn', '14:00'], // 8h: 7 regular (2 of them night), 1 overtime
+		['2026-07-25', 'afternoonOut', '22:00'],
+		['2026-07-26', 'morningIn', '09:00'] // no clock-out yet: nothing counts
+	];
+	for (const [workDate, punch, time] of punches) {
+		await saveOwnPunch(db, { work_date: workDate, punch, ...at(time) }, ana);
+	}
+	const { team } = await getTeamWeek(db, { week: '2026-07-22' }, manager);
+	expect(team[0]).toMatchObject({ regularMinutes: 14 * 60, overtimeMinutes: 6 * 60 });
 });
 
 test('only ADMIN and MANAGER see the team week', async () => {

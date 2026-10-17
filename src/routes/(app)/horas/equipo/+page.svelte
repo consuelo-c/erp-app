@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import Card from '$lib/components/Card.svelte';
+	import Icon from '$lib/components/Icon.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
@@ -14,9 +15,10 @@
 		formatWeekRange,
 		getWeekStart
 	} from '$lib/datetime';
+	import { formatHours } from '$lib/format';
 	import { PUNCH_LABELS } from '$lib/labels';
 	import { HOURS_TABS } from '$lib/navigation';
-	import type { Punch } from '$lib/server/services/timesheets';
+	import type { Punch, TeamMember } from '$lib/server/services/timesheets';
 	import type { PageProps } from './$types';
 
 	// Read-only: no status, no approve button. One card per employee on a phone, one table from
@@ -25,6 +27,7 @@
 
 	const punches = Object.keys(PUNCH_LABELS) as Punch[];
 	const currentWeek = $derived(getWeekStart(data.today));
+	const OVERTIME_HINT = 'Horas extra diurnas + nocturnas + dominicales + dominicales nocturnas';
 
 	// The current week is the plain URL; there's no week after it.
 	function weekHref(weekStart: string): string {
@@ -36,6 +39,25 @@
 		return null === time ? '—' : format(time);
 	}
 </script>
+
+<!-- Five cells, like a day's row in either table: the label spans the day and three punches. -->
+{#snippet totals(member: TeamMember)}
+	<tr>
+		<td colspan="4"><b>Horas laborales regulares</b></td>
+		<td class="num"><b>{formatHours(member.regularMinutes)}</b></td>
+	</tr>
+	<tr>
+		<td colspan="4">
+			<b>Horas extras</b>
+			<!-- Hover on a mouse, tap on a phone: a tap leaves the button hovered or focused. -->
+			<button type="button" class="hint" aria-label={OVERTIME_HINT}>
+				<Icon name="info" size="sm" />
+				<span class="hint__text" aria-hidden="true">{OVERTIME_HINT}</span>
+			</button>
+		</td>
+		<td class="num"><b>{formatHours(member.overtimeMinutes)}</b></td>
+	</tr>
+{/snippet}
 
 <svelte:head>
 	<title>Horas del equipo · Banquetes Consuelo C</title>
@@ -86,6 +108,7 @@
 								{/each}
 							</tr>
 						{/each}
+						{@render totals(member)}
 					</tbody>
 				</table>
 			</Card>
@@ -107,7 +130,7 @@
 				{#each member.days as day, i (day.workDate)}
 					<tr>
 						{#if 0 === i}
-							<td class="team-table__employee" rowspan={member.days.length}>
+							<td class="team-table__employee" rowspan={member.days.length + 2}>
 								<b>{member.fullName}</b>
 								<div class="meta">{member.position}</div>
 							</td>
@@ -118,6 +141,7 @@
 						{/each}
 					</tr>
 				{/each}
+				{@render totals(member)}
 			</tbody>
 		{/each}
 	</table>
@@ -161,6 +185,38 @@
 
 	.team-table {
 		display: none;
+	}
+
+	.hint {
+		position: relative;
+		padding: var(--space-2);
+		color: var(--text-secondary);
+		cursor: help;
+		background: none;
+		border: 0;
+	}
+
+	.hint__text {
+		position: absolute;
+		bottom: 100%;
+		left: 50%;
+		z-index: var(--z-modal);
+		display: none;
+		width: max-content;
+		max-width: 240px;
+		padding: var(--space-2) var(--space-3);
+		font-size: var(--text-sm);
+		color: var(--neutral-0);
+		text-align: left;
+		white-space: normal;
+		background: var(--neutral-900);
+		border-radius: var(--radius-sm);
+		translate: -50% 0;
+	}
+
+	.hint:hover .hint__text,
+	.hint:focus .hint__text {
+		display: block;
 	}
 
 	.team-table__employee {

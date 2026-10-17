@@ -23,6 +23,7 @@
 		| 'banknote'
 		| 'users'
 		| 'help'
+		| 'info'
 		| 'edit';
 
 	interface Props {
