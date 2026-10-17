@@ -5,7 +5,9 @@ import {
 	formatClockTime,
 	formatInstant,
 	formatLongDay,
+	formatShortClockTime,
 	formatShortDay,
+	formatWeekday,
 	formatWeekRange,
 	getTodaysDate,
 	getWeekStart
@@ -69,4 +71,10 @@ test('day and week labels', () => {
 	expect(formatShortDay('2026-07-27')).toBe('Lun 27 jul');
 	expect(formatLongDay('2026-07-31')).toBe('Vie 31 jul 2026');
 	expect(formatWeekRange('2026-07-27')).toBe('27 jul – 2 ago');
+});
+
+test('short labels for the team week', () => {
+	expect(formatWeekday('2026-07-27')).toBe('Lun 27');
+	expect(formatShortClockTime('14:00')).toBe('2:00');
+	expect(formatShortClockTime('07:02')).toBe('7:02');
 });

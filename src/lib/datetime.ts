@@ -58,6 +58,11 @@ export function formatClockTime(clockTime: string): string {
 	return formatTime(hour, minute);
 }
 
+/** A clock time as `7:02`, for columns that already say morning or afternoon. */
+export function formatShortClockTime(clockTime: string): string {
+	return formatClockTime(clockTime).split(' ')[0];
+}
+
 /** A civil date (YYYY-MM-DD) as `3 feb 2025`. Split, never parsed into a Date: it has no zone. */
 export function formatCivilDate(date: string): string {
 	const [year, month, day] = date.split('-');
@@ -93,6 +98,11 @@ function formatDayAndMonth(date: string): string {
 /** A civil date as `Lun 27 jul`. */
 export function formatShortDay(date: string): string {
 	return `${WEEKDAY_NAMES[toUtcDate(date).getUTCDay()]} ${formatDayAndMonth(date)}`;
+}
+
+/** A civil date as `Lun 27`, where the week already says the month. */
+export function formatWeekday(date: string): string {
+	return `${WEEKDAY_NAMES[toUtcDate(date).getUTCDay()]} ${Number(date.split('-')[2])}`;
 }
 
 /** A civil date as `Vie 31 jul 2026`. */

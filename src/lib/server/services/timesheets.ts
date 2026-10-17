@@ -333,3 +333,75 @@ export async function saveEmployeePunch(
 	const { work_date, punch, time } = parsed.data;
 	return savePunch(db, actor, { employee, workDate: work_date, punch, time });
 }
+
+export type TeamMember = {
+	employeeId: number;
+	fullName: string;
+	position: string;
+	days: { workDate: string; punches: Punches }[];
+};
+
+// Position and periods only: the salary never leaves employees.ts.
+const teamAttributesSchema = z.object({ position: z.string(), employment: employmentSchema });
+
+function overlapsWeek(employment: Period[], weekDates: string[]): boolean {
+	const [first, last] = [weekDates[0], weekDates.at(-1)!];
+	return employment.some(
+		(period) => period.start <= last && (null === period.end || first <= period.end)
+	);
+}
+
+async function findTeam(db: D1Database, weekDates: string[]) {
+	const { results } = await db
+		.prepare('select id, full_name, attributes from employees')
+		.all<{ id: number; full_name: string; attributes: string }>();
+	return results
+		.map((row) => ({ ...row, attributes: teamAttributesSchema.parse(JSON.parse(row.attributes)) }))
+		.filter((row) => overlapsWeek(row.attributes.employment, weekDates))
+		.sort((first, second) => first.full_name.localeCompare(second.full_name, 'es'));
+}
+
+type TeamRow = TimesheetRow & { employeeId: number };
+
+async function findWeekRows(db: D1Database, weekDates: string[]): Promise<TeamRow[]> {
+	const { results } = await db
+		.prepare(
+			`select employee_id as employeeId, work_date as workDate, morning_in as morningIn,
+			morning_out as morningOut, afternoon_in as afternoonIn, afternoon_out as afternoonOut
+			from timesheets where work_date between ? and ?`
+		)
+		.bind(weekDates[0], weekDates.at(-1))
+		.all<TeamRow>();
+	return results;
+}
+
+/**
+ * Everyone employed at some point of the week (`week` is any of its dates; this week by default),
+ * each with the seven days' punches. Read-only: there's nothing to approve.
+ */
+export async function getTeamWeek(
+	db: D1Database,
+	input: { week?: string | null },
+	actor: Actor | null
+): Promise<{ weekStart: string; team: TeamMember[] }> {
+	requireRole(actor, LOGS_EVERYONES_HOURS);
+	const today = getTodaysDate();
+	const weekStart = getWeekStart(dateSchema.catch(today).parse(input.week ?? today));
+	const weekDates = Array.from({ length: DAYS_PER_WEEK }, (_, offset) =>
+		addDays(weekStart, offset)
+	);
+	const [team, rows] = await Promise.all([findTeam(db, weekDates), findWeekRows(db, weekDates)]);
+	const punchesOf = (employeeId: number, workDate: string): Punches => {
+		const row = rows.find((each) => employeeId === each.employeeId && workDate === each.workDate);
+		return { ...NO_PUNCHES, ...pickPunches(row) };
+	};
+	return {
+		weekStart,
+		team: team.map((member) => ({
+			employeeId: member.id,
+			fullName: member.full_name,
+			position: member.attributes.position,
+			days: weekDates.map((workDate) => ({ workDate, punches: punchesOf(member.id, workDate) }))
+		}))
+	};
+}

@@ -4,7 +4,13 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
 import { createEmployee } from './employees';
-import { getEmployeeHours, getOwnHours, saveEmployeePunch, saveOwnPunch } from './timesheets';
+import {
+	getEmployeeHours,
+	getOwnHours,
+	getTeamWeek,
+	saveEmployeePunch,
+	saveOwnPunch
+} from './timesheets';
 
 const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
 
@@ -230,4 +236,27 @@ test('only ADMIN and MANAGER see or log another employee’s hours; an unknown o
 		(caught: unknown) => caught
 	);
 	expect(isHttpError(unknown, 404)).toBe(true);
+});
+
+test('the team week has everyone employed that week, by name, with seven days of punches', async () => {
+	await hire('71384902', '2026-08-03'); // starts the week after
+	const carlos = await hire('98765432', '2026-07-29');
+	await saveEmployeePunch(
+		db,
+		{ employee_id: String(carlos), work_date: '2026-07-29', punch: 'morningIn', ...at('06:30') },
+		manager
+	);
+	const { weekStart, team } = await getTeamWeek(db, {}, manager);
+	expect(weekStart).toBe('2026-07-27');
+	expect(team.map((member) => member.employeeId)).toEqual([ana.employeeId, carlos]);
+	expect(team[1].days).toHaveLength(7);
+	expect(team[1].days[2]).toEqual({
+		workDate: '2026-07-29',
+		punches: { morningIn: '06:30', morningOut: null, afternoonIn: null, afternoonOut: null }
+	});
+});
+
+test('only ADMIN and MANAGER see the team week', async () => {
+	const forbidden = await getTeamWeek(db, {}, ana).catch((caught: unknown) => caught);
+	expect(isHttpError(forbidden, 403)).toBe(true);
 });
