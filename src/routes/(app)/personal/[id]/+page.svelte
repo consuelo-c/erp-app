@@ -5,7 +5,6 @@
 	import Button from '$lib/components/Button.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import Input from '$lib/components/Input.svelte';
-	import LogoutButton from '$lib/components/LogoutButton.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
@@ -45,9 +44,7 @@
 
 <Screen>
 	{#snippet header()}
-		<ScreenHeader title={employee.fullName} backHref={resolve('/personal')}>
-			<LogoutButton />
-		</ScreenHeader>
+		<ScreenHeader title={employee.fullName} backHref={resolve('/personal')} />
 	{/snippet}
 
 	<UnsavedChangesGuard form="save" />

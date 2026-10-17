@@ -4,7 +4,6 @@
 	import Button from '$lib/components/Button.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import Input from '$lib/components/Input.svelte';
-	import LogoutButton from '$lib/components/LogoutButton.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
@@ -23,10 +22,8 @@
 	{#snippet header()}
 		<ScreenHeader
 			title="Cambiar contraseña"
-			backHref={resolve('/logins/[id]', { id: String(data.login.id) })}
-		>
-			<LogoutButton />
-		</ScreenHeader>
+			backHref={resolve('/(app)/logins/[id]', { id: String(data.login.id) })}
+		/>
 	{/snippet}
 
 	<UnsavedChangesGuard form="password" />

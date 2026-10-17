@@ -3,11 +3,12 @@
 	import Badge from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import Card from '$lib/components/Card.svelte';
-	import LogoutButton from '$lib/components/LogoutButton.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
+	import Tabs from '$lib/components/Tabs.svelte';
 	import { formatCivilDate } from '$lib/datetime';
 	import { formatIdNumber } from '$lib/format';
+	import { PERSONAL_TABS } from '$lib/navigation';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -19,14 +20,16 @@
 
 <Screen>
 	{#snippet header()}
-		<ScreenHeader title="Personal">
-			<LogoutButton />
-		</ScreenHeader>
+		{#if data.canManageLogins}
+			<ScreenHeader><Tabs tabs={PERSONAL_TABS} current="Personal" /></ScreenHeader>
+		{:else}
+			<ScreenHeader title="Personal" />
+		{/if}
 	{/snippet}
 
 	{#each data.employees as employee (employee.id)}
 		<Card
-			href={resolve('/personal/[id]', { id: String(employee.id) })}
+			href={resolve('/(app)/personal/[id]', { id: String(employee.id) })}
 			dimmed={!employee.isEmployed}
 		>
 			{#snippet head()}

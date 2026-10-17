@@ -54,12 +54,13 @@ Claude runs `test`, `lint` and `typecheck`; the developer runs every other one.
 
 ## Folder structure
 
-- `src/routes/` — `/` (the public landing: logo and the icon link to `/login`), `/login`, `/logout` (`POST` only), `/inicio`, where every role lands after login (a stub that phase 4's shell replaces), `/personal` (Employees: list, `nuevo`, `[id]`; reached by URL until phase 4's navigation) and `/logins` (Logins, `ADMIN` only: list, `nuevo`, `[id]` with its `contrasena` and `reasignar`; reached by URL until phase 4's navigation); `+layout.svelte` loads `app.css`; `+error.svelte` is every route's error screen (a 403 says the section isn't theirs)
+- `src/routes/` — `/` (the public landing: logo and the icon link to `/login`), `/login`, `/logout` (`POST` only); `+layout.svelte` loads `app.css`; `+error.svelte` is the error screen outside the shell (401, 404, 500). `(app)/` is the shell, a group that keeps the URLs: its `+layout.server.ts` requires a session, `+layout.svelte` holds the bottom bar and the «Más» sheet, `+error.svelte` shows errors inside it (a 403 names the section and says it isn't theirs). Inside: `/despachos`, where every role lands after login (empty until phase 9), `/personal` (Employees: list, `nuevo`, `[id]`) and `/logins` (Logins, `ADMIN` only: list, `nuevo`, `[id]` with its `contrasena` and `reasignar`), reached from Personal's tabs. Route IDs inside the group carry it: `resolve('/(app)/logins/[id]', …)`
 - `src/hooks.server.ts` — resolves the session cookie into `locals.user` (an `Actor`, or null) and slides its expiry
 - `src/app.css` — the Design System's tokens as CSS custom properties, its base and text roles (`.meta`, `.note`, `.section-title`), and the `.form-stack` / `.chip-row` wrappers
 - `src/lib/components/` — the Design System's components translated to Svelte, keeping its BEM class names; only the ones a screen uses so far. Icons are `static/icons.svg`, the system's sprite. `UnsavedChangesGuard` is behavior, not a system component: mounted with a form's id, it asks before leaving with unsaved changes
 - `src/lib/datetime.ts` — `getTodaysDate`, `formatInstant`, `formatCivilDate`: Bogotá dates and times
 - `src/lib/labels.ts` — `ROLE_LABELS`: the label map every enum value reaches the screen through
+- `src/lib/navigation.ts` — `DESTINATIONS`, the same menu for every login (no `href` until a phase builds its screens), `findDestination` and Personal's tabs
 - `src/lib/format.ts` — `formatPesos`, `formatIdNumber`: Colombian number display
 - `src/lib/server/actor.ts` — `Actor` and the permission helpers (`requireRole`, `hasAnyRole`, …)
 - `src/lib/server/db/schema.ts` — Drizzle schema, source of `migrations/`
