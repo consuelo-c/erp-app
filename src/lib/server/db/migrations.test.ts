@@ -42,8 +42,15 @@ function insertUser(username: string, employeeId: number | null) {
 	);
 }
 
-test('creates exactly settings, events, employees, users and sessions', () => {
-	expect(listTables()).toEqual(['employees', 'events', 'sessions', 'settings', 'users']);
+test('creates exactly settings, events, employees, users, sessions and timesheets', () => {
+	expect(listTables()).toEqual([
+		'employees',
+		'events',
+		'sessions',
+		'settings',
+		'timesheets',
+		'users'
+	]);
 });
 
 test('users: username is unique, employee_id is unique but may be null on many rows', () => {

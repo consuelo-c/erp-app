@@ -1,5 +1,15 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { formatCivilDate, formatInstant, getTodaysDate } from './datetime';
+import {
+	addDays,
+	formatCivilDate,
+	formatClockTime,
+	formatInstant,
+	formatLongDay,
+	formatShortDay,
+	formatWeekRange,
+	getTodaysDate,
+	getWeekStart
+} from './datetime';
 
 // 10:00 p.m. on 14 August in Bogotá (UTC−5) is already 15 August in UTC.
 const BOGOTA_10PM = new Date('2026-08-15T03:00:00Z');
@@ -36,4 +46,27 @@ test('formatInstant writes midnight and noon as 12', () => {
 test('formatCivilDate writes the day, the short month and the year', () => {
 	expect(formatCivilDate('2025-02-03')).toBe('3 feb 2025');
 	expect(formatCivilDate('2024-12-31')).toBe('31 dic 2024');
+});
+
+test('formatClockTime writes a stored punch the way people read it', () => {
+	expect(formatClockTime('07:02')).toBe('7:02 a.m.');
+	expect(formatClockTime('12:01')).toBe('12:01 p.m.');
+	expect(formatClockTime('00:30')).toBe('12:30 a.m.');
+});
+
+test('addDays crosses months and years', () => {
+	expect(addDays('2026-07-31', 1)).toBe('2026-08-01');
+	expect(addDays('2026-01-01', -1)).toBe('2025-12-31');
+});
+
+test('getWeekStart is the Monday, Sunday included in the week before it', () => {
+	expect(getWeekStart('2026-07-31')).toBe('2026-07-27');
+	expect(getWeekStart('2026-08-02')).toBe('2026-07-27');
+	expect(getWeekStart('2026-07-27')).toBe('2026-07-27');
+});
+
+test('day and week labels', () => {
+	expect(formatShortDay('2026-07-27')).toBe('Lun 27 jul');
+	expect(formatLongDay('2026-07-31')).toBe('Vie 31 jul 2026');
+	expect(formatWeekRange('2026-07-27')).toBe('27 jul – 2 ago');
 });

@@ -1,14 +1,19 @@
 <script lang="ts">
 	import type { HTMLInputAttributes } from 'svelte/elements';
 
-	// A label around a native checkbox, so a form posts the selection without JS.
-	type Props = HTMLInputAttributes & { label: string };
+	// A label around a native checkbox or radio, so a form posts the selection without JS. A radio's
+	// `checked` isn't bound (a group binds across inputs): the caller sets it and listens to `onchange`.
+	type Props = HTMLInputAttributes & { label: string; type?: 'checkbox' | 'radio' };
 
-	let { label, checked = $bindable(false), ...rest }: Props = $props();
+	let { label, type = 'checkbox', checked = $bindable(false), ...rest }: Props = $props();
 </script>
 
 <label class="chip">
-	<input {...rest} type="checkbox" bind:checked />{label}
+	{#if 'radio' === type}
+		<input {...rest} type="radio" {checked} />{label}
+	{:else}
+		<input {...rest} type="checkbox" bind:checked />{label}
+	{/if}
 </label>
 
 <style>

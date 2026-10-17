@@ -10,3 +10,8 @@ export function formatPesos(pesos: number): string {
 export function formatIdNumber(digits: string): string {
 	return grouped.format(Number(digits));
 }
+
+/** Worked minutes as hours with one decimal, a dot as the separator: `8.1 h`. */
+export function formatHours(minutes: number): string {
+	return `${(minutes / 60).toFixed(1)} h`;
+}
