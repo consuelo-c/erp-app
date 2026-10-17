@@ -22,7 +22,8 @@
 		| 'package'
 		| 'banknote'
 		| 'users'
-		| 'help';
+		| 'help'
+		| 'edit';
 
 	interface Props {
 		name: IconName;

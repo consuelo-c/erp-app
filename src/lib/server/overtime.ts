@@ -46,6 +46,18 @@ function listBlockMinutes(clockIn: string | null, clockOut: string | null): numb
 	return Array.from({ length }, (_, offset) => start + offset);
 }
 
+function listDayMinutes(day: Omit<DayPunches, 'workDate'>): number[] {
+	return [
+		...listBlockMinutes(day.morningIn, day.morningOut),
+		...listBlockMinutes(day.afternoonIn, day.afternoonOut)
+	];
+}
+
+/** The minutes a day's complete blocks cover: a clock-in with no clock-out counts nothing yet. */
+export function countWorkedMinutes(day: Omit<DayPunches, 'workDate'>): number {
+	return listDayMinutes(day).length;
+}
+
 // Split, never parsed in a zone: a civil date's weekday is the same everywhere in UTC.
 function isSunday(workDate: string): boolean {
 	const [year, month, day] = workDate.split('-').map(Number);
@@ -80,10 +92,7 @@ export function deriveOvertime(
 	isHoliday: boolean,
 	parameters: OvertimeParameters
 ): OvertimeMinutes {
-	const minutes = [
-		...listBlockMinutes(day.morningIn, day.morningOut),
-		...listBlockMinutes(day.afternoonIn, day.afternoonOut)
-	];
+	const minutes = listDayMinutes(day);
 	const nightStart = toMinutes(parameters.PAYROLL_NIGHT_START);
 	const nightEnd = toMinutes(parameters.PAYROLL_NIGHT_END);
 	const isHolidayRate = isHoliday || isSunday(day.workDate);

@@ -1,6 +1,7 @@
 // Enum values never reach the screen raw: every one goes through its label map.
 
 import type { Role } from './server/actor';
+import type { Punch } from './server/services/timesheets';
 
 export const ROLE_LABELS: Record<Role, string> = {
 	ADMIN: 'Administrador',
@@ -70,4 +71,11 @@ export const SERVICE_LABELS = {
 	TRANSPORTER: 'Transportador',
 	DECORATOR: 'Decorador',
 	CHEF: 'Chef'
+};
+
+export const PUNCH_LABELS: Record<Punch, string> = {
+	morningIn: 'Inicio mañana',
+	morningOut: 'Finalización mañana',
+	afternoonIn: 'Inicio tarde',
+	afternoonOut: 'Finalización tarde'
 };

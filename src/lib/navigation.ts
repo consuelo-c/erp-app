@@ -22,7 +22,12 @@ export const DESTINATIONS: Destination[] = [
 		href: resolve('/despachos'),
 		paths: [resolve('/despachos')]
 	},
-	{ label: 'Horas', icon: 'clock' },
+	{
+		label: 'Horas',
+		icon: 'clock',
+		href: resolve('/horas'),
+		paths: [resolve('/horas')]
+	},
 	{ label: 'Pedidos', icon: 'list' },
 	{ label: 'Inventario', icon: 'package' },
 	{ label: 'Nómina', icon: 'banknote' },

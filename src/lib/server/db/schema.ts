@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { check, index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { check, index, integer, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core';
 
 const auditColumns = {
 	createdAt: integer('created_at').notNull(),
@@ -79,4 +79,24 @@ export const sessions = sqliteTable(
 		...auditColumns
 	},
 	(table) => [index('sessions_user_id').on(table.userId)]
+);
+
+// A day's four punches, `HH:MM` or null. `employee_id` is whose hours they are, not who typed them,
+// and points to the person, not the login. No payment fields: a day is paid when a PAID settlement
+// of that employee covers it.
+export const timesheets = sqliteTable(
+	'timesheets',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		employeeId: integer('employee_id')
+			.notNull()
+			.references(() => employees.id),
+		workDate: text('work_date').notNull(), // YYYY-MM-DD
+		morningIn: text('morning_in'),
+		morningOut: text('morning_out'),
+		afternoonIn: text('afternoon_in'),
+		afternoonOut: text('afternoon_out'),
+		...auditColumns
+	},
+	(table) => [unique('timesheets_employee_id_work_date').on(table.employeeId, table.workDate)]
 );
