@@ -56,3 +56,9 @@ export function findDestination(pathname: string): Destination | undefined {
 		paths.some((path) => pathname === path || pathname.startsWith(`${path}/`))
 	);
 }
+
+/** Horas' tabs, for the logins that log everyone's hours. */
+export const HOURS_TABS = [
+	{ label: 'Empleado', href: resolve('/horas/empleado') },
+	{ label: 'Equipo', href: resolve('/horas/equipo') }
+];
