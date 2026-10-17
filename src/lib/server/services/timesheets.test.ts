@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
 import { createEmployee } from './employees';
-import { getOwnHours, saveOwnPunch } from './timesheets';
+import { getEmployeeHours, getOwnHours, saveEmployeePunch, saveOwnPunch } from './timesheets';
 
 const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
 
@@ -115,7 +115,7 @@ test('a day not yet come, or outside the employment, is refused', async () => {
 		{ work_date: '2026-06-30', punch: 'morningIn', ...at('07:00') },
 		ana
 	);
-	expect(before).toEqual({ ok: false, message: 'Ese día no estabas trabajando en la empresa' });
+	expect(before).toEqual({ ok: false, message: 'Ese día no hace parte de ningún período laboral' });
 });
 
 test('any earlier day of the employment can be corrected: no date window', async () => {
@@ -186,4 +186,48 @@ test('a future or malformed day is a 404', async () => {
 		const error = await getOwnHours(db, { date }, ana).catch((caught: unknown) => caught);
 		expect(isHttpError(error, 404)).toBe(true);
 	}
+});
+
+test('a manager logs a punch for the employee chosen in the selector, signed as the manager', async () => {
+	const input = {
+		employee_id: String(ana.employeeId),
+		work_date: TODAY,
+		punch: 'morningIn',
+		...at('07:00')
+	};
+	expect(await saveEmployeePunch(db, input, manager)).toEqual({ ok: true });
+	expect(database.prepare('select employee_id, created_by from timesheets').all()).toEqual([
+		{ employee_id: ana.employeeId, created_by: 'gerente' }
+	]);
+	const hours = await getEmployeeHours(db, { employeeId: ana.employeeId, date: TODAY }, manager);
+	expect(hours.employeeName).toBe('Ana Pérez');
+	expect(hours.day.punches.morningIn).toBe('07:00');
+});
+
+test('a manager’s punch follows the same rules: no unknown employee, no day outside the employment', async () => {
+	const base = { work_date: TODAY, punch: 'morningIn', ...at('07:00') };
+	expect(await saveEmployeePunch(db, { ...base, employee_id: '999' }, manager)).toEqual({
+		ok: false,
+		message: 'Escoge el empleado'
+	});
+	const before = { ...base, employee_id: String(ana.employeeId), work_date: '2026-06-30' };
+	expect(await saveEmployeePunch(db, before, manager)).toEqual({
+		ok: false,
+		message: 'Ese día no hace parte de ningún período laboral'
+	});
+});
+
+test('only ADMIN and MANAGER see or log another employee’s hours; an unknown one is a 404', async () => {
+	const input = {
+		employee_id: String(ana.employeeId),
+		work_date: TODAY,
+		punch: 'morningIn',
+		...at('07:00')
+	};
+	const forbidden = await saveEmployeePunch(db, input, ana).catch((caught: unknown) => caught);
+	expect(isHttpError(forbidden, 403)).toBe(true);
+	const unknown = await getEmployeeHours(db, { employeeId: 999, date: TODAY }, manager).catch(
+		(caught: unknown) => caught
+	);
+	expect(isHttpError(unknown, 404)).toBe(true);
 });
