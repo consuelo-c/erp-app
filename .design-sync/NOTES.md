@@ -4,3 +4,4 @@
 - The app (`src/lib/components/*.svelte`, `src/app.css`, `static/icons.svg`) is the source of truth. A sync is a targeted edit: read the remote file, apply the code's change to it, upload only the files that changed. Never a wholesale replace.
 - The Design System keeps `lock` in its sprite although the app doesn't use it yet: planned by the navigation handoff (`uploads/ds-add-icons.md`).
 - `get_file` content only reaches the conversation, not the disk, so edited files are retyped before upload. Check `assets/icons.svg` symbols against `static/icons.svg` before uploading: a retyped path can carry a silent typo.
+- The Hint (ⓘ tooltip, `.hint` / `.hint__text`) has no Svelte component: its styles are page-scoped in `src/routes/(app)/horas/equipo/+page.svelte`, and the Design System keeps them in `components/feedback/feedback.css`. Extract a component when a second screen uses it.
