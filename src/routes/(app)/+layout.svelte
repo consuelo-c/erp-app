@@ -3,14 +3,18 @@
 	import { page } from '$app/state';
 	import BottomNav from '$lib/components/BottomNav.svelte';
 	import BottomSheet from '$lib/components/BottomSheet.svelte';
+	import Button from '$lib/components/Button.svelte';
+	import Icon from '$lib/components/Icon.svelte';
 	import LogoutButton from '$lib/components/LogoutButton.svelte';
 	import MenuList from '$lib/components/MenuList.svelte';
+	import Sidebar from '$lib/components/Sidebar.svelte';
 	import { BAR_SLOTS, DESTINATIONS, findDestination, HELP } from '$lib/navigation';
 	import type { LayoutProps } from './$types';
 
 	let { data, children }: LayoutProps = $props();
 
 	let isMoreOpen = $state(false);
+	let isSidebarCollapsed = $state(false);
 
 	// The sheet's rows are links: leaving the page closes it.
 	afterNavigate(() => {
@@ -42,18 +46,37 @@
 		})),
 		HELP
 	]);
+
+	const sidebarItems = $derived(
+		DESTINATIONS.map((destination) => ({ ...destination, isCurrent: destination === current }))
+	);
 </script>
 
+<!-- Both navigations are in the page; the width decides which one shows. -->
 <div class="shell">
+	<div class="shell__sidebar">
+		<Sidebar
+			items={sidebarItems}
+			footItems={[HELP]}
+			username={data.username}
+			bind:isCollapsed={isSidebarCollapsed}
+		/>
+	</div>
 	<div class="shell__screen">{@render children()}</div>
-	<BottomNav items={barItems} />
+	<div class="shell__bar"><BottomNav items={barItems} /></div>
 </div>
 
 <BottomSheet bind:open={isMoreOpen} title="Más">
 	<MenuList rows={moreRows}>
 		{#snippet session()}
 			<p class="meta">Sesión: <b>{data.username}</b></p>
-			<LogoutButton />
+			<LogoutButton>
+				{#snippet trigger(open)}
+					<Button type="button" variant="secondary" size="sm" inline onclick={open}>
+						<Icon name="exit" size="sm" />Cerrar sesión
+					</Button>
+				{/snippet}
+			</LogoutButton>
 		{/snippet}
 	</MenuList>
 </BottomSheet>
@@ -61,11 +84,39 @@
 <style>
 	.shell {
 		display: grid;
-		grid-template-rows: 1fr auto;
+		grid-template:
+			'screen' 1fr
+			'bar' auto
+			/ 1fr;
 		height: 100%;
 	}
 
 	.shell__screen {
+		grid-area: screen;
 		min-height: 0;
+	}
+
+	.shell__bar {
+		grid-area: bar;
+	}
+
+	.shell__sidebar {
+		display: none;
+	}
+
+	@container (width >= 1024px) {
+		.shell {
+			grid-template: 'sidebar screen' 1fr / auto 1fr;
+		}
+
+		.shell__sidebar {
+			display: block;
+			grid-area: sidebar;
+			min-height: 0;
+		}
+
+		.shell__bar {
+			display: none;
+		}
 	}
 </style>
