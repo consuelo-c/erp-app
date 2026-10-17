@@ -20,6 +20,6 @@ export const actions: Actions = {
 			return fail(400, { username: String(credentials.username ?? ''), invalid: true });
 		}
 		setSessionCookie(cookies, session.token, session.expiresAt);
-		redirect(303, resolve('/inicio'));
+		redirect(303, resolve('/despachos'));
 	}
 };

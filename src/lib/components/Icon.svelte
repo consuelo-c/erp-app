@@ -18,7 +18,11 @@
 		| 'exit'
 		| 'collapse'
 		| 'more'
-		| 'back';
+		| 'back'
+		| 'package'
+		| 'banknote'
+		| 'users'
+		| 'help';
 
 	interface Props {
 		name: IconName;

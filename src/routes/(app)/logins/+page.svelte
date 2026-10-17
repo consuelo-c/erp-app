@@ -3,10 +3,11 @@
 	import Badge from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import Card from '$lib/components/Card.svelte';
-	import LogoutButton from '$lib/components/LogoutButton.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
+	import Tabs from '$lib/components/Tabs.svelte';
 	import { ROLE_LABELS } from '$lib/labels';
+	import { PERSONAL_TABS } from '$lib/navigation';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -21,9 +22,7 @@
 
 <Screen>
 	{#snippet header()}
-		<ScreenHeader title="Logins" backHref={resolve('/personal')}>
-			<LogoutButton />
-		</ScreenHeader>
+		<ScreenHeader><Tabs tabs={PERSONAL_TABS} current="Logins" /></ScreenHeader>
 	{/snippet}
 
 	{#if isOnlyOwnLogin}
@@ -35,7 +34,7 @@
 		</div>
 	{:else}
 		{#each data.logins as login (login.id)}
-			<Card href={resolve('/logins/[id]', { id: String(login.id) })} dimmed={!login.isActive}>
+			<Card href={resolve('/(app)/logins/[id]', { id: String(login.id) })} dimmed={!login.isActive}>
 				{#snippet head()}
 					<strong>{login.username}</strong>
 					{#if login.isActive}

@@ -6,7 +6,7 @@
 	// to one centered column.
 	interface Props {
 		header?: Snippet;
-		children: Snippet;
+		children?: Snippet;
 		footer?: Snippet;
 	}
 
@@ -15,7 +15,7 @@
 
 <div class="screen">
 	{@render header?.()}
-	<main class="screen__body">{@render children()}</main>
+	<main class="screen__body">{@render children?.()}</main>
 	{#if footer}
 		<div class="screen__footer">{@render footer()}</div>
 	{/if}

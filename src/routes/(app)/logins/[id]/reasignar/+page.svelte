@@ -4,7 +4,6 @@
 	import Button from '$lib/components/Button.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import Input from '$lib/components/Input.svelte';
-	import LogoutButton from '$lib/components/LogoutButton.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
@@ -59,10 +58,8 @@
 	{#snippet header()}
 		<ScreenHeader
 			title="Reasignar login"
-			backHref={resolve('/logins/[id]', { id: String(login.id) })}
-		>
-			<LogoutButton />
-		</ScreenHeader>
+			backHref={resolve('/(app)/logins/[id]', { id: String(login.id) })}
+		/>
 	{/snippet}
 
 	<UnsavedChangesGuard form="reassign" />

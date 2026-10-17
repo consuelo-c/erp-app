@@ -2,7 +2,6 @@
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import Button from '$lib/components/Button.svelte';
-	import LogoutButton from '$lib/components/LogoutButton.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
@@ -35,9 +34,7 @@
 
 <Screen>
 	{#snippet header()}
-		<ScreenHeader title={login.username} backHref={resolve('/logins')}>
-			<LogoutButton />
-		</ScreenHeader>
+		<ScreenHeader title={login.username} backHref={resolve('/logins')} />
 	{/snippet}
 
 	<UnsavedChangesGuard form="roles" />
@@ -59,10 +56,10 @@
 	</form>
 
 	<section class="login-actions">
-		<Button variant="secondary" href={resolve('/logins/[id]/contrasena', { id })}>
+		<Button variant="secondary" href={resolve('/(app)/logins/[id]/contrasena', { id })}>
 			Cambiar contraseña
 		</Button>
-		<Button variant="secondary" href={resolve('/logins/[id]/reasignar', { id })}>
+		<Button variant="secondary" href={resolve('/(app)/logins/[id]/reasignar', { id })}>
 			Reasignar a otro empleado
 		</Button>
 		{#if login.isActive}
