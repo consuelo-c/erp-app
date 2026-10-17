@@ -5,9 +5,10 @@
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { addDays, getTodaysDate, getWeekStart } from '$lib/datetime';
+import { SETTINGS } from '$lib/settings';
 import { requireRole, ROLES, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
-import { countWorkedMinutes } from '../overtime';
+import { countWorkedMinutes, deriveOvertime } from '../overtime';
 import { employmentSchema } from './employees';
 
 const PUNCH_COLUMNS = {
@@ -338,8 +339,53 @@ export type TeamMember = {
 	employeeId: number;
 	fullName: string;
 	position: string;
-	days: { workDate: string; punches: Punches }[];
+	days: TeamDay[];
+	regularMinutes: number;
+	overtimeMinutes: number;
 };
+
+type TeamDay = { workDate: string; punches: Punches };
+
+// What the week's totals read: the derivation's parameters and the holidays.
+const overtimeSettingsSchema = z.object({
+	PAYROLL_ORDINARY_HOURS_PER_DAY: SETTINGS.PAYROLL_ORDINARY_HOURS_PER_DAY.schema,
+	PAYROLL_NIGHT_START: SETTINGS.PAYROLL_NIGHT_START.schema,
+	PAYROLL_NIGHT_END: SETTINGS.PAYROLL_NIGHT_END.schema,
+	PAYROLL_HOLIDAYS: SETTINGS.PAYROLL_HOLIDAYS.schema
+});
+type OvertimeSettings = z.infer<typeof overtimeSettingsSchema>;
+
+async function findOvertimeSettings(db: D1Database): Promise<OvertimeSettings> {
+	const keys = Object.keys(overtimeSettingsSchema.shape);
+	const { results } = await db
+		.prepare(`select key, value from settings where key in (${keys.map(() => '?').join(', ')})`)
+		.bind(...keys)
+		.all<{ key: string; value: string }>();
+	return overtimeSettingsSchema.parse(
+		Object.fromEntries(results.map(({ key, value }) => [key, value]))
+	);
+}
+
+// The night surcharge pays ordinary hours, so it isn't one of them.
+const OVERTIME_ROWS = [
+	'daytimeOvertime',
+	'nightOvertime',
+	'daytimeHolidayOvertime',
+	'nightHolidayOvertime'
+] as const;
+
+/** The week's overtime, Sunday and holiday hours included, and the rest of its worked hours. */
+function sumWeekHours(days: TeamDay[], settings: OvertimeSettings) {
+	let workedMinutes = 0;
+	let overtimeMinutes = 0;
+	for (const { workDate, punches } of days) {
+		const isHoliday = settings.PAYROLL_HOLIDAYS.some((holiday) => workDate === holiday.date);
+		const overtime = deriveOvertime({ workDate, ...punches }, isHoliday, settings);
+		workedMinutes += countWorkedMinutes(punches);
+		overtimeMinutes += OVERTIME_ROWS.reduce((sum, row) => sum + overtime[row], 0);
+	}
+	return { regularMinutes: workedMinutes - overtimeMinutes, overtimeMinutes };
+}
 
 // Position and periods only: the salary never leaves employees.ts.
 const teamAttributesSchema = z.object({ position: z.string(), employment: employmentSchema });
@@ -375,9 +421,29 @@ async function findWeekRows(db: D1Database, weekDates: string[]): Promise<TeamRo
 	return results;
 }
 
+type TeamWeek = { weekDates: string[]; rows: TeamRow[]; settings: OvertimeSettings };
+
+function buildTeamMember(
+	member: Awaited<ReturnType<typeof findTeam>>[number],
+	{ weekDates, rows, settings }: TeamWeek
+): TeamMember {
+	const days = weekDates.map((workDate) => {
+		const row = rows.find((each) => member.id === each.employeeId && workDate === each.workDate);
+		return { workDate, punches: { ...NO_PUNCHES, ...pickPunches(row) } };
+	});
+	return {
+		employeeId: member.id,
+		fullName: member.full_name,
+		position: member.attributes.position,
+		days,
+		...sumWeekHours(days, settings)
+	};
+}
+
 /**
  * Everyone employed at some point of the week (`week` is any of its dates; this week by default),
- * each with the seven days' punches. Read-only: there's nothing to approve.
+ * each with the seven days' punches and the week's regular and overtime minutes. Read-only:
+ * there's nothing to approve.
  */
 export async function getTeamWeek(
 	db: D1Database,
@@ -390,18 +456,13 @@ export async function getTeamWeek(
 	const weekDates = Array.from({ length: DAYS_PER_WEEK }, (_, offset) =>
 		addDays(weekStart, offset)
 	);
-	const [team, rows] = await Promise.all([findTeam(db, weekDates), findWeekRows(db, weekDates)]);
-	const punchesOf = (employeeId: number, workDate: string): Punches => {
-		const row = rows.find((each) => employeeId === each.employeeId && workDate === each.workDate);
-		return { ...NO_PUNCHES, ...pickPunches(row) };
-	};
+	const [team, rows, settings] = await Promise.all([
+		findTeam(db, weekDates),
+		findWeekRows(db, weekDates),
+		findOvertimeSettings(db)
+	]);
 	return {
 		weekStart,
-		team: team.map((member) => ({
-			employeeId: member.id,
-			fullName: member.full_name,
-			position: member.attributes.position,
-			days: weekDates.map((workDate) => ({ workDate, punches: punchesOf(member.id, workDate) }))
-		}))
+		team: team.map((member) => buildTeamMember(member, { weekDates, rows, settings }))
 	};
 }
