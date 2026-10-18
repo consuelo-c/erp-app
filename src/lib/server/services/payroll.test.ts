@@ -4,8 +4,8 @@ import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
-import { createEmployee, endEmployment } from './employees';
-import { openWeek, saveDraft, type Draft, type PayrollWeek } from './payroll';
+import { createEmployee, endEmployment, updateEmployee } from './employees';
+import { openWeek, recordPayment, saveDraft, type Draft, type PayrollWeek } from './payroll';
 
 const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
 
@@ -251,17 +251,107 @@ test('the first settlement of January is proposed as week 1', async () => {
 	expect(await openDraft('2026-12-28')).toMatchObject({ weekNumber: 1, previousWeekNumber: null });
 });
 
+const CASH = { payment_method: 'CASH' };
+
+function movements() {
+	return database
+		.prepare(
+			'select concept, payment_method, amount, movement_date, payroll_run_id, bank_account, notes from cash_movements'
+		)
+		.all();
+}
+
+test('recording the payment marks it PAID and writes its PAYROLL movement, in one action', async () => {
+	const draft = await openDraft();
+	const typed = { NON_SALARY_BONUS: '50.000' };
+	expect(await recordPayment(db, { ...formOf(draft, WEEK, typed), ...CASH }, manager)).toEqual({
+		ok: true
+	});
+	const row = runRow();
+	expect(row.status).toBe('PAID');
+	// What's paid is what was on screen, saved in the same action.
+	expect(row.net_pay).toBe(draft.netPay + 50000);
+	expect(movements()).toEqual([
+		{
+			concept: 'PAYROLL',
+			payment_method: 'CASH',
+			amount: -row.net_pay!,
+			movement_date: TODAY,
+			payroll_run_id: row.id,
+			bank_account: null,
+			notes: null
+		}
+	]);
+	const events = database
+		.prepare(
+			"select entity_type, action from events where entity_type in ('PAYROLL_RUN', 'CASH_MOVEMENT') order by id"
+		)
+		.all();
+	expect(events).toEqual([
+		{ entity_type: 'PAYROLL_RUN', action: 'CREATED' },
+		{ entity_type: 'PAYROLL_RUN', action: 'PAID' },
+		{ entity_type: 'CASH_MOVEMENT', action: 'CREATED' }
+	]);
+});
+
 test('a paid settlement shows what was stored and is never written again', async () => {
-	await saveDraft(db, formOf(await openDraft(), WEEK), manager);
-	database.exec("update payroll_runs set status = 'PAID'");
+	await recordPayment(db, { ...formOf(await openDraft(), WEEK), ...CASH }, manager);
 	punch('2026-10-15', '07:00', '12:00', '13:00', '17:00');
 	const paid = await openDraft();
 	expect(paid.status).toBe('PAID');
 	expect(line(paid, 'OVERTIME_DAY').qty).toBe(0);
-	expect(await saveDraft(db, formOf(paid, WEEK), manager)).toMatchObject({
-		ok: false,
-		message: 'Esta liquidación ya se pagó: no se puede cambiar'
+	expect(paid.payment).toMatchObject({
+		method: 'CASH',
+		amount: paid.netPay,
+		movementDate: TODAY,
+		recordedBy: 'gerente',
+		employeeName: 'Ana Pérez'
 	});
+	const refusal = { ok: false, message: 'Esta liquidación ya se pagó: no se puede cambiar' };
+	expect(await saveDraft(db, formOf(paid, WEEK), manager)).toMatchObject(refusal);
+	expect(await recordPayment(db, { ...formOf(paid, WEEK), ...CASH }, manager)).toMatchObject(
+		refusal
+	);
+	expect(movements()).toHaveLength(1);
+});
+
+test("a transfer keeps a copy of the account, pre-filled from the employee's", async () => {
+	const details = {
+		id: String(anaId),
+		full_name: 'Ana Pérez',
+		id_number: '1036452118',
+		monthly_salary: '1750905',
+		position: 'Bodega',
+		bank_account: 'Bancolombia ahorros 0123-456789-01'
+	};
+	await updateEmployee(db, details, manager);
+	const draft = await openDraft();
+	expect(draft.employeeBankAccount).toBe('Bancolombia ahorros 0123-456789-01');
+	const transfer = { payment_method: 'TRANSFER', bank_account: '' };
+	expect(await recordPayment(db, { ...formOf(draft, WEEK), ...transfer }, manager)).toMatchObject({
+		ok: false,
+		errors: { bank_account: 'Escribe la cuenta a la que se transfiere' }
+	});
+	expect(runRow()).toBeUndefined();
+	const otherAccount = { payment_method: 'TRANSFER', bank_account: 'Nequi 300 123 4567' };
+	await recordPayment(db, { ...formOf(draft, WEEK), ...otherAccount }, manager);
+	expect(movements()).toMatchObject([{ bank_account: 'Nequi 300 123 4567', notes: null }]);
+});
+
+test('with «Otro», recording fails without «¿Cuál medio de pago?», which lands in notes', async () => {
+	const draft = await openDraft();
+	const other = { payment_method: 'OTHER', bank_account: 'ignorada' };
+	expect(await recordPayment(db, { ...formOf(draft, WEEK), ...other }, manager)).toMatchObject({
+		ok: false,
+		errors: { payment_method_other: 'Escribe cuál medio de pago se usó' }
+	});
+	const described = { ...other, payment_method_other: 'Nequi' };
+	expect(await recordPayment(db, { ...formOf(draft, WEEK), ...described }, manager)).toEqual({
+		ok: true
+	});
+	expect(movements()).toMatchObject([
+		{ payment_method: 'OTHER', bank_account: null, notes: 'Nequi' }
+	]);
 });
 
 test('only the employees who worked in the period are offered, and only to ADMIN and MANAGER', async () => {

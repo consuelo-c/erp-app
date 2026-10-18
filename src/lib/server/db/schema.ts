@@ -137,3 +137,33 @@ export const payrollRuns = sqliteTable(
 		check('payroll_runs_status', sql`${table.status} IN ('DRAFT', 'PAID')`)
 	]
 );
+
+// All the company's money: the sign is the direction (+ in, − out). Immutable by rule, not by
+// schema: no route edits or deletes a movement, a mistake is corrected with an offsetting one.
+// `order_id` arrives with `orders` in Phase 08.
+export const cashMovements = sqliteTable(
+	'cash_movements',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		concept: text('concept').notNull(),
+		paymentMethod: text('payment_method').notNull(),
+		amount: integer('amount').notNull(), // whole pesos, negative is an outflow
+		movementDate: text('movement_date').notNull(), // YYYY-MM-DD
+		payrollRunId: integer('payroll_run_id').references(() => payrollRuns.id),
+		payee: text('payee'), // a third party: carrier, supplier
+		bankAccount: text('bank_account'), // outflows by transfer: where the money went
+		notes: text('notes'),
+		...auditColumns
+	},
+	(table) => [
+		index('cash_movements_payroll_run_id').on(table.payrollRunId),
+		check(
+			'cash_movements_concept',
+			sql`${table.concept} IN ('INSTALLMENT', 'SECURITY_DEPOSIT', 'INSTALLMENT_REFUND', 'DEPOSIT_REFUND', 'PAYROLL', 'CARRIER_PAYMENT', 'OTHER_EXPENSE')`
+		),
+		check(
+			'cash_movements_payment_method',
+			sql`${table.paymentMethod} IN ('CASH', 'TRANSFER', 'OTHER')`
+		)
+	]
+);

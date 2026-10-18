@@ -144,6 +144,21 @@ export type Draft = {
 	// What the screen recalculates with as it's typed, the same way saving does.
 	monthlySalary: number;
 	parameters: PayrollParameters;
+	// Pre-fills «Cuenta» for a transfer.
+	employeeBankAccount: string | null;
+	// Paid only: the movement recorded, and who the settlement was for when it was paid.
+	payment: Payment | null;
+};
+
+export type Payment = {
+	method: PaymentMethod;
+	amount: number;
+	movementDate: string;
+	bankAccount: string | null;
+	notes: string | null;
+	recordedBy: string;
+	employeeName: string;
+	employeePosition: string | null;
 };
 
 type Period = {
@@ -421,18 +436,60 @@ async function buildDraft(db: D1Database, employee: Employee, period: Period): P
 	const details = {
 		employeeId: employee.id,
 		previousWeekNumber: proposal.previousWeekNumber,
-		monthlySalary: employee.monthlySalary
+		monthlySalary: employee.monthlySalary,
+		employeeBankAccount: employee.bankAccount
 	};
 	if (null === row) {
 		const run = calculate(newEntries(context.derived), context);
 		const proposed = { weekNumber: proposal.weekNumber, paymentDate: period.periodEnd };
-		return toDraft(run, { ...details, ...proposed, status: 'DRAFT', isSaved: false }, settings);
+		const fresh = { status: 'DRAFT', isSaved: false, payment: null } as const;
+		return toDraft(run, { ...details, ...proposed, ...fresh }, settings);
 	}
 	// A paid settlement is frozen: it shows what was stored, never a recalculation.
 	const run =
 		'PAID' === row.status ? readStored(row) : calculate(readEntries(row, context.derived), context);
 	const saved = { weekNumber: Number(row.week_number), paymentDate: String(row.payment_date) };
-	return toDraft(run, { ...details, ...saved, status: row.status, isSaved: true }, settings);
+	const payment = await findPayment(db, row);
+	return toDraft(
+		run,
+		{ ...details, ...saved, status: row.status, isSaved: true, payment },
+		settings
+	);
+}
+
+type MovementRow = {
+	payment_method: PaymentMethod;
+	amount: number;
+	movement_date: string;
+	bank_account: string | null;
+	notes: string | null;
+	created_by: string;
+};
+
+async function findPayment(db: D1Database, row: RunRow): Promise<Payment | null> {
+	if ('PAID' !== row.status) {
+		return null;
+	}
+	const movement = await db
+		.prepare(
+			`select payment_method, amount, movement_date, bank_account, notes, created_by
+			from cash_movements where payroll_run_id = ? and concept = 'PAYROLL'`
+		)
+		.bind(row.id)
+		.first<MovementRow>();
+	if (null === movement) {
+		throw new Error(`Paid settlement ${row.id} has no PAYROLL movement`);
+	}
+	return {
+		method: movement.payment_method,
+		amount: -movement.amount,
+		movementDate: movement.movement_date,
+		bankAccount: movement.bank_account,
+		notes: movement.notes,
+		recordedBy: movement.created_by,
+		employeeName: String(row.employee_name),
+		employeePosition: null === row.employee_position ? null : String(row.employee_position)
+	};
 }
 
 const QUANTITY_MESSAGE = 'Escribe una cantidad de 0 en adelante';
@@ -448,29 +505,55 @@ const descriptionSchema = z
 	.transform((value) => value || null);
 
 const WEEK_MESSAGE = 'Escribe el número de la semana, de 1 a 53';
-const saveSchema = z
-	.object({
-		employee_id: idSchema,
-		period_start: dateSchema.refine((date) => getWeekStart(date) === date),
-		week_number: z.coerce
-			.number(WEEK_MESSAGE)
-			.int(WEEK_MESSAGE)
-			.min(1, WEEK_MESSAGE)
-			.max(53, WEEK_MESSAGE),
-		payment_date: z.iso.date('Escoge la fecha de pago'),
-		...Object.fromEntries(QUANTITY_CONCEPTS.map((concept) => [concept, quantitySchema])),
-		NON_SALARY_BONUS: pesosSchema,
-		LOANS: pesosSchema,
-		OTHER: pesosSchema,
-		'LOANS.description': descriptionSchema,
-		'OTHER.description': descriptionSchema
-	})
-	// The worker signs for every deduction: one they can't identify isn't saved.
-	.refine((form) => 0 === form.OTHER || null !== form['OTHER.description'], {
+const draftShape = {
+	employee_id: idSchema,
+	period_start: dateSchema.refine((date) => getWeekStart(date) === date),
+	week_number: z.coerce
+		.number(WEEK_MESSAGE)
+		.int(WEEK_MESSAGE)
+		.min(1, WEEK_MESSAGE)
+		.max(53, WEEK_MESSAGE),
+	payment_date: z.iso.date('Escoge la fecha de pago'),
+	...Object.fromEntries(QUANTITY_CONCEPTS.map((concept) => [concept, quantitySchema])),
+	NON_SALARY_BONUS: pesosSchema,
+	LOANS: pesosSchema,
+	OTHER: pesosSchema,
+	'LOANS.description': descriptionSchema,
+	'OTHER.description': descriptionSchema
+};
+// The worker signs for every deduction: one they can't identify isn't saved.
+const OTHER_DESCRIBED = {
+	check: (form: { OTHER: number; 'OTHER.description': string | null }) =>
+		0 === form.OTHER || null !== form['OTHER.description'],
+	params: {
 		path: ['OTHER.description'],
 		message: 'Escribe la descripción. «Otros» no se guarda sin ella.'
-	});
+	}
+};
+const saveSchema = z.object(draftShape).refine(OTHER_DESCRIBED.check, OTHER_DESCRIBED.params);
 type SaveForm = z.infer<typeof saveSchema> & Record<QuantityConcept, number>;
+
+export const PAYMENT_METHODS = ['CASH', 'TRANSFER', 'OTHER'] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
+// The draft as typed plus how it's paid: a transfer names the account, «Otro» says which method.
+const paymentSchema = z
+	.object({
+		...draftShape,
+		payment_method: z.enum(PAYMENT_METHODS, 'Escoge el medio de pago'),
+		bank_account: descriptionSchema,
+		payment_method_other: descriptionSchema
+	})
+	.refine(OTHER_DESCRIBED.check, OTHER_DESCRIBED.params)
+	.refine((form) => 'TRANSFER' !== form.payment_method || null !== form.bank_account, {
+		path: ['bank_account'],
+		message: 'Escribe la cuenta a la que se transfiere'
+	})
+	.refine((form) => 'OTHER' !== form.payment_method || null !== form.payment_method_other, {
+		path: ['payment_method_other'],
+		message: 'Escribe cuál medio de pago se usó'
+	});
+type PaymentForm = z.infer<typeof paymentSchema> & SaveForm;
 
 function readForm(form: SaveForm): Entries {
 	// Typed hours land on the minute, like the derived ones.
@@ -521,10 +604,67 @@ export async function saveDraft(
 ): Promise<SaveResult> {
 	requireRole(actor, SETTLES_PAYROLL);
 	const parsed = saveSchema.safeParse(input);
+	return parsed.success ? writeDraft(db, parsed.data as SaveForm, actor) : invalid(parsed.error);
+}
+
+/**
+ * Saves the form as the draft and records its payment, in that order: what's paid is what's on
+ * screen. One batch marks it PAID, frozen from then on, and writes its `PAYROLL` movement.
+ */
+export async function recordPayment(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<SaveResult> {
+	requireRole(actor, SETTLES_PAYROLL);
+	const parsed = paymentSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalid(parsed.error);
 	}
-	const form = parsed.data as SaveForm;
+	const form = parsed.data as PaymentForm;
+	const saved = await writeDraft(db, form, actor);
+	if (!saved.ok) {
+		return saved;
+	}
+	// ponytail: two payments racing past the DRAFT check both write a movement; one manager pays.
+	const row = (await findRun(db, form.employee_id, form.period_start))!;
+	await db.batch(payStatements(db, actor, { form, row }));
+	return { ok: true };
+}
+
+// The three things recording a payment does, in one batch: PAID, frozen, and its movement.
+function payStatements(
+	db: D1Database,
+	actor: Actor,
+	{ form, row }: { form: PaymentForm; row: RunRow }
+) {
+	const paid = auditedUpdate(db, {
+		table: 'payroll_runs',
+		entityType: 'PAYROLL_RUN',
+		actor,
+		id: row.id,
+		current: { status: row.status },
+		changes: { status: 'PAID' },
+		action: 'PAID'
+	});
+	const movement = { table: 'cash_movements', entityType: 'CASH_MOVEMENT', actor };
+	return [...paid, ...auditedInsert(db, { ...movement, values: toMovement(form, row) })];
+}
+
+// The outflow: the net pay leaves on the payment date, to the account a transfer names.
+function toMovement(form: PaymentForm, row: RunRow): Row {
+	return {
+		concept: 'PAYROLL',
+		payment_method: form.payment_method,
+		amount: -Number(row.net_pay),
+		movement_date: String(row.payment_date),
+		payroll_run_id: row.id,
+		bank_account: 'TRANSFER' === form.payment_method ? form.bank_account : null,
+		notes: 'OTHER' === form.payment_method ? form.payment_method_other : null
+	};
+}
+
+async function writeDraft(db: D1Database, form: SaveForm, actor: Actor): Promise<SaveResult> {
 	const target = await findTarget(db, form, actor);
 	if ('string' === typeof target) {
 		return refuse(target);

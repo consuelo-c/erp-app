@@ -5,6 +5,7 @@
 	import Button from '$lib/components/Button.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import Input from '$lib/components/Input.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
@@ -13,7 +14,13 @@
 	import WeekPicker from '$lib/components/WeekPicker.svelte';
 	import { addDays, formatLongDay, formatShortDay, getWeekStart } from '$lib/datetime';
 	import { formatInteger, formatPesos } from '$lib/format';
-	import { DEDUCTION_LABELS, EARNING_LABELS, PAYROLL_STATUS_LABELS } from '$lib/labels';
+	import {
+		CASH_CONCEPT_LABELS,
+		DEDUCTION_LABELS,
+		EARNING_LABELS,
+		PAYMENT_METHOD_LABELS,
+		PAYROLL_STATUS_LABELS
+	} from '$lib/labels';
 	import {
 		calculateSettlement,
 		parsePesos,
@@ -23,6 +30,7 @@
 	} from '$lib/payroll';
 	import type { DeductionRow, Draft, EarningRow } from '$lib/server/services/payroll';
 	import type { SubmitFunction } from '@sveltejs/kit';
+	import PaidSettlement from './PaidSettlement.svelte';
 	import type { PageProps } from './$types';
 
 	let { data, form }: PageProps = $props();
@@ -109,9 +117,38 @@
 			: `Semana propuesta: la anterior (${draft?.previousWeekNumber}) + 1.`
 	);
 
+	// How it's paid, as typed. A transfer is the default when the employee has an account on file.
+	const enteredText = (name: string, saved: string) =>
+		String(entered?.get(name) ?? typed(name, saved));
+	const method = $derived(
+		enteredText('payment_method', draft?.employeeBankAccount ? 'TRANSFER' : 'CASH')
+	);
+	const methods = Object.entries(PAYMENT_METHOD_LABELS);
+	const methodLabel = $derived(
+		'OTHER' === method
+			? enteredText('payment_method_other', '') || PAYMENT_METHOD_LABELS.OTHER
+			: PAYMENT_METHOD_LABELS[method as keyof typeof PAYMENT_METHOD_LABELS]
+	);
+	const employeeName = $derived(
+		week.employees.find((employee) => draft?.employeeId === employee.id)?.fullName
+	);
+
+	let confirmOpen = $state(false);
+
+	// The fields are checked before asking, since the dialog covers them.
+	function askToConfirm(event: MouseEvent) {
+		if ((event.currentTarget as HTMLButtonElement).form?.reportValidity()) {
+			confirmOpen = true;
+		}
+	}
+
 	// Saving stays on the screen: the fields keep what was typed until the reloaded values replace it.
+	// The dialog closes once the server answers; an error shows above the buttons.
 	const keepValues: SubmitFunction = () => {
-		return ({ update }) => update({ reset: false });
+		return async ({ update }) => {
+			await update({ reset: false });
+			confirmOpen = false;
+		};
 	};
 </script>
 
@@ -122,7 +159,11 @@
 <Screen>
 	{#snippet header()}
 		<ScreenHeader title="Liquidación semanal">
-			{#if draft}<Badge>{PAYROLL_STATUS_LABELS[draft.status]}</Badge>{/if}
+			{#if draft}
+				<Badge tone={'PAID' === draft.status ? 'success' : undefined}>
+					{PAYROLL_STATUS_LABELS[draft.status]}
+				</Badge>
+			{/if}
 		</ScreenHeader>
 	{/snippet}
 
@@ -167,10 +208,13 @@
 		<div class="payroll__notice">
 			<Notice tone="info">Nadie trabajó en este periodo</Notice>
 		</div>
+	{:else if draft.payment}
+		<PaidSettlement {week} {draft} payment={draft.payment} />
 	{:else}
 		<form
 			id="settlement"
 			method="POST"
+			action="?/guardar"
 			use:enhance={keepValues}
 			oninput={(event) => (entered = new FormData(event.currentTarget))}
 		>
@@ -332,6 +376,47 @@
 				<span>Neto a pagar</span><span>{formatPesos(shown.netPay)}</span>
 			</div>
 
+			<h2 class="section-title payroll__title">Pago</h2>
+			<div class="form-stack">
+				<Field label="Medio de pago" id="payment_method" error={errorOf('payment_method')}>
+					<Select id="payment_method" name="payment_method" value={method}>
+						{#each methods as [value, label] (value)}
+							<option {value}>{label}</option>
+						{/each}
+					</Select>
+				</Field>
+				{#if 'TRANSFER' === method}
+					<Field
+						label="Cuenta"
+						id="bank_account"
+						hint={draft.employeeBankAccount
+							? 'Tomada de los datos del empleado. Puedes cambiarla para este pago.'
+							: undefined}
+						error={errorOf('bank_account')}
+					>
+						<Input
+							id="bank_account"
+							name="bank_account"
+							value={typed('bank_account', draft.employeeBankAccount ?? '')}
+							aria-invalid={undefined !== errorOf('bank_account')}
+						/>
+					</Field>
+				{:else if 'OTHER' === method}
+					<Field
+						label="¿Cuál medio de pago?"
+						id="payment_method_other"
+						error={errorOf('payment_method_other')}
+					>
+						<Input
+							id="payment_method_other"
+							name="payment_method_other"
+							value={typed('payment_method_other', '')}
+							aria-invalid={undefined !== errorOf('payment_method_other')}
+						/>
+					</Field>
+				{/if}
+			</div>
+
 			{#if form?.message}
 				<div class="payroll__notice">
 					<Notice tone="error">{form.message}</Notice>
@@ -339,11 +424,40 @@
 			{/if}
 		</form>
 
-		<div class="screen__action">
+		<Modal bind:open={confirmOpen} title="Registrar pago" body={confirmation}>
+			<p class="payroll__amount-due">{formatPesos(shown.netPay)}</p>
+			<ul class="detail-list">
+				<li><span>Concepto</span><span>{CASH_CONCEPT_LABELS.PAYROLL}</span></li>
+				<li><span>Medio de pago</span><span>{methodLabel}</span></li>
+				{#if 'TRANSFER' === method}
+					<li>
+						<span>Cuenta</span>
+						<span>{enteredText('bank_account', draft.employeeBankAccount ?? '')}</span>
+					</li>
+				{/if}
+			</ul>
+			{#snippet actions()}
+				<Button type="button" variant="secondary" onclick={() => (confirmOpen = false)}>
+					Cancelar
+				</Button>
+				<Button type="submit" form="settlement" formaction="?/pagar" size="md">
+					Registrar pago
+				</Button>
+			{/snippet}
+		</Modal>
+
+		<div class="screen__action payroll__actions">
 			<Button type="submit" form="settlement" variant="secondary">Guardar borrador</Button>
+			<Button type="button" form="settlement" onclick={askToConfirm}>Registrar pago</Button>
 		</div>
+		<p class="note payroll__note">Al registrar el pago la liquidación queda congelada.</p>
 	{/if}
 </Screen>
+
+{#snippet confirmation()}
+	Los pagos <b>no se pueden corregir</b> después. La liquidación de {employeeName}, semana
+	{enteredText('week_number', String(draft?.weekNumber))}, queda congelada.
+{/snippet}
 
 <style>
 	.payroll__selector {
@@ -360,6 +474,55 @@
 
 	.payroll__fields {
 		margin-top: var(--space-8);
+	}
+
+	.payroll__title {
+		margin: var(--space-12) 0 var(--space-6);
+	}
+
+	.payroll__actions {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-5);
+	}
+
+	.payroll__amount-due {
+		margin: 0 0 var(--space-5);
+		font: var(--type-net);
+	}
+
+	.detail-list {
+		padding: 0;
+		margin: 0;
+		list-style: none;
+		border-top: var(--border-w-strong) solid var(--border-strong);
+	}
+
+	.detail-list > li {
+		box-sizing: border-box;
+		display: flex;
+		gap: var(--space-6);
+		align-items: center;
+		justify-content: space-between;
+		min-height: var(--tap-min);
+		font-size: var(--text-base);
+		border-bottom: var(--border-w-hair) solid var(--border-default);
+	}
+
+	.detail-list > li > :last-child {
+		font-weight: var(--weight-semibold);
+		text-align: right;
+	}
+
+	@container (width >= 1024px) {
+		.payroll__actions {
+			flex-direction: row;
+			justify-content: flex-end;
+		}
+
+		.payroll__note {
+			text-align: right;
+		}
 	}
 
 	.payroll__row {
