@@ -99,6 +99,7 @@ test('an update logs before and after with only the changed fields', () => {
 		expect.objectContaining({
 			action: 'EDITED',
 			entity_id: null,
+			entity_key: 'PAYROLL_PENSION_RATE',
 			before: '{"value":"4"}',
 			after: '{"value":"5"}'
 		})

@@ -4,7 +4,7 @@
 
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
-import { addDays, getTodaysDate, getWeekStart } from '$lib/datetime';
+import { addDays, dialTimeShape, getTodaysDate, getWeekStart, toClockTime } from '$lib/datetime';
 import { SETTINGS } from '$lib/settings';
 import { requireRole, ROLES, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
@@ -55,35 +55,18 @@ const DAYS_PER_WEEK = 7;
 const employmentAttributesSchema = z.object({ employment: employmentSchema });
 
 const punchKeys = Object.keys(PUNCH_COLUMNS) as [Punch, ...Punch[]];
-// The hour comes as people say it: 1 to 12, the minutes, and a.m. or p.m. Stored as `HH:MM`.
-const HOUR_MESSAGE = 'Escribe la hora, de 1 a 12';
-const MINUTE_MESSAGE = 'Escribe los minutos, de 0 a 59';
+// Stored as `HH:MM`.
 const saveSchema = z
 	.object({
 		work_date: z.iso.date('Escoge el día'),
 		punch: z.enum(punchKeys),
-		hour: z.coerce
-			.number({ error: HOUR_MESSAGE })
-			.int(HOUR_MESSAGE)
-			.min(1, HOUR_MESSAGE)
-			.max(12, HOUR_MESSAGE),
-		minute: z.coerce
-			.number({ error: MINUTE_MESSAGE })
-			.int(MINUTE_MESSAGE)
-			.min(0, MINUTE_MESSAGE)
-			.max(59, MINUTE_MESSAGE),
-		period: z.enum(['am', 'pm'], 'Escoge a.m. o p.m.')
+		...dialTimeShape
 	})
 	.transform(({ hour, minute, period, ...rest }) => ({
 		...rest,
-		time: toClockTime(hour, minute, period)
+		time: toClockTime({ hour, minute, period })
 	}));
 
-// 12 a.m. is midnight (00) and 12 p.m. is noon (12).
-function toClockTime(hour: number, minute: number, period: 'am' | 'pm'): string {
-	const hour24 = (hour % 12) + ('pm' === period ? 12 : 0);
-	return `${String(hour24).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-}
 const dateSchema = z.iso.date();
 const employeeIdSchema = z.coerce.number().int().positive();
 const employeeChoiceSchema = z.object({ employee_id: employeeIdSchema });

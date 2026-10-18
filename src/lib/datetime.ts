@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 // Workers run in UTC and browsers in the device's zone; every date the app uses is Bogotá's.
 const COMPANY_TIMEZONE = 'America/Bogota';
 
@@ -56,6 +58,43 @@ function formatTime(hour: number, minute: number): string {
 export function formatClockTime(clockTime: string): string {
 	const [hour, minute] = clockTime.split(':').map(Number);
 	return formatTime(hour, minute);
+}
+
+// A clock time is typed the way people say it: 1 to 12, the minutes, and a.m. or p.m.
+const HOUR_MESSAGE = 'Escribe la hora, de 1 a 12';
+const MINUTE_MESSAGE = 'Escribe los minutos, de 0 a 59';
+
+/** The three fields of a typed clock time, for a Zod object; `toClockTime` turns them into `HH:MM`. */
+export const dialTimeShape = {
+	hour: z.coerce
+		.number({ error: HOUR_MESSAGE })
+		.int(HOUR_MESSAGE)
+		.min(1, HOUR_MESSAGE)
+		.max(12, HOUR_MESSAGE),
+	minute: z.coerce
+		.number({ error: MINUTE_MESSAGE })
+		.int(MINUTE_MESSAGE)
+		.min(0, MINUTE_MESSAGE)
+		.max(59, MINUTE_MESSAGE),
+	period: z.enum(['am', 'pm'], 'Escoge a.m. o p.m.')
+};
+
+type DialTime = { hour: number; minute: number; period: 'am' | 'pm' };
+
+/** A typed clock time as `HH:MM`. 12 a.m. is midnight (00) and 12 p.m. is noon (12). */
+export function toClockTime({ hour, minute, period }: DialTime): string {
+	const hour24 = (hour % 12) + ('pm' === period ? 12 : 0);
+	return `${String(hour24).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+/** `HH:MM` as the fields show it: 1 to 12, the minutes, and a.m. or p.m. */
+export function toDialTime(clockTime: string) {
+	const [hour24, minutes] = clockTime.split(':').map(Number);
+	return {
+		hour: String(hour24 % 12 || 12),
+		minute: String(minutes).padStart(2, '0'),
+		period: hour24 < 12 ? ('am' as const) : ('pm' as const)
+	};
 }
 
 /** A clock time as `7:02`, for columns that already say morning or afternoon. */

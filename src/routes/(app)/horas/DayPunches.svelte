@@ -1,12 +1,11 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import Button from '$lib/components/Button.svelte';
-	import Chip from '$lib/components/Chip.svelte';
-	import Input from '$lib/components/Input.svelte';
+	import ClockField from '$lib/components/ClockField.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import PunchTile from '$lib/components/PunchTile.svelte';
-	import { formatClockTime, formatLongDay } from '$lib/datetime';
+	import { formatClockTime, formatLongDay, toDialTime } from '$lib/datetime';
 	import { PUNCH_LABELS } from '$lib/labels';
 	import type { Punch, TimesheetDay } from '$lib/server/services/timesheets';
 	import type { SubmitFunction } from '@sveltejs/kit';
@@ -43,7 +42,7 @@
 	let period = $state<'am' | 'pm'>('am');
 
 	const current = $derived(null === selected ? null : day.punches[selected]);
-	const placeholder = $derived(null === selected ? null : toDial(USUAL_TIMES[selected]));
+	const placeholder = $derived(null === selected ? null : toDialTime(USUAL_TIMES[selected]));
 	const title = $derived(
 		null === selected
 			? ''
@@ -53,19 +52,9 @@
 		`${formatLongDay(day.workDate).toLowerCase()}${current ? ` · marcada a las ${formatClockTime(current)}` : ''}`
 	);
 
-	// `HH:MM` as the dialog shows it: 1 to 12, the minutes, and a.m. or p.m.
-	function toDial(time: string) {
-		const [hour24, minutes] = time.split(':').map(Number);
-		return {
-			hour: String(hour24 % 12 || 12),
-			minute: String(minutes).padStart(2, '0'),
-			period: hour24 < 12 ? ('am' as const) : ('pm' as const)
-		};
-	}
-
 	function open(punch: Punch) {
 		selected = punch;
-		({ hour, minute, period } = toDial(day.punches[punch] ?? USUAL_TIMES[punch]));
+		({ hour, minute, period } = toDialTime(day.punches[punch] ?? USUAL_TIMES[punch]));
 	}
 
 	function closeUnless(isOpen: boolean) {
@@ -127,44 +116,7 @@
 		{#if message}
 			<Notice tone="error">{message}</Notice>
 		{/if}
-		<fieldset class="clock">
-			<legend class="clock__legend">Hora</legend>
-			<div class="clock__row">
-				<Input
-					form={formId}
-					name="hour"
-					inputmode="numeric"
-					maxlength={2}
-					autocomplete="off"
-					aria-label="Hora"
-					placeholder={placeholder?.hour}
-					required
-					bind:value={hour}
-				/>
-				<span class="clock__colon">:</span>
-				<Input
-					form={formId}
-					name="minute"
-					inputmode="numeric"
-					maxlength={2}
-					autocomplete="off"
-					aria-label="Minutos"
-					placeholder={placeholder?.minute}
-					bind:value={minute}
-				/>
-				{#each ['am', 'pm'] as const as value (value)}
-					<Chip
-						type="radio"
-						form={formId}
-						name="period"
-						{value}
-						label={'am' === value ? 'a.m.' : 'p.m.'}
-						checked={value === period}
-						onchange={() => (period = value)}
-					/>
-				{/each}
-			</div>
-		</fieldset>
+		<ClockField legend="Hora" form={formId} {placeholder} bind:hour bind:minute bind:period />
 		{#snippet actions()}
 			<Button type="button" variant="secondary" onclick={() => (selected = null)}>Cancelar</Button>
 			<Button type="submit" form={formId} size="md">Guardar</Button>
@@ -173,33 +125,6 @@
 {/if}
 
 <style>
-	.clock {
-		min-width: 0;
-		padding: 0;
-		margin: 0;
-		border: 0;
-	}
-
-	/* The same look as a Field's label. */
-	.clock__legend {
-		padding: 0;
-		margin-bottom: var(--space-3);
-		font: var(--type-label);
-		color: var(--text-secondary);
-	}
-
-	/* Two short number fields, then the a.m./p.m. chips. */
-	.clock__row {
-		display: grid;
-		grid-template-columns: 4rem auto 4rem auto auto;
-		gap: var(--space-3);
-		align-items: center;
-	}
-
-	.clock__colon {
-		font-weight: var(--weight-bold);
-	}
-
 	.day-punches__date {
 		margin: var(--space-1) 0 var(--space-7);
 		font: var(--weight-bold) var(--text-2xl) / 1.25 var(--font-sans);
