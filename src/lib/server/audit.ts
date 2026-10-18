@@ -41,6 +41,7 @@ type EventRow = {
 	// NEW_ROW: the row inserted by the statement right before this one in the batch.
 	entityId: number | null | 'NEW_ROW';
 	entityKey?: string;
+	reason?: string;
 };
 
 // Rows keyed by text, like settings, log their key in entity_key and leave entity_id null.
@@ -54,7 +55,7 @@ function eventStatement(db: D1Database, event: EventRow) {
 	const entityId = isNewRow ? [] : [event.entityId];
 	return db
 		.prepare(
-			`insert into events (entity_type, entity_id, entity_key, action, actor_username, actor_kind, before, after, created_at) values (?, ${entityIdSql}, ?, ?, ?, ?, ?, ?, ?)`
+			`insert into events (entity_type, entity_id, entity_key, action, actor_username, actor_kind, before, after, reason, created_at) values (?, ${entityIdSql}, ?, ?, ?, ?, ?, ?, ?, ?)`
 		)
 		.bind(
 			event.entityType,
@@ -65,6 +66,7 @@ function eventStatement(db: D1Database, event: EventRow) {
 			event.actor.kind,
 			toEventJson(event.before),
 			toEventJson(event.after),
+			event.reason ?? null,
 			event.now
 		);
 }
@@ -136,8 +138,8 @@ function updateStatement(db: D1Database, write: UpdateRow): D1PreparedStatement 
 /**
  * Updates the row `id` (matched on `idColumn`, `id` by default) with the fields of `changes`
  * that differ from `current`, refreshes `updated_at`/`updated_by`, and logs an `EDITED` event
- * (or `action`) with those fields only. `unlogged` columns are always written but never logged:
- * a new password hash. Returns the statements for the caller's `db.batch()`, or none when
+ * (or `action`) with those fields only, and `reason` when the write needs one. `unlogged` columns
+ * are always written but never logged: a new password hash. Returns the statements for the caller's `db.batch()`, or none when
  * nothing changed: an edit that changes nothing writes nothing.
  */
 export function auditedUpdate(
@@ -149,6 +151,7 @@ export function auditedUpdate(
 		changes: Row;
 		unlogged?: Row;
 		action?: string;
+		reason?: string;
 	}
 ): D1PreparedStatement[] {
 	const { before, after } = diffFields(write.current, write.changes);
