@@ -5,11 +5,11 @@
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { addDays, dialTimeShape, getTodaysDate, getWeekStart, toClockTime } from '$lib/datetime';
-import { SETTINGS } from '$lib/settings';
 import { requireRole, ROLES, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
 import { countWorkedMinutes, deriveOvertime } from '../overtime';
 import { employmentSchema } from './employees';
+import { readSettings, type SettingValues } from './settings';
 
 const PUNCH_COLUMNS = {
 	morningIn: 'morning_in',
@@ -339,24 +339,13 @@ export type TeamMember = {
 type TeamDay = { workDate: string; punches: Punches };
 
 // What the week's totals read: the derivation's parameters and the holidays.
-const overtimeSettingsSchema = z.object({
-	PAYROLL_ORDINARY_HOURS_PER_DAY: SETTINGS.PAYROLL_ORDINARY_HOURS_PER_DAY.schema,
-	PAYROLL_NIGHT_START: SETTINGS.PAYROLL_NIGHT_START.schema,
-	PAYROLL_NIGHT_END: SETTINGS.PAYROLL_NIGHT_END.schema,
-	PAYROLL_HOLIDAYS: SETTINGS.PAYROLL_HOLIDAYS.schema
-});
-type OvertimeSettings = z.infer<typeof overtimeSettingsSchema>;
-
-async function findOvertimeSettings(db: D1Database): Promise<OvertimeSettings> {
-	const keys = Object.keys(overtimeSettingsSchema.shape);
-	const { results } = await db
-		.prepare(`select key, value from settings where key in (${keys.map(() => '?').join(', ')})`)
-		.bind(...keys)
-		.all<{ key: string; value: string }>();
-	return overtimeSettingsSchema.parse(
-		Object.fromEntries(results.map(({ key, value }) => [key, value]))
-	);
-}
+const OVERTIME_SETTINGS = [
+	'PAYROLL_ORDINARY_HOURS_PER_DAY',
+	'PAYROLL_NIGHT_START',
+	'PAYROLL_NIGHT_END',
+	'PAYROLL_HOLIDAYS'
+] as const;
+type OvertimeSettings = SettingValues<(typeof OVERTIME_SETTINGS)[number]>;
 
 // The night surcharge pays ordinary hours, so it isn't one of them.
 const OVERTIME_ROWS = [
@@ -451,7 +440,7 @@ export async function getTeamWeek(
 	const [team, rows, settings] = await Promise.all([
 		findTeam(db, weekDates),
 		findWeekRows(db, weekDates),
-		findOvertimeSettings(db)
+		readSettings(db, OVERTIME_SETTINGS)
 	]);
 	return {
 		weekStart,

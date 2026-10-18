@@ -3,6 +3,9 @@ import {
 	calculateSettlement,
 	deriveRates,
 	getExtraHoursRange,
+	parsePesos,
+	parseQuantity,
+	roundToMinute,
 	type EarningConcept,
 	type HourConcept,
 	type PayrollParameters,
@@ -154,4 +157,14 @@ test('the range depends only on the period, not on when the payment is recorded'
 	// Paying at 6 p.m. on Saturday 17 doesn't pull that Saturday in: the range takes no time at all.
 	expect(getExtraHoursRange.length).toBe(1);
 	expect(getExtraHoursRange('2026-10-12').end).toBe('2026-10-16');
+});
+
+test('typed text reads the same on the screen and on save: decimals, pesos and the whole minute', () => {
+	expect(parseQuantity(' 1,5 ')).toBe(1.5);
+	expect(parseQuantity('')).toBe(0);
+	expect(parseQuantity('dos')).toBeNaN();
+	expect(parsePesos('20.000')).toBe(20000);
+	expect(parsePesos('')).toBe(0);
+	// 17 minutes show as 0.28 h, and 0.28 lands back on exactly 17 minutes.
+	expect(roundToMinute(0.28)).toBe(17 / 60);
 });

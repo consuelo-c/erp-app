@@ -1,6 +1,7 @@
 // Weekly payroll settlement: the derived rates, the nine earnings, the four deductions and the
 // totals. Pure, no database: the caller passes the quantities and the settings values. Money is
 // whole pesos: each line rounds to the peso as it's calculated, and every total sums rounded lines.
+// Shared with the browser, so the settlement screen recalculates the same way as it's typed.
 
 import { addDays } from '$lib/datetime';
 
@@ -131,4 +132,21 @@ export function calculateSettlement(
 		totalDeductions,
 		netPay: totalEarnings - totalDeductions
 	};
+}
+
+const MINUTES_PER_HOUR = 60;
+
+/** A typed quantity, with a dot or a comma for the decimals; blank is 0, anything else NaN. */
+export function parseQuantity(typed: string): number {
+	return Number(typed.trim().replace(',', '.'));
+}
+
+/** Typed pesos, thousands separators and all (20.000); blank is 0. */
+export function parsePesos(typed: string): number {
+	return Number(typed.replace(/\D/g, ''));
+}
+
+/** Hours onto the whole minute, the hours log's resolution. */
+export function roundToMinute(hours: number): number {
+	return Math.round(hours * MINUTES_PER_HOUR) / MINUTES_PER_HOUR;
 }
