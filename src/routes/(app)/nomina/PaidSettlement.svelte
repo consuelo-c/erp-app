@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
+	import Button from '$lib/components/Button.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import { formatLongDay, formatShortDay } from '$lib/datetime';
 	import { formatPesos } from '$lib/format';
@@ -14,6 +16,13 @@
 
 	let { week, draft, payment }: Props = $props();
 
+	const receiptHref = $derived(
+		`${resolve('/(app)/nomina/comprobante')}?${new URLSearchParams({
+			empleado: String(draft.employeeId),
+			semana: week.periodStart
+		})}`
+	);
+
 	const formatQuantity = (qty: number) => String(Math.round(qty * 100) / 100);
 	const isCorrected = (qty: number | null, derivedQty: number | null) =>
 		null !== derivedQty && qty !== derivedQty;
@@ -24,6 +33,10 @@
 	Pagada el {formatLongDay(payment.movementDate)} por {payment.recordedBy}. Esta liquidación está
 	cerrada y es definitiva.
 </Notice>
+
+<div class="paid__print">
+	<Button href={receiptHref} variant="secondary" size="sm" inline>Imprimir comprobante</Button>
+</div>
 
 <ul class="detail-list paid__facts">
 	<li>
@@ -124,6 +137,12 @@
 </ul>
 
 <style>
+	.paid__print {
+		display: flex;
+		justify-content: flex-end;
+		margin-block: var(--space-6) var(--space-10);
+	}
+
 	.paid__facts {
 		margin-top: var(--space-8);
 	}

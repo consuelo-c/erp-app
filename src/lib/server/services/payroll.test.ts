@@ -5,7 +5,14 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
 import { createEmployee, endEmployment, updateEmployee } from './employees';
-import { openWeek, recordPayment, saveDraft, type Draft, type PayrollWeek } from './payroll';
+import {
+	getReceipt,
+	openWeek,
+	recordPayment,
+	saveDraft,
+	type Draft,
+	type PayrollWeek
+} from './payroll';
 
 const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
 
@@ -386,4 +393,30 @@ test('only the employees who worked in the period are offered, and only to ADMIN
 	expect(await saveDraft(db, { employee_id: String(leftId) }, manager)).toMatchObject({
 		ok: false
 	});
+});
+
+test('the receipt prints a paid settlement: its snapshot, who prepared it, and the company header', async () => {
+	const draft = await openDraft();
+	const notPaid = await getReceipt(db, { employeeId: anaId, week: WEEK }, manager).catch(
+		(caught: unknown) => caught
+	);
+	expect(isHttpError(notPaid, 404)).toBe(true);
+	await recordPayment(db, { ...formOf(draft, WEEK), ...CASH }, manager);
+	const receipt = await getReceipt(db, { employeeId: anaId, week: TODAY }, manager);
+	expect(receipt.periodStart).toBe(WEEK);
+	expect(receipt.extraHours).toEqual({ start: '2026-10-10', end: '2026-10-16' });
+	expect(receipt.payment).toMatchObject({
+		employeeName: 'Ana Pérez',
+		employeeIdNumber: '1036452118',
+		employeePosition: 'Bodega',
+		employeeHireDate: '2026-07-01',
+		preparedBy: 'gerente'
+	});
+	expect(receipt.company.COMPANY_NAME).toBe('Banquetes Consuelo C');
+	// Another employee's id never falls back to Ana's receipt.
+	const otherId = await hire('Luis Gómez', '71000111', '2026-07-01');
+	const other = await getReceipt(db, { employeeId: otherId, week: WEEK }, manager).catch(
+		(caught: unknown) => caught
+	);
+	expect(isHttpError(other, 404)).toBe(true);
 });

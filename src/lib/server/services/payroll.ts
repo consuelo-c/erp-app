@@ -157,8 +157,12 @@ export type Payment = {
 	bankAccount: string | null;
 	notes: string | null;
 	recordedBy: string;
+	// The snapshot the receipt prints, as it was when the settlement was created.
 	employeeName: string;
+	employeeIdNumber: string;
 	employeePosition: string | null;
+	employeeHireDate: string | null;
+	preparedBy: string;
 };
 
 type Period = {
@@ -434,6 +438,37 @@ export async function openWeek(
 	return { ...period, employees: options, draft: await buildDraft(db, employee, period) };
 }
 
+export type Receipt = Period & {
+	draft: Draft;
+	payment: Payment;
+	company: SettingValues<(typeof COMPANY_SETTINGS)[number]>;
+};
+
+// The printed formats' header.
+const COMPANY_SETTINGS = ['COMPANY_NAME', 'COMPANY_ADDRESS', 'COMPANY_PHONE'] as const;
+
+/**
+ * The printed receipt of one employee's settlement for one week (`week` is any date of it): only
+ * once it's paid, since the worker signs it when the money is handed over.
+ */
+export async function getReceipt(
+	db: D1Database,
+	input: { employeeId: unknown; week: unknown },
+	actor: Actor | null
+): Promise<Receipt> {
+	const [{ draft, ...week }, company] = await Promise.all([
+		openWeek(db, input, actor),
+		readSettings(db, COMPANY_SETTINGS)
+	]);
+	// openWeek falls back to another employee: the receipt is only ever the one asked for.
+	const isAsked = String(draft?.employeeId) === String(input.employeeId);
+	if (null === draft || null === draft.payment || !isAsked) {
+		error(404, 'Esa liquidación todavía no está pagada');
+	}
+	const { periodStart, periodEnd, extraHours } = week;
+	return { periodStart, periodEnd, extraHours, draft, payment: draft.payment, company };
+}
+
 async function buildDraft(db: D1Database, employee: Employee, period: Period): Promise<Draft> {
 	const [settings, row, proposal, days] = await Promise.all([
 		readSettings(db, PAYROLL_SETTINGS),
@@ -497,7 +532,10 @@ async function findPayment(db: D1Database, row: RunRow): Promise<Payment | null>
 		notes: movement.notes,
 		recordedBy: movement.created_by,
 		employeeName: String(row.employee_name),
-		employeePosition: null === row.employee_position ? null : String(row.employee_position)
+		employeeIdNumber: String(row.employee_id_number),
+		employeePosition: null === row.employee_position ? null : String(row.employee_position),
+		employeeHireDate: null === row.employee_hire_date ? null : String(row.employee_hire_date),
+		preparedBy: String(row.prepared_by)
 	};
 }
 
