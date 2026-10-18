@@ -189,6 +189,20 @@ test('the week runs Monday to Sunday, the days after today marked as future', as
 	expect(earlier?.week[0].workDate).toBe('2026-07-20');
 });
 
+test('the days before the hire are marked outside the employment', async () => {
+	const hours = await getOwnHours(db, { date: '2026-07-01', week: '2026-06-29' }, ana);
+	expect(hours?.day.isEmployed).toBe(true);
+	expect(hours?.week.map((day) => day.isEmployed)).toEqual([
+		false,
+		false,
+		true,
+		true,
+		true,
+		true,
+		true
+	]);
+});
+
 test('a future or malformed day is a 404', async () => {
 	for (const date of ['2026-08-01', 'ayer']) {
 		const error = await getOwnHours(db, { date }, ana).catch((caught: unknown) => caught);
