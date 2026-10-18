@@ -6,9 +6,14 @@ export function formatPesos(pesos: number): string {
 	return `$${grouped.format(pesos)}`;
 }
 
+/** A whole number with its thousands grouped, the way people type it: `1.750.905`. */
+export function formatInteger(value: number): string {
+	return grouped.format(value);
+}
+
 /** A stored ID number (digits only) as people write it: `71.384.902`. */
 export function formatIdNumber(digits: string): string {
-	return grouped.format(Number(digits));
+	return formatInteger(Number(digits));
 }
 
 /** Worked minutes as hours with one decimal, a dot as the separator: `8.1 h`. */

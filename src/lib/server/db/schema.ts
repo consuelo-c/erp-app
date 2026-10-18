@@ -16,13 +16,16 @@ export const settings = sqliteTable('settings', {
 });
 
 // Append-only. Drizzle can't express triggers, so the initial migration appends two by hand that
-// abort any UPDATE or DELETE: re-add them whenever migrations/ is squashed.
+// abort any UPDATE or DELETE: re-add them whenever migrations/ is squashed or a migration recreates
+// the table (drizzle does, to add a CHECK).
 export const events = sqliteTable(
 	'events',
 	{
 		id: integer('id').primaryKey({ autoIncrement: true }),
 		entityType: text('entity_type').notNull(),
 		entityId: integer('entity_id'),
+		// The key of an entity keyed by text, a `settings` key; never set together with entity_id.
+		entityKey: text('entity_key'),
 		action: text('action').notNull(),
 		actorUsername: text('actor_username').notNull(),
 		actorKind: text('actor_kind').notNull(),
@@ -37,7 +40,8 @@ export const events = sqliteTable(
 		check(
 			'events_actor_kind',
 			sql`${table.actorKind} IN ('user', 'system', 'agent', 'integration')`
-		)
+		),
+		check('events_entity_id_or_key', sql`${table.entityId} IS NULL OR ${table.entityKey} IS NULL`)
 	]
 );
 

@@ -40,7 +40,13 @@ type EventRow = {
 	now: number;
 	// NEW_ROW: the row inserted by the statement right before this one in the batch.
 	entityId: number | null | 'NEW_ROW';
+	entityKey?: string;
 };
+
+// Rows keyed by text, like settings, log their key in entity_key and leave entity_id null.
+function entityOf(id: number | string) {
+	return 'string' === typeof id ? { entityId: null, entityKey: id } : { entityId: id };
+}
 
 function eventStatement(db: D1Database, event: EventRow) {
 	const isNewRow = 'NEW_ROW' === event.entityId;
@@ -48,11 +54,12 @@ function eventStatement(db: D1Database, event: EventRow) {
 	const entityId = isNewRow ? [] : [event.entityId];
 	return db
 		.prepare(
-			`insert into events (entity_type, entity_id, action, actor_username, actor_kind, before, after, created_at) values (?, ${entityIdSql}, ?, ?, ?, ?, ?, ?)`
+			`insert into events (entity_type, entity_id, entity_key, action, actor_username, actor_kind, before, after, created_at) values (?, ${entityIdSql}, ?, ?, ?, ?, ?, ?, ?)`
 		)
 		.bind(
 			event.entityType,
 			...entityId,
+			event.entityKey ?? null,
 			event.action,
 			event.actor.username,
 			event.actor.kind,
@@ -108,6 +115,24 @@ export function diffFields(current: Row, changes: Row): { before: Row; after: Ro
 	};
 }
 
+type UpdateRow = AuditedWrite & {
+	id: number | string;
+	idColumn?: string;
+	columns: Row;
+	now: number;
+};
+
+function updateStatement(db: D1Database, write: UpdateRow): D1PreparedStatement {
+	const idColumn = write.idColumn ?? 'id';
+	assertIdentifiers([write.table, idColumn, ...Object.keys(write.columns)]);
+	const assignments = [...Object.keys(write.columns), 'updated_at', 'updated_by'].map(
+		(column) => `${column} = ?`
+	);
+	return db
+		.prepare(`update ${write.table} set ${assignments.join(', ')} where ${idColumn} = ?`)
+		.bind(...Object.values(write.columns), write.now, write.actor.username, write.id);
+}
+
 /**
  * Updates the row `id` (matched on `idColumn`, `id` by default) with the fields of `changes`
  * that differ from `current`, refreshes `updated_at`/`updated_by`, and logs an `EDITED` event
@@ -131,17 +156,15 @@ export function auditedUpdate(
 	if (0 === Object.keys(columns).length) {
 		return [];
 	}
-	const idColumn = write.idColumn ?? 'id';
-	assertIdentifiers([write.table, idColumn, ...Object.keys(columns)]);
 	const now = nowInSeconds();
-	const assignments = [...Object.keys(columns), 'updated_at', 'updated_by'].map(
-		(column) => `${column} = ?`
-	);
-	const update = db
-		.prepare(`update ${write.table} set ${assignments.join(', ')} where ${idColumn} = ?`)
-		.bind(...Object.values(columns), now, write.actor.username, write.id);
-	// entity_id is INTEGER: rows keyed by text, like settings, log it as null.
-	const entityId = 'number' === typeof write.id ? write.id : null;
-	const event = { ...write, action: write.action ?? 'EDITED', before, after, now, entityId };
+	const update = updateStatement(db, { ...write, columns, now });
+	const event = {
+		...write,
+		action: write.action ?? 'EDITED',
+		before,
+		after,
+		now,
+		...entityOf(write.id)
+	};
 	return [update, eventStatement(db, event)];
 }

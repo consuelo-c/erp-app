@@ -14,7 +14,6 @@ export type Destination = {
 };
 
 // The same menu for every login: a section outside the login's roles is its route's 403.
-// Configuración joins in phase 6, with its screens.
 export const DESTINATIONS: Destination[] = [
 	{
 		label: 'Despachos',
@@ -36,6 +35,12 @@ export const DESTINATIONS: Destination[] = [
 		icon: 'users',
 		href: resolve('/personal'),
 		paths: [resolve('/personal'), resolve('/logins')]
+	},
+	{
+		label: 'Configuración',
+		icon: 'settings',
+		href: resolve('/configuracion'),
+		paths: [resolve('/configuracion')]
 	}
 ];
 
@@ -61,4 +66,10 @@ export function findDestination(pathname: string): Destination | undefined {
 export const HOURS_TABS = [
 	{ label: 'Empleado', href: resolve('/horas/empleado') },
 	{ label: 'Equipo', href: resolve('/horas/equipo') }
+];
+
+/** Configuración's tabs: the system settings and the holidays editor. */
+export const SETTINGS_TABS = [
+	{ label: 'Configuración', href: resolve('/configuracion') },
+	{ label: 'Festivos', href: resolve('/configuracion/festivos') }
 ];
