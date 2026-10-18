@@ -88,6 +88,24 @@ async function findSystemSettings(db: D1Database): Promise<SystemSettings> {
 	return Object.fromEntries(SYSTEM_SETTING_KEYS.map((key) => [key, values[key]])) as SystemSettings;
 }
 
+type SettingValue<K extends SettingKey> = z.output<(typeof SETTINGS)[K]['schema']>;
+export type SettingValues<K extends SettingKey> = { [Key in K]: SettingValue<Key> };
+
+/** The parsed values of `keys`, for the services that calculate with them; the caller checks the role. */
+export async function readSettings<K extends SettingKey>(
+	db: D1Database,
+	keys: readonly K[]
+): Promise<SettingValues<K>> {
+	const { results } = await db
+		.prepare(`select key, value from settings where key in (${keys.map(() => '?').join(', ')})`)
+		.bind(...keys)
+		.all<{ key: string; value: string }>();
+	const stored = Object.fromEntries(results.map(({ key, value }) => [key, value]));
+	return Object.fromEntries(
+		keys.map((key) => [key, SETTINGS[key].schema.parse(stored[key])])
+	) as SettingValues<K>;
+}
+
 // The field as typed, turned into the text its key stores, then checked with the key's schema.
 function parseField(key: SystemSettingKey, form: Record<string, string>): ParsedField {
 	const typed = readTypedValue(key, form);

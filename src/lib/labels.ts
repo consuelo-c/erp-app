@@ -1,6 +1,7 @@
 // Enum values never reach the screen raw: every one goes through its label map.
 
 import type { Role } from './server/actor';
+import type { DeductionConcept, EarningConcept } from './payroll';
 import type { Punch } from './server/services/timesheets';
 
 export const ROLE_LABELS: Record<Role, string> = {
@@ -85,4 +86,28 @@ export const SETTING_MODULE_LABELS = {
 	COMPANY: 'Empresa',
 	ORDERS: 'Pedidos',
 	PAYROLL: 'Nómina'
+};
+
+export const EARNING_LABELS: Record<EarningConcept, string> = {
+	DAYS_WORKED: 'Días laborados',
+	SUNDAY_REST: 'Descanso dominical x día',
+	HOLIDAY_OVERTIME_DAY: 'Horas extras diurnas festivas',
+	HOLIDAY_OVERTIME_NIGHT: 'Horas extras nocturnas festivas',
+	OVERTIME_DAY: 'Horas extras diurnas',
+	OVERTIME_NIGHT: 'Horas extras nocturnas',
+	NIGHT_SURCHARGE: 'Recargo nocturno',
+	TRANSPORT_ALLOWANCE: 'Auxilio de transporte',
+	NON_SALARY_BONUS: 'Bono no salarial'
+};
+
+export const DEDUCTION_LABELS: Record<DeductionConcept, string> = {
+	PENSION: 'Aporte pensión',
+	HEALTH: 'Aporte salud',
+	LOANS: 'Préstamos',
+	OTHER: 'Otros'
+};
+
+export const PAYROLL_STATUS_LABELS = {
+	DRAFT: 'Borrador',
+	PAID: 'Pagada'
 };

@@ -104,3 +104,36 @@ export const timesheets = sqliteTable(
 	},
 	(table) => [unique('timesheets_employee_id_work_date').on(table.employeeId, table.workDate)]
 );
+
+// One settlement per employee per week. Born DRAFT, PAID once its payment is recorded, then frozen.
+// The snapshots and `settings_snapshot` are rewritten on every draft save and final once PAID.
+export const payrollRuns = sqliteTable(
+	'payroll_runs',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		employeeId: integer('employee_id')
+			.notNull()
+			.references(() => employees.id),
+		status: text('status').notNull().default('DRAFT'),
+		weekNumber: integer('week_number').notNull(), // the company's own count, resets in January
+		periodStart: text('period_start').notNull(), // Monday
+		periodEnd: text('period_end').notNull(), // Saturday
+		paymentDate: text('payment_date').notNull(),
+		employeeName: text('employee_name').notNull(),
+		employeeIdNumber: text('employee_id_number').notNull(),
+		employeePosition: text('employee_position'),
+		employeeHireDate: text('employee_hire_date'), // the current employment period's start
+		preparedBy: text('prepared_by').notNull(), // the receipt's «Elaboró:»
+		earnings: text('earnings').notNull(), // JSON, validated with Zod
+		deductions: text('deductions').notNull(), // JSON, validated with Zod
+		settingsSnapshot: text('settings_snapshot').notNull(), // JSON, holidays included
+		totalEarnings: integer('total_earnings').notNull(),
+		totalDeductions: integer('total_deductions').notNull(),
+		netPay: integer('net_pay').notNull(),
+		...auditColumns
+	},
+	(table) => [
+		unique('payroll_runs_employee_id_period_start').on(table.employeeId, table.periodStart),
+		check('payroll_runs_status', sql`${table.status} IN ('DRAFT', 'PAID')`)
+	]
+);

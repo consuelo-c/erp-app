@@ -42,10 +42,11 @@ function insertUser(username: string, employeeId: number | null) {
 	);
 }
 
-test('creates exactly settings, events, employees, users, sessions and timesheets', () => {
+test('creates exactly settings, events, employees, users, sessions, timesheets and payroll_runs', () => {
 	expect(listTables()).toEqual([
 		'employees',
 		'events',
+		'payroll_runs',
 		'sessions',
 		'settings',
 		'timesheets',

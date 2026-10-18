@@ -29,7 +29,12 @@ export const DESTINATIONS: Destination[] = [
 	},
 	{ label: 'Pedidos', icon: 'list' },
 	{ label: 'Inventario', icon: 'package' },
-	{ label: 'Nómina', icon: 'banknote' },
+	{
+		label: 'Nómina',
+		icon: 'banknote',
+		href: resolve('/nomina'),
+		paths: [resolve('/nomina')]
+	},
 	{
 		label: 'Personal',
 		icon: 'users',
