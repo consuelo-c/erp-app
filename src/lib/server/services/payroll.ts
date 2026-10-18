@@ -368,12 +368,18 @@ async function proposeWeekNumber(db: D1Database, { periodStart, periodEnd }: Per
 		: { weekNumber: 1, previousWeekNumber: null };
 }
 
-function pickEmployee(employees: Employee[], employeeId: unknown): Employee {
-	if (null === employeeId || undefined === employeeId) {
-		return employees[0];
-	}
+function findById(employees: Employee[], employeeId: unknown): Employee | undefined {
 	const id = idSchema.safeParse(employeeId);
-	const employee = employees.find((candidate) => id.success && id.data === candidate.id);
+	return employees.find((candidate) => id.success && id.data === candidate.id);
+}
+
+// The employee asked for must have worked the period: showing someone else instead is how the
+// wrong person gets paid. The one preferred, picked earlier, is only kept if they did.
+function pickEmployee(employees: Employee[], input: EmployeeChoice): Employee {
+	if (null === input.employeeId || undefined === input.employeeId) {
+		return findById(employees, input.preferredEmployeeId) ?? employees[0];
+	}
+	const employee = findById(employees, input.employeeId);
 	if (undefined === employee) {
 		error(404, 'Ese empleado no trabajó en este periodo');
 	}
@@ -405,13 +411,16 @@ function toDraft(
 	};
 }
 
+type EmployeeChoice = { employeeId: unknown; preferredEmployeeId?: unknown };
+
 /**
- * The week's employees and one of them's settlement (`employeeId`; the first one by default): the
- * saved draft recalculated, or a new one proposed from the hours log. Opening writes nothing.
+ * The week's employees and one of them's settlement (`employeeId`; otherwise `preferredEmployeeId`
+ * if they worked the period, or the first one): the saved draft recalculated, or a new one proposed
+ * from the hours log. Opening writes nothing.
  */
 export async function openWeek(
 	db: D1Database,
-	input: { employeeId: unknown; week: unknown },
+	input: EmployeeChoice & { week: unknown },
 	actor: Actor | null
 ): Promise<PayrollWeek> {
 	requireRole(actor, SETTLES_PAYROLL);
@@ -421,7 +430,7 @@ export async function openWeek(
 	if (0 === employees.length) {
 		return { ...period, employees: options, draft: null };
 	}
-	const employee = pickEmployee(employees, input.employeeId);
+	const employee = pickEmployee(employees, input);
 	return { ...period, employees: options, draft: await buildDraft(db, employee, period) };
 }
 
