@@ -5,6 +5,7 @@
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { addDays, dialTimeShape, getTodaysDate, getWeekStart, toClockTime } from '$lib/datetime';
+import { getExtraHoursRange } from '$lib/payroll';
 import { requireRole, ROLES, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
 import { countWorkedMinutes, deriveOvertime } from '../overtime';
@@ -25,13 +26,15 @@ export type TimesheetDay = {
 	workDate: string;
 	punches: Punches;
 	workedMinutes: number;
-	isPaid: boolean;
+	// The salary period of the PAID settlement that paid the day, or null: a paid day is locked.
+	paidPeriod: PaidPeriod | null;
 	isFuture: boolean;
 	// Inside one of the employee's employment periods: outside them, no punch is taken.
 	isEmployed: boolean;
 };
 
 export type Result = { ok: true } | { ok: false; message: string };
+export type PaidPeriod = { start: string; end: string };
 
 type Period = z.infer<typeof employmentSchema>[number];
 type HoursEmployee = { id: number; fullName: string; employment: Period[] };
@@ -101,13 +104,31 @@ function isWithinEmployment(employment: Period[], date: string): boolean {
 	);
 }
 
-// STUB: Phase 06 (#140). Settlements don't exist yet, so no day is paid. Phase 06 replaces it
-// with the PAID settlement of this employee whose extra-hours range covers `workDate`.
-type EmployeeDay = { employeeId: number; workDate: string };
+// The employee's PAID settlements that may cover `dates`. An extra-hours range runs from
+// period_start − 2 to period_start + 4, so a day is covered by a period_start from 4 days before
+// it to 2 days after. Only the employee's own: another's payment locks no one else's hours.
+async function findPaidPeriods(
+	db: D1Database,
+	employeeId: number,
+	dates: string[]
+): Promise<PaidPeriod[]> {
+	const { results } = await db
+		.prepare(
+			`select period_start as start, period_end as end from payroll_runs
+			where employee_id = ? and status = 'PAID' and period_start between ? and ?`
+		)
+		.bind(employeeId, addDays(dates[0], -4), addDays(dates.at(-1)!, 2))
+		.all<PaidPeriod>();
+	return results;
+}
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- the stub ignores what Phase 06 reads
-async function isDayPaid(db: D1Database, day: EmployeeDay): Promise<boolean> {
-	return false;
+/** The period whose settlement paid `workDate`: its extra-hours range covers the day. */
+function findPaidPeriod(periods: PaidPeriod[], workDate: string): PaidPeriod | null {
+	const covers = ({ start }: PaidPeriod) => {
+		const range = getExtraHoursRange(start);
+		return range.start <= workDate && workDate <= range.end;
+	};
+	return periods.find(covers) ?? null;
 }
 
 const SELECT_ROWS = `select id, work_date as workDate, morning_in as morningIn, morning_out as morningOut,
@@ -130,24 +151,23 @@ async function buildDays(
 	{ id: employeeId, employment }: HoursEmployee,
 	dates: string[]
 ): Promise<TimesheetDay[]> {
-	const rows = await findRows(db, employeeId, dates);
+	const [rows, paidPeriods] = await Promise.all([
+		findRows(db, employeeId, dates),
+		findPaidPeriods(db, employeeId, dates)
+	]);
 	const today = getTodaysDate();
-	return Promise.all(
-		dates.map(async (workDate) => {
-			const row = rows.find((candidate) => workDate === candidate.workDate);
-			const punches: Punches = { ...NO_PUNCHES, ...pickPunches(row) };
-			const isPaid = await isDayPaid(db, { employeeId, workDate });
-			const workedMinutes = countWorkedMinutes(punches);
-			return {
-				workDate,
-				punches,
-				workedMinutes,
-				isPaid,
-				isFuture: workDate > today,
-				isEmployed: isWithinEmployment(employment, workDate)
-			};
-		})
-	);
+	return dates.map((workDate) => {
+		const row = rows.find((candidate) => workDate === candidate.workDate);
+		const punches: Punches = { ...NO_PUNCHES, ...pickPunches(row) };
+		return {
+			workDate,
+			punches,
+			workedMinutes: countWorkedMinutes(punches),
+			paidPeriod: findPaidPeriod(paidPeriods, workDate),
+			isFuture: workDate > today,
+			isEmployed: isWithinEmployment(employment, workDate)
+		};
+	});
 }
 
 function pickPunches(row: TimesheetRow | undefined): Partial<Punches> {
@@ -234,7 +254,8 @@ async function findRefusal(
 	if (!isWithinEmployment(employee.employment, workDate)) {
 		return 'Ese día no hace parte de ningún período laboral';
 	}
-	if (await isDayPaid(db, { employeeId: employee.id, workDate })) {
+	const paidPeriods = await findPaidPeriods(db, employee.id, [workDate]);
+	if (null !== findPaidPeriod(paidPeriods, workDate)) {
 		return 'Ese día ya se pagó en la nómina: no se puede cambiar';
 	}
 	return null;
@@ -325,6 +346,73 @@ export async function saveEmployeePunch(
 	}
 	const { work_date, punch, time } = parsed.data;
 	return savePunch(db, actor, { employee, workDate: work_date, punch, time });
+}
+
+const clearSchema = z.object({ work_date: z.iso.date('Escoge el día') });
+
+type DayChoice = { employee: HoursEmployee; workDate: string };
+
+// A punch on the wrong day is undone by clearing the day: the row stays with its four punches
+// null, and its `CLEARED` event keeps what they were. Same refusals as correcting a punch.
+async function clearDay(db: D1Database, actor: Actor, { employee, workDate }: DayChoice) {
+	const refusal = await findRefusal(db, employee, workDate);
+	if (null !== refusal) {
+		return { ok: false, message: refusal } as const;
+	}
+	const [row = null] = await findRows(db, employee.id, [workDate]);
+	if (null === row) {
+		return { ok: true } as const;
+	}
+	const statements = auditedUpdate(db, {
+		table: 'timesheets',
+		entityType: 'TIMESHEET',
+		actor,
+		id: row.id,
+		current: Object.fromEntries(punchKeys.map((punch) => [PUNCH_COLUMNS[punch], row[punch]])),
+		changes: Object.fromEntries(punchKeys.map((punch) => [PUNCH_COLUMNS[punch], null])),
+		action: 'CLEARED'
+	});
+	if (0 < statements.length) {
+		await db.batch(statements);
+	}
+	return { ok: true } as const;
+}
+
+/** Clears the four punches of one of the actor's own days. */
+export async function clearOwnDay(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<Result> {
+	requireRole(actor, ROLES);
+	const parsed = clearSchema.safeParse(input);
+	if (!parsed.success) {
+		return { ok: false, message: parsed.error.issues[0].message };
+	}
+	const employee = await findEmployee(db, actor.employeeId);
+	if (null === employee) {
+		return NO_EMPLOYEE;
+	}
+	return clearDay(db, actor, { employee, workDate: parsed.data.work_date });
+}
+
+/** Clears the four punches of a day of the employee in `employee_id`, for ADMIN and MANAGER. */
+export async function clearEmployeeDay(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<Result> {
+	requireRole(actor, LOGS_EVERYONES_HOURS);
+	const parsed = clearSchema.safeParse(input);
+	if (!parsed.success) {
+		return { ok: false, message: parsed.error.issues[0].message };
+	}
+	const choice = employeeChoiceSchema.safeParse(input);
+	const employee = choice.success ? await findEmployee(db, choice.data.employee_id) : null;
+	if (null === employee) {
+		return { ok: false, message: 'Escoge el empleado' };
+	}
+	return clearDay(db, actor, { employee, workDate: parsed.data.work_date });
 }
 
 export type TeamMember = {

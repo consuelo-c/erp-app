@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Notice from '$lib/components/Notice.svelte';
 	import WeekPicker from '$lib/components/WeekPicker.svelte';
 	import { addDays, formatWeekRange, getWeekStart } from '$lib/datetime';
 	import type { Hours } from '$lib/server/services/timesheets';
@@ -6,7 +7,9 @@
 	import WeekList from './WeekList.svelte';
 
 	// A day's punches on top and a week under them, for Mis horas and for Empleado. Tapping a day in
-	// the week loads it on top (`?dia=`); the arrows change the week only (`?semana=`).
+	// the week loads it on top (`?dia=`); the arrows change the week only (`?semana=`), and while the
+	// day isn't in the week shown, its punches give way to a hint: punching a day you can't see in
+	// the week is how hours land on the wrong day.
 	interface Props {
 		hours: Hours;
 		today: string;
@@ -22,6 +25,7 @@
 
 	const currentWeek = $derived(getWeekStart(today));
 	const weekStart = $derived(hours.week[0].workDate);
+	const isDayInWeek = $derived(hours.week.some(({ workDate }) => hours.day.workDate === workDate));
 
 	// Today and the current week are the plain URL; there's no week after the current one.
 	function weekHref(start: string): string {
@@ -33,13 +37,20 @@
 	}
 </script>
 
-<DayPunches
-	day={hours.day}
-	isToday={today === hours.day.workDate}
-	{employeeName}
-	{employeeId}
-	{message}
-/>
+{#if isDayInWeek}
+	<DayPunches
+		day={hours.day}
+		isToday={today === hours.day.workDate}
+		{employeeName}
+		{employeeId}
+		{message}
+	/>
+{:else}
+	{#if employeeName}
+		<p class="meta">{employeeName}</p>
+	{/if}
+	<Notice tone="info">Toca un día de la semana para ver o corregir sus marcas.</Notice>
+{/if}
 <section class="week">
 	<WeekPicker
 		title="Semana"

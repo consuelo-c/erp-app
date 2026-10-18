@@ -6,6 +6,8 @@ import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
 import { createEmployee } from './employees';
 import {
+	clearEmployeeDay,
+	clearOwnDay,
 	getEmployeeHours,
 	getOwnHours,
 	getTeamWeek,
@@ -252,6 +254,107 @@ test('only ADMIN and MANAGER see or log another employee’s hours; an unknown o
 		(caught: unknown) => caught
 	);
 	expect(isHttpError(unknown, 404)).toBe(true);
+});
+
+test('clearing a day empties its four punches, keeps the row, and logs what they were', async () => {
+	const day = { work_date: TODAY };
+	await saveOwnPunch(db, { ...day, punch: 'morningIn', ...at('07:02') }, ana);
+	await saveOwnPunch(db, { ...day, punch: 'morningOut', ...at('12:01') }, ana);
+	expect(await clearOwnDay(db, day, ana)).toEqual({ ok: true });
+	const hours = await getOwnHours(db, { date: TODAY }, ana);
+	expect(hours?.day.punches).toEqual({
+		morningIn: null,
+		morningOut: null,
+		afternoonIn: null,
+		afternoonOut: null
+	});
+	expect(database.prepare('select count(*) as rows from timesheets').get()).toEqual({ rows: 1 });
+	expect(timesheetEvents().at(-1)).toEqual({
+		action: 'CLEARED',
+		before: JSON.stringify({ morning_in: '07:02', morning_out: '12:01' }),
+		after: JSON.stringify({ morning_in: null, morning_out: null })
+	});
+	// A day with nothing to clear writes nothing.
+	expect(await clearOwnDay(db, { work_date: '2026-07-30' }, ana)).toEqual({ ok: true });
+	expect(timesheetEvents()).toHaveLength(3);
+});
+
+test('clearing follows the punch rules: own day only, and no day outside the employment', async () => {
+	await saveOwnPunch(db, { work_date: TODAY, punch: 'morningIn', ...at('07:00') }, ana);
+	// Another employee's id in the input is ignored: it's always the actor's own day.
+	await clearOwnDay(db, { work_date: TODAY, employee_id: '999' }, ana);
+	expect((await getOwnHours(db, { date: TODAY }, ana))?.day.punches.morningIn).toBeNull();
+	expect(await clearOwnDay(db, { work_date: '2026-06-30' }, ana)).toEqual({
+		ok: false,
+		message: 'Ese día no hace parte de ningún período laboral'
+	});
+	expect(await clearOwnDay(db, { work_date: '2026-08-01' }, ana)).toEqual({
+		ok: false,
+		message: 'Ese día todavía no ha llegado'
+	});
+});
+
+test('a manager clears a day of the employee chosen in the selector; no one else can', async () => {
+	const input = { employee_id: String(ana.employeeId), work_date: TODAY };
+	await saveEmployeePunch(db, { ...input, punch: 'morningIn', ...at('07:00') }, manager);
+	expect(await clearEmployeeDay(db, input, manager)).toEqual({ ok: true });
+	const hours = await getEmployeeHours(db, { employeeId: ana.employeeId, date: TODAY }, manager);
+	expect(hours.day.punches.morningIn).toBeNull();
+	expect(await clearEmployeeDay(db, { ...input, employee_id: '999' }, manager)).toEqual({
+		ok: false,
+		message: 'Escoge el empleado'
+	});
+	const forbidden = await clearEmployeeDay(db, input, ana).catch((caught: unknown) => caught);
+	expect(isHttpError(forbidden, 403)).toBe(true);
+});
+
+// A settlement as far as the hours care: whose, which week, and whether it's paid.
+function settle(employeeId: number | null, periodStart: string, status: 'DRAFT' | 'PAID') {
+	database
+		.prepare(
+			`insert into payroll_runs (employee_id, status, week_number, period_start, period_end,
+			payment_date, employee_name, employee_id_number, prepared_by, earnings, deductions,
+			settings_snapshot, total_earnings, total_deductions, net_pay,
+			created_at, created_by, updated_at, updated_by)
+			values (?, ?, 1, ?, '', '', 'Ana Pérez', '1', 'gerente', '[]', '[]', '{}', 0, 0, 0, 0, 'gerente', 0, 'gerente')`
+		)
+		.run(employeeId, status, periodStart);
+}
+
+test("a PAID settlement locks the employee's punches in its extra-hours range, for every role", async () => {
+	// Monday 27 July: its extra hours run from Saturday 25 to Friday 31, today.
+	await saveOwnPunch(db, { work_date: TODAY, punch: 'morningIn', ...at('07:00') }, ana);
+	settle(ana.employeeId, '2026-07-27', 'PAID');
+	const locked = { ok: false, message: 'Ese día ya se pagó en la nómina: no se puede cambiar' };
+	const punch = { work_date: TODAY, punch: 'morningOut', ...at('12:00') };
+	expect(await saveOwnPunch(db, punch, ana)).toEqual(locked);
+	expect(await clearOwnDay(db, { work_date: TODAY }, ana)).toEqual(locked);
+	const forAna = { employee_id: String(ana.employeeId) };
+	expect(await saveEmployeePunch(db, { ...punch, ...forAna }, manager)).toEqual(locked);
+	expect(await clearEmployeeDay(db, { work_date: TODAY, ...forAna }, manager)).toEqual(locked);
+	// The day before the range is still the previous settlement's, which isn't paid.
+	const friday24 = { work_date: '2026-07-24', punch: 'morningIn', ...at('07:00') };
+	expect(await saveOwnPunch(db, friday24, ana)).toEqual({ ok: true });
+	const hours = await getOwnHours(db, { date: TODAY }, ana);
+	const paidPeriods = hours?.week.map(({ workDate, paidPeriod }) => [workDate, paidPeriod?.start]);
+	expect(paidPeriods).toEqual([
+		['2026-07-27', '2026-07-27'],
+		['2026-07-28', '2026-07-27'],
+		['2026-07-29', '2026-07-27'],
+		['2026-07-30', '2026-07-27'],
+		['2026-07-31', '2026-07-27'],
+		['2026-08-01', undefined],
+		['2026-08-02', undefined]
+	]);
+});
+
+test("a draft locks nothing, and another employee's payment doesn't lock anyone else's days", async () => {
+	settle(ana.employeeId, '2026-07-27', 'DRAFT');
+	const otherId = await hire('71384902', '2026-07-01');
+	settle(otherId, '2026-07-27', 'PAID');
+	const punch = { work_date: TODAY, punch: 'morningIn', ...at('07:00') };
+	expect(await saveOwnPunch(db, punch, ana)).toEqual({ ok: true });
+	expect(await clearOwnDay(db, { work_date: TODAY }, ana)).toEqual({ ok: true });
 });
 
 test('the team week has everyone employed that week, by name, with seven days of punches', async () => {

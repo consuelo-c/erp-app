@@ -5,7 +5,7 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import PunchTile from '$lib/components/PunchTile.svelte';
-	import { formatClockTime, formatLongDay, toDialTime } from '$lib/datetime';
+	import { formatClockTime, formatDayRange, formatLongDay, toDialTime } from '$lib/datetime';
 	import { PUNCH_LABELS } from '$lib/labels';
 	import type { Punch, TimesheetDay } from '$lib/server/services/timesheets';
 	import type { SubmitFunction } from '@sveltejs/kit';
@@ -13,7 +13,8 @@
 	// A day's four tiles and the time dialog they open. The hour is always typed, never taken from the
 	// clock: hour and minutes on the number pad, then a.m. or p.m. A new punch starts on the usual
 	// schedule's time, also the fields' placeholder; a correction starts with the punch. A short
-	// form inside a Modal: like the one-field ones, it doesn't mount UnsavedChangesGuard.
+	// form inside a Modal: like the one-field ones, it doesn't mount UnsavedChangesGuard. A day
+	// punched by mistake is cleared whole, after asking.
 	interface Props {
 		day: TimesheetDay;
 		isToday: boolean;
@@ -29,6 +30,7 @@
 
 	const punches = Object.keys(PUNCH_LABELS) as Punch[];
 	const formId = $props.id();
+	const clearFormId = `${formId}-clear`;
 	const USUAL_TIMES: Record<Punch, string> = {
 		morningIn: '08:00',
 		morningOut: '12:00',
@@ -37,10 +39,12 @@
 	};
 
 	let selected = $state<Punch | null>(null);
+	let isClearing = $state(false);
 	let hour = $state('');
 	let minute = $state('');
 	let period = $state<'am' | 'pm'>('am');
 
+	const hasPunches = $derived(Object.values(day.punches).some((time) => null !== time));
 	const current = $derived(null === selected ? null : day.punches[selected]);
 	const placeholder = $derived(null === selected ? null : toDialTime(USUAL_TIMES[selected]));
 	const title = $derived(
@@ -71,6 +75,7 @@
 			await update({ reset: false });
 			if ('success' === result.type) {
 				selected = null;
+				isClearing = false;
 			}
 		};
 	};
@@ -82,8 +87,13 @@
 <h2 class="day-punches__date">{formatLongDay(day.workDate)}</h2>
 
 {#if !day.isEmployed}
-	<!-- No tiles: the service refuses any punch outside the employment. -->
+	<!-- No tiles: the service refuses any punch outside the employment, or on a paid day. -->
 	<p class="note">Ese día no hace parte de ningún período laboral.</p>
+{:else if day.paidPeriod}
+	<p class="note">
+		Pagado en la nómina del {formatDayRange(day.paidPeriod.start, day.paidPeriod.end)}: ya no se
+		puede cambiar.
+	</p>
 {:else}
 	<div class="punch-grid">
 		{#each punches as punch (punch)}
@@ -103,6 +113,12 @@
 			: 'Toca una marca para agregar la hora.'}
 	</p>
 
+	{#if hasPunches}
+		<Button type="button" variant="secondary" size="sm" inline onclick={() => (isClearing = true)}>
+			Borrar marcas del día
+		</Button>
+	{/if}
+
 	<form id={formId} method="POST" action="?/marcar" use:enhance={closeOnSave} hidden>
 		<input type="hidden" name="work_date" value={day.workDate} />
 		<input type="hidden" name="punch" value={selected} />
@@ -110,6 +126,29 @@
 			<input type="hidden" name="employee_id" value={employeeId} />
 		{/if}
 	</form>
+
+	<form id={clearFormId} method="POST" action="?/borrar" use:enhance={closeOnSave} hidden>
+		<input type="hidden" name="work_date" value={day.workDate} />
+		{#if undefined !== employeeId}
+			<input type="hidden" name="employee_id" value={employeeId} />
+		{/if}
+	</form>
+
+	<Modal
+		bind:open={isClearing}
+		title="¿Borrar las marcas del {formatLongDay(day.workDate).toLowerCase()}?"
+		body="Las cuatro marcas quedan vacías. Puedes volver a marcarlas."
+	>
+		{#if message}
+			<Notice tone="error">{message}</Notice>
+		{/if}
+		{#snippet actions()}
+			<Button type="button" variant="secondary" onclick={() => (isClearing = false)}
+				>Cancelar</Button
+			>
+			<Button type="submit" form={clearFormId} size="md">Borrar</Button>
+		{/snippet}
+	</Modal>
 
 	<!-- Esc closes the dialog from inside Modal: the setter clears the tile's ink border too. -->
 	<Modal bind:open={() => null !== selected, closeUnless} {title} {body}>
