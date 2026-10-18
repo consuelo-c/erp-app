@@ -17,6 +17,6 @@ export const actions: Actions = {
 		if (!result.ok) {
 			return fail(400, { message: result.message });
 		}
-		redirect(303, resolve('/logins'));
+		redirect(303, `${resolve('/logins')}?aviso=contrasena`);
 	}
 };

@@ -26,7 +26,12 @@
 	let rehireOpen = $state(false);
 
 	// After a failed save the fields come back with what was typed.
-	const value = (name: string, saved: string) => String(form?.values[name] ?? saved);
+	const value = (name: string, saved: string) => String(form?.values?.[name] ?? saved);
+
+	// Saving stays on the screen: the fields keep what was typed until the reloaded employee replaces it.
+	const keepValues: SubmitFunction = () => {
+		return ({ update }) => update({ reset: false });
+	};
 
 	// The dialog closes once the server answers; an error shows above the form.
 	const closeDialogs: SubmitFunction = () => {
@@ -50,9 +55,11 @@
 	<UnsavedChangesGuard form="save" />
 
 	<!-- Every submit button sits outside its form (end of the body, dialogs) and points at it by id. -->
-	<form id="save" class="form-stack" method="POST" action="?/save" use:enhance>
+	<form id="save" class="form-stack" method="POST" action="?/save" use:enhance={keepValues}>
 		{#if form?.message}
 			<Notice tone="error">{form.message}</Notice>
+		{:else if form?.saved}
+			<Notice tone="success">Datos guardados con éxito</Notice>
 		{/if}
 		<Field label="Nombre completo" id="full_name">
 			<Input
@@ -82,6 +89,14 @@
 		</Field>
 		<Field label="Cargo" id="position">
 			<Input id="position" name="position" value={value('position', employee.position)} required />
+		</Field>
+		<Field label="Cuenta bancaria" id="bank_account" hint="Cuenta a la que se consigna la nómina.">
+			<Input
+				id="bank_account"
+				name="bank_account"
+				value={value('bank_account', employee.bankAccount ?? '')}
+				placeholder="Ej. Cuenta ahorros Bancolombia 123-122334-12"
+			/>
 		</Field>
 	</form>
 

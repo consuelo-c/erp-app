@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import Badge from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import Card from '$lib/components/Card.svelte';
+	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
@@ -26,6 +28,11 @@
 			<ScreenHeader title="Personal" />
 		{/if}
 	{/snippet}
+
+	<!-- Set by Nuevo empleado's redirect after a save. -->
+	{#if page.url.searchParams.has('guardado')}
+		<div class="saved"><Notice tone="success">Empleado guardado con éxito</Notice></div>
+	{/if}
 
 	{#each data.employees as employee (employee.id)}
 		<Card
@@ -63,6 +70,10 @@
 <style>
 	p {
 		margin: 0;
+	}
+
+	.saved {
+		margin-bottom: var(--space-5);
 	}
 
 	.empty {

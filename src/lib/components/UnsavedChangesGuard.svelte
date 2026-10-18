@@ -31,9 +31,9 @@
 		};
 	});
 
-	// A failed save comes back with what was typed: still unsaved.
+	// A failed save comes back with what was typed: still unsaved. A successful one stays clean.
 	$effect(() => {
-		if (page.form) {
+		if (page.form && 400 <= page.status) {
 			dirty = true;
 		}
 	});

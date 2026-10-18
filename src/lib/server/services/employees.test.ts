@@ -50,6 +50,7 @@ test('creating stores digits only and opens the first period, with a CREATED eve
 		idNumber: '71384902',
 		monthlySalary: 1423500,
 		position: 'Bodega',
+		bankAccount: null,
 		employment: [{ start: '2024-07-15', end: null }],
 		isEmployed: true
 	});
@@ -69,6 +70,19 @@ test('editing logs only the changed fields in before/after', async () => {
 	expect(edited).toMatchObject({ action: 'EDITED' });
 	expect(JSON.parse(String(edited.before))).toEqual({ full_name: 'Carlos Vélez' });
 	expect(JSON.parse(String(edited.after))).toEqual({ full_name: 'Carlos A. Vélez' });
+});
+
+test('the bank account is optional, kept across employment changes and cleared when blanked', async () => {
+	const id = await hire({ ...carlos, bank_account: '  Bancolombia ahorros 123-456789-01 ' });
+	await endEmployment(db, { id, end: '2025-06-30' }, manager);
+	expect((await getEmployee(db, id, manager))?.bankAccount).toBe(
+		'Bancolombia ahorros 123-456789-01'
+	);
+
+	await updateEmployee(db, { ...carlos, id, bank_account: '' }, manager);
+	expect((await getEmployee(db, id, manager))?.bankAccount).toBeNull();
+	const attributes = database.prepare('select attributes from employees').get()?.attributes;
+	expect(JSON.parse(String(attributes))).not.toHaveProperty('bank_account');
 });
 
 test('ending sets the last period end; rehiring appends a period to the same row', async () => {

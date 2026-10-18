@@ -33,6 +33,7 @@ export const employmentSchema = z
 const attributesSchema = z.object({
 	monthly_salary: z.number().int().nonnegative(),
 	position: z.string(),
+	bank_account: z.string().min(1).optional(),
 	employment: employmentSchema
 });
 
@@ -45,6 +46,7 @@ export type Employee = {
 	idNumber: string;
 	monthlySalary: number;
 	position: string;
+	bankAccount: string | null;
 	employment: Period[];
 	isEmployed: boolean;
 };
@@ -64,7 +66,13 @@ const detailsSchema = z.object({
 	full_name: z.string().trim().min(1, 'Escribe el nombre completo'),
 	id_number: digitsSchema('Escribe la cédula'),
 	monthly_salary: digitsSchema('Escribe el salario mensual').transform(Number),
-	position: z.string().trim().min(1, 'Escribe el cargo')
+	position: z.string().trim().min(1, 'Escribe el cargo'),
+	// Optional: left blank, the key isn't stored.
+	bank_account: z
+		.string()
+		.trim()
+		.optional()
+		.transform((value) => value || undefined)
 });
 
 const idSchema = z.coerce.number().int().positive();
@@ -80,8 +88,8 @@ function invalid(error: z.ZodError): Result {
 
 // Always the same key order, so an edit that changes nothing produces the same text and logs nothing.
 function attributesJson(attributes: Attributes): string {
-	const { monthly_salary, position, employment } = attributesSchema.parse(attributes);
-	return JSON.stringify({ monthly_salary, position, employment });
+	const { monthly_salary, position, bank_account, employment } = attributesSchema.parse(attributes);
+	return JSON.stringify({ monthly_salary, position, bank_account, employment });
 }
 
 function toEmployee(row: EmployeeRow): Employee {
@@ -92,6 +100,7 @@ function toEmployee(row: EmployeeRow): Employee {
 		idNumber: row.id_number,
 		monthlySalary: attributes.monthly_salary,
 		position: attributes.position,
+		bankAccount: attributes.bank_account ?? null,
 		employment: attributes.employment,
 		isEmployed: null === attributes.employment.at(-1)?.end
 	};
@@ -151,13 +160,14 @@ export async function createEmployee(
 	if (!parsed.success) {
 		return invalid(parsed.error);
 	}
-	const { full_name, id_number, monthly_salary, position, start } = parsed.data;
+	const { full_name, id_number, monthly_salary, position, bank_account, start } = parsed.data;
 	if (await idNumberTaken(db, id_number, 0)) {
 		return ID_NUMBER_TAKEN;
 	}
 	const attributes = attributesJson({
 		monthly_salary,
 		position,
+		bank_account,
 		employment: [{ start, end: null }]
 	});
 	const [insert, event] = auditedInsert(db, {
@@ -192,7 +202,7 @@ async function applyEdit(db: D1Database, actor: Actor, { row, changes }: Edit): 
 
 const NOT_FOUND: Result = { ok: false, message: 'Ese empleado no existe' };
 
-/** Name, ID number, salary and position; the employment periods change only by ending or rehiring. */
+/** Name, ID number, salary, position and bank account; the employment periods change only by ending or rehiring. */
 export async function updateEmployee(
 	db: D1Database,
 	input: unknown,
@@ -203,7 +213,7 @@ export async function updateEmployee(
 	if (!parsed.success) {
 		return invalid(parsed.error);
 	}
-	const { id, full_name, id_number, monthly_salary, position } = parsed.data;
+	const { id, full_name, id_number, monthly_salary, position, bank_account } = parsed.data;
 	const row = await findRow(db, id);
 	if (null === row) {
 		return NOT_FOUND;
@@ -217,7 +227,7 @@ export async function updateEmployee(
 		changes: {
 			full_name,
 			id_number,
-			attributes: { monthly_salary, position, employment }
+			attributes: { monthly_salary, position, bank_account, employment }
 		}
 	});
 }
@@ -237,11 +247,7 @@ async function changeEmployment(
 	if ('string' === typeof employment) {
 		return { ok: false, message: employment };
 	}
-	const attributes = {
-		monthly_salary: employee.monthlySalary,
-		position: employee.position,
-		employment
-	};
+	const attributes = { ...attributesSchema.parse(JSON.parse(row.attributes)), employment };
 	return applyEdit(db, actor, { row, changes: { attributes } });
 }
 

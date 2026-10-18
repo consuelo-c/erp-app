@@ -21,6 +21,7 @@ export const actions: Actions = {
 		if (!result.ok) {
 			return fail(400, { message: result.message, values });
 		}
-		redirect(303, resolve('/personal'));
+		// The list shows the saved notice for this flag.
+		redirect(303, `${resolve('/personal')}?guardado`);
 	}
 };

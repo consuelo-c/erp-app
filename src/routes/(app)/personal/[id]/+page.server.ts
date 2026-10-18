@@ -1,5 +1,4 @@
-import { error, fail, redirect } from '@sveltejs/kit';
-import { resolve } from '$app/paths';
+import { error, fail } from '@sveltejs/kit';
 import { getTodaysDate } from '$lib/datetime';
 import { requireRole } from '$lib/server/actor';
 import {
@@ -38,11 +37,7 @@ async function submit({ locals, platform, request, params }: RequestEvent, servi
 export const actions: Actions = {
 	save: async (event) => {
 		requireRole(event.locals.user, ['ADMIN', 'MANAGER']);
-		const failure = await submit(event, updateEmployee);
-		if (null !== failure) {
-			return failure;
-		}
-		redirect(303, resolve('/personal'));
+		return (await submit(event, updateEmployee)) ?? { saved: true };
 	},
 	end: (event) => {
 		requireRole(event.locals.user, ['ADMIN', 'MANAGER']);
