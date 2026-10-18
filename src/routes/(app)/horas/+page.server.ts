@@ -2,7 +2,7 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { getTodaysDate } from '$lib/datetime';
 import { isAdminOrManager, requireRole, ROLES } from '$lib/server/actor';
-import { getOwnHours, saveOwnPunch } from '$lib/server/services/timesheets';
+import { clearOwnDay, getOwnHours, saveOwnPunch } from '$lib/server/services/timesheets';
 import type { Actions, PageServerLoad } from './$types';
 
 // One screen: the punches of the day tapped in the week (`?dia=`, today by default) above that
@@ -37,5 +37,18 @@ export const actions: Actions = {
 			return fail(400, { message: result.message });
 		}
 		return { saved: true };
+	},
+	// «Borrar marcas del día»: the four punches of that day back to empty.
+	borrar: async ({ locals, platform, request }) => {
+		requireRole(locals.user, ROLES);
+		if (undefined === platform) {
+			error(500, 'Sin acceso a la base de datos');
+		}
+		const input = Object.fromEntries(await request.formData());
+		const result = await clearOwnDay(platform.env.DB, input, locals.user);
+		if (!result.ok) {
+			return fail(400, { message: result.message });
+		}
+		return { cleared: true };
 	}
 };

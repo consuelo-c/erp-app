@@ -2,7 +2,11 @@ import { error, fail } from '@sveltejs/kit';
 import { getTodaysDate } from '$lib/datetime';
 import { requireRole } from '$lib/server/actor';
 import { listEmployees } from '$lib/server/services/employees';
-import { getEmployeeHours, saveEmployeePunch } from '$lib/server/services/timesheets';
+import {
+	clearEmployeeDay,
+	getEmployeeHours,
+	saveEmployeePunch
+} from '$lib/server/services/timesheets';
 import type { Actions, PageServerLoad } from './$types';
 
 // Any employee's punches, for ADMIN and MANAGER: the selector's employee (`?empleado=`; by default
@@ -51,5 +55,18 @@ export const actions: Actions = {
 			return fail(400, { message: result.message });
 		}
 		return { saved: true };
+	},
+	// «Borrar marcas del día»: the four punches of that day back to empty.
+	borrar: async ({ locals, platform, request }) => {
+		requireRole(locals.user, ['ADMIN', 'MANAGER']);
+		if (undefined === platform) {
+			error(500, 'Sin acceso a la base de datos');
+		}
+		const input = Object.fromEntries(await request.formData());
+		const result = await clearEmployeeDay(platform.env.DB, input, locals.user);
+		if (!result.ok) {
+			return fail(400, { message: result.message });
+		}
+		return { cleared: true };
 	}
 };

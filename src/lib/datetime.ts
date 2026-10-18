@@ -149,7 +149,12 @@ export function formatLongDay(date: string): string {
 	return `${WEEKDAY_NAMES[toUtcDate(date).getUTCDay()]} ${formatCivilDate(date)}`;
 }
 
+/** Two civil dates as `27 jul – 1 ago`. */
+export function formatDayRange(start: string, end: string): string {
+	return `${formatDayAndMonth(start)} – ${formatDayAndMonth(end)}`;
+}
+
 /** A Monday-to-Sunday week as `27 jul – 2 ago`. */
 export function formatWeekRange(weekStart: string): string {
-	return `${formatDayAndMonth(weekStart)} – ${formatDayAndMonth(addDays(weekStart, 6))}`;
+	return formatDayRange(weekStart, addDays(weekStart, 6));
 }

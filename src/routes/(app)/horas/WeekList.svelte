@@ -1,12 +1,13 @@
 <script lang="ts">
 	import Icon from '$lib/components/Icon.svelte';
-	import { formatShortDay } from '$lib/datetime';
+	import { formatDayRange, formatShortDay } from '$lib/datetime';
 	import { formatHours } from '$lib/format';
 	import type { TimesheetDay } from '$lib/server/services/timesheets';
 
 	// Día | Horas | ›: tapping a day up to today puts its four punches on top of the screen; the days
 	// still to come don't open, nor do the ones outside the employment, which are muted but keep the
-	// hours punched before the period changed. The day on top is marked.
+	// hours punched before the period changed, nor the ones a paid settlement locked. The day on top
+	// is marked.
 	interface Props {
 		days: TimesheetDay[];
 		today: string;
@@ -17,7 +18,7 @@
 	let { days, today, selectedDate, dayHref }: Props = $props();
 
 	function opens(day: TimesheetDay): boolean {
-		return !day.isFuture && day.isEmployed;
+		return !day.isFuture && day.isEmployed && null === day.paidPeriod;
 	}
 
 	function hasPunches(day: TimesheetDay): boolean {
@@ -37,6 +38,7 @@
 				class={[
 					opens(day) && 'table__row--link',
 					!day.isEmployed && 'table__row--muted',
+					null !== day.paidPeriod && 'table__row--locked',
 					selectedDate === day.workDate && 'table__row--selected'
 				]}
 			>
@@ -60,6 +62,11 @@
 					{/if}
 					{#if !day.isEmployed}
 						<div class="meta">Sin período laboral</div>
+					{/if}
+					{#if day.paidPeriod}
+						<div class="meta">
+							Pagado en la nómina del {formatDayRange(day.paidPeriod.start, day.paidPeriod.end)}
+						</div>
 					{/if}
 				</td>
 				{#if hasPunches(day)}
@@ -110,6 +117,16 @@
 
 	.table__row--muted {
 		color: var(--text-secondary);
+	}
+
+	/* A day covered by a paid settlement: read-only. */
+	.table__row--locked td {
+		color: var(--text-disabled);
+		background: var(--surface-subtle);
+	}
+
+	.table__row--locked .meta {
+		color: var(--text-disabled);
 	}
 
 	.table__row--selected {
