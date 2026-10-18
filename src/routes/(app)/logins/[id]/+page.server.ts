@@ -4,7 +4,7 @@ import { requireRole } from '$lib/server/actor';
 import { deactivateLogin, reactivateLogin, updateRoles } from '$lib/server/services/logins';
 import type { Actions } from './$types';
 
-// The login itself is loaded by +layout.server.ts.
+// The login itself is loaded by +layout.server.ts. `?aviso=` picks the list's success notice.
 export const actions: Actions = {
 	roles: async ({ locals, platform, request, params }) => {
 		requireRole(locals.user, ['ADMIN']);
@@ -16,7 +16,7 @@ export const actions: Actions = {
 		if (!result.ok) {
 			return fail(400, { message: result.message, roles });
 		}
-		redirect(303, resolve('/logins'));
+		redirect(303, `${resolve('/logins')}?aviso=actualizado`);
 	},
 	deactivate: async ({ locals, platform, params }) => {
 		requireRole(locals.user, ['ADMIN']);
@@ -27,7 +27,7 @@ export const actions: Actions = {
 		if (!result.ok) {
 			return fail(400, { message: result.message });
 		}
-		redirect(303, resolve('/logins'));
+		redirect(303, `${resolve('/logins')}?aviso=desactivado`);
 	},
 	reactivate: async ({ locals, platform, params }) => {
 		requireRole(locals.user, ['ADMIN']);
@@ -38,6 +38,6 @@ export const actions: Actions = {
 		if (!result.ok) {
 			return fail(400, { message: result.message });
 		}
-		redirect(303, resolve('/logins'));
+		redirect(303, `${resolve('/logins')}?aviso=reactivado`);
 	}
 };

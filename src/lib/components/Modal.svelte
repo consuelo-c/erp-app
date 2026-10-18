@@ -6,7 +6,8 @@
 	interface Props {
 		open?: boolean;
 		title: string;
-		body: string;
+		// A snippet when part of the text needs emphasis.
+		body: string | Snippet;
 		children?: Snippet;
 		actions: Snippet;
 	}
@@ -27,7 +28,9 @@
 
 <dialog class="modal" aria-labelledby={titleId} {@attach syncOpen} onclose={() => (open = false)}>
 	<h2 class="modal__title" id={titleId}>{title}</h2>
-	<p class="modal__body">{body}</p>
+	<p class="modal__body">
+		{#if 'string' === typeof body}{body}{:else}{@render body()}{/if}
+	</p>
 	{#if children}
 		<div class="modal__field">{@render children()}</div>
 	{/if}

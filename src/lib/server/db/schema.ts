@@ -41,7 +41,7 @@ export const events = sqliteTable(
 	]
 );
 
-// The people on payroll. Salary, position and employment periods live in `attributes` (JSON,
+// The people on payroll. Salary, position, bank account and employment periods live in `attributes` (JSON,
 // validated with Zod); "currently employed" is the last period having no end, so there's no `active`.
 export const employees = sqliteTable('employees', {
 	id: integer('id').primaryKey({ autoIncrement: true }),

@@ -1,9 +1,9 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 
-	// Warnings advise and never block; the warning and success tones arrive with the screens that use them.
+	// Warnings advise and never block; the warning tone arrives with the screens that use it.
 	interface Props {
-		tone: 'error' | 'info';
+		tone: 'error' | 'info' | 'success';
 		children: Snippet;
 	}
 
@@ -24,6 +24,12 @@
 		color: var(--error-fg);
 		background: var(--error-bg);
 		border-color: var(--error-bg);
+	}
+
+	.notice--success {
+		color: var(--success-fg);
+		background: var(--success-bg);
+		border-color: var(--success-bg);
 	}
 
 	.notice--info {
