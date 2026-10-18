@@ -354,6 +354,17 @@ test('with «Otro», recording fails without «¿Cuál medio de pago?», which l
 	]);
 });
 
+test('the employee picked earlier is kept if they worked the period, or the first one shows', async () => {
+	const luisId = await hire('Luis Gómez', '71384902', '2026-07-01');
+	const leftId = await hire('Pedro Ruiz', '98765432', '2026-07-01');
+	await endEmployment(db, { id: String(leftId), end: '2026-09-30' }, manager);
+	const opened = (preferredEmployeeId: number) =>
+		openWeek(db, { employeeId: null, preferredEmployeeId, week: WEEK }, manager);
+	expect((await opened(luisId)).draft?.employeeId).toBe(luisId);
+	// Pedro left in September: the first one of the week, never a 404.
+	expect((await opened(leftId)).draft?.employeeId).toBe(anaId);
+});
+
 test('only the employees who worked in the period are offered, and only to ADMIN and MANAGER', async () => {
 	const leftId = await hire('Luis Gómez', '71384902', '2026-07-01');
 	await endEmployment(db, { id: String(leftId), end: '2026-09-30' }, manager);

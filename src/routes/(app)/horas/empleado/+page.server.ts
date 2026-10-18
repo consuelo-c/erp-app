@@ -1,6 +1,7 @@
 import { error, fail } from '@sveltejs/kit';
 import { getTodaysDate } from '$lib/datetime';
 import { requireRole } from '$lib/server/actor';
+import { rememberEmployee } from '$lib/server/chosen-employee';
 import { listEmployees } from '$lib/server/services/employees';
 import {
 	clearEmployeeDay,
@@ -10,15 +11,16 @@ import {
 import type { Actions, PageServerLoad } from './$types';
 
 // Any employee's punches, for ADMIN and MANAGER: the selector's employee (`?empleado=`; by default
-// the actor's own, or the first one), then the same day and week as Mis horas.
-export const load: PageServerLoad = async ({ locals, platform, url }) => {
+// the one picked last, here or in Nómina, then the actor's own, or the first one), then the same
+// day and week as Mis horas.
+export const load: PageServerLoad = async ({ cookies, locals, platform, url }) => {
 	requireRole(locals.user, ['ADMIN', 'MANAGER']);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
 	const employees = await listEmployees(platform.env.DB, locals.user);
 	const employeeId =
-		url.searchParams.get('empleado') ?? locals.user.employeeId ?? employees[0]?.id ?? null;
+		rememberEmployee(url, cookies) ?? locals.user.employeeId ?? employees[0]?.id ?? null;
 	const today = getTodaysDate();
 	// Only what the selector shows: the salary stays on the server.
 	const options = employees.map(({ id, fullName, position, isEmployed }) => ({
