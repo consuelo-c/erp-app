@@ -2,6 +2,7 @@
 
 import type { Role } from './server/actor';
 import type { DeductionConcept, EarningConcept } from './payroll';
+import type { PaymentMethod } from './server/services/payroll';
 import type { Punch } from './server/services/timesheets';
 
 export const ROLE_LABELS: Record<Role, string> = {
@@ -33,7 +34,7 @@ export const CASH_CONCEPT_LABELS = {
 	OTHER_EXPENSE: 'Otro egreso'
 };
 
-export const PAYMENT_METHOD_LABELS = {
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
 	CASH: 'Efectivo',
 	TRANSFER: 'Transferencia',
 	OTHER: 'Otro'

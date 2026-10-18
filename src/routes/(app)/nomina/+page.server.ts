@@ -1,7 +1,7 @@
 import { error, fail } from '@sveltejs/kit';
 import { getTodaysDate } from '$lib/datetime';
 import { requireRole } from '$lib/server/actor';
-import { openWeek, saveDraft } from '$lib/server/services/payroll';
+import { openWeek, recordPayment, saveDraft } from '$lib/server/services/payroll';
 import type { Actions, PageServerLoad } from './$types';
 
 // One employee's settlement for one week: `?empleado=` (the first one by default) and `?semana=`,
@@ -21,16 +21,22 @@ export const load: PageServerLoad = async ({ locals, platform, url }) => {
 	};
 };
 
-export const actions: Actions = {
-	default: async ({ locals, platform, request }) => {
+type Write = typeof saveDraft;
+
+// Both buttons post the same form: «Guardar borrador» saves it, «Registrar pago» saves and pays it.
+function action(write: Write, done: Record<string, true>): Actions[string] {
+	return async ({ locals, platform, request }) => {
 		requireRole(locals.user, ['ADMIN', 'MANAGER']);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}
 		const values = Object.fromEntries(await request.formData());
-		const result = await saveDraft(platform.env.DB, values, locals.user);
-		return result.ok
-			? { saved: true }
-			: fail(400, { message: result.message, errors: result.errors, values });
-	}
+		const result = await write(platform.env.DB, values, locals.user);
+		return result.ok ? done : fail(400, { message: result.message, errors: result.errors, values });
+	};
+}
+
+export const actions: Actions = {
+	guardar: action(saveDraft, { saved: true }),
+	pagar: action(recordPayment, { paid: true })
 };
