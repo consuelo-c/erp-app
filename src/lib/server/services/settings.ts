@@ -1,10 +1,11 @@
-// System settings: every `settings` key but PAYROLL_HOLIDAYS, which has its own editor. One current
-// value per key; each changed key is an `EDITED` event carrying the key in `entity_key`.
+// System settings, and PAYROLL_HOLIDAYS through its own editor. One current value per key; each
+// changed key is an `EDITED` event carrying the key in `entity_key`.
 
 import { z } from 'zod';
-import { dialTimeShape, toClockTime } from '$lib/datetime';
-import { getSettingInput, SETTINGS, type SettingKey } from '$lib/settings';
-import { requireRole, type Actor } from '../actor';
+import { dialTimeShape, formatLongDay, toClockTime } from '$lib/datetime';
+import { getExtraHoursRange } from '$lib/payroll';
+import { getSettingInput, holidaysSchema, SETTINGS, type SettingKey } from '$lib/settings';
+import { isAdmin, requireRole, type Actor } from '../actor';
 import { auditedUpdate } from '../audit';
 
 // A mistake here throws off all of payroll: only the ones who settle it edit settings.
@@ -137,4 +138,144 @@ function readClockTime(key: SystemSettingKey, form: Record<string, string>): Par
 	return result.success
 		? { value: toClockTime(result.data) }
 		: { message: result.error.issues[0].message };
+}
+
+export type Holiday = z.output<typeof holidaysSchema>[number];
+
+export type HolidaysEditor = {
+	holidays: Holiday[];
+	// The last day a PAID settlement paid extra hours for, or null with none paid yet.
+	freezeLine: string | null;
+	canOverrideFreeze: boolean;
+};
+
+export type HolidaysResult = { ok: true } | { ok: false; message: string };
+
+const holidayShape = {
+	date: z.iso.date('Escoge la fecha del festivo'),
+	label: z.string().trim().min(1, 'Escribe el nombre del festivo')
+};
+
+// The editor posts the dates after the freeze line as one JSON field; the closed ones stay as stored.
+const openHolidaysSchema = z.object({
+	holidays: z
+		.string()
+		.transform((value, context) => {
+			try {
+				return JSON.parse(value) as unknown;
+			} catch {
+				context.addIssue({ code: 'custom', message: 'Revisa la lista de festivos' });
+				return z.NEVER;
+			}
+		})
+		.pipe(z.array(z.object(holidayShape)))
+});
+
+const overrideSchema = z.object({
+	original: z.iso.date(),
+	...holidayShape,
+	remove: z.literal('true').optional(),
+	reason: z.string().trim().min(1, 'Escribe el motivo del cambio')
+});
+
+export async function getHolidays(db: D1Database, actor: Actor | null): Promise<HolidaysEditor> {
+	requireRole(actor, EDITS_SETTINGS);
+	const [holidays, freezeLine] = await Promise.all([findHolidays(db), findFreezeLine(db)]);
+	return { holidays, freezeLine, canOverrideFreeze: isAdmin(actor) };
+}
+
+/**
+ * Saves the holidays after the freeze line as posted; the ones on or before it are kept as stored,
+ * for ADMIN too: changing one goes through `overrideFrozenHoliday`, with its reason.
+ */
+export async function updateHolidays(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<HolidaysResult> {
+	requireRole(actor, EDITS_SETTINGS);
+	const parsed = openHolidaysSchema.safeParse(input);
+	if (!parsed.success) {
+		return { ok: false, message: parsed.error.issues[0].message };
+	}
+	const [current, freezeLine] = await Promise.all([findHolidays(db), findFreezeLine(db)]);
+	const closed = parsed.data.holidays.find((holiday) => isFrozen(holiday.date, freezeLine));
+	if (undefined !== closed) {
+		return { ok: false, message: `${frozenMessage(closed)}: no se puede agregar ni cambiar` };
+	}
+	const kept = current.filter((holiday) => isFrozen(holiday.date, freezeLine));
+	return saveHolidays(db, { current, holidays: [...kept, ...parsed.data.holidays], actor });
+}
+
+/**
+ * ADMIN's change to one holiday on or before the freeze line: a new date or name or, with `remove`,
+ * its removal (the popup posts the date and name either way).
+ * The required reason lands on the write's `events` row, never inside the holiday itself.
+ */
+export async function overrideFrozenHoliday(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<HolidaysResult> {
+	requireRole(actor, ['ADMIN']);
+	const parsed = overrideSchema.safeParse(input);
+	if (!parsed.success) {
+		return { ok: false, message: parsed.error.issues[0].message };
+	}
+	const { original, reason } = parsed.data;
+	const [current, freezeLine] = await Promise.all([findHolidays(db), findFreezeLine(db)]);
+	if (!current.some((holiday) => original === holiday.date && isFrozen(holiday.date, freezeLine))) {
+		return { ok: false, message: 'Esa fecha no está en una nómina pagada' };
+	}
+	const others = current.filter((holiday) => original !== holiday.date);
+	const holidays = parsed.data.remove ? others : [...others, toHoliday(parsed.data)];
+	return saveHolidays(db, { current, holidays, actor, reason });
+}
+
+function toHoliday({ date, label }: Holiday): Holiday {
+	return { date, label };
+}
+
+function isFrozen(date: string, freezeLine: string | null): boolean {
+	return null !== freezeLine && date <= freezeLine;
+}
+
+function frozenMessage(holiday: Holiday): string {
+	return `El ${formatLongDay(holiday.date).toLowerCase()} está en una nómina pagada`;
+}
+
+type HolidaysWrite = { current: Holiday[]; holidays: Holiday[]; actor: Actor; reason?: string };
+
+// Sorted here, so the key's schema only has duplicates left to reject.
+async function saveHolidays(db: D1Database, write: HolidaysWrite): Promise<HolidaysResult> {
+	const sorted = [...write.holidays].sort((first, second) => first.date.localeCompare(second.date));
+	if (!holidaysSchema.safeParse(sorted).success) {
+		return { ok: false, message: 'Esa fecha ya está en la lista' };
+	}
+	const statements = auditedUpdate(db, {
+		table: 'settings',
+		entityType: 'SETTINGS',
+		actor: write.actor,
+		idColumn: 'key',
+		id: 'PAYROLL_HOLIDAYS',
+		current: { value: JSON.stringify(write.current) },
+		changes: { value: JSON.stringify(sorted) },
+		reason: write.reason
+	});
+	if (statements.length > 0) {
+		await db.batch(statements);
+	}
+	return { ok: true };
+}
+
+async function findHolidays(db: D1Database): Promise<Holiday[]> {
+	return (await readSettings(db, ['PAYROLL_HOLIDAYS'])).PAYROLL_HOLIDAYS;
+}
+
+// Extra-hours ranges move with period_start, so the latest PAID one ends on the freeze line.
+async function findFreezeLine(db: D1Database): Promise<string | null> {
+	const row = await db
+		.prepare(`select max(period_start) as periodStart from payroll_runs where status = 'PAID'`)
+		.first<{ periodStart: string | null }>();
+	return row?.periodStart ? getExtraHoursRange(row.periodStart).end : null;
 }
