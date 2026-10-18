@@ -27,6 +27,8 @@ export type TimesheetDay = {
 	workedMinutes: number;
 	isPaid: boolean;
 	isFuture: boolean;
+	// Inside one of the employee's employment periods: outside them, no punch is taken.
+	isEmployed: boolean;
 };
 
 export type Result = { ok: true } | { ok: false; message: string };
@@ -142,7 +144,7 @@ async function findRows(
 
 async function buildDays(
 	db: D1Database,
-	employeeId: number,
+	{ id: employeeId, employment }: HoursEmployee,
 	dates: string[]
 ): Promise<TimesheetDay[]> {
 	const rows = await findRows(db, employeeId, dates);
@@ -153,7 +155,14 @@ async function buildDays(
 			const punches: Punches = { ...NO_PUNCHES, ...pickPunches(row) };
 			const isPaid = await isDayPaid(db, { employeeId, workDate });
 			const workedMinutes = countWorkedMinutes(punches);
-			return { workDate, punches, workedMinutes, isPaid, isFuture: workDate > today };
+			return {
+				workDate,
+				punches,
+				workedMinutes,
+				isPaid,
+				isFuture: workDate > today,
+				isEmployed: isWithinEmployment(employment, workDate)
+			};
 		})
 	);
 }
@@ -211,8 +220,8 @@ async function buildHours(
 		addDays(weekStart, offset)
 	);
 	const [[day], week] = await Promise.all([
-		buildDays(db, employee.id, [date.data]),
-		buildDays(db, employee.id, weekDates)
+		buildDays(db, employee, [date.data]),
+		buildDays(db, employee, weekDates)
 	]);
 	return { employeeId: employee.id, employeeName: employee.fullName, day, week };
 }

@@ -5,7 +5,8 @@
 	import type { TimesheetDay } from '$lib/server/services/timesheets';
 
 	// Día | Horas | ›: tapping a day up to today puts its four punches on top of the screen; the days
-	// still to come don't open. The day on top is marked.
+	// still to come don't open, nor do the ones outside the employment, which are muted but keep the
+	// hours punched before the period changed. The day on top is marked.
 	interface Props {
 		days: TimesheetDay[];
 		today: string;
@@ -14,6 +15,10 @@
 	}
 
 	let { days, today, selectedDate, dayHref }: Props = $props();
+
+	function opens(day: TimesheetDay): boolean {
+		return !day.isFuture && day.isEmployed;
+	}
 
 	function hasPunches(day: TimesheetDay): boolean {
 		return Object.values(day.punches).some((time) => null !== time);
@@ -30,12 +35,13 @@
 		{#each days as day (day.workDate)}
 			<tr
 				class={[
-					!day.isFuture && 'table__row--link',
+					opens(day) && 'table__row--link',
+					!day.isEmployed && 'table__row--muted',
 					selectedDate === day.workDate && 'table__row--selected'
 				]}
 			>
 				<td>
-					{#if day.isFuture}
+					{#if !opens(day)}
 						{formatShortDay(day.workDate)}
 					{:else}
 						<!-- eslint-disable svelte/no-navigation-without-resolve -- dayHref builds it with resolve() -->
@@ -49,19 +55,22 @@
 					{/if}
 					{#if today === day.workDate}
 						<div class="meta">Hoy</div>
-					{:else if !day.isFuture && !hasPunches(day)}
+					{:else if opens(day) && !hasPunches(day)}
 						<div class="meta">Sin marcas</div>
 					{/if}
+					{#if !day.isEmployed}
+						<div class="meta">Sin período laboral</div>
+					{/if}
 				</td>
-				{#if day.isFuture}
-					<td class="num">—</td>
-					<td></td>
-				{:else if hasPunches(day)}
+				{#if hasPunches(day)}
 					<td class="num"><b>{formatHours(day.workedMinutes)}</b></td>
-					<td class="num">›</td>
-				{:else}
+					<td class="num">{opens(day) ? '›' : ''}</td>
+				{:else if opens(day)}
 					<td class="num table__cell--missing"><Icon name="edit" size="sm" /></td>
 					<td class="num">›</td>
+				{:else}
+					<td class="num">—</td>
+					<td></td>
 				{/if}
 			</tr>
 		{/each}
@@ -97,6 +106,10 @@
 	/* The day's link covers its whole row: one tap target per day. */
 	.table__row--link {
 		position: relative;
+	}
+
+	.table__row--muted {
+		color: var(--text-secondary);
 	}
 
 	.table__row--selected {
