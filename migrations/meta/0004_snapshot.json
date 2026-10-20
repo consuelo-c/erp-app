@@ -1,9 +1,133 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "89c15e6c-e0f1-4ec8-82fb-57aac038e925",
+  "id": "5cfcc3df-776a-4044-9657-a6bd07a019a6",
   "prevId": "75f8c2ca-abc5-408f-a6c5-cb2d15b88a3a",
   "tables": {
+    "cash_movements": {
+      "name": "cash_movements",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "concept": {
+          "name": "concept",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payment_method": {
+          "name": "payment_method",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "amount": {
+          "name": "amount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "movement_date": {
+          "name": "movement_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity_type": {
+          "name": "entity_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "entity_id": {
+          "name": "entity_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "payee": {
+          "name": "payee",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "attributes": {
+          "name": "attributes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'{}'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "cash_movements_entity": {
+          "name": "cash_movements_entity",
+          "columns": [
+            "entity_type",
+            "entity_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "cash_movements_entity_pair": {
+          "name": "cash_movements_entity_pair",
+          "value": "(\"cash_movements\".\"entity_type\" IS NULL) = (\"cash_movements\".\"entity_id\" IS NULL)"
+        },
+        "cash_movements_concept_link": {
+          "name": "cash_movements_concept_link",
+          "value": "CASE\n\t\t\t\tWHEN \"cash_movements\".\"concept\" IN ('INSTALLMENT', 'SECURITY_DEPOSIT') THEN \"cash_movements\".\"entity_type\" IS 'ORDER' AND \"cash_movements\".\"amount\" > 0\n\t\t\t\tWHEN \"cash_movements\".\"concept\" IN ('INSTALLMENT_REFUND', 'DEPOSIT_REFUND', 'CARRIER_PAYMENT') THEN \"cash_movements\".\"entity_type\" IS 'ORDER' AND \"cash_movements\".\"amount\" < 0\n\t\t\t\tWHEN \"cash_movements\".\"concept\" = 'PAYROLL' THEN \"cash_movements\".\"entity_type\" IS 'PAYROLL_RUN' AND \"cash_movements\".\"amount\" < 0\n\t\t\t\tWHEN \"cash_movements\".\"concept\" = 'OTHER_EXPENSE' THEN \"cash_movements\".\"entity_type\" IS NULL AND \"cash_movements\".\"amount\" < 0\n\t\t\t\tELSE 0\n\t\t\tEND"
+        },
+        "cash_movements_payment_method": {
+          "name": "cash_movements_payment_method",
+          "value": "\"cash_movements\".\"payment_method\" IN ('CASH', 'TRANSFER', 'OTHER')"
+        }
+      }
+    },
     "employees": {
       "name": "employees",
       "columns": {
@@ -242,32 +366,11 @@
           "notNull": true,
           "autoincrement": false
         },
-        "employee_name": {
-          "name": "employee_name",
+        "employee_snapshot": {
+          "name": "employee_snapshot",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "employee_id_number": {
-          "name": "employee_id_number",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "employee_position": {
-          "name": "employee_position",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "employee_hire_date": {
-          "name": "employee_hire_date",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         },
         "prepared_by": {

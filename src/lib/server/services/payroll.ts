@@ -194,10 +194,7 @@ const RUN_COLUMNS = [
 	'week_number',
 	'period_end',
 	'payment_date',
-	'employee_name',
-	'employee_id_number',
-	'employee_position',
-	'employee_hire_date',
+	'employee_snapshot',
 	'prepared_by',
 	'earnings',
 	'deductions',
@@ -531,6 +528,7 @@ async function findPayment(db: D1Database, row: RunRow): Promise<Payment | null>
 		throw new Error(`Paid settlement ${row.id} has no PAYROLL movement`);
 	}
 	const attributes = movementAttributesSchema.parse(JSON.parse(movement.attributes));
+	const employee = employeeSnapshotSchema.parse(JSON.parse(String(row.employee_snapshot)));
 	return {
 		method: movement.payment_method,
 		amount: -movement.amount,
@@ -538,12 +536,32 @@ async function findPayment(db: D1Database, row: RunRow): Promise<Payment | null>
 		bankAccount: attributes.bank_account ?? null,
 		otherMethod: attributes.other_method ?? null,
 		recordedBy: movement.created_by,
-		employeeName: String(row.employee_name),
-		employeeIdNumber: String(row.employee_id_number),
-		employeePosition: null === row.employee_position ? null : String(row.employee_position),
-		employeeHireDate: null === row.employee_hire_date ? null : String(row.employee_hire_date),
+		employeeName: employee.full_name,
+		employeeIdNumber: employee.id_number,
+		employeePosition: employee.position,
+		employeeHireDate: employee.hire_date,
 		preparedBy: String(row.prepared_by)
 	};
+}
+
+// Who the settlement is for, as they were when it was saved: what the receipt prints. SQLite
+// validates nothing: checked on write and on read.
+const employeeSnapshotSchema = z.object({
+	full_name: z.string(),
+	id_number: z.string(),
+	position: z.string(),
+	hire_date: z.iso.date().nullable() // the current employment period's start
+});
+
+function toEmployeeSnapshot(employee: Employee, period: Period): string {
+	const hirePeriod = employee.employment.findLast((each) => each.start <= period.periodEnd);
+	const snapshot = {
+		full_name: employee.fullName,
+		id_number: employee.idNumber,
+		position: employee.position,
+		hire_date: hirePeriod?.start ?? null
+	};
+	return JSON.stringify(employeeSnapshotSchema.parse(snapshot));
 }
 
 const QUANTITY_MESSAGE = 'Escribe una cantidad de 0 en adelante';
@@ -782,15 +800,11 @@ async function findTarget(db: D1Database, form: SaveForm, actor: Actor): Promise
 
 // Every column a save writes but the two that identify the row.
 function toColumns({ employee, period, form, settings, actor }: Save, run: Computed): Row {
-	const hirePeriod = employee.employment.findLast((each) => each.start <= period.periodEnd);
 	return {
 		week_number: form.week_number,
 		period_end: period.periodEnd,
 		payment_date: form.payment_date,
-		employee_name: employee.fullName,
-		employee_id_number: employee.idNumber,
-		employee_position: employee.position,
-		employee_hire_date: hirePeriod?.start ?? null,
+		employee_snapshot: toEmployeeSnapshot(employee, period),
 		prepared_by: actor.username,
 		earnings: JSON.stringify(run.earnings),
 		deductions: JSON.stringify(run.deductions),

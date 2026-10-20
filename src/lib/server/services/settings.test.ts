@@ -140,10 +140,10 @@ function settle(periodStart: string, status: 'DRAFT' | 'PAID') {
 	database
 		.prepare(
 			`insert into payroll_runs (employee_id, status, week_number, period_start, period_end,
-			payment_date, employee_name, employee_id_number, prepared_by, earnings, deductions,
+			payment_date, employee_snapshot, prepared_by, earnings, deductions,
 			settings_snapshot, total_earnings, total_deductions, net_pay,
 			created_at, created_by, updated_at, updated_by)
-			values (?, ?, 1, ?, '', '', 'Ana Pérez', '1', 'gerente', '[]', '[]', '{}', 0, 0, 0, 0, 'gerente', 0, 'gerente')`
+			values (?, ?, 1, ?, '', '', '{}', 'gerente', '[]', '[]', '{}', 0, 0, 0, 0, 'gerente', 0, 'gerente')`
 		)
 		.run(employeeId, status, periodStart);
 }
