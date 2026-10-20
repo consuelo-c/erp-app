@@ -156,7 +156,8 @@
 	<title>Liquidación semanal · Banquetes Consuelo C</title>
 </svelte:head>
 
-<Screen>
+<!-- Only a draft has the side column. -->
+<Screen wide={null !== draft && null === draft.payment}>
 	{#snippet header()}
 		<ScreenHeader title="Liquidación semanal">
 			{#if draft}
@@ -226,202 +227,215 @@
 			<input type="hidden" name="employee_id" value={draft.employeeId} />
 			<input type="hidden" name="period_start" value={week.periodStart} />
 
-			<div class="form-stack payroll__fields">
-				<div class="payroll__row">
-					<div class="payroll__week">
-						<Field label="Semana" id="week_number" error={errorOf('week_number')}>
-							<Input
-								id="week_number"
-								name="week_number"
-								inputmode="numeric"
-								value={typed('week_number', String(draft.weekNumber))}
-								aria-invalid={undefined !== errorOf('week_number')}
-								required
-							/>
-						</Field>
-					</div>
-					<Field label="Fecha de pago" id="payment_date" error={errorOf('payment_date')}>
-						<Input
-							id="payment_date"
-							name="payment_date"
-							type="date"
-							value={typed('payment_date', draft.paymentDate)}
-							aria-invalid={undefined !== errorOf('payment_date')}
-							required
-						/>
-					</Field>
-				</div>
-				{#if !draft.isSaved}
-					<p class="field__hint">{proposalHint}</p>
-				{/if}
-			</div>
-
-			<table class="table payroll__table">
-				<thead>
-					<tr><th>DEVENGADOS</th><th class="num">Cant.</th><th class="num">Valor</th></tr>
-				</thead>
-				<tbody>
-					<!-- The inputs keep the saved values; the amounts follow what's typed. -->
-					{#each draft.earnings as line, index (line.concept)}
-						{@const current = shown.earnings[index]}
-						{@const error = errorOf(line.concept)}
-						<tr>
-							<td>
-								{EARNING_LABELS[line.concept]}
-								{#if isCorrected(current)}
-									<div class="meta">calculado: {formatQuantity(current.derivedQty ?? 0)} h</div>
-								{/if}
-							</td>
-							{#if null === line.qty}
-								<td class="num">—</td>
-								<td class="num">
-									<div class="payroll__amount">
-										<span class="meta">$</span>
-										<Input
-											name={line.concept}
-											inputmode="numeric"
-											placeholder="0"
-											aria-label="Valor"
-											value={typed(line.concept, formatTypedPesos(line.amount))}
-											aria-invalid={undefined !== error}
-										/>
-									</div>
-								</td>
-							{:else}
-								<td class="num">
-									<div class="payroll__quantity">
-										<Input
-											name={line.concept}
-											inputmode="decimal"
-											aria-label="Cantidad"
-											value={typed(line.concept, formatQuantity(line.qty))}
-											aria-invalid={undefined !== error}
-										/>
-										<span class="meta">{null === line.derivedQty ? 'd' : 'h'}</span>
-									</div>
-									{#if error}<p class="field__error">{error}</p>{/if}
-								</td>
-								<td class="num">{formatPesos(current.amount)}</td>
-							{/if}
-						</tr>
-					{/each}
-				</tbody>
-				<tfoot>
-					<tr>
-						<td colspan="2">Total devengado</td>
-						<td class="num">{formatPesos(shown.totalEarnings)}</td>
-					</tr>
-				</tfoot>
-			</table>
-
-			<table class="table payroll__table">
-				<thead>
-					<tr><th>DEDUCCIONES</th><th class="num">Cant.</th><th class="num">Valor</th></tr>
-				</thead>
-				<tbody>
-					{#each draft.deductions as line, index (line.concept)}
-						{#if isContribution(line)}
-							{@const { PAYROLL_PENSION_RATE, PAYROLL_HEALTH_RATE } = shown.parameters}
-							<tr>
-								<td>{DEDUCTION_LABELS[line.concept]}</td>
-								<td class="num">
-									{'PENSION' === line.concept ? PAYROLL_PENSION_RATE : PAYROLL_HEALTH_RATE} %
-								</td>
-								<td class="num">{formatPesos(shown.deductions[index].amount)}</td>
-							</tr>
-						{:else}
-							{@const name = `${line.concept}.description`}
-							{@const error = errorOf(name)}
-							<tr>
-								<td colspan="2">
-									<div class="payroll__described">
-										<span class="payroll__concept">{DEDUCTION_LABELS[line.concept]}</span>
-										<Input
-											{name}
-											aria-label="Descripción"
-											placeholder={'OTHER' === line.concept
-												? 'Descripción (obligatoria)'
-												: 'Descripción (opcional)'}
-											value={typed(name, line.description ?? '')}
-											aria-invalid={undefined !== error}
-										/>
-									</div>
-									{#if error}<p class="field__error">{error}</p>{/if}
-								</td>
-								<td class="num">
-									<div class="payroll__amount">
-										<span class="meta">$</span>
-										<Input
-											name={line.concept}
-											inputmode="numeric"
-											placeholder="0"
-											aria-label="Valor"
-											value={typed(line.concept, formatTypedPesos(line.amount))}
-										/>
-									</div>
-								</td>
-							</tr>
+			<div class="payroll__layout">
+				<div class="payroll__lines">
+					<div class="form-stack payroll__fields">
+						<div class="payroll__row">
+							<div class="payroll__week">
+								<Field label="Semana" id="week_number" error={errorOf('week_number')}>
+									<Input
+										id="week_number"
+										name="week_number"
+										inputmode="numeric"
+										value={typed('week_number', String(draft.weekNumber))}
+										aria-invalid={undefined !== errorOf('week_number')}
+										required
+									/>
+								</Field>
+							</div>
+							<Field label="Fecha de pago" id="payment_date" error={errorOf('payment_date')}>
+								<Input
+									id="payment_date"
+									name="payment_date"
+									type="date"
+									value={typed('payment_date', draft.paymentDate)}
+									aria-invalid={undefined !== errorOf('payment_date')}
+									required
+								/>
+							</Field>
+						</div>
+						{#if !draft.isSaved}
+							<p class="field__hint">{proposalHint}</p>
 						{/if}
-					{/each}
-				</tbody>
-				<tfoot>
-					<tr>
-						<td colspan="2">Total deducciones</td>
-						<td class="num">{formatPesos(shown.totalDeductions)}</td>
-					</tr>
-				</tfoot>
-			</table>
+					</div>
 
-			<div class="summary-row summary-row--net">
-				<span>Neto a pagar</span><span>{formatPesos(shown.netPay)}</span>
-			</div>
+					<table class="table payroll__table">
+						<thead>
+							<tr><th>DEVENGADOS</th><th class="num">Cant.</th><th class="num">Valor</th></tr>
+						</thead>
+						<tbody>
+							<!-- The inputs keep the saved values; the amounts follow what's typed. -->
+							{#each draft.earnings as line, index (line.concept)}
+								{@const current = shown.earnings[index]}
+								{@const error = errorOf(line.concept)}
+								<tr>
+									<td>
+										{EARNING_LABELS[line.concept]}
+										{#if isCorrected(current)}
+											<div class="meta">calculado: {formatQuantity(current.derivedQty ?? 0)} h</div>
+										{/if}
+									</td>
+									{#if null === line.qty}
+										<td class="num">—</td>
+										<td class="num">
+											<div class="payroll__amount">
+												<span class="meta">$</span>
+												<Input
+													name={line.concept}
+													inputmode="numeric"
+													placeholder="0"
+													aria-label="Valor"
+													value={typed(line.concept, formatTypedPesos(line.amount))}
+													aria-invalid={undefined !== error}
+												/>
+											</div>
+										</td>
+									{:else}
+										<td class="num">
+											<div class="payroll__quantity">
+												<Input
+													name={line.concept}
+													inputmode="decimal"
+													aria-label="Cantidad"
+													value={typed(line.concept, formatQuantity(line.qty))}
+													aria-invalid={undefined !== error}
+												/>
+												<span class="meta">{null === line.derivedQty ? 'd' : 'h'}</span>
+											</div>
+											{#if error}<p class="field__error">{error}</p>{/if}
+										</td>
+										<td class="num">{formatPesos(current.amount)}</td>
+									{/if}
+								</tr>
+							{/each}
+						</tbody>
+						<tfoot>
+							<tr>
+								<td colspan="2">Total devengado</td>
+								<td class="num">{formatPesos(shown.totalEarnings)}</td>
+							</tr>
+						</tfoot>
+					</table>
 
-			<h2 class="section-title payroll__title">Pago</h2>
-			<div class="form-stack">
-				<Field label="Medio de pago" id="payment_method" error={errorOf('payment_method')}>
-					<Select id="payment_method" name="payment_method" value={method}>
-						{#each methods as [value, label] (value)}
-							<option {value}>{label}</option>
-						{/each}
-					</Select>
-				</Field>
-				{#if 'TRANSFER' === method}
-					<Field
-						label="Cuenta"
-						id="bank_account"
-						hint={draft.employeeBankAccount
-							? 'Tomada de los datos del empleado. Puedes cambiarla para este pago.'
-							: undefined}
-						error={errorOf('bank_account')}
-					>
-						<Input
-							id="bank_account"
-							name="bank_account"
-							value={typed('bank_account', draft.employeeBankAccount ?? '')}
-							aria-invalid={undefined !== errorOf('bank_account')}
-						/>
-					</Field>
-				{:else if 'OTHER' === method}
-					<Field
-						label="¿Cuál medio de pago?"
-						id="payment_method_other"
-						error={errorOf('payment_method_other')}
-					>
-						<Input
-							id="payment_method_other"
-							name="payment_method_other"
-							value={typed('payment_method_other', '')}
-							aria-invalid={undefined !== errorOf('payment_method_other')}
-						/>
-					</Field>
-				{/if}
-			</div>
-
-			{#if form?.message}
-				<div class="payroll__notice">
-					<Notice tone="error">{form.message}</Notice>
+					<table class="table payroll__table">
+						<thead>
+							<tr><th>DEDUCCIONES</th><th class="num">Cant.</th><th class="num">Valor</th></tr>
+						</thead>
+						<tbody>
+							{#each draft.deductions as line, index (line.concept)}
+								{#if isContribution(line)}
+									{@const { PAYROLL_PENSION_RATE, PAYROLL_HEALTH_RATE } = shown.parameters}
+									<tr>
+										<td>{DEDUCTION_LABELS[line.concept]}</td>
+										<td class="num">
+											{'PENSION' === line.concept ? PAYROLL_PENSION_RATE : PAYROLL_HEALTH_RATE} %
+										</td>
+										<td class="num">{formatPesos(shown.deductions[index].amount)}</td>
+									</tr>
+								{:else}
+									{@const name = `${line.concept}.description`}
+									{@const error = errorOf(name)}
+									<tr>
+										<td colspan="2">
+											<div class="payroll__described">
+												<span class="payroll__concept">{DEDUCTION_LABELS[line.concept]}</span>
+												<Input
+													{name}
+													aria-label="Descripción"
+													placeholder={'OTHER' === line.concept
+														? 'Descripción (obligatoria)'
+														: 'Descripción (opcional)'}
+													value={typed(name, line.description ?? '')}
+													aria-invalid={undefined !== error}
+												/>
+											</div>
+											{#if error}<p class="field__error">{error}</p>{/if}
+										</td>
+										<td class="num">
+											<div class="payroll__amount">
+												<span class="meta">$</span>
+												<Input
+													name={line.concept}
+													inputmode="numeric"
+													placeholder="0"
+													aria-label="Valor"
+													value={typed(line.concept, formatTypedPesos(line.amount))}
+												/>
+											</div>
+										</td>
+									</tr>
+								{/if}
+							{/each}
+						</tbody>
+						<tfoot>
+							<tr>
+								<td colspan="2">Total deducciones</td>
+								<td class="num">{formatPesos(shown.totalDeductions)}</td>
+							</tr>
+						</tfoot>
+					</table>
 				</div>
-			{/if}
+
+				<!-- On a wide screen what's paid stays in view while the lines are corrected. -->
+				<aside class="payroll__side">
+					<div class="summary-row summary-row--net">
+						<span>Neto a pagar</span><span>{formatPesos(shown.netPay)}</span>
+					</div>
+
+					<h2 class="section-title payroll__title">Pago</h2>
+					<div class="form-stack">
+						<Field label="Medio de pago" id="payment_method" error={errorOf('payment_method')}>
+							<Select id="payment_method" name="payment_method" value={method}>
+								{#each methods as [value, label] (value)}
+									<option {value}>{label}</option>
+								{/each}
+							</Select>
+						</Field>
+						{#if 'TRANSFER' === method}
+							<Field
+								label="Cuenta"
+								id="bank_account"
+								hint={draft.employeeBankAccount
+									? 'Tomada de los datos del empleado. Puedes cambiarla para este pago.'
+									: undefined}
+								error={errorOf('bank_account')}
+							>
+								<Input
+									id="bank_account"
+									name="bank_account"
+									value={typed('bank_account', draft.employeeBankAccount ?? '')}
+									aria-invalid={undefined !== errorOf('bank_account')}
+								/>
+							</Field>
+						{:else if 'OTHER' === method}
+							<Field
+								label="¿Cuál medio de pago?"
+								id="payment_method_other"
+								error={errorOf('payment_method_other')}
+							>
+								<Input
+									id="payment_method_other"
+									name="payment_method_other"
+									value={typed('payment_method_other', '')}
+									aria-invalid={undefined !== errorOf('payment_method_other')}
+								/>
+							</Field>
+						{/if}
+					</div>
+
+					{#if form?.message}
+						<div class="payroll__notice">
+							<Notice tone="error">{form.message}</Notice>
+						</div>
+					{/if}
+
+					<div class="screen__action payroll__actions">
+						<Button type="submit" variant="secondary">Guardar borrador</Button>
+						<Button type="button" onclick={askToConfirm}>Registrar pago</Button>
+					</div>
+					<p class="note payroll__note">Al registrar el pago la liquidación queda congelada.</p>
+				</aside>
+			</div>
 		</form>
 
 		<Modal bind:open={confirmOpen} title="Registrar pago" body={confirmation}>
@@ -445,12 +459,6 @@
 				</Button>
 			{/snippet}
 		</Modal>
-
-		<div class="screen__action payroll__actions">
-			<Button type="submit" form="settlement" variant="secondary">Guardar borrador</Button>
-			<Button type="button" form="settlement" onclick={askToConfirm}>Registrar pago</Button>
-		</div>
-		<p class="note payroll__note">Al registrar el pago la liquidación queda congelada.</p>
 	{/if}
 </Screen>
 
@@ -522,6 +530,38 @@
 
 		.payroll__note {
 			text-align: right;
+		}
+	}
+
+	/* The payment in a side column, beside the lines: the column narrows, so the buttons stack. */
+	@container (width >= 1280px) {
+		.payroll__layout {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) 320px;
+			gap: var(--space-12);
+			align-items: start;
+		}
+
+		.payroll__side {
+			position: sticky;
+			top: 0;
+		}
+
+		.payroll__side > .summary-row--net {
+			margin-top: var(--space-8);
+		}
+
+		.payroll__actions {
+			flex-direction: column;
+			align-items: stretch;
+		}
+
+		.payroll__actions :global(.btn) {
+			max-width: none;
+		}
+
+		.payroll__note {
+			text-align: left;
 		}
 	}
 
