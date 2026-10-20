@@ -1,5 +1,14 @@
 import { sql } from 'drizzle-orm';
-import { check, index, integer, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core';
+import {
+	check,
+	index,
+	integer,
+	sqliteTable,
+	text,
+	unique,
+	uniqueIndex,
+	type AnySQLiteColumn
+} from 'drizzle-orm/sqlite-core';
 
 const auditColumns = {
 	createdAt: integer('created_at').notNull(),
@@ -151,22 +160,35 @@ export const cashMovements = sqliteTable(
 		entityId: integer('entity_id'),
 		payee: text('payee'), // a third party: carrier, supplier
 		attributes: text('attributes').notNull().default('{}'), // JSON, validated with Zod
+		// Recibo de caja (+) and comprobante de egreso (−) consecutives: one sequence per sign.
+		receiptNumber: integer('receipt_number').notNull(),
+		// The movement this one offsets: same concept and link, opposite sign. At most one per movement.
+		reversesId: integer('reverses_id')
+			.unique()
+			.references((): AnySQLiteColumn => cashMovements.id),
 		...auditColumns
 	},
 	(table) => [
 		index('cash_movements_entity').on(table.entityType, table.entityId),
+		uniqueIndex('cash_movements_receipt_number').on(
+			sql`(${table.amount} > 0)`,
+			table.receiptNumber
+		),
+		check('cash_movements_amount', sql`${table.amount} <> 0`),
 		check(
 			'cash_movements_entity_pair',
 			sql`(${table.entityType} IS NULL) = (${table.entityId} IS NULL)`
 		),
 		// `IS`, not `=`: a CHECK passes when it evaluates to NULL. `ELSE 0` also refuses an unknown concept.
+		// A concept's natural sign flips only on an offsetting movement, the one with reverses_id.
 		check(
 			'cash_movements_concept_link',
 			sql`CASE
-				WHEN ${table.concept} IN ('INSTALLMENT', 'SECURITY_DEPOSIT') THEN ${table.entityType} IS 'ORDER' AND ${table.amount} > 0
-				WHEN ${table.concept} IN ('INSTALLMENT_REFUND', 'DEPOSIT_REFUND', 'CARRIER_PAYMENT') THEN ${table.entityType} IS 'ORDER' AND ${table.amount} < 0
-				WHEN ${table.concept} = 'PAYROLL' THEN ${table.entityType} IS 'PAYROLL_RUN' AND ${table.amount} < 0
-				WHEN ${table.concept} = 'OTHER_EXPENSE' THEN ${table.entityType} IS NULL AND ${table.amount} < 0
+				WHEN ${table.concept} IN ('INSTALLMENT', 'SECURITY_DEPOSIT') THEN ${table.entityType} IS 'ORDER' AND (${table.amount} > 0) = (${table.reversesId} IS NULL)
+				WHEN ${table.concept} IN ('INSTALLMENT_REFUND', 'DEPOSIT_REFUND', 'CARRIER_PAYMENT') THEN ${table.entityType} IS 'ORDER' AND (${table.amount} < 0) = (${table.reversesId} IS NULL)
+				WHEN ${table.concept} = 'PAYROLL' THEN ${table.entityType} IS 'PAYROLL_RUN' AND (${table.amount} < 0) = (${table.reversesId} IS NULL)
+				WHEN ${table.concept} = 'OTHER_INCOME' THEN ${table.entityType} IS NULL AND (${table.amount} > 0) = (${table.reversesId} IS NULL)
+				WHEN ${table.concept} = 'OTHER_EXPENSE' THEN ${table.entityType} IS NULL AND (${table.amount} < 0) = (${table.reversesId} IS NULL)
 				ELSE 0
 			END`
 		),
