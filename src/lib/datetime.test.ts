@@ -1,6 +1,9 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import {
 	addDays,
+	formatInstantTime,
+	formatPeriod,
+	getMonthRange,
 	formatCivilDate,
 	formatClockTime,
 	formatInstant,
@@ -77,4 +80,22 @@ test('short labels for the team week', () => {
 	expect(formatWeekday('2026-07-27')).toBe('Lun 27');
 	expect(formatShortClockTime('14:00')).toBe('2:00');
 	expect(formatShortClockTime('07:02')).toBe('7:02');
+});
+
+test('getMonthRange spans the whole month, February and December included', () => {
+	expect(getMonthRange('2026-10-17')).toEqual({ start: '2026-10-01', end: '2026-10-31' });
+	expect(getMonthRange('2028-02-10')).toEqual({ start: '2028-02-01', end: '2028-02-29' });
+	expect(getMonthRange('2026-12-31')).toEqual({ start: '2026-12-01', end: '2026-12-31' });
+});
+
+test('formatPeriod names the month once when the period stays in it', () => {
+	expect(formatPeriod('2026-10-01', '2026-10-31')).toBe('1 – 31 oct 2026');
+	expect(formatPeriod('2026-09-28', '2026-10-03')).toBe('28 sep – 3 oct 2026');
+	expect(formatPeriod('2026-12-28', '2027-01-03')).toBe('28 dic 2026 – 3 ene 2027');
+});
+
+test("formatInstantTime gives an instant's time in Bogotá", () => {
+	// 20:30 UTC is 3:30 p.m. in Bogotá (UTC−5).
+	expect(formatInstantTime(Date.UTC(2026, 9, 14, 20, 30) / 1000)).toBe('3:30 p.m.');
+	expect(formatInstantTime(Date.UTC(2026, 9, 15, 4, 5) / 1000)).toBe('11:05 p.m.');
 });

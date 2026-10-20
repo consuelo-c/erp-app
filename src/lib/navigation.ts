@@ -36,6 +36,12 @@ export const DESTINATIONS: Destination[] = [
 		paths: [resolve('/nomina')]
 	},
 	{
+		label: 'Caja',
+		icon: 'wallet',
+		href: resolve('/caja'),
+		paths: [resolve('/caja')]
+	},
+	{
 		label: 'Personal',
 		icon: 'users',
 		href: resolve('/personal'),
@@ -71,6 +77,12 @@ export function findDestination(pathname: string): Destination | undefined {
 export const HOURS_TABS = [
 	{ label: 'Empleado', href: resolve('/horas/empleado') },
 	{ label: 'Equipo', href: resolve('/horas/equipo') }
+];
+
+/** Caja's tabs: the book and the entry of a movement no other module records. */
+export const CASH_TABS = [
+	{ label: 'Libro de caja', href: resolve('/caja') },
+	{ label: 'Registrar movimiento', shortLabel: 'Registrar', href: resolve('/caja/registrar') }
 ];
 
 /** Configuración's tabs: the system settings and the holidays editor. */
