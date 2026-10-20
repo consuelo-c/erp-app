@@ -106,7 +106,7 @@ export const timesheets = sqliteTable(
 );
 
 // One settlement per employee per week. Born DRAFT, PAID once its payment is recorded, then frozen.
-// The snapshots and `settings_snapshot` are rewritten on every draft save and final once PAID.
+// `employee_snapshot` and `settings_snapshot` are rewritten on every draft save and final once PAID.
 export const payrollRuns = sqliteTable(
 	'payroll_runs',
 	{
@@ -119,10 +119,7 @@ export const payrollRuns = sqliteTable(
 		periodStart: text('period_start').notNull(), // Monday
 		periodEnd: text('period_end').notNull(), // Saturday
 		paymentDate: text('payment_date').notNull(),
-		employeeName: text('employee_name').notNull(),
-		employeeIdNumber: text('employee_id_number').notNull(),
-		employeePosition: text('employee_position'),
-		employeeHireDate: text('employee_hire_date'), // the current employment period's start
+		employeeSnapshot: text('employee_snapshot').notNull(), // JSON: name, ID number, position, hire date
 		preparedBy: text('prepared_by').notNull(), // the receipt's «Elaboró:»
 		earnings: text('earnings').notNull(), // JSON, validated with Zod
 		deductions: text('deductions').notNull(), // JSON, validated with Zod

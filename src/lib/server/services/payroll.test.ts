@@ -156,11 +156,13 @@ test('saving creates the draft with its event and snapshots; saving again edits 
 	expect(row).toMatchObject({
 		status: 'DRAFT',
 		period_end: TODAY,
-		employee_name: 'Ana Pérez',
-		employee_id_number: '1036452118',
-		employee_position: 'Bodega',
-		employee_hire_date: '2026-07-01',
 		prepared_by: 'gerente'
+	});
+	expect(JSON.parse(String(row.employee_snapshot))).toEqual({
+		full_name: 'Ana Pérez',
+		id_number: '1036452118',
+		position: 'Bodega',
+		hire_date: '2026-07-01'
 	});
 	const snapshot = JSON.parse(String(row.settings_snapshot));
 	expect(snapshot.PAYROLL_OVERTIME_DAY_FACTOR).toBe('125');
