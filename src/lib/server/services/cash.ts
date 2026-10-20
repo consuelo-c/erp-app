@@ -2,8 +2,12 @@
 // another movement with the same concept and link, the opposite sign and `reverses_id`.
 
 import { z } from 'zod';
-import type { Actor } from '../actor';
+import { getMonthRange, getTodaysDate } from '$lib/datetime';
+import { requireRole, type Actor } from '../actor';
 import { auditedInsert } from '../audit';
+
+// The cash book, its receipts and every movement recorded by hand.
+const MANAGES_CASH = ['ADMIN', 'MANAGER'] as const;
 
 export const CASH_CONCEPTS = [
 	'INSTALLMENT',
@@ -78,4 +82,190 @@ export function movementStatements(
 		values: { ...columns, attributes: JSON.stringify(attributes) },
 		computed: { receipt_number: { sql: NEXT_RECEIPT_NUMBER, params: [isInflow] } }
 	});
+}
+
+export const DIRECTIONS = ['IN', 'OUT'] as const;
+
+// Filters come from the URL: an empty or tampered value is ignored, not an error.
+function optional<T extends z.ZodType>(schema: T) {
+	return z
+		.preprocess((value) => ('' === value || null === value ? undefined : value), schema.optional())
+		.catch(undefined);
+}
+
+// Pesos as people type them, $45.000: only the digits count.
+const pesosSchema = z
+	.string()
+	.transform((value) => value.replace(/\D/g, ''))
+	.pipe(z.string().min(1))
+	.transform(Number);
+
+const cashBookFiltersSchema = z.object({
+	from: optional(z.iso.date()),
+	to: optional(z.iso.date()),
+	concept: optional(z.enum(CASH_CONCEPTS)),
+	method: optional(z.enum(PAYMENT_METHODS)),
+	direction: optional(z.enum(DIRECTIONS)),
+	employee: optional(z.string().trim().min(1)),
+	min: optional(pesosSchema),
+	max: optional(pesosSchema),
+	text: optional(z.string().trim().min(1))
+});
+
+/** What the cash book is narrowed by; the period always has both ends, this month by default. */
+export type CashBookFilters = z.infer<typeof cashBookFiltersSchema> & { from: string; to: string };
+
+export type CashBookEntry = {
+	id: number;
+	movementDate: string;
+	concept: CashConcept;
+	amount: number;
+	method: PaymentMethod;
+	/** The link: the payroll week a PAYROLL movement pays and to whom, or a standalone one's payee. */
+	weekNumber: number | null;
+	employeeName: string | null;
+	payee: string | null;
+	description: string | null;
+	recordedBy: string;
+	/** When it was recorded, epoch seconds: the book shows its time under the date. */
+	recordedAt: number;
+	receiptNumber: number;
+};
+
+/** The filtered period's money in and out, as positive pesos, and their difference. */
+export type CashBookTotals = { inflow: number; outflow: number; net: number };
+
+type Clause = { sql: string; params: (string | number)[] };
+
+// A LIKE pattern for typed text: its own % and _ match themselves.
+function containing(text: string): string {
+	return `%${text.replace(/[\\%_]/g, '\\$&')}%`;
+}
+
+// Free text over who was paid or paid us, the description and the notes.
+function textClause(pattern: string): Clause {
+	const columns = [
+		'cash_movements.payee',
+		"json_extract(cash_movements.attributes, '$.description')",
+		"json_extract(cash_movements.attributes, '$.notes')"
+	];
+	return {
+		sql: columns.map((column) => `${column} like ? escape '\\'`).join(' or '),
+		params: columns.map(() => pattern)
+	};
+}
+
+// The movements paying an employee whose name contains the text: a subquery, not a join.
+function employeeClause(pattern: string): Clause {
+	return {
+		sql: `cash_movements.entity_type = 'PAYROLL_RUN' and cash_movements.entity_id in (
+			select payroll_runs.id from payroll_runs join employees on employees.id = payroll_runs.employee_id
+			where employees.full_name like ? escape '\\')`,
+		params: [pattern]
+	};
+}
+
+// One clause per filter, each narrowing on its own. No joins: the totals stay one SUM over the table.
+const CLAUSES: ((filters: CashBookFilters) => Clause | null)[] = [
+	({ from, to }) => ({ sql: 'cash_movements.movement_date between ? and ?', params: [from, to] }),
+	({ concept }) => (concept ? { sql: 'cash_movements.concept = ?', params: [concept] } : null),
+	({ method }) => (method ? { sql: 'cash_movements.payment_method = ?', params: [method] } : null),
+	({ direction }) => {
+		if (undefined === direction) {
+			return null;
+		}
+		return { sql: `cash_movements.amount ${'IN' === direction ? '>' : '<'} 0`, params: [] };
+	},
+	({ employee }) => (employee ? employeeClause(containing(employee)) : null),
+	({ min }) =>
+		undefined === min ? null : { sql: 'abs(cash_movements.amount) >= ?', params: [min] },
+	({ max }) =>
+		undefined === max ? null : { sql: 'abs(cash_movements.amount) <= ?', params: [max] },
+	({ text }) => (text ? textClause(containing(text)) : null)
+];
+
+function whereClause(filters: CashBookFilters): Clause {
+	const clauses = CLAUSES.map((clause) => clause(filters)).filter((clause) => null !== clause);
+	return {
+		sql: clauses.map((clause) => `(${clause.sql})`).join(' and '),
+		params: clauses.flatMap((clause) => clause.params)
+	};
+}
+
+type EntryRow = {
+	id: number;
+	movement_date: string;
+	concept: CashConcept;
+	amount: number;
+	payment_method: PaymentMethod;
+	payee: string | null;
+	attributes: string;
+	receipt_number: number;
+	created_by: string;
+	created_at: number;
+	week_number: number | null;
+	full_name: string | null;
+};
+
+function toEntry(row: EntryRow): CashBookEntry {
+	return {
+		id: row.id,
+		movementDate: row.movement_date,
+		concept: row.concept,
+		amount: row.amount,
+		method: row.payment_method,
+		weekNumber: row.week_number,
+		employeeName: row.full_name,
+		payee: row.payee,
+		description: movementAttributesSchema.parse(JSON.parse(row.attributes)).description ?? null,
+		recordedBy: row.created_by,
+		recordedAt: row.created_at,
+		receiptNumber: row.receipt_number
+	};
+}
+
+async function listEntries(db: D1Database, where: Clause): Promise<CashBookEntry[]> {
+	const { results } = await db
+		.prepare(
+			`select cash_movements.id, cash_movements.movement_date, cash_movements.concept, cash_movements.amount,
+				cash_movements.payment_method, cash_movements.payee, cash_movements.attributes,
+				cash_movements.receipt_number, cash_movements.created_by, cash_movements.created_at,
+				payroll_runs.week_number, employees.full_name
+			from cash_movements
+			left join payroll_runs on cash_movements.entity_type = 'PAYROLL_RUN' and payroll_runs.id = cash_movements.entity_id
+			left join employees on employees.id = payroll_runs.employee_id
+			where ${where.sql}
+			order by cash_movements.movement_date desc, cash_movements.id desc`
+		)
+		.bind(...where.params)
+		.all<EntryRow>();
+	return results.map(toEntry);
+}
+
+// The period's net, not a cash balance: it mixes cash with transfers. One SUM, no join.
+async function sumTotals(db: D1Database, where: Clause): Promise<CashBookTotals> {
+	const totals = await db
+		.prepare(
+			`select coalesce(sum(max(amount, 0)), 0) as inflow, coalesce(-sum(min(amount, 0)), 0) as outflow,
+				coalesce(sum(amount), 0) as net
+			from cash_movements where ${where.sql}`
+		)
+		.bind(...where.params)
+		.first<CashBookTotals>();
+	return totals!;
+}
+
+/** Every movement the filters let through, newest first, and the period's three totals. */
+export async function getCashBook(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<{ filters: CashBookFilters; entries: CashBookEntry[]; totals: CashBookTotals }> {
+	requireRole(actor, MANAGES_CASH);
+	const month = getMonthRange(getTodaysDate());
+	const parsed = cashBookFiltersSchema.parse(input ?? {});
+	const filters = { ...parsed, from: parsed.from ?? month.start, to: parsed.to ?? month.end };
+	const where = whereClause(filters);
+	const [entries, totals] = await Promise.all([listEntries(db, where), sumTotals(db, where)]);
+	return { filters, entries, totals };
 }

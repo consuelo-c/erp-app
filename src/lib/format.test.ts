@@ -1,5 +1,11 @@
 import { expect, test } from 'vitest';
-import { formatHours, formatIdNumber, formatPesos, formatReceiptNumber } from './format';
+import {
+	formatHours,
+	formatIdNumber,
+	formatPesos,
+	formatReceiptNumber,
+	formatSignedPesos
+} from './format';
 
 test('pesos and ID numbers get a dot every three digits', () => {
 	expect(formatPesos(1423500)).toBe('$1.423.500');
@@ -15,4 +21,9 @@ test('worked minutes read as hours with one decimal', () => {
 test('receipt numbers print with four digits and grow past them', () => {
 	expect(formatReceiptNumber(89)).toBe('0089');
 	expect(formatReceiptNumber(12345)).toBe('12345');
+});
+
+test('a movement shows its sign: plus in, a minus sign out', () => {
+	expect(formatSignedPesos(680000)).toBe('+$680.000');
+	expect(formatSignedPesos(-222000)).toBe('−$222.000');
 });

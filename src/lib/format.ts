@@ -6,6 +6,11 @@ export function formatPesos(pesos: number): string {
 	return `$${grouped.format(pesos)}`;
 }
 
+/** A movement's pesos with its direction: `+$680.000` in, `−$222.000` out (a minus sign, not a hyphen). */
+export function formatSignedPesos(pesos: number): string {
+	return `${pesos < 0 ? '−' : '+'}${formatPesos(Math.abs(pesos))}`;
+}
+
 /** A whole number with its thousands grouped, the way people type it: `1.750.905`. */
 export function formatInteger(value: number): string {
 	return grouped.format(value);

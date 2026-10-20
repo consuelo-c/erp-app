@@ -49,6 +49,14 @@ export function formatInstant(epochSeconds: number): string {
 	return `${date}, ${formatTime(part('hour'), part('minute'))}`;
 }
 
+/** The Bogotá time of a UTC instant (epoch seconds): `3:30 p.m.`. */
+export function formatInstantTime(epochSeconds: number): string {
+	const parts = instantPartsFormat.formatToParts(new Date(epochSeconds * 1000));
+	const part = (type: Intl.DateTimeFormatPartTypes) =>
+		Number(parts.find((candidate) => type === candidate.type)?.value);
+	return formatTime(part('hour'), part('minute'));
+}
+
 function formatTime(hour: number, minute: number): string {
 	const period = hour < 12 ? 'a.m.' : 'p.m.';
 	return `${hour % 12 || 12}:${String(minute).padStart(2, '0')} ${period}`;
@@ -123,6 +131,14 @@ export function addDays(date: string, days: number): string {
 	return `${moved.getUTCFullYear()}-${month}-${day}`;
 }
 
+/** The first and last civil dates of `date`'s month. */
+export function getMonthRange(date: string): { start: string; end: string } {
+	const start = `${date.slice(0, 7)}-01`;
+	// 31 days past the 1st always lands in the next month, whatever this one's length.
+	const nextMonth = `${addDays(start, 31).slice(0, 7)}-01`;
+	return { start, end: addDays(nextMonth, -1) };
+}
+
 /** The Monday of `date`'s week: weeks run Monday to Sunday. */
 export function getWeekStart(date: string): string {
 	const daysSinceMonday = (toUtcDate(date).getUTCDay() + 6) % 7;
@@ -152,6 +168,16 @@ export function formatLongDay(date: string): string {
 /** Two civil dates as `27 jul – 1 ago`. */
 export function formatDayRange(start: string, end: string): string {
 	return `${formatDayAndMonth(start)} – ${formatDayAndMonth(end)}`;
+}
+
+/** A filtered period: `1 – 31 oct 2026` within a month, `28 sep – 3 oct 2026` across two. */
+export function formatPeriod(start: string, end: string): string {
+	const endYear = end.slice(0, 4);
+	if (start.slice(0, 7) === end.slice(0, 7)) {
+		return `${Number(start.slice(8))} – ${formatDayAndMonth(end)} ${endYear}`;
+	}
+	const startYear = start.slice(0, 4) === endYear ? '' : ` ${start.slice(0, 4)}`;
+	return `${formatDayAndMonth(start)}${startYear} – ${formatDayAndMonth(end)} ${endYear}`;
 }
 
 /** A Monday-to-Sunday week as `27 jul – 2 ago`. */

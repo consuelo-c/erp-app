@@ -1,6 +1,7 @@
 <script lang="ts">
 	// Sibling views of one section, in place of the screen title. Each tab is a page of its own.
-	type Tab = { label: string; href: string };
+	// `shortLabel` is what a phone shows when the full label doesn't fit beside the header's actions.
+	type Tab = { label: string; shortLabel?: string; href: string };
 
 	let { tabs, current }: { tabs: Tab[]; current: string } = $props();
 </script>
@@ -9,7 +10,12 @@
 	{#each tabs as tab (tab.href)}
 		<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- the caller passes an href built with resolve() -->
 		<a class="tabs__item" href={tab.href} aria-current={current === tab.label ? 'page' : undefined}>
-			{tab.label}
+			{#if tab.shortLabel}
+				<span class="tabs__label--short">{tab.shortLabel}</span>
+				<span class="tabs__label--full">{tab.label}</span>
+			{:else}
+				{tab.label}
+			{/if}
 		</a>
 	{/each}
 </nav>
@@ -42,5 +48,19 @@
 	.tabs__item[aria-current='page'] {
 		color: var(--text-body);
 		border-bottom-color: var(--border-strong);
+	}
+
+	.tabs__label--full {
+		display: none;
+	}
+
+	@container (width >= 1024px) {
+		.tabs__label--short {
+			display: none;
+		}
+
+		.tabs__label--full {
+			display: inline;
+		}
 	}
 </style>

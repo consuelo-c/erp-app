@@ -21,6 +21,7 @@
 		| 'back'
 		| 'package'
 		| 'banknote'
+		| 'wallet'
 		| 'users'
 		| 'help'
 		| 'info'
