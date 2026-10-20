@@ -159,7 +159,6 @@ export type Payment = {
 	employeeName: string;
 	employeeIdNumber: string;
 	employeePosition: string | null;
-	employeeHireDate: string | null;
 	preparedBy: string;
 };
 
@@ -549,7 +548,6 @@ async function findPayment(db: D1Database, row: RunRow): Promise<Payment | null>
 		employeeName: employee.full_name,
 		employeeIdNumber: employee.id_number,
 		employeePosition: employee.position,
-		employeeHireDate: employee.hire_date,
 		preparedBy: String(row.prepared_by)
 	};
 }

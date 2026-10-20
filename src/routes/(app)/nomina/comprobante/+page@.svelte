@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import Button from '$lib/components/Button.svelte';
-	import { formatCivilDate, formatLongDay, formatShortDay } from '$lib/datetime';
+	import { formatLongDay, formatShortDay } from '$lib/datetime';
 	import { formatIdNumber, formatPesos } from '$lib/format';
 	import { DEDUCTION_LABELS, EARNING_LABELS } from '$lib/labels';
 	import type { PageProps } from './$types';
@@ -61,10 +61,6 @@
 				<span>Cédula</span><span>{formatIdNumber(payment.employeeIdNumber)}</span>
 			</div>
 			<div class="print-row"><span>Cargo</span><span>{payment.employeePosition ?? '—'}</span></div>
-			<div class="print-row">
-				<span>Fecha de ingreso</span>
-				<span>{payment.employeeHireDate ? formatCivilDate(payment.employeeHireDate) : '—'}</span>
-			</div>
 		</div>
 
 		<div class="print-group">
@@ -162,7 +158,7 @@
 		flex-direction: column;
 		width: var(--print-sheet-w);
 		height: var(--print-sheet-h);
-		padding: 28px 26px;
+		padding: 22px 26px;
 		font: var(--weight-regular) var(--print-base) / 1.35 var(--font-sans);
 		color: var(--text-body);
 		background: var(--neutral-0);
@@ -234,7 +230,7 @@
 	}
 
 	.print-table th {
-		padding: var(--space-2) 5px;
+		padding: 3px 5px;
 		font-size: var(--print-xs);
 		font-weight: var(--weight-bold);
 		color: var(--text-secondary);
@@ -243,7 +239,7 @@
 	}
 
 	.print-table td {
-		padding: var(--space-2) 5px;
+		padding: 3px 5px;
 		vertical-align: top;
 		border-bottom: var(--border-w-hair) solid var(--border-default);
 	}
