@@ -76,9 +76,6 @@ const DEDUCTION_CONCEPTS = [
 	'OTHER'
 ] as const satisfies readonly DeductionConcept[];
 
-// A new draft's typed-in days: six worked, Sunday's rest, and the allowance for the six.
-const DEFAULT_DAYS = { DAYS_WORKED: 6, SUNDAY_REST: 1, TRANSPORT_ALLOWANCE: 6 };
-
 // Hours rows are whole minutes, kept as hours: shown with two decimals, which map back to the
 // exact minute, so an untouched row never reads as corrected.
 const MINUTES_PER_HOUR = 60;
@@ -336,9 +333,22 @@ function readEntries(row: RunRow, derived: Record<HourConcept, number>): Entries
 	};
 }
 
-function newEntries(derived: Record<HourConcept, number>): Entries {
+// The period's days inside an employment period: six unless hired or gone mid-week.
+function countDaysEmployed(employee: Employee, { periodStart }: Period): number {
+	const dates = Array.from({ length: DAYS_PER_PERIOD }, (_, index) => addDays(periodStart, index));
+	return dates.filter((date) =>
+		employee.employment.some(
+			(each) => each.start <= date && (null === each.end || date <= each.end)
+		)
+	).length;
+}
+
+// A new draft's typed-in days: the days employed, Sunday's rest, and the allowance for those days.
+function newEntries({ employee, derived }: Context, period: Period): Entries {
+	const daysEmployed = countDaysEmployed(employee, period);
+	const days = { DAYS_WORKED: daysEmployed, SUNDAY_REST: 1, TRANSPORT_ALLOWANCE: daysEmployed };
 	return {
-		quantities: { ...DEFAULT_DAYS, ...derived },
+		quantities: { ...days, ...derived },
 		nonSalaryBonus: 0,
 		loans: 0,
 		other: 0,
@@ -482,7 +492,7 @@ async function buildDraft(db: D1Database, employee: Employee, period: Period): P
 		employeeBankAccount: employee.bankAccount
 	};
 	if (null === row) {
-		const run = calculate(newEntries(context.derived), context);
+		const run = calculate(newEntries(context, period), context);
 		const proposed = { weekNumber: proposal.weekNumber, paymentDate: period.periodEnd };
 		const fresh = { status: 'DRAFT', isSaved: false, payment: null } as const;
 		return toDraft(run, { ...details, ...proposed, ...fresh }, settings);
