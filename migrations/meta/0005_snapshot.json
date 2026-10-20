@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "aa192308-f6e7-4544-956e-980420b0d423",
+  "id": "0d620067-e8b8-4036-b5e7-dac6220a7d32",
   "prevId": "89c15e6c-e0f1-4ec8-82fb-57aac038e925",
   "tables": {
     "cash_movements": {
@@ -42,8 +42,15 @@
           "notNull": true,
           "autoincrement": false
         },
-        "payroll_run_id": {
-          "name": "payroll_run_id",
+        "entity_type": {
+          "name": "entity_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "entity_id": {
+          "name": "entity_id",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
@@ -56,19 +63,13 @@
           "notNull": false,
           "autoincrement": false
         },
-        "bank_account": {
-          "name": "bank_account",
+        "attributes": {
+          "name": "attributes",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "notes": {
-          "name": "notes",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'{}'"
         },
         "created_at": {
           "name": "created_at",
@@ -100,35 +101,26 @@
         }
       },
       "indexes": {
-        "cash_movements_payroll_run_id": {
-          "name": "cash_movements_payroll_run_id",
+        "cash_movements_entity": {
+          "name": "cash_movements_entity",
           "columns": [
-            "payroll_run_id"
+            "entity_type",
+            "entity_id"
           ],
           "isUnique": false
         }
       },
-      "foreignKeys": {
-        "cash_movements_payroll_run_id_payroll_runs_id_fk": {
-          "name": "cash_movements_payroll_run_id_payroll_runs_id_fk",
-          "tableFrom": "cash_movements",
-          "tableTo": "payroll_runs",
-          "columnsFrom": [
-            "payroll_run_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {
-        "cash_movements_concept": {
-          "name": "cash_movements_concept",
-          "value": "\"cash_movements\".\"concept\" IN ('INSTALLMENT', 'SECURITY_DEPOSIT', 'INSTALLMENT_REFUND', 'DEPOSIT_REFUND', 'PAYROLL', 'CARRIER_PAYMENT', 'OTHER_EXPENSE')"
+        "cash_movements_entity_pair": {
+          "name": "cash_movements_entity_pair",
+          "value": "(\"cash_movements\".\"entity_type\" IS NULL) = (\"cash_movements\".\"entity_id\" IS NULL)"
+        },
+        "cash_movements_concept_link": {
+          "name": "cash_movements_concept_link",
+          "value": "CASE\n\t\t\t\tWHEN \"cash_movements\".\"concept\" IN ('INSTALLMENT', 'SECURITY_DEPOSIT') THEN \"cash_movements\".\"entity_type\" IS 'ORDER' AND \"cash_movements\".\"amount\" > 0\n\t\t\t\tWHEN \"cash_movements\".\"concept\" IN ('INSTALLMENT_REFUND', 'DEPOSIT_REFUND', 'CARRIER_PAYMENT') THEN \"cash_movements\".\"entity_type\" IS 'ORDER' AND \"cash_movements\".\"amount\" < 0\n\t\t\t\tWHEN \"cash_movements\".\"concept\" = 'PAYROLL' THEN \"cash_movements\".\"entity_type\" IS 'PAYROLL_RUN' AND \"cash_movements\".\"amount\" < 0\n\t\t\t\tWHEN \"cash_movements\".\"concept\" = 'OTHER_EXPENSE' THEN \"cash_movements\".\"entity_type\" IS NULL AND \"cash_movements\".\"amount\" < 0\n\t\t\t\tELSE 0\n\t\t\tEND"
         },
         "cash_movements_payment_method": {
           "name": "cash_movements_payment_method",

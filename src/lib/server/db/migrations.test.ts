@@ -81,6 +81,40 @@ test('employees: id_number is required and unique, attributes defaults to {}, no
 	expect(listColumns('employees')).not.toContain('active');
 });
 
+function insertMovement(concept: string, amount: number, entityType: string | null) {
+	const entityId = null === entityType ? 'null' : '1';
+	const type = null === entityType ? 'null' : `'${entityType}'`;
+	database.exec(
+		`insert into cash_movements (concept, payment_method, amount, movement_date, entity_type, entity_id, created_at, created_by, updated_at, updated_by) values ('${concept}', 'CASH', ${amount}, '2026-10-17', ${type}, ${entityId}, ${AUDIT})`
+	);
+}
+
+test('cash_movements has no link columns: it links by entity_type + entity_id', () => {
+	expect(listColumns('cash_movements')).not.toContain('order_id');
+	expect(listColumns('cash_movements')).not.toContain('payroll_run_id');
+	expect(listColumns('cash_movements')).toEqual(
+		expect.arrayContaining(['entity_type', 'entity_id'])
+	);
+});
+
+test("cash_movements: each concept takes its entity_type and its amount's sign", () => {
+	insertMovement('PAYROLL', -100, 'PAYROLL_RUN');
+	insertMovement('INSTALLMENT', 100, 'ORDER');
+	insertMovement('OTHER_EXPENSE', -100, null);
+	expect(database.prepare('select attributes from cash_movements').get()?.attributes).toBe('{}');
+	expect(() => insertMovement('PAYROLL', -100, null)).toThrow(/CHECK/);
+	expect(() => insertMovement('PAYROLL', -100, 'ORDER')).toThrow(/CHECK/);
+	expect(() => insertMovement('INSTALLMENT', 100, null)).toThrow(/CHECK/);
+	expect(() => insertMovement('INSTALLMENT_REFUND', 100, 'ORDER')).toThrow(/CHECK/);
+	expect(() => insertMovement('OTHER_EXPENSE', -100, 'ORDER')).toThrow(/CHECK/);
+	expect(() => insertMovement('BOGUS', -100, null)).toThrow(/CHECK/);
+	expect(() =>
+		database.exec(
+			`insert into cash_movements (concept, payment_method, amount, movement_date, entity_type, created_at, created_by, updated_at, updated_by) values ('PAYROLL', 'CASH', -100, '2026-10-17', 'PAYROLL_RUN', ${AUDIT})`
+		)
+	).toThrow(/CHECK/);
+});
+
 test('users, employees and sessions carry the audit columns', () => {
 	const audit = ['created_at', 'created_by', 'updated_at', 'updated_by'];
 	for (const table of ['users', 'employees', 'sessions']) {
