@@ -431,7 +431,6 @@ test('the receipt prints a paid settlement: its snapshot, who prepared it, and t
 		employeeName: 'Ana Pérez',
 		employeeIdNumber: '1036452118',
 		employeePosition: 'Bodega',
-		employeeHireDate: '2026-07-01',
 		preparedBy: 'gerente'
 	});
 	expect(receipt.company.COMPANY_NAME).toBe('Banquetes Consuelo C');
