@@ -20,3 +20,8 @@ export function formatIdNumber(digits: string): string {
 export function formatHours(minutes: number): string {
 	return `${(minutes / 60).toFixed(1)} h`;
 }
+
+/** A receipt's consecutive with at least four digits: `0089`; past them it just grows, `12345`. */
+export function formatReceiptNumber(receiptNumber: number): string {
+	return String(receiptNumber).padStart(4, '0');
+}

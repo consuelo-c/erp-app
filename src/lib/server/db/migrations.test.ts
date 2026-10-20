@@ -81,12 +81,25 @@ test('employees: id_number is required and unique, attributes defaults to {}, no
 	expect(listColumns('employees')).not.toContain('active');
 });
 
-function insertMovement(concept: string, amount: number, entityType: string | null) {
-	const entityId = null === entityType ? 'null' : '1';
-	const type = null === entityType ? 'null' : `'${entityType}'`;
-	database.exec(
-		`insert into cash_movements (concept, payment_method, amount, movement_date, entity_type, entity_id, created_at, created_by, updated_at, updated_by) values ('${concept}', 'CASH', ${amount}, '2026-10-17', ${type}, ${entityId}, ${AUDIT})`
-	);
+type MovementInsert = {
+	concept: string;
+	amount: number;
+	entityType?: string | null;
+	reversesId?: number | null;
+};
+
+let receiptNumber = 0;
+
+// Each row gets a receipt number of its own, so only the CHECK under test can refuse it.
+function insertMovement({ concept, amount, entityType = null, reversesId = null }: MovementInsert) {
+	receiptNumber += 1;
+	const columns =
+		'concept, payment_method, amount, movement_date, entity_type, entity_id, receipt_number, reverses_id, created_at, created_by, updated_at, updated_by';
+	database
+		.prepare(
+			`insert into cash_movements (${columns}) values (?, 'CASH', ?, '2026-10-17', ?, ?, ?, ?, ${AUDIT})`
+		)
+		.run(concept, amount, entityType, null === entityType ? null : 1, receiptNumber, reversesId);
 }
 
 test('cash_movements has no link columns: it links by entity_type + entity_id', () => {
@@ -97,22 +110,84 @@ test('cash_movements has no link columns: it links by entity_type + entity_id', 
 	);
 });
 
-test("cash_movements: each concept takes its entity_type and its amount's sign", () => {
-	insertMovement('PAYROLL', -100, 'PAYROLL_RUN');
-	insertMovement('INSTALLMENT', 100, 'ORDER');
-	insertMovement('OTHER_EXPENSE', -100, null);
+test("cash_movements: each concept takes its entity_type and its amount's natural sign", () => {
+	insertMovement({ concept: 'PAYROLL', amount: -100, entityType: 'PAYROLL_RUN' });
+	insertMovement({ concept: 'INSTALLMENT', amount: 100, entityType: 'ORDER' });
+	insertMovement({ concept: 'OTHER_EXPENSE', amount: -100 });
+	insertMovement({ concept: 'OTHER_INCOME', amount: 100 });
 	expect(database.prepare('select attributes from cash_movements').get()?.attributes).toBe('{}');
-	expect(() => insertMovement('PAYROLL', -100, null)).toThrow(/CHECK/);
-	expect(() => insertMovement('PAYROLL', -100, 'ORDER')).toThrow(/CHECK/);
-	expect(() => insertMovement('INSTALLMENT', 100, null)).toThrow(/CHECK/);
-	expect(() => insertMovement('INSTALLMENT_REFUND', 100, 'ORDER')).toThrow(/CHECK/);
-	expect(() => insertMovement('OTHER_EXPENSE', -100, 'ORDER')).toThrow(/CHECK/);
-	expect(() => insertMovement('BOGUS', -100, null)).toThrow(/CHECK/);
+	const refused = [
+		{ concept: 'OTHER_EXPENSE', amount: 0 },
+		{ concept: 'OTHER_INCOME', amount: -100 },
+		{ concept: 'OTHER_INCOME', amount: 100, entityType: 'ORDER' },
+		{ concept: 'OTHER_EXPENSE', amount: -100, entityType: 'ORDER' },
+		{ concept: 'PAYROLL', amount: 100, entityType: 'PAYROLL_RUN' },
+		{ concept: 'PAYROLL', amount: -100 },
+		{ concept: 'PAYROLL', amount: -100, entityType: 'ORDER' },
+		{ concept: 'INSTALLMENT', amount: 100 },
+		{ concept: 'INSTALLMENT_REFUND', amount: 100, entityType: 'ORDER' },
+		{ concept: 'BOGUS', amount: -100 }
+	];
+	for (const movement of refused) {
+		expect(() => insertMovement(movement)).toThrow(/CHECK/);
+	}
 	expect(() =>
 		database.exec(
-			`insert into cash_movements (concept, payment_method, amount, movement_date, entity_type, created_at, created_by, updated_at, updated_by) values ('PAYROLL', 'CASH', -100, '2026-10-17', 'PAYROLL_RUN', ${AUDIT})`
+			`insert into cash_movements (concept, payment_method, amount, movement_date, entity_type, receipt_number, created_at, created_by, updated_at, updated_by) values ('PAYROLL', 'CASH', -100, '2026-10-17', 'PAYROLL_RUN', 99, ${AUDIT})`
 		)
 	).toThrow(/CHECK/);
+});
+
+test('an offsetting movement flips the sign: it points at the original with reverses_id', () => {
+	insertMovement({ concept: 'PAYROLL', amount: -100, entityType: 'PAYROLL_RUN' });
+	insertMovement({ concept: 'OTHER_INCOME', amount: 100 });
+	insertMovement({ concept: 'PAYROLL', amount: 100, entityType: 'PAYROLL_RUN', reversesId: 1 });
+	insertMovement({ concept: 'OTHER_INCOME', amount: -100, reversesId: 2 });
+	// A movement is offset at most once.
+	expect(() =>
+		insertMovement({ concept: 'PAYROLL', amount: 100, entityType: 'PAYROLL_RUN', reversesId: 1 })
+	).toThrow(/UNIQUE/);
+	expect(() => insertMovement({ concept: 'OTHER_INCOME', amount: -100, reversesId: 99 })).toThrow(
+		/FOREIGN KEY/
+	);
+});
+
+test('receipt_number is required and unique per sign', () => {
+	const insert = (amount: number, number: number | null) =>
+		database.exec(
+			`insert into cash_movements (concept, payment_method, amount, movement_date, receipt_number, created_at, created_by, updated_at, updated_by) values ('${0 < amount ? 'OTHER_INCOME' : 'OTHER_EXPENSE'}', 'CASH', ${amount}, '2026-10-17', ${number}, ${AUDIT})`
+		);
+	insert(-100, 1);
+	insert(100, 1);
+	expect(() => insert(-50, 1)).toThrow(/UNIQUE/);
+	expect(() => insert(-50, null)).toThrow(/NOT NULL/);
+});
+
+test('rebuilding cash_movements numbers the existing rows in id order, one sequence per sign', () => {
+	const rebuilt = new DatabaseSync(':memory:');
+	const files = readdirSync('migrations')
+		.filter((file) => file.endsWith('.sql'))
+		.sort();
+	const rebuild = files.find((file) => file.startsWith('0005'))!;
+	for (const file of files.filter((earlier) => earlier < rebuild)) {
+		rebuilt.exec(readFileSync(`migrations/${file}`, 'utf8'));
+	}
+	const insert = rebuilt.prepare(
+		`insert into cash_movements (concept, payment_method, amount, movement_date, entity_type, entity_id, created_at, created_by, updated_at, updated_by) values (?, 'CASH', ?, '2026-10-17', ?, ?, ${AUDIT})`
+	);
+	insert.run('PAYROLL', -100, 'PAYROLL_RUN', 1);
+	insert.run('INSTALLMENT', 500, 'ORDER', 7);
+	insert.run('PAYROLL', -200, 'PAYROLL_RUN', 2);
+	rebuilt.exec(readFileSync(`migrations/${rebuild}`, 'utf8'));
+
+	const rows = rebuilt.prepare(
+		'select id, receipt_number, reverses_id from cash_movements order by id'
+	);
+	expect(rows.all().map((row) => ({ ...row }))).toEqual([
+		{ id: 1, receipt_number: 1, reverses_id: null },
+		{ id: 2, receipt_number: 1, reverses_id: null },
+		{ id: 3, receipt_number: 2, reverses_id: null }
+	]);
 });
 
 test('users, employees and sessions carry the audit columns', () => {

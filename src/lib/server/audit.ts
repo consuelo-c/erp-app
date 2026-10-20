@@ -71,15 +71,32 @@ function eventStatement(db: D1Database, event: EventRow) {
 		);
 }
 
+/** Columns whose value a subquery works out inside the same INSERT: no separate read. */
+type Computed = Record<string, { sql: string; params: ColumnValue[] }>;
+
+function insertStatement(
+	db: D1Database,
+	{ table, row, computed }: { table: string; row: Row; computed: Computed }
+): D1PreparedStatement {
+	const subqueries = Object.values(computed);
+	const columns = [...Object.keys(row), ...Object.keys(computed)];
+	assertIdentifiers([table, ...columns]);
+	const values = [...Object.keys(row).map(() => '?'), ...subqueries.map(({ sql }) => `(${sql})`)];
+	return db
+		.prepare(`insert into ${table} (${columns.join(', ')}) values (${values.join(', ')})`)
+		.bind(...Object.values(row), ...subqueries.flatMap(({ params }) => params));
+}
+
 /**
  * Inserts `values` with the four audit columns filled from `actor`, plus its `CREATED` event.
  * `unlogged` columns are inserted but left out of the event: a password hash never reaches `events`.
+ * `computed` columns come from a subquery in the same statement, like a receipt's consecutive.
  * Returns both statements for the caller's `db.batch()`, in this order: the event takes
  * `entity_id` from `last_insert_rowid()`, so it must run right after the insert.
  */
 export function auditedInsert(
 	db: D1Database,
-	write: AuditedWrite & { values: Row; unlogged?: Row }
+	write: AuditedWrite & { values: Row; unlogged?: Row; computed?: Computed }
 ): D1PreparedStatement[] {
 	const now = nowInSeconds();
 	const row = {
@@ -90,13 +107,7 @@ export function auditedInsert(
 		updated_at: now,
 		updated_by: write.actor.username
 	};
-	const columns = Object.keys(row);
-	assertIdentifiers([write.table, ...columns]);
-	const insert = db
-		.prepare(
-			`insert into ${write.table} (${columns.join(', ')}) values (${columns.map(() => '?').join(', ')})`
-		)
-		.bind(...Object.values(row));
+	const insert = insertStatement(db, { table: write.table, row, computed: write.computed ?? {} });
 	const event = {
 		...write,
 		action: 'CREATED',

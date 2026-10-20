@@ -4,6 +4,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
+import { movementStatements } from './cash';
 import { createEmployee, endEmployment, updateEmployee } from './employees';
 import {
 	getReceipt,
@@ -284,6 +285,24 @@ function movements() {
 		)
 		.all();
 }
+
+test('the PAYROLL movement takes the next comprobante de egreso number', async () => {
+	const expense = {
+		concept: 'OTHER_EXPENSE',
+		payment_method: 'CASH',
+		amount: -45000,
+		movement_date: TODAY,
+		entity_type: null,
+		entity_id: null,
+		attributes: { description: 'Compra de jabón' }
+	} as const;
+	await db.batch(movementStatements(db, manager, expense));
+	await recordPayment(db, { ...formOf(await openDraft(), WEEK), ...CASH }, manager);
+	const payroll = database
+		.prepare("select receipt_number from cash_movements where concept = 'PAYROLL'")
+		.get();
+	expect(payroll?.receipt_number).toBe(2);
+});
 
 test('recording the payment marks it PAID and writes its PAYROLL movement, in one action', async () => {
 	const draft = await openDraft();
