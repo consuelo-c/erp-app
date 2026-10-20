@@ -155,7 +155,8 @@ export type Payment = {
 	amount: number;
 	movementDate: string;
 	bankAccount: string | null;
-	notes: string | null;
+	// «¿Cuál medio de pago?», when the method is OTHER.
+	otherMethod: string | null;
 	recordedBy: string;
 	// The snapshot the receipt prints, as it was when the settlement was created.
 	employeeName: string;
@@ -501,12 +502,17 @@ async function buildDraft(db: D1Database, employee: Employee, period: Period): P
 	);
 }
 
+// SQLite validates nothing: the movement's JSON is checked on write and on read.
+const movementAttributesSchema = z.object({
+	bank_account: z.string().min(1).optional(),
+	other_method: z.string().min(1).optional()
+});
+
 type MovementRow = {
 	payment_method: PaymentMethod;
 	amount: number;
 	movement_date: string;
-	bank_account: string | null;
-	notes: string | null;
+	attributes: string;
 	created_by: string;
 };
 
@@ -516,20 +522,21 @@ async function findPayment(db: D1Database, row: RunRow): Promise<Payment | null>
 	}
 	const movement = await db
 		.prepare(
-			`select payment_method, amount, movement_date, bank_account, notes, created_by
-			from cash_movements where payroll_run_id = ? and concept = 'PAYROLL'`
+			`select payment_method, amount, movement_date, attributes, created_by from cash_movements
+			where entity_type = 'PAYROLL_RUN' and entity_id = ? and concept = 'PAYROLL'`
 		)
 		.bind(row.id)
 		.first<MovementRow>();
 	if (null === movement) {
 		throw new Error(`Paid settlement ${row.id} has no PAYROLL movement`);
 	}
+	const attributes = movementAttributesSchema.parse(JSON.parse(movement.attributes));
 	return {
 		method: movement.payment_method,
 		amount: -movement.amount,
 		movementDate: movement.movement_date,
-		bankAccount: movement.bank_account,
-		notes: movement.notes,
+		bankAccount: attributes.bank_account ?? null,
+		otherMethod: attributes.other_method ?? null,
 		recordedBy: movement.created_by,
 		employeeName: String(row.employee_name),
 		employeeIdNumber: String(row.employee_id_number),
@@ -705,10 +712,20 @@ function toMovement(form: PaymentForm, row: RunRow): Row {
 		payment_method: form.payment_method,
 		amount: -Number(row.net_pay),
 		movement_date: String(row.payment_date),
-		payroll_run_id: row.id,
-		bank_account: 'TRANSFER' === form.payment_method ? form.bank_account : null,
-		notes: 'OTHER' === form.payment_method ? form.payment_method_other : null
+		entity_type: 'PAYROLL_RUN',
+		entity_id: row.id,
+		attributes: toMovementAttributes(form)
 	};
+}
+
+// Only the key the method uses: a transfer's account, or which method «Otro» was.
+function toMovementAttributes(form: PaymentForm): string {
+	const attributes = {
+		bank_account: 'TRANSFER' === form.payment_method ? form.bank_account : null,
+		other_method: 'OTHER' === form.payment_method ? form.payment_method_other : null
+	};
+	const present = Object.entries(attributes).filter(([, value]) => null !== value);
+	return JSON.stringify(movementAttributesSchema.parse(Object.fromEntries(present)));
 }
 
 async function writeDraft(db: D1Database, form: SaveForm, actor: Actor): Promise<SaveResult> {

@@ -263,7 +263,7 @@ const CASH = { payment_method: 'CASH' };
 function movements() {
 	return database
 		.prepare(
-			'select concept, payment_method, amount, movement_date, payroll_run_id, bank_account, notes from cash_movements'
+			'select concept, payment_method, amount, movement_date, entity_type, entity_id, attributes from cash_movements'
 		)
 		.all();
 }
@@ -284,9 +284,9 @@ test('recording the payment marks it PAID and writes its PAYROLL movement, in on
 			payment_method: 'CASH',
 			amount: -row.net_pay!,
 			movement_date: TODAY,
-			payroll_run_id: row.id,
-			bank_account: null,
-			notes: null
+			entity_type: 'PAYROLL_RUN',
+			entity_id: row.id,
+			attributes: '{}'
 		}
 	]);
 	const events = database
@@ -342,10 +342,14 @@ test("a transfer keeps a copy of the account, pre-filled from the employee's", a
 	expect(runRow()).toBeUndefined();
 	const otherAccount = { payment_method: 'TRANSFER', bank_account: 'Nequi 300 123 4567' };
 	await recordPayment(db, { ...formOf(draft, WEEK), ...otherAccount }, manager);
-	expect(movements()).toMatchObject([{ bank_account: 'Nequi 300 123 4567', notes: null }]);
+	expect(movements()).toMatchObject([{ attributes: '{"bank_account":"Nequi 300 123 4567"}' }]);
+	expect((await openDraft()).payment).toMatchObject({
+		bankAccount: 'Nequi 300 123 4567',
+		otherMethod: null
+	});
 });
 
-test('with «Otro», recording fails without «¿Cuál medio de pago?», which lands in notes', async () => {
+test('with «Otro», recording fails without «¿Cuál medio de pago?», which lands in attributes', async () => {
 	const draft = await openDraft();
 	const other = { payment_method: 'OTHER', bank_account: 'ignorada' };
 	expect(await recordPayment(db, { ...formOf(draft, WEEK), ...other }, manager)).toMatchObject({
@@ -357,8 +361,9 @@ test('with «Otro», recording fails without «¿Cuál medio de pago?», which l
 		ok: true
 	});
 	expect(movements()).toMatchObject([
-		{ payment_method: 'OTHER', bank_account: null, notes: 'Nequi' }
+		{ payment_method: 'OTHER', attributes: '{"other_method":"Nequi"}' }
 	]);
+	expect((await openDraft()).payment).toMatchObject({ bankAccount: null, otherMethod: 'Nequi' });
 });
 
 test('the employee picked earlier is kept if they worked the period, or the first one shows', async () => {

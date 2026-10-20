@@ -140,7 +140,8 @@ export const payrollRuns = sqliteTable(
 
 // All the company's money: the sign is the direction (+ in, − out). Immutable by rule, not by
 // schema: no route edits or deletes a movement, a mistake is corrected with an offsetting one.
-// `order_id` arrives with `orders` in Phase 08.
+// Linked like `events`, by entity_type + entity_id with no foreign key, so a new business line
+// never adds a column here: the per-concept CHECK fixes the entity_type and the sign instead.
 export const cashMovements = sqliteTable(
 	'cash_movements',
 	{
@@ -149,17 +150,28 @@ export const cashMovements = sqliteTable(
 		paymentMethod: text('payment_method').notNull(),
 		amount: integer('amount').notNull(), // whole pesos, negative is an outflow
 		movementDate: text('movement_date').notNull(), // YYYY-MM-DD
-		payrollRunId: integer('payroll_run_id').references(() => payrollRuns.id),
+		entityType: text('entity_type'), // 'ORDER' | 'PAYROLL_RUN'
+		entityId: integer('entity_id'),
 		payee: text('payee'), // a third party: carrier, supplier
-		bankAccount: text('bank_account'), // outflows by transfer: where the money went
-		notes: text('notes'),
+		attributes: text('attributes').notNull().default('{}'), // JSON, validated with Zod
 		...auditColumns
 	},
 	(table) => [
-		index('cash_movements_payroll_run_id').on(table.payrollRunId),
+		index('cash_movements_entity').on(table.entityType, table.entityId),
 		check(
-			'cash_movements_concept',
-			sql`${table.concept} IN ('INSTALLMENT', 'SECURITY_DEPOSIT', 'INSTALLMENT_REFUND', 'DEPOSIT_REFUND', 'PAYROLL', 'CARRIER_PAYMENT', 'OTHER_EXPENSE')`
+			'cash_movements_entity_pair',
+			sql`(${table.entityType} IS NULL) = (${table.entityId} IS NULL)`
+		),
+		// `IS`, not `=`: a CHECK passes when it evaluates to NULL. `ELSE 0` also refuses an unknown concept.
+		check(
+			'cash_movements_concept_link',
+			sql`CASE
+				WHEN ${table.concept} IN ('INSTALLMENT', 'SECURITY_DEPOSIT') THEN ${table.entityType} IS 'ORDER' AND ${table.amount} > 0
+				WHEN ${table.concept} IN ('INSTALLMENT_REFUND', 'DEPOSIT_REFUND', 'CARRIER_PAYMENT') THEN ${table.entityType} IS 'ORDER' AND ${table.amount} < 0
+				WHEN ${table.concept} = 'PAYROLL' THEN ${table.entityType} IS 'PAYROLL_RUN' AND ${table.amount} < 0
+				WHEN ${table.concept} = 'OTHER_EXPENSE' THEN ${table.entityType} IS NULL AND ${table.amount} < 0
+				ELSE 0
+			END`
 		),
 		check(
 			'cash_movements_payment_method',

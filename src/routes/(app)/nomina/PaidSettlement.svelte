@@ -128,7 +128,11 @@
 <ul class="detail-list">
 	<li>
 		<span>Medio de pago</span>
-		<span>{PAYMENT_METHOD_LABELS[payment.method]}{payment.notes ? ` — ${payment.notes}` : ''}</span>
+		<span
+			>{PAYMENT_METHOD_LABELS[payment.method]}{payment.otherMethod
+				? ` — ${payment.otherMethod}`
+				: ''}</span
+		>
 	</li>
 	{#if payment.bankAccount}
 		<li><span>Cuenta</span><span>{payment.bankAccount}</span></li>
