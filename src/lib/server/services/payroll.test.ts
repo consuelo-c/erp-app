@@ -138,6 +138,21 @@ test('a new draft comes pre-filled: six days, Sunday rest, the hours log, and no
 	expect(draft.totalEarnings).toBe(amounts);
 });
 
+test('a new draft only counts the days employed: hired or gone mid-week', async () => {
+	const hiredId = await hire('Luis Gómez', '71384902', '2026-10-15'); // Thursday
+	const goneId = await hire('Pedro Ruiz', '98765432', '2026-07-01');
+	await endEmployment(db, { id: String(goneId), end: '2026-10-13' }, manager); // Tuesday
+	for (const [employeeId, days] of [
+		[hiredId, 3],
+		[goneId, 2]
+	]) {
+		const { draft } = await open(WEEK, employeeId);
+		expect(line(draft!, 'DAYS_WORKED').qty).toBe(days);
+		expect(line(draft!, 'TRANSPORT_ALLOWANCE').qty).toBe(days);
+		expect(line(draft!, 'SUNDAY_REST').qty).toBe(1);
+	}
+});
+
 test("a week's own Saturday and Sunday hours go to the next week's settlement", async () => {
 	punch('2026-10-10', '07:00', '12:00', '13:00', '16:00'); // Saturday the 10th: 1 h overtime
 	expect(line(await openDraft(PREVIOUS_WEEK), 'OVERTIME_DAY').qty).toBe(0);
