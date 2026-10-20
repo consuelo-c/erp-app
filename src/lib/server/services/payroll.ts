@@ -22,6 +22,13 @@ import {
 	type PayrollParameters,
 	type QuantityConcept
 } from '$lib/payroll';
+import {
+	movementAttributesSchema,
+	movementStatements,
+	PAYMENT_METHODS,
+	type Movement,
+	type PaymentMethod
+} from './cash';
 import { getEmployee, listEmployees, type Employee } from './employees';
 import { readSettings, type SettingValues } from './settings';
 
@@ -508,12 +515,6 @@ async function buildDraft(db: D1Database, employee: Employee, period: Period): P
 	);
 }
 
-// SQLite validates nothing: the movement's JSON is checked on write and on read.
-const movementAttributesSchema = z.object({
-	bank_account: z.string().min(1).optional(),
-	other_method: z.string().min(1).optional()
-});
-
 type MovementRow = {
 	payment_method: PaymentMethod;
 	amount: number;
@@ -612,9 +613,6 @@ const OTHER_DESCRIBED = {
 };
 const saveSchema = z.object(draftShape).refine(OTHER_DESCRIBED.check, OTHER_DESCRIBED.params);
 type SaveForm = z.infer<typeof saveSchema> & Record<QuantityConcept, number>;
-
-export const PAYMENT_METHODS = ['CASH', 'TRANSFER', 'OTHER'] as const;
-export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 // The draft as typed plus how it's paid: a transfer names the account, «Otro» says which method.
 const paymentSchema = z
@@ -727,12 +725,11 @@ function payStatements(
 		changes: { status: 'PAID' },
 		action: 'PAID'
 	});
-	const movement = { table: 'cash_movements', entityType: 'CASH_MOVEMENT', actor };
-	return [...paid, ...auditedInsert(db, { ...movement, values: toMovement(form, row) })];
+	return [...paid, ...movementStatements(db, actor, toMovement(form, row))];
 }
 
 // The outflow: the net pay leaves on the payment date, to the account a transfer names.
-function toMovement(form: PaymentForm, row: RunRow): Row {
+function toMovement(form: PaymentForm, row: RunRow): Movement {
 	return {
 		concept: 'PAYROLL',
 		payment_method: form.payment_method,
@@ -745,13 +742,12 @@ function toMovement(form: PaymentForm, row: RunRow): Row {
 }
 
 // Only the key the method uses: a transfer's account, or which method «Otro» was.
-function toMovementAttributes(form: PaymentForm): string {
+function toMovementAttributes(form: PaymentForm): Movement['attributes'] {
 	const attributes = {
 		bank_account: 'TRANSFER' === form.payment_method ? form.bank_account : null,
 		other_method: 'OTHER' === form.payment_method ? form.payment_method_other : null
 	};
-	const present = Object.entries(attributes).filter(([, value]) => null !== value);
-	return JSON.stringify(movementAttributesSchema.parse(Object.fromEntries(present)));
+	return Object.fromEntries(Object.entries(attributes).filter(([, value]) => null !== value));
 }
 
 async function writeDraft(db: D1Database, form: SaveForm, actor: Actor): Promise<SaveResult> {

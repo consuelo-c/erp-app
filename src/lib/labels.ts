@@ -2,7 +2,7 @@
 
 import type { Role } from './server/actor';
 import type { DeductionConcept, EarningConcept } from './payroll';
-import type { PaymentMethod } from './server/services/payroll';
+import type { CashConcept, PaymentMethod } from './server/services/cash';
 import type { Punch } from './server/services/timesheets';
 
 export const ROLE_LABELS: Record<Role, string> = {
@@ -24,13 +24,14 @@ export const ORDER_STATUS_LABELS = {
 	CANCELLED: 'Cancelado'
 };
 
-export const CASH_CONCEPT_LABELS = {
+export const CASH_CONCEPT_LABELS: Record<CashConcept, string> = {
 	INSTALLMENT: 'Abono',
 	SECURITY_DEPOSIT: 'Depósito de garantía',
 	INSTALLMENT_REFUND: 'Devolución de abono',
 	DEPOSIT_REFUND: 'Devolución de depósito',
 	PAYROLL: 'Pago de nómina',
 	CARRIER_PAYMENT: 'Pago a transportador',
+	OTHER_INCOME: 'Otro ingreso',
 	OTHER_EXPENSE: 'Otro egreso'
 };
 
