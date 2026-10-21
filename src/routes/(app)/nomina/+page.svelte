@@ -499,29 +499,6 @@
 		font: var(--type-net);
 	}
 
-	.detail-list {
-		padding: 0;
-		margin: 0;
-		list-style: none;
-		border-top: var(--border-w-strong) solid var(--border-strong);
-	}
-
-	.detail-list > li {
-		box-sizing: border-box;
-		display: flex;
-		gap: var(--space-6);
-		align-items: center;
-		justify-content: space-between;
-		min-height: var(--tap-min);
-		font-size: var(--text-base);
-		border-bottom: var(--border-w-hair) solid var(--border-default);
-	}
-
-	.detail-list > li > :last-child {
-		font-weight: var(--weight-semibold);
-		text-align: right;
-	}
-
 	@container (width >= 1024px) {
 		.payroll__actions {
 			flex-direction: row;

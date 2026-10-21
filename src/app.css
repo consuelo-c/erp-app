@@ -247,6 +247,35 @@ a:hover {
 	overflow-x: auto;
 }
 
+/* Label and value rows: a detail's facts. */
+.detail-list {
+	padding: 0;
+	margin: 0;
+	list-style: none;
+	border-top: var(--border-w-strong) solid var(--border-strong);
+}
+
+.detail-list > li {
+	box-sizing: border-box;
+	display: flex;
+	gap: var(--space-6);
+	align-items: center;
+	justify-content: space-between;
+	min-height: var(--tap-min);
+	font-size: var(--text-base);
+	border-bottom: var(--border-w-hair) solid var(--border-default);
+}
+
+.detail-list > li > :last-child {
+	font-weight: var(--weight-semibold);
+	text-align: right;
+}
+
+.detail-list__row--strong,
+.detail-list__row--strong > :last-child {
+	font-weight: var(--weight-bold);
+}
+
 /* The primary action, last in the body on screens with the bottom navigation (a fixed footer
    would cover it). On a wide screen it sits at the column's right edge. */
 .screen__action {

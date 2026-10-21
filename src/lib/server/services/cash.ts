@@ -255,6 +255,78 @@ async function sumTotals(db: D1Database, where: Clause): Promise<CashBookTotals>
 	return totals!;
 }
 
+/** A movement's receipt, as another movement's detail names it: its sign picks the title. */
+export type ReceiptReference = { amount: number; receiptNumber: number };
+
+/**
+ * What the movement's receipt prints, plus who recorded it and when, and its correction. Its
+ * `employeeName` is the one the settlement's snapshot keeps, as the receipt prints it.
+ */
+export type MovementDetail = CashBookEntry & {
+	otherMethod: string | null;
+	bankAccount: string | null;
+	notes: string | null;
+	/** The movement this one offsets, and the one that offsets it: at most one of the two is set. */
+	reverses: ReceiptReference | null;
+	reversedBy: ReceiptReference | null;
+};
+
+type DetailRow = Omit<EntryRow, 'full_name'> & {
+	employee_snapshot: string | null;
+	original_amount: number | null;
+	original_receipt_number: number | null;
+	correction_amount: number | null;
+	correction_receipt_number: number | null;
+};
+
+// Only the name is read off payroll's `employee_snapshot`; payroll validates the rest.
+const snapshotNameSchema = z.object({ full_name: z.string() });
+
+function toReference(amount: number | null, receiptNumber: number | null): ReceiptReference | null {
+	return null === amount || null === receiptNumber ? null : { amount, receiptNumber };
+}
+
+function toDetail(row: DetailRow): MovementDetail {
+	const attributes = movementAttributesSchema.parse(JSON.parse(row.attributes));
+	const snapshot = row.employee_snapshot ? JSON.parse(row.employee_snapshot) : null;
+	return {
+		...toEntry({ ...row, full_name: null }),
+		employeeName: snapshot ? snapshotNameSchema.parse(snapshot).full_name : null,
+		otherMethod: attributes.other_method ?? null,
+		bankAccount: attributes.bank_account ?? null,
+		notes: attributes.notes ?? null,
+		reverses: toReference(row.original_amount, row.original_receipt_number),
+		reversedBy: toReference(row.correction_amount, row.correction_receipt_number)
+	};
+}
+
+/** One movement's detail, or null when there's no such movement: a tampered id included. */
+export async function getMovement(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<MovementDetail | null> {
+	requireRole(actor, MANAGES_CASH);
+	const id = z.coerce.number().int().positive().safeParse(input);
+	if (!id.success) {
+		return null;
+	}
+	const row = await db
+		.prepare(
+			`select cash_movements.*, payroll_runs.week_number, payroll_runs.employee_snapshot,
+				original.amount as original_amount, original.receipt_number as original_receipt_number,
+				correction.amount as correction_amount, correction.receipt_number as correction_receipt_number
+			from cash_movements
+			left join payroll_runs on cash_movements.entity_type = 'PAYROLL_RUN' and payroll_runs.id = cash_movements.entity_id
+			left join cash_movements as original on original.id = cash_movements.reverses_id
+			left join cash_movements as correction on correction.reverses_id = cash_movements.id
+			where cash_movements.id = ?`
+		)
+		.bind(id.data)
+		.first<DetailRow>();
+	return null === row ? null : toDetail(row);
+}
+
 /** Every movement the filters let through, newest first, and the period's three totals. */
 export async function getCashBook(
 	db: D1Database,
