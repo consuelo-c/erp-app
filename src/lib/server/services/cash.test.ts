@@ -10,6 +10,7 @@ import {
 	getReceipt,
 	movementSchema,
 	movementStatements,
+	recordMovement,
 	type Movement
 } from './cash';
 
@@ -295,4 +296,81 @@ test("a movement's receipt carries the company's header from settings", async ()
 	await expect(getReceipt(db, 2, manager)).rejects.toSatisfy((thrown) => isHttpError(thrown, 404));
 	const actor: Actor = { ...manager, roles: ['SALES'] };
 	await expect(getReceipt(db, 1, actor)).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
+});
+
+// The movement entry tab as it posts: every field as text.
+const typedExpense = {
+	direction: 'OUT',
+	description: 'Compra de jabón y desinfectante',
+	payee: 'Almacén Éxito Laureles',
+	payment_method: 'CASH',
+	amount: '$48.500',
+	movement_date: '2026-10-20',
+	notes: ''
+};
+
+function storedMovement(id: number) {
+	return { ...database.prepare('select * from cash_movements where id = ?').get(id) };
+}
+
+test('«Salida» saves an OTHER_EXPENSE with a negative amount, and «Entrada» an OTHER_INCOME', async () => {
+	expect(await recordMovement(db, typedExpense, manager)).toEqual({ ok: true, id: 1 });
+	expect(storedMovement(1)).toMatchObject({
+		concept: 'OTHER_EXPENSE',
+		amount: -48500,
+		payment_method: 'CASH',
+		movement_date: '2026-10-20',
+		payee: 'Almacén Éxito Laureles',
+		entity_type: null,
+		attributes: '{"description":"Compra de jabón y desinfectante"}',
+		created_by: 'gerente'
+	});
+	await recordMovement(db, { ...typedExpense, direction: 'IN', amount: '120000' }, manager);
+	expect(storedMovement(2)).toMatchObject({ concept: 'OTHER_INCOME', amount: 120000 });
+});
+
+test('saving fails without a description, a payee or a value greater than zero', async () => {
+	const missing = { ...typedExpense, description: ' ', payee: '', amount: '0' };
+	expect(await recordMovement(db, missing, manager)).toMatchObject({
+		ok: false,
+		errors: {
+			description: 'Escribe la descripción',
+			payee: 'Escribe a quién se le pagó',
+			amount: 'Escribe un valor mayor que cero'
+		}
+	});
+	expect(storedMovement(1)).toEqual({});
+});
+
+test('«Otro» needs which method, kept in attributes.other_method', async () => {
+	const other = { ...typedExpense, payment_method: 'OTHER' };
+	expect(await recordMovement(db, other, manager)).toMatchObject({
+		ok: false,
+		errors: { other_method: 'Escribe el medio de pago' }
+	});
+	await recordMovement(db, { ...other, other_method: 'Nequi' }, manager);
+	expect(JSON.parse(String(storedMovement(1).attributes))).toMatchObject({ other_method: 'Nequi' });
+});
+
+test('only an outflow by transfer needs, and keeps, the destination account', async () => {
+	const transfer = { ...typedExpense, payment_method: 'TRANSFER' };
+	expect(await recordMovement(db, transfer, manager)).toMatchObject({
+		ok: false,
+		errors: { bank_account: 'Escribe la cuenta de destino' }
+	});
+	const account = 'Bancolombia ahorros 123-456789-01';
+	await recordMovement(db, { ...transfer, bank_account: account }, manager);
+	await recordMovement(db, { ...transfer, direction: 'IN', bank_account: account }, manager);
+	expect(JSON.parse(String(storedMovement(1).attributes))).toMatchObject({ bank_account: account });
+	expect(JSON.parse(String(storedMovement(2).attributes))).not.toHaveProperty('bank_account');
+});
+
+test('only MANAGER and ADMIN record a movement, even calling the service directly', async () => {
+	for (const role of ['SALES', 'WAREHOUSE', 'DRIVER'] as const) {
+		const actor: Actor = { ...manager, roles: [role] };
+		await expect(recordMovement(db, typedExpense, actor)).rejects.toSatisfy((thrown) =>
+			isHttpError(thrown, 403)
+		);
+	}
+	expect(storedMovement(1)).toEqual({});
 });
