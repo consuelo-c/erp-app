@@ -306,7 +306,6 @@
 			{0 < detail.amount ? 'Imprimir recibo de caja' : 'Imprimir comprobante de egreso'}
 		</Button>
 		{#if isReversible(detail)}
-			<!-- STUB: unit #195 (Movimiento contrario, phase 07) pre-fills the tab from `?corrige=`. -->
 			<Button
 				variant="secondary"
 				href="{resolve('/(app)/caja/registrar')}?{new URLSearchParams({
