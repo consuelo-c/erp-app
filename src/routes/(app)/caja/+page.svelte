@@ -145,7 +145,7 @@
 	}
 
 	function receiptName(receipt: ReceiptReference): string {
-		return `${receiptTitle(receipt)} N.º ${formatReceiptNumber(receipt.receiptNumber)}`;
+		return `${receiptTitle(receipt)} # ${formatReceiptNumber(receipt.receiptNumber)}`;
 	}
 
 	// A PAYROLL movement says which week it paid.
@@ -297,8 +297,7 @@
 		<li><span>Registrado por</span><span>{detail.recordedBy}</span></li>
 		<li><span>Registrado el</span><span>{formatInstant(detail.recordedAt)}</span></li>
 		<li>
-			<span>{receiptTitle(detail)}</span><span>N.º {formatReceiptNumber(detail.receiptNumber)}</span
-			>
+			<span>{receiptTitle(detail)}</span><span># {formatReceiptNumber(detail.receiptNumber)}</span>
 		</li>
 		{#if detail.reverses}
 			<li><span>Corrige</span><span>{receiptName(detail.reverses)}</span></li>
