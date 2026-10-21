@@ -113,6 +113,20 @@
 		return joined(link(entry), party(entry));
 	}
 
+	// On a tablet the detail floats over the book: collapsed to a strip until a movement is picked,
+	// and ✕ collapses it again. Picking another movement opens it.
+	let isPanelCollapsed = $derived(null === movement);
+
+	// The detail's rows before a movement is picked.
+	const EMPTY_DETAIL_LABELS = [
+		'Tipo',
+		'Descripción',
+		'Recibido de / Pagado a',
+		'Método',
+		'Fecha',
+		'Registrado por'
+	];
+
 	// A movement just recorded opens here with `?aviso=registrado`: its receipt is what comes next.
 	const isJustRecorded = $derived('registrado' === page.url.searchParams.get('aviso'));
 
@@ -335,143 +349,179 @@
 
 	<div class="book__body">
 		<div class="book__list">
-			<Screen>
-				<div class="desktop-only">
-					<div class="book__toolbar">
-						<p class="book__period">{period}</p>
-						<Button
-							type="button"
-							variant="secondary"
-							size="sm"
-							inline
-							aria-expanded={areFiltersShown}
-							onclick={() => (areFiltersShown = !areFiltersShown)}
-						>
-							<Icon name="filter" size="sm" />
-							{areFiltersShown ? 'Ocultar filtros' : 'Filtros'}{extraCount
-								? ` (${extraCount})`
-								: ''}
-						</Button>
+			<Screen wide>
+				<div class="book__layout">
+					<div class="book__intro">
+						<div class="desktop-only">
+							<div class="book__toolbar">
+								<p class="book__period">{period}</p>
+								<Button
+									type="button"
+									variant="secondary"
+									size="sm"
+									inline
+									aria-expanded={areFiltersShown}
+									onclick={() => (areFiltersShown = !areFiltersShown)}
+								>
+									<Icon name="filter" size="sm" />
+									{areFiltersShown ? 'Ocultar filtros' : 'Filtros'}{extraCount
+										? ` (${extraCount})`
+										: ''}
+								</Button>
+							</div>
+							{#if areFiltersShown}
+								<!-- No apply button: a changed field reloads the book. -->
+								<form
+									method="GET"
+									data-sveltekit-keepfocus
+									data-sveltekit-noscroll
+									onchange={submitOnChange}
+								>
+									{@render fields('desktop-', select)}
+								</form>
+							{/if}
+							<div class="book__count">
+								<p class="meta">
+									{entries.length}
+									{1 === entries.length ? 'movimiento' : 'movimientos'}{extras}
+								</p>
+								{#if extraCount}
+									{@render clearFilters()}
+								{/if}
+							</div>
+						</div>
+
+						<p class="meta phone-only">Totales de {period}{extras}</p>
+
+						<!-- The period's net, not a cash balance: it mixes cash with transfers. -->
+						<div class="stat-grid">
+							<div class="stat stat--income">
+								<div class="stat__label">Entradas</div>
+								<div class="stat__value">{formatPesos(totals.inflow)}</div>
+							</div>
+							<div class="stat stat--expense">
+								<div class="stat__label">Salidas</div>
+								<div class="stat__value">{formatPesos(totals.outflow)}</div>
+							</div>
+							<div class="stat">
+								<div class="stat__label">Neto</div>
+								<div class="stat__value">{net}</div>
+							</div>
+						</div>
 					</div>
-					{#if areFiltersShown}
-						<!-- No apply button: a changed field reloads the book. -->
-						<form
-							method="GET"
-							data-sveltekit-keepfocus
-							data-sveltekit-noscroll
-							onchange={submitOnChange}
-						>
-							{@render fields('desktop-', select)}
-						</form>
-					{/if}
-					<div class="book__count">
-						<p class="meta">
-							{entries.length}
-							{1 === entries.length ? 'movimiento' : 'movimientos'}{extras}
-						</p>
-						{#if extraCount}
-							{@render clearFilters()}
+
+					<div class="book__records">
+						{#if 0 === entries.length}
+							<div class="empty">
+								<p class="meta">Ningún movimiento coincide con los filtros.</p>
+								{@render clearFilters()}
+							</div>
+						{:else}
+							<table class="table phone-only">
+								<thead>
+									<tr>
+										<th>Fecha</th>
+										<th>Movimiento</th>
+										<th class="num">Valor</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each entries as entry (entry.id)}
+										<tr>
+											<td class="nowrap">
+												{formatShortDay(entry.movementDate)}
+												<div class="meta">{formatInstantTime(entry.recordedAt)}</div>
+											</td>
+											<td>
+												<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- bookHref builds it with resolve() -->
+												<a class="row-link" href={bookHref(entry.id)}
+													>{CASH_CONCEPT_LABELS[entry.concept]}</a
+												>
+												<div class="meta">{summary(entry)}</div>
+												<div class="meta">
+													{joined(PAYMENT_METHOD_LABELS[entry.method], entry.recordedBy)}
+												</div>
+											</td>
+											<td class="num nowrap">
+												<b class={0 < entry.amount ? 'income' : 'expense'}>
+													{formatSignedPesos(entry.amount)}
+												</b>
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+
+							<table class="table desktop-only">
+								<thead>
+									<tr>
+										<th>Fecha</th>
+										<th>Concepto</th>
+										<th class="num">Valor</th>
+										<th>Método</th>
+										<th>Relacionado</th>
+										<th>Registró</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each entries as entry (entry.id)}
+										<tr class={{ 'table__row--selected': entry.id === movement?.id }}>
+											<td class="nowrap">
+												{formatShortDay(entry.movementDate)}
+												<div class="meta">{formatInstantTime(entry.recordedAt)}</div>
+											</td>
+											<td>
+												<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- bookHref builds it with resolve() -->
+												<a class="row-link" href={bookHref(entry.id)}
+													>{CASH_CONCEPT_LABELS[entry.concept]}</a
+												>
+												<div class="meta">{entry.description ?? party(entry)}</div>
+											</td>
+											<td class="num nowrap">
+												<b class={0 < entry.amount ? 'income' : 'expense'}>
+													{formatSignedPesos(entry.amount)}
+												</b>
+											</td>
+											<td>{PAYMENT_METHOD_LABELS[entry.method]}</td>
+											<td>{link(entry)}</td>
+											<td>{entry.recordedBy}</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
 						{/if}
 					</div>
+
+					<!-- Always there on a desktop, empty until a movement is picked, so the book never shifts. -->
+					<aside
+						class={['book__panel desktop-only', { 'book__panel--collapsed': isPanelCollapsed }]}
+					>
+						<span class="panel__expand">
+							<IconButton
+								icon="back"
+								label="Mostrar el detalle"
+								onclick={() => (isPanelCollapsed = false)}
+							/>
+						</span>
+						<div class="panel__content">
+							<div class="panel__head">
+								<h2 class="section-title">{movement ? detailTitle(movement) : 'Movimiento'}</h2>
+								<span class="panel__close">
+									<IconButton
+										icon="close"
+										label="Ocultar el detalle"
+										onclick={() => (isPanelCollapsed = true)}
+									/>
+								</span>
+							</div>
+							{#if movement}
+								{@render movementDetail(movement)}
+							{:else}
+								{@render emptyDetail()}
+							{/if}
+						</div>
+					</aside>
 				</div>
-
-				<p class="meta phone-only">Totales de {period}{extras}</p>
-
-				<!-- The period's net, not a cash balance: it mixes cash with transfers. -->
-				<div class="stat-grid">
-					<div class="stat stat--income">
-						<div class="stat__label">Entradas</div>
-						<div class="stat__value">{formatPesos(totals.inflow)}</div>
-					</div>
-					<div class="stat stat--expense">
-						<div class="stat__label">Salidas</div>
-						<div class="stat__value">{formatPesos(totals.outflow)}</div>
-					</div>
-					<div class="stat">
-						<div class="stat__label">Neto</div>
-						<div class="stat__value">{net}</div>
-					</div>
-				</div>
-
-				{#if 0 === entries.length}
-					<div class="empty">
-						<p class="meta">Ningún movimiento coincide con los filtros.</p>
-						{@render clearFilters()}
-					</div>
-				{:else}
-					<table class="table phone-only">
-						<thead>
-							<tr>
-								<th>Fecha</th>
-								<th>Movimiento</th>
-								<th class="num">Valor</th>
-							</tr>
-						</thead>
-						<tbody>
-							{#each entries as entry (entry.id)}
-								<tr>
-									<td class="nowrap">
-										{formatShortDay(entry.movementDate)}
-										<div class="meta">{formatInstantTime(entry.recordedAt)}</div>
-									</td>
-									<td>
-										<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- bookHref builds it with resolve() -->
-										<a class="row-link" href={bookHref(entry.id)}
-											>{CASH_CONCEPT_LABELS[entry.concept]}</a
-										>
-										<div class="meta">{summary(entry)}</div>
-										<div class="meta">
-											{joined(PAYMENT_METHOD_LABELS[entry.method], entry.recordedBy)}
-										</div>
-									</td>
-									<td class="num nowrap">
-										<b class={0 < entry.amount ? 'income' : 'expense'}>
-											{formatSignedPesos(entry.amount)}
-										</b>
-									</td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-
-					<table class="table desktop-only">
-						<thead>
-							<tr>
-								<th>Fecha</th>
-								<th>Concepto</th>
-								<th class="num">Valor</th>
-								<th>Método</th>
-								<th>Relacionado</th>
-								<th>Registró</th>
-							</tr>
-						</thead>
-						<tbody>
-							{#each entries as entry (entry.id)}
-								<tr class={{ 'table__row--selected': entry.id === movement?.id }}>
-									<td class="nowrap">
-										{formatShortDay(entry.movementDate)}
-										<div class="meta">{formatInstantTime(entry.recordedAt)}</div>
-									</td>
-									<td>
-										<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- bookHref builds it with resolve() -->
-										<a class="row-link" href={bookHref(entry.id)}
-											>{CASH_CONCEPT_LABELS[entry.concept]}</a
-										>
-										<div class="meta">{entry.description ?? party(entry)}</div>
-									</td>
-									<td class="num nowrap">
-										<b class={0 < entry.amount ? 'income' : 'expense'}>
-											{formatSignedPesos(entry.amount)}
-										</b>
-									</td>
-									<td>{PAYMENT_METHOD_LABELS[entry.method]}</td>
-									<td>{link(entry)}</td>
-									<td>{entry.recordedBy}</td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-				{/if}
 			</Screen>
 		</div>
 
@@ -484,16 +534,19 @@
 					{@render movementDetail(movement)}
 				</Screen>
 			</div>
-			<aside class="book__panel desktop-only">
-				<div class="panel__head">
-					<h2 class="section-title">{detailTitle(movement)}</h2>
-					<IconButton icon="close" label="Cerrar" href={bookHref()} />
-				</div>
-				{@render movementDetail(movement)}
-			</aside>
 		{/if}
 	</div>
 </div>
+
+{#snippet emptyDetail()}
+	<ul class="detail-list">
+		{#each EMPTY_DETAIL_LABELS as label (label)}
+			<li><span>{label}</span><span>—</span></li>
+		{/each}
+		<li class="detail-list__row--strong"><span>Valor</span><span>—</span></li>
+	</ul>
+	<p class="note panel__empty">Selecciona un movimiento para ver su detalle.</p>
+{/snippet}
 
 <BottomSheet bind:open={isSheetOpen} title="Filtros">
 	<form method="GET" data-sveltekit-noscroll onsubmit={() => (isSheetOpen = false)}>
@@ -536,6 +589,16 @@
 
 	.book--detail .book__header,
 	.book--detail .book__list {
+		display: none;
+	}
+
+	.book__panel {
+		background: var(--surface-card);
+	}
+
+	/* ✕ and the expand button only exist on a tablet, where the detail floats over the book. */
+	.panel__close,
+	.panel__expand {
 		display: none;
 	}
 
@@ -628,6 +691,7 @@
 		padding: var(--space-3) var(--space-4);
 		font-size: var(--text-label);
 		font-weight: var(--weight-bold);
+		line-height: 1.5;
 		color: var(--text-secondary);
 		text-align: left;
 		border-bottom: var(--border-w-strong) solid var(--border-strong);
@@ -722,29 +786,17 @@
 			display: block;
 		}
 
-		.book__body {
-			display: flex;
-		}
-
-		.book__list {
-			flex: 1;
-			min-width: 0;
-		}
-
 		.book--detail .book__header,
 		.book--detail .book__list {
 			display: block;
 		}
 
-		.book__panel {
-			box-sizing: border-box;
+		.book__layout {
+			--table-head-h: calc(2 * var(--space-3) + 1.5 * var(--text-label));
+		}
 
-			/* 30% of the width; on a tablet it gives way to the book's table, never past the edge. */
-			flex: 0 1 30%;
-			height: 100%;
-			padding: var(--space-8) var(--space-12) var(--space-12);
-			overflow: auto;
-			border-left: var(--border-w-hair) solid var(--border-default);
+		.panel__empty {
+			margin-top: var(--space-6);
 		}
 
 		.panel__head {
@@ -752,7 +804,12 @@
 			gap: var(--space-4);
 			align-items: center;
 			justify-content: space-between;
-			margin-bottom: var(--space-6);
+			height: var(--table-head-h);
+		}
+
+		/* The close button keeps its 44px target, overlapping the head instead of growing it. */
+		.panel__close :global(.icon-btn) {
+			margin-block: calc((var(--table-head-h) - 44px) / 2);
 		}
 
 		.panel__head .section-title {
@@ -807,6 +864,80 @@
 
 		.stat-grid {
 			max-width: 560px;
+		}
+	}
+
+	/* A tablet: the detail is a panel over the book's right side, with a shadow saying so. ✕
+	   collapses it to a strip with an expand button, and the book underneath reads whole. */
+	@container (1024px <= width < 1280px) {
+		.book__list {
+			position: relative;
+		}
+
+		.book__panel {
+			position: absolute;
+			inset: 0 0 0 auto;
+			box-sizing: border-box;
+			width: 360px;
+			padding: var(--space-8) var(--space-10);
+			overflow: auto;
+			box-shadow: -8px 0 24px rgb(0 0 0 / 12%);
+		}
+
+		.panel__close {
+			display: contents;
+		}
+
+		.book__panel--collapsed {
+			width: 12px;
+			padding: 0;
+			overflow: visible;
+		}
+
+		.book__panel--collapsed .panel__content {
+			display: none;
+		}
+
+		/* Straddling the strip's edge, so its 44px target stays easy to hit. */
+		.book__panel--collapsed .panel__expand {
+			position: absolute;
+			top: var(--space-8);
+			left: -22px;
+			display: block;
+		}
+
+		.panel__expand :global(.icon-btn) {
+			background: var(--surface-card);
+			border-radius: var(--radius-round);
+			box-shadow: var(--shadow-dialog);
+		}
+	}
+
+	/* A desktop: Nómina's proportions, the book and the detail in a 320px side column that stays
+	   in view while the book scrolls. */
+	@container (width >= 1280px) {
+		.book__layout {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) 320px;
+			column-gap: var(--space-12);
+			align-items: start;
+		}
+
+		.book__intro {
+			grid-area: 1 / 1;
+		}
+
+		.book__records {
+			grid-area: 2 / 1;
+		}
+
+		/* Level with the table: its head as tall as the table's header row, so both ink rules
+		   share a line. */
+		.book__panel {
+			position: sticky;
+			top: 0;
+			grid-area: 2 / 2;
+			margin-top: var(--space-9);
 		}
 	}
 </style>
