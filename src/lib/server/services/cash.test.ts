@@ -11,6 +11,8 @@ import {
 	movementSchema,
 	movementStatements,
 	recordMovement,
+	recordOffset,
+	getOffsetOriginal,
 	type Movement
 } from './cash';
 
@@ -373,4 +375,90 @@ test('only MANAGER and ADMIN record a movement, even calling the service directl
 		);
 	}
 	expect(storedMovement(1)).toEqual({});
+});
+
+// The offsetting movement as the pre-filled tab posts it: the original's id comes from `?corrige=`.
+const typedCorrection = {
+	reverses_id: '1',
+	description: 'Corrige el comprobante de egreso N.º 0001',
+	payee: 'Almacén Éxito Laureles',
+	payment_method: 'CASH',
+	movement_date: '2026-10-21',
+	notes: ''
+};
+
+test('an offset keeps the concept and link, flips the amount and points at the original', async () => {
+	await recordMovement(db, typedExpense, manager);
+	// Tipo and Valor aren't the form's to set: a tampered one changes nothing.
+	const tampered = { ...typedCorrection, direction: 'OUT', amount: '1' };
+	expect(await recordOffset(db, tampered, manager)).toEqual({ ok: true, id: 2 });
+	expect(storedMovement(2)).toMatchObject({
+		concept: 'OTHER_EXPENSE',
+		amount: 48500,
+		entity_type: null,
+		entity_id: null,
+		payee: 'Almacén Éxito Laureles',
+		movement_date: '2026-10-21',
+		reverses_id: 1,
+		receipt_number: 1,
+		attributes: '{"description":"Corrige el comprobante de egreso N.º 0001"}'
+	});
+	expect(storedMovement(1)).toMatchObject({ amount: -48500, receipt_number: 1 });
+});
+
+test('a movement is offset once, and a correction never', async () => {
+	await recordMovement(db, typedExpense, manager);
+	await recordOffset(db, typedCorrection, manager);
+	expect(await recordOffset(db, typedCorrection, manager)).toMatchObject({
+		ok: false,
+		message: 'Ese movimiento ya tiene su movimiento contrario.'
+	});
+	expect(await recordOffset(db, { ...typedCorrection, reverses_id: '2' }, manager)).toMatchObject({
+		ok: false
+	});
+	expect(await recordOffset(db, { ...typedCorrection, reverses_id: '9' }, manager)).toMatchObject({
+		ok: false,
+		message: 'Ese movimiento no existe.'
+	});
+	expect(receiptNumbers()).toHaveLength(2);
+	await expect(getOffsetOriginal(db, 1, manager)).rejects.toSatisfy((thrown) =>
+		isHttpError(thrown, 400)
+	);
+	await expect(getOffsetOriginal(db, 2, manager)).rejects.toSatisfy((thrown) =>
+		isHttpError(thrown, 400)
+	);
+});
+
+test("a PAYROLL movement's offset keeps its link; the settlement stays PAID", async () => {
+	const runId = insertRun({ employee: 'Ana Pérez', week: 42 });
+	await record(payroll(runId, -480000));
+	const correction = { reverses_id: '1', payment_method: 'TRANSFER', movement_date: '2026-10-21' };
+	expect(await recordOffset(db, correction, manager)).toEqual({ ok: true, id: 2 });
+	expect(storedMovement(2)).toMatchObject({
+		concept: 'PAYROLL',
+		amount: 480000,
+		entity_type: 'PAYROLL_RUN',
+		entity_id: runId,
+		payee: null,
+		reverses_id: 1
+	});
+	const run = database.prepare('select status from payroll_runs where id = ?').get(runId);
+	expect(run).toMatchObject({ status: 'PAID' });
+});
+
+test('an original and its correction net to zero, both under their concept', async () => {
+	await recordMovement(db, typedExpense, manager);
+	await recordOffset(db, typedCorrection, manager);
+	const filters = { from: '2026-10-01', to: '2026-10-31', concept: 'OTHER_EXPENSE' };
+	const { entries, totals } = await getCashBook(db, filters, manager);
+	expect(entries).toHaveLength(2);
+	expect(totals).toEqual({ inflow: 48500, outflow: 48500, net: 0 });
+});
+
+test('only MANAGER and ADMIN record an offsetting movement', async () => {
+	await recordMovement(db, typedExpense, manager);
+	const actor: Actor = { ...manager, roles: ['SALES'] };
+	await expect(recordOffset(db, typedCorrection, actor)).rejects.toSatisfy((thrown) =>
+		isHttpError(thrown, 403)
+	);
 });

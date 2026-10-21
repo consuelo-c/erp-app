@@ -119,20 +119,28 @@ const amountSchema = z
 			.max(999_999_999, 'Escribe un valor de hasta $999.999.999')
 	);
 
-// The movement entry tab, every field as text. «Otro» says which method; an outflow by transfer
-// names the account the money went to.
-function standaloneSchema(isInflow: boolean) {
-	return z
-		.object({
-			description: requiredText('Escribe la descripción'),
-			payee: requiredText(isInflow ? 'Escribe de quién se recibió' : 'Escribe a quién se le pagó'),
-			payment_method: z.enum(PAYMENT_METHODS, 'Escoge el método'),
-			other_method: optionalText,
-			bank_account: optionalText,
-			amount: amountSchema,
-			movement_date: z.iso.date('Escoge la fecha'),
-			notes: optionalText
-		})
+// What a standalone movement says about itself: no order or settlement says it for it.
+function partyShape(isInflow: boolean) {
+	return {
+		description: requiredText('Escribe la descripción'),
+		payee: requiredText(isInflow ? 'Escribe de quién se recibió' : 'Escribe a quién se le pagó')
+	};
+}
+
+// The movement entry tab, every field as text; each form extends it.
+const entryBase = z.object({
+	payment_method: z.enum(PAYMENT_METHODS, 'Escoge el método'),
+	other_method: optionalText,
+	bank_account: optionalText,
+	movement_date: z.iso.date('Escoge la fecha'),
+	notes: optionalText
+});
+
+type EntryForm = z.infer<typeof entryBase>;
+
+// «Otro» says which method; an outflow by transfer names the account the money went to.
+function checkMethod<T extends z.ZodType<EntryForm>>(isInflow: boolean, schema: T): T {
+	return schema
 		.refine((form) => 'OTHER' !== form.payment_method || undefined !== form.other_method, {
 			path: ['other_method'],
 			message: 'Escribe el medio de pago'
@@ -143,10 +151,21 @@ function standaloneSchema(isInflow: boolean) {
 		});
 }
 
-type StandaloneForm = z.infer<ReturnType<typeof standaloneSchema>>;
-
 function needsBankAccount(isInflow: boolean, form: { payment_method: PaymentMethod }): boolean {
 	return !isInflow && 'TRANSFER' === form.payment_method;
+}
+
+// Only the keys the method uses: which one «Otro» was, and an outflow's transfer account.
+function toAttributes(
+	isInflow: boolean,
+	form: EntryForm & { description?: string }
+): Movement['attributes'] {
+	return {
+		description: form.description,
+		other_method: 'OTHER' === form.payment_method ? form.other_method : undefined,
+		bank_account: needsBankAccount(isInflow, form) ? form.bank_account : undefined,
+		notes: form.notes
+	};
 }
 
 function invalid(error: z.ZodError): RecordResult {
@@ -156,23 +175,17 @@ function invalid(error: z.ZodError): RecordResult {
 	return { ok: false, message: 'Revisa los campos marcados en rojo antes de guardar.', errors };
 }
 
-// Only the keys the method uses: which one «Otro» was, and an outflow's transfer account.
-function toStandaloneMovement(isInflow: boolean, form: StandaloneForm): Movement {
-	return {
-		concept: isInflow ? 'OTHER_INCOME' : 'OTHER_EXPENSE',
-		payment_method: form.payment_method,
-		amount: isInflow ? form.amount : -form.amount,
-		movement_date: form.movement_date,
-		entity_type: null,
-		entity_id: null,
-		payee: form.payee,
-		attributes: {
-			description: form.description,
-			other_method: 'OTHER' === form.payment_method ? form.other_method : undefined,
-			bank_account: needsBankAccount(isInflow, form) ? form.bank_account : undefined,
-			notes: form.notes
-		}
-	};
+function refuse(message: string): RecordResult {
+	return { ok: false, message, errors: {} };
+}
+
+async function insertMovement(
+	db: D1Database,
+	actor: Actor,
+	movement: Movement
+): Promise<RecordResult> {
+	const [inserted] = await db.batch(movementStatements(db, actor, movement));
+	return { ok: true, id: inserted.meta.last_row_id };
 }
 
 /**
@@ -190,13 +203,134 @@ export async function recordMovement(
 		return invalid(direction.error);
 	}
 	const isInflow = 'IN' === direction.data.direction;
-	const form = standaloneSchema(isInflow).safeParse(input);
+	const schema = entryBase.extend({ ...partyShape(isInflow), amount: amountSchema });
+	const form = checkMethod(isInflow, schema).safeParse(input);
 	if (!form.success) {
 		return invalid(form.error);
 	}
-	const movement = toStandaloneMovement(isInflow, form.data);
-	const [inserted] = await db.batch(movementStatements(db, actor, movement));
-	return { ok: true, id: inserted.meta.last_row_id };
+	return insertMovement(db, actor, {
+		concept: isInflow ? 'OTHER_INCOME' : 'OTHER_EXPENSE',
+		payment_method: form.data.payment_method,
+		amount: isInflow ? form.data.amount : -form.data.amount,
+		movement_date: form.data.movement_date,
+		entity_type: null,
+		entity_id: null,
+		payee: form.data.payee,
+		attributes: toAttributes(isInflow, form.data)
+	});
+}
+
+/** Why a movement can't be offset, or null when it can: once, and never a correction itself. */
+function offsetRefusal(movement: { isOffset: boolean; isCorrected: boolean }): string | null {
+	if (movement.isOffset) {
+		return 'Un movimiento contrario no se corrige: si el error fue la corrección, registra de nuevo el original.';
+	}
+	if (movement.isCorrected) {
+		return 'Ese movimiento ya tiene su movimiento contrario.';
+	}
+	return null;
+}
+
+/** The movement `?corrige=` names, to pre-fill its offsetting movement: one that can be offset. */
+export async function getOffsetOriginal(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<MovementDetail> {
+	const original = await getMovement(db, input, actor);
+	if (null === original) {
+		error(404, 'Ese movimiento no existe');
+	}
+	const refusal = offsetRefusal({
+		isOffset: null !== original.reverses,
+		isCorrected: null !== original.reversedBy
+	});
+	if (null !== refusal) {
+		error(400, refusal);
+	}
+	return original;
+}
+
+type OriginalRow = {
+	id: number;
+	concept: CashConcept;
+	amount: number;
+	entity_type: string | null;
+	entity_id: number | null;
+	payee: string | null;
+	reverses_id: number | null;
+	corrected_by: number | null;
+};
+
+async function findOriginal(db: D1Database, input: unknown): Promise<OriginalRow | null> {
+	const id = z.coerce.number().int().positive().safeParse(input);
+	if (!id.success) {
+		return null;
+	}
+	return db
+		.prepare(
+			`select id, concept, amount, entity_type, entity_id, payee, reverses_id,
+				(select correction.id from cash_movements as correction where correction.reverses_id = cash_movements.id) as corrected_by
+			from cash_movements where id = ?`
+		)
+		.bind(id.data)
+		.first<OriginalRow>();
+}
+
+// A standalone movement's correction says again what it was and who it was with; a linked one
+// keeps its order's or settlement's.
+function offsetSchema(isInflow: boolean, original: OriginalRow) {
+	const isStandalone = null === original.entity_type;
+	return checkMethod(isInflow, entryBase.extend(isStandalone ? partyShape(isInflow) : {}));
+}
+
+/**
+ * Records the offsetting movement of `reverses_id`: its concept and link, the opposite amount, and
+ * `reverses_id` pointing to it. The rest is the manager's, as in the entry tab. A movement is offset
+ * once, a correction never; a PAYROLL one's settlement stays PAID, as it was.
+ */
+export async function recordOffset(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<RecordResult> {
+	requireRole(actor, MANAGES_CASH);
+	const original = await findOriginal(db, (input as { reverses_id?: unknown })?.reverses_id);
+	if (null === original) {
+		return refuse('Ese movimiento no existe.');
+	}
+	const refusal = offsetRefusal({
+		isOffset: null !== original.reverses_id,
+		isCorrected: null !== original.corrected_by
+	});
+	if (null !== refusal) {
+		return refuse(refusal);
+	}
+	const isInflow = original.amount < 0;
+	const form = offsetSchema(isInflow, original).safeParse(input);
+	if (!form.success) {
+		return invalid(form.error);
+	}
+	// ponytail: two corrections racing past the check: the UNIQUE on reverses_id rejects the second as a 500.
+	return insertMovement(db, actor, toOffset(original, isInflow, form.data));
+}
+
+function toOffset(
+	original: OriginalRow,
+	isInflow: boolean,
+	form: EntryForm & { description?: string; payee?: string }
+): Movement {
+	return {
+		concept: original.concept,
+		payment_method: form.payment_method,
+		amount: -original.amount,
+		movement_date: form.movement_date,
+		entity_type: original.entity_type,
+		entity_id: original.entity_id,
+		payee: form.payee ?? original.payee,
+		reverses_id: original.id,
+		attributes: toAttributes(isInflow, form)
+	};
 }
 
 // Filters come from the URL: an empty or tampered value is ignored, not an error.
