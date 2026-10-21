@@ -4,6 +4,7 @@
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { getMonthRange, getTodaysDate } from '$lib/datetime';
+import { parsePesos } from '$lib/payroll';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert } from '../audit';
 import { COMPANY_SETTINGS, readSettings, type CompanySettings } from './settings';
@@ -87,6 +88,116 @@ export function movementStatements(
 }
 
 export const DIRECTIONS = ['IN', 'OUT'] as const;
+
+export type RecordResult =
+	{ ok: true; id: number } | { ok: false; message: string; errors: Record<string, string> };
+
+const directionSchema = z.object({
+	direction: z.enum(DIRECTIONS, 'Escoge si es una entrada o una salida')
+});
+
+function requiredText(message: string) {
+	return z.string(message).trim().min(1, message);
+}
+
+const optionalText = z
+	.string()
+	.trim()
+	.optional()
+	.transform((value) => value || undefined);
+
+// Typed positive, the sign comes from Tipo. The receipt writes it in words up to 999.999.999.
+const AMOUNT_MESSAGE = 'Escribe un valor mayor que cero';
+const amountSchema = z
+	.string(AMOUNT_MESSAGE)
+	.transform(parsePesos)
+	.pipe(
+		z
+			.number()
+			.int()
+			.positive(AMOUNT_MESSAGE)
+			.max(999_999_999, 'Escribe un valor de hasta $999.999.999')
+	);
+
+// The movement entry tab, every field as text. «Otro» says which method; an outflow by transfer
+// names the account the money went to.
+function standaloneSchema(isInflow: boolean) {
+	return z
+		.object({
+			description: requiredText('Escribe la descripción'),
+			payee: requiredText(isInflow ? 'Escribe de quién se recibió' : 'Escribe a quién se le pagó'),
+			payment_method: z.enum(PAYMENT_METHODS, 'Escoge el método'),
+			other_method: optionalText,
+			bank_account: optionalText,
+			amount: amountSchema,
+			movement_date: z.iso.date('Escoge la fecha'),
+			notes: optionalText
+		})
+		.refine((form) => 'OTHER' !== form.payment_method || undefined !== form.other_method, {
+			path: ['other_method'],
+			message: 'Escribe el medio de pago'
+		})
+		.refine((form) => !needsBankAccount(isInflow, form) || undefined !== form.bank_account, {
+			path: ['bank_account'],
+			message: 'Escribe la cuenta de destino'
+		});
+}
+
+type StandaloneForm = z.infer<ReturnType<typeof standaloneSchema>>;
+
+function needsBankAccount(isInflow: boolean, form: { payment_method: PaymentMethod }): boolean {
+	return !isInflow && 'TRANSFER' === form.payment_method;
+}
+
+function invalid(error: z.ZodError): RecordResult {
+	const errors = Object.fromEntries(
+		error.issues.map((issue) => [String(issue.path[0]), issue.message])
+	);
+	return { ok: false, message: 'Revisa los campos marcados en rojo antes de guardar.', errors };
+}
+
+// Only the keys the method uses: which one «Otro» was, and an outflow's transfer account.
+function toStandaloneMovement(isInflow: boolean, form: StandaloneForm): Movement {
+	return {
+		concept: isInflow ? 'OTHER_INCOME' : 'OTHER_EXPENSE',
+		payment_method: form.payment_method,
+		amount: isInflow ? form.amount : -form.amount,
+		movement_date: form.movement_date,
+		entity_type: null,
+		entity_id: null,
+		payee: form.payee,
+		attributes: {
+			description: form.description,
+			other_method: 'OTHER' === form.payment_method ? form.other_method : undefined,
+			bank_account: needsBankAccount(isInflow, form) ? form.bank_account : undefined,
+			notes: form.notes
+		}
+	};
+}
+
+/**
+ * Records a movement no other module does: «Entrada» is an `OTHER_INCOME`, «Salida» an
+ * `OTHER_EXPENSE`. Returns the new movement's id, for its detail.
+ */
+export async function recordMovement(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<RecordResult> {
+	requireRole(actor, MANAGES_CASH);
+	const direction = directionSchema.safeParse(input);
+	if (!direction.success) {
+		return invalid(direction.error);
+	}
+	const isInflow = 'IN' === direction.data.direction;
+	const form = standaloneSchema(isInflow).safeParse(input);
+	if (!form.success) {
+		return invalid(form.error);
+	}
+	const movement = toStandaloneMovement(isInflow, form.data);
+	const [inserted] = await db.batch(movementStatements(db, actor, movement));
+	return { ok: true, id: inserted.meta.last_row_id };
+}
 
 // Filters come from the URL: an empty or tampered value is ignored, not an error.
 function optional<T extends z.ZodType>(schema: T) {

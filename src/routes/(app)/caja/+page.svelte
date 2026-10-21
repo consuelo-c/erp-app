@@ -9,6 +9,7 @@
 	import Icon from '$lib/components/Icon.svelte';
 	import IconButton from '$lib/components/IconButton.svelte';
 	import Input from '$lib/components/Input.svelte';
+	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import Select from '$lib/components/Select.svelte';
@@ -112,9 +113,14 @@
 		return joined(link(entry), party(entry));
 	}
 
+	// A movement just recorded opens here with `?aviso=registrado`: its receipt is what comes next.
+	const isJustRecorded = $derived('registrado' === page.url.searchParams.get('aviso'));
+
 	// The book as filtered, with or without a movement's detail open over it.
 	function bookHref(movementId?: number): string {
-		const kept = [...page.url.searchParams].filter(([name]) => 'movimiento' !== name);
+		const kept = [...page.url.searchParams].filter(
+			([name]) => 'movimiento' !== name && 'aviso' !== name
+		);
 		const opened = undefined === movementId ? [] : [['movimiento', String(movementId)]];
 		const query = new URLSearchParams([...kept, ...opened]).toString();
 		return `${resolve('/(app)/caja')}${query ? `?${query}` : ''}`;
@@ -248,6 +254,11 @@
 {/snippet}
 
 {#snippet movementDetail(detail: MovementDetail)}
+	{#if isJustRecorded}
+		<div class="detail__notice">
+			<Notice tone="success">Movimiento registrado con éxito</Notice>
+		</div>
+	{/if}
 	<ul class="detail-list">
 		<li><span>Tipo</span><span>{0 < detail.amount ? 'Entrada' : 'Salida'}</span></li>
 		{#if detail.description}
@@ -287,7 +298,7 @@
 	</ul>
 	<div class="detail__actions">
 		<Button
-			variant="secondary"
+			variant={isJustRecorded ? 'primary' : 'secondary'}
 			href="{resolve('/(app)/caja/comprobante')}?{new URLSearchParams({
 				movimiento: String(detail.id)
 			})}"
@@ -527,6 +538,10 @@
 	.book--detail .book__header,
 	.book--detail .book__list {
 		display: none;
+	}
+
+	.detail__notice {
+		margin-bottom: var(--space-6);
 	}
 
 	.detail__actions {
