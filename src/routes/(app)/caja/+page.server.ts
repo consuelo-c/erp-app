@@ -1,11 +1,12 @@
 import { error } from '@sveltejs/kit';
-import { requireRole } from '$lib/server/actor';
-import { getCashBook } from '$lib/server/services/cash';
+import { requireRole, type Actor } from '$lib/server/actor';
+import { getCashBook, getMovement } from '$lib/server/services/cash';
 import type { PageServerLoad } from './$types';
 
 // The filters live in the URL, so a filtered book can be shared and reloaded: `?desde=`, `?hasta=`
 // (this month by default), `?tipo=`, `?concepto=`, `?metodo=`, `?empleado=`, `?minimo=`, `?maximo=`
-// and `?texto=`.
+// and `?texto=`. `?movimiento=` opens one movement's detail over them: its own view on a phone, a
+// side panel on a desktop.
 export const load: PageServerLoad = async ({ locals, platform, url }) => {
 	requireRole(locals.user, ['ADMIN', 'MANAGER']);
 	if (undefined === platform) {
@@ -23,5 +24,18 @@ export const load: PageServerLoad = async ({ locals, platform, url }) => {
 		max: params.get('maximo'),
 		text: params.get('texto')
 	};
-	return { book: await getCashBook(platform.env.DB, input, locals.user) };
+	const db = platform.env.DB;
+	const [book, movement] = await Promise.all([
+		getCashBook(db, input, locals.user),
+		params.has('movimiento') ? findMovement(db, params.get('movimiento'), locals.user) : null
+	]);
+	return { book, movement };
 };
+
+async function findMovement(db: D1Database, id: string | null, actor: Actor | null) {
+	const movement = await getMovement(db, id, actor);
+	if (null === movement) {
+		error(404, 'Ese movimiento no existe');
+	}
+	return movement;
+}

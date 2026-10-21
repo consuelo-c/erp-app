@@ -3,7 +3,13 @@ import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
-import { getCashBook, movementSchema, movementStatements, type Movement } from './cash';
+import {
+	getCashBook,
+	getMovement,
+	movementSchema,
+	movementStatements,
+	type Movement
+} from './cash';
 
 const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
 
@@ -109,9 +115,9 @@ function insertRun({ employee, week }: { employee: string; week: number }): numb
 	const { id } = database.prepare('select id from employees where full_name = ?').get(employee)!;
 	const { lastInsertRowid } = database
 		.prepare(
-			`insert into payroll_runs (employee_id, status, week_number, period_start, period_end, payment_date, employee_snapshot, prepared_by, earnings, deductions, settings_snapshot, total_earnings, total_deductions, net_pay, created_at, created_by, updated_at, updated_by) values (?, 'PAID', ?, ?, '2026-10-17', '2026-10-17', '{}', 'gerente', '{}', '{}', '{}', 0, 0, 0, ${AUDIT})`
+			`insert into payroll_runs (employee_id, status, week_number, period_start, period_end, payment_date, employee_snapshot, prepared_by, earnings, deductions, settings_snapshot, total_earnings, total_deductions, net_pay, created_at, created_by, updated_at, updated_by) values (?, 'PAID', ?, ?, '2026-10-17', '2026-10-17', ?, 'gerente', '{}', '{}', '{}', 0, 0, 0, ${AUDIT})`
 		)
-		.run(id, week, `2026-W${week}`);
+		.run(id, week, `2026-W${week}`, JSON.stringify({ full_name: employee }));
 	return Number(lastInsertRowid);
 }
 
@@ -213,4 +219,66 @@ test('only MANAGER and ADMIN open the cash book', async () => {
 			isHttpError(thrown, 403)
 		);
 	}
+});
+
+test("a movement's detail has what its receipt prints, plus who recorded it and when", async () => {
+	const attributes = {
+		description: 'Compra de jabón',
+		bank_account: 'Nequi 300',
+		notes: 'Con IVA'
+	};
+	await record({ ...expense, payee: 'Almacén La Gloria', payment_method: 'TRANSFER', attributes });
+	expect(await getMovement(db, 1, manager)).toEqual({
+		id: 1,
+		movementDate: '2026-10-17',
+		concept: 'OTHER_EXPENSE',
+		amount: -45000,
+		method: 'TRANSFER',
+		otherMethod: null,
+		weekNumber: null,
+		employeeName: null,
+		payee: 'Almacén La Gloria',
+		description: 'Compra de jabón',
+		bankAccount: 'Nequi 300',
+		notes: 'Con IVA',
+		recordedBy: 'gerente',
+		recordedAt: expect.any(Number),
+		receiptNumber: 1,
+		reverses: null,
+		reversedBy: null
+	});
+	expect(await getMovement(db, '1', manager)).toMatchObject({ id: 1 });
+	expect(await getMovement(db, 2, manager)).toBeNull();
+	expect(await getMovement(db, 'uno', manager)).toBeNull();
+});
+
+test("a PAYROLL movement's detail names the week and the employee the settlement kept", async () => {
+	await record(payroll(insertRun({ employee: 'Ana Pérez', week: 42 }), -480000));
+	database.exec("update employees set full_name = 'Ana Pérez Gómez'");
+	expect(await getMovement(db, 1, manager)).toMatchObject({
+		weekNumber: 42,
+		employeeName: 'Ana Pérez',
+		payee: null
+	});
+});
+
+test('an offsetting movement names the one it corrects, and the corrected one names it', async () => {
+	await record(income);
+	await record(expense);
+	await record({ ...expense, amount: 45000, reverses_id: 2 });
+	expect(await getMovement(db, 2, manager)).toMatchObject({
+		reverses: null,
+		reversedBy: { amount: 45000, receiptNumber: 2 }
+	});
+	expect(await getMovement(db, 3, manager)).toMatchObject({
+		reverses: { amount: -45000, receiptNumber: 1 },
+		reversedBy: null
+	});
+	expect(await getMovement(db, 1, manager)).toMatchObject({ reverses: null, reversedBy: null });
+});
+
+test("only MANAGER and ADMIN open a movement's detail", async () => {
+	await record(expense);
+	const actor: Actor = { ...manager, roles: ['SALES'] };
+	await expect(getMovement(db, 1, actor)).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
 });
