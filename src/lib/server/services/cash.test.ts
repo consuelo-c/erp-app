@@ -1,4 +1,5 @@
 import { isHttpError } from '@sveltejs/kit';
+import { readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Actor } from '../actor';
@@ -6,6 +7,7 @@ import { createMemoryD1 } from '../db/memory-d1';
 import {
 	getCashBook,
 	getMovement,
+	getReceipt,
 	movementSchema,
 	movementStatements,
 	type Movement
@@ -281,4 +283,16 @@ test("only MANAGER and ADMIN open a movement's detail", async () => {
 	await record(expense);
 	const actor: Actor = { ...manager, roles: ['SALES'] };
 	await expect(getMovement(db, 1, actor)).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
+});
+
+test("a movement's receipt carries the company's header from settings", async () => {
+	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
+	await record(expense);
+	expect(await getReceipt(db, 1, manager)).toMatchObject({
+		movement: { id: 1, receiptNumber: 1 },
+		company: { COMPANY_NAME: 'Banquetes Consuelo C' }
+	});
+	await expect(getReceipt(db, 2, manager)).rejects.toSatisfy((thrown) => isHttpError(thrown, 404));
+	const actor: Actor = { ...manager, roles: ['SALES'] };
+	await expect(getReceipt(db, 1, actor)).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
 });

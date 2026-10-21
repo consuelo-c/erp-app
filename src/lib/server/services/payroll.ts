@@ -30,7 +30,12 @@ import {
 	type PaymentMethod
 } from './cash';
 import { getEmployee, listEmployees, type Employee } from './employees';
-import { readSettings, type SettingValues } from './settings';
+import {
+	COMPANY_SETTINGS,
+	readSettings,
+	type CompanySettings,
+	type SettingValues
+} from './settings';
 
 const SETTLES_PAYROLL = ['ADMIN', 'MANAGER'] as const;
 
@@ -455,11 +460,8 @@ export async function openWeek(
 export type Receipt = Period & {
 	draft: Draft;
 	payment: Payment;
-	company: SettingValues<(typeof COMPANY_SETTINGS)[number]>;
+	company: CompanySettings;
 };
-
-// The printed formats' header.
-const COMPANY_SETTINGS = ['COMPANY_NAME', 'COMPANY_ADDRESS', 'COMPANY_PHONE'] as const;
 
 /**
  * The printed receipt of one employee's settlement for one week (`week` is any date of it): only
