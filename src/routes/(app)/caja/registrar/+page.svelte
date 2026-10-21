@@ -53,7 +53,7 @@
 
 	function receiptName({ amount, receiptNumber }: MovementDetail): string {
 		const title = 0 < amount ? 'recibo de caja' : 'comprobante de egreso';
-		return `${title} N.º ${formatReceiptNumber(receiptNumber)}`;
+		return `${title} # ${formatReceiptNumber(receiptNumber)}`;
 	}
 
 	// What's being corrected, as the cash book shows it.

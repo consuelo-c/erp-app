@@ -73,7 +73,7 @@ test('inflows and outflows are numbered apart: egreso 1, recibo 1, egreso 2', as
 test('an offsetting movement takes the next number of its own sign; the original keeps its own', async () => {
 	await record(expense);
 	await record(income);
-	const correction = 'Corrige el comprobante de egreso N.º 0001';
+	const correction = 'Corrige el comprobante de egreso # 0001';
 	await record({
 		...expense,
 		amount: 45000,
@@ -380,7 +380,7 @@ test('only MANAGER and ADMIN record a movement, even calling the service directl
 // The offsetting movement as the pre-filled tab posts it: the original's id comes from `?corrige=`.
 const typedCorrection = {
 	reverses_id: '1',
-	description: 'Corrige el comprobante de egreso N.º 0001',
+	description: 'Corrige el comprobante de egreso # 0001',
 	payee: 'Almacén Éxito Laureles',
 	payment_method: 'CASH',
 	movement_date: '2026-10-21',
@@ -401,7 +401,7 @@ test('an offset keeps the concept and link, flips the amount and points at the o
 		movement_date: '2026-10-21',
 		reverses_id: 1,
 		receipt_number: 1,
-		attributes: '{"description":"Corrige el comprobante de egreso N.º 0001"}'
+		attributes: '{"description":"Corrige el comprobante de egreso # 0001"}'
 	});
 	expect(storedMovement(1)).toMatchObject({ amount: -48500, receipt_number: 1 });
 });

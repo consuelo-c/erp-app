@@ -26,7 +26,7 @@
 
 <svelte:head>
 	<title>
-		{isInflow ? 'Recibo de caja' : 'Comprobante de egreso'} #{formatReceiptNumber(
+		{isInflow ? 'Recibo de caja' : 'Comprobante de egreso'} # {formatReceiptNumber(
 			movement.receiptNumber
 		)} · {company.COMPANY_NAME}
 	</title>
@@ -50,7 +50,7 @@
 			</div>
 			<div class="print-head__title">
 				<div>{title}</div>
-				<div class="print-head__number">#{formatReceiptNumber(movement.receiptNumber)}</div>
+				<div class="print-head__number"># {formatReceiptNumber(movement.receiptNumber)}</div>
 			</div>
 		</header>
 
