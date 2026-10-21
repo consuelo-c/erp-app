@@ -314,171 +314,175 @@
 {/snippet}
 
 <div class={['book', { 'book--detail': movement }]}>
-	<div class="book__list">
-		<Screen>
-			{#snippet header()}
-				<ScreenHeader>
-					<Tabs tabs={CASH_TABS} current="Libro de caja" />
-					<span class="phone-only">
-						<IconButton icon="filter" label="Filtrar" onclick={() => (isSheetOpen = true)} />
-					</span>
-				</ScreenHeader>
-			{/snippet}
-
-			<div class="desktop-only">
-				<div class="book__toolbar">
-					<p class="book__period">{period}</p>
-					<Button
-						type="button"
-						variant="secondary"
-						size="sm"
-						inline
-						aria-expanded={areFiltersShown}
-						onclick={() => (areFiltersShown = !areFiltersShown)}
-					>
-						<Icon name="filter" size="sm" />
-						{areFiltersShown ? 'Ocultar filtros' : 'Filtros'}{extraCount ? ` (${extraCount})` : ''}
-					</Button>
-				</div>
-				{#if areFiltersShown}
-					<!-- No apply button: a changed field reloads the book. -->
-					<form
-						method="GET"
-						data-sveltekit-keepfocus
-						data-sveltekit-noscroll
-						onchange={submitOnChange}
-					>
-						{@render fields('desktop-', select)}
-					</form>
-				{/if}
-				<div class="book__count">
-					<p class="meta">
-						{entries.length}
-						{1 === entries.length ? 'movimiento' : 'movimientos'}{extras}
-					</p>
-					{#if extraCount}
-						{@render clearFilters()}
-					{/if}
-				</div>
-			</div>
-
-			<p class="meta phone-only">Totales de {period}{extras}</p>
-
-			<!-- The period's net, not a cash balance: it mixes cash with transfers. -->
-			<div class="stat-grid">
-				<div class="stat stat--income">
-					<div class="stat__label">Entradas</div>
-					<div class="stat__value">{formatPesos(totals.inflow)}</div>
-				</div>
-				<div class="stat stat--expense">
-					<div class="stat__label">Salidas</div>
-					<div class="stat__value">{formatPesos(totals.outflow)}</div>
-				</div>
-				<div class="stat">
-					<div class="stat__label">Neto</div>
-					<div class="stat__value">{net}</div>
-				</div>
-			</div>
-
-			{#if 0 === entries.length}
-				<div class="empty">
-					<p class="meta">Ningún movimiento coincide con los filtros.</p>
-					{@render clearFilters()}
-				</div>
-			{:else}
-				<table class="table phone-only">
-					<thead>
-						<tr>
-							<th>Fecha</th>
-							<th>Movimiento</th>
-							<th class="num">Valor</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each entries as entry (entry.id)}
-							<tr>
-								<td class="nowrap">
-									{formatShortDay(entry.movementDate)}
-									<div class="meta">{formatInstantTime(entry.recordedAt)}</div>
-								</td>
-								<td>
-									<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- bookHref builds it with resolve() -->
-									<a class="row-link" href={bookHref(entry.id)}
-										>{CASH_CONCEPT_LABELS[entry.concept]}</a
-									>
-									<div class="meta">{summary(entry)}</div>
-									<div class="meta">
-										{joined(PAYMENT_METHOD_LABELS[entry.method], entry.recordedBy)}
-									</div>
-								</td>
-								<td class="num nowrap">
-									<b class={0 < entry.amount ? 'income' : 'expense'}>
-										{formatSignedPesos(entry.amount)}
-									</b>
-								</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-
-				<table class="table desktop-only">
-					<thead>
-						<tr>
-							<th>Fecha</th>
-							<th>Concepto</th>
-							<th class="num">Valor</th>
-							<th>Método</th>
-							<th>Relacionado</th>
-							<th>Registró</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each entries as entry (entry.id)}
-							<tr class={{ 'table__row--selected': entry.id === movement?.id }}>
-								<td class="nowrap">
-									{formatShortDay(entry.movementDate)}
-									<div class="meta">{formatInstantTime(entry.recordedAt)}</div>
-								</td>
-								<td>
-									<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- bookHref builds it with resolve() -->
-									<a class="row-link" href={bookHref(entry.id)}
-										>{CASH_CONCEPT_LABELS[entry.concept]}</a
-									>
-									<div class="meta">{entry.description ?? party(entry)}</div>
-								</td>
-								<td class="num nowrap">
-									<b class={0 < entry.amount ? 'income' : 'expense'}>
-										{formatSignedPesos(entry.amount)}
-									</b>
-								</td>
-								<td>{PAYMENT_METHOD_LABELS[entry.method]}</td>
-								<td>{link(entry)}</td>
-								<td>{entry.recordedBy}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			{/if}
-		</Screen>
+	<div class="book__header">
+		<ScreenHeader>
+			<Tabs tabs={CASH_TABS} current="Libro de caja" />
+			<span class="phone-only">
+				<IconButton icon="filter" label="Filtrar" onclick={() => (isSheetOpen = true)} />
+			</span>
+		</ScreenHeader>
 	</div>
 
-	{#if movement}
-		<div class="book__detail phone-only">
+	<div class="book__body">
+		<div class="book__list">
 			<Screen>
-				{#snippet header()}
-					<ScreenHeader backHref={bookHref()} title={detailTitle(movement)} />
-				{/snippet}
-				{@render movementDetail(movement)}
+				<div class="desktop-only">
+					<div class="book__toolbar">
+						<p class="book__period">{period}</p>
+						<Button
+							type="button"
+							variant="secondary"
+							size="sm"
+							inline
+							aria-expanded={areFiltersShown}
+							onclick={() => (areFiltersShown = !areFiltersShown)}
+						>
+							<Icon name="filter" size="sm" />
+							{areFiltersShown ? 'Ocultar filtros' : 'Filtros'}{extraCount
+								? ` (${extraCount})`
+								: ''}
+						</Button>
+					</div>
+					{#if areFiltersShown}
+						<!-- No apply button: a changed field reloads the book. -->
+						<form
+							method="GET"
+							data-sveltekit-keepfocus
+							data-sveltekit-noscroll
+							onchange={submitOnChange}
+						>
+							{@render fields('desktop-', select)}
+						</form>
+					{/if}
+					<div class="book__count">
+						<p class="meta">
+							{entries.length}
+							{1 === entries.length ? 'movimiento' : 'movimientos'}{extras}
+						</p>
+						{#if extraCount}
+							{@render clearFilters()}
+						{/if}
+					</div>
+				</div>
+
+				<p class="meta phone-only">Totales de {period}{extras}</p>
+
+				<!-- The period's net, not a cash balance: it mixes cash with transfers. -->
+				<div class="stat-grid">
+					<div class="stat stat--income">
+						<div class="stat__label">Entradas</div>
+						<div class="stat__value">{formatPesos(totals.inflow)}</div>
+					</div>
+					<div class="stat stat--expense">
+						<div class="stat__label">Salidas</div>
+						<div class="stat__value">{formatPesos(totals.outflow)}</div>
+					</div>
+					<div class="stat">
+						<div class="stat__label">Neto</div>
+						<div class="stat__value">{net}</div>
+					</div>
+				</div>
+
+				{#if 0 === entries.length}
+					<div class="empty">
+						<p class="meta">Ningún movimiento coincide con los filtros.</p>
+						{@render clearFilters()}
+					</div>
+				{:else}
+					<table class="table phone-only">
+						<thead>
+							<tr>
+								<th>Fecha</th>
+								<th>Movimiento</th>
+								<th class="num">Valor</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each entries as entry (entry.id)}
+								<tr>
+									<td class="nowrap">
+										{formatShortDay(entry.movementDate)}
+										<div class="meta">{formatInstantTime(entry.recordedAt)}</div>
+									</td>
+									<td>
+										<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- bookHref builds it with resolve() -->
+										<a class="row-link" href={bookHref(entry.id)}
+											>{CASH_CONCEPT_LABELS[entry.concept]}</a
+										>
+										<div class="meta">{summary(entry)}</div>
+										<div class="meta">
+											{joined(PAYMENT_METHOD_LABELS[entry.method], entry.recordedBy)}
+										</div>
+									</td>
+									<td class="num nowrap">
+										<b class={0 < entry.amount ? 'income' : 'expense'}>
+											{formatSignedPesos(entry.amount)}
+										</b>
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+
+					<table class="table desktop-only">
+						<thead>
+							<tr>
+								<th>Fecha</th>
+								<th>Concepto</th>
+								<th class="num">Valor</th>
+								<th>Método</th>
+								<th>Relacionado</th>
+								<th>Registró</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each entries as entry (entry.id)}
+								<tr class={{ 'table__row--selected': entry.id === movement?.id }}>
+									<td class="nowrap">
+										{formatShortDay(entry.movementDate)}
+										<div class="meta">{formatInstantTime(entry.recordedAt)}</div>
+									</td>
+									<td>
+										<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- bookHref builds it with resolve() -->
+										<a class="row-link" href={bookHref(entry.id)}
+											>{CASH_CONCEPT_LABELS[entry.concept]}</a
+										>
+										<div class="meta">{entry.description ?? party(entry)}</div>
+									</td>
+									<td class="num nowrap">
+										<b class={0 < entry.amount ? 'income' : 'expense'}>
+											{formatSignedPesos(entry.amount)}
+										</b>
+									</td>
+									<td>{PAYMENT_METHOD_LABELS[entry.method]}</td>
+									<td>{link(entry)}</td>
+									<td>{entry.recordedBy}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				{/if}
 			</Screen>
 		</div>
-		<aside class="book__panel desktop-only">
-			<div class="panel__head">
-				<h2 class="section-title">{detailTitle(movement)}</h2>
-				<IconButton icon="close" label="Cerrar" href={bookHref()} />
+
+		{#if movement}
+			<div class="book__detail phone-only">
+				<Screen>
+					{#snippet header()}
+						<ScreenHeader backHref={bookHref()} title={detailTitle(movement)} />
+					{/snippet}
+					{@render movementDetail(movement)}
+				</Screen>
 			</div>
-			{@render movementDetail(movement)}
-		</aside>
-	{/if}
+			<aside class="book__panel desktop-only">
+				<div class="panel__head">
+					<h2 class="section-title">{detailTitle(movement)}</h2>
+					<IconButton icon="close" label="Cerrar" href={bookHref()} />
+				</div>
+				{@render movementDetail(movement)}
+			</aside>
+		{/if}
+	</div>
 </div>
 
 <BottomSheet bind:open={isSheetOpen} title="Filtros">
@@ -502,14 +506,25 @@
 		margin: 0;
 	}
 
-	/* The book and, once a movement is open, its detail: instead of the book on a phone, beside
-	   it on a desktop. */
-	.book,
+	/* The tabs head the section, and under them the book and, once a movement is open, its
+	   detail: instead of the tabs and the book on a phone, beside the book on a desktop. */
+	.book {
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+	}
+
+	.book__body {
+		flex: 1;
+		min-height: 0;
+	}
+
 	.book__list,
 	.book__detail {
 		height: 100%;
 	}
 
+	.book--detail .book__header,
 	.book--detail .book__list {
 		display: none;
 	}
@@ -693,7 +708,7 @@
 			display: block;
 		}
 
-		.book {
+		.book__body {
 			display: flex;
 		}
 
@@ -702,16 +717,18 @@
 			min-width: 0;
 		}
 
+		.book--detail .book__header,
 		.book--detail .book__list {
 			display: block;
 		}
 
 		.book__panel {
 			box-sizing: border-box;
-			flex: none;
-			width: 340px;
+
+			/* 30% of the width; on a tablet it gives way to the book's table, never past the edge. */
+			flex: 0 1 30%;
 			height: 100%;
-			padding: var(--space-14) var(--space-12);
+			padding: var(--space-8) var(--space-12) var(--space-12);
 			overflow: auto;
 			border-left: var(--border-w-hair) solid var(--border-default);
 		}
