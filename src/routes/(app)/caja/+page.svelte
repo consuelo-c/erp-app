@@ -318,6 +318,18 @@
 		>
 			{0 < detail.amount ? 'Imprimir recibo de caja' : 'Imprimir comprobante de egreso'}
 		</Button>
+		<!-- Where the money came from or went to: the settlement it paid. -->
+		{#if detail.settlement}
+			<Button
+				variant="secondary"
+				href="{resolve('/(app)/nomina')}?{new URLSearchParams({
+					empleado: String(detail.settlement.employeeId),
+					semana: detail.settlement.periodStart
+				})}"
+			>
+				Ver origen
+			</Button>
+		{/if}
 		{#if isReversible(detail)}
 			<Button
 				variant="secondary"
