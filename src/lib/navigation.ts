@@ -30,28 +30,22 @@ export const DESTINATIONS: Destination[] = [
 	{ label: 'Pedidos', icon: 'list' },
 	{ label: 'Inventario', icon: 'package' },
 	{
-		label: 'Nómina',
-		icon: 'banknote',
-		href: resolve('/nomina'),
-		paths: [resolve('/nomina')]
-	},
-	{
 		label: 'Caja',
 		icon: 'wallet',
 		href: resolve('/caja'),
 		paths: [resolve('/caja')]
 	},
 	{
-		label: 'Personal',
+		label: 'Personal y Nómina',
 		icon: 'users',
 		href: resolve('/personal'),
-		paths: [resolve('/personal'), resolve('/logins')]
+		paths: [resolve('/personal'), resolve('/nomina')]
 	},
 	{
-		label: 'Configuración',
+		label: 'Sistema',
 		icon: 'settings',
 		href: resolve('/configuracion'),
-		paths: [resolve('/configuracion')]
+		paths: [resolve('/configuracion'), resolve('/logins')]
 	}
 ];
 
@@ -61,10 +55,10 @@ export const BAR_SLOTS = 3;
 /** Not a destination: it lives in «Más» and at the sidebar's foot. */
 export const HELP: Destination = { label: 'Ayuda', icon: 'help' };
 
-/** Personal's tabs, for the logins that manage logins. */
+/** Personal y Nómina's tabs: the employees and their weekly settlement. */
 export const PERSONAL_TABS = [
 	{ label: 'Personal', href: resolve('/personal') },
-	{ label: 'Logins', href: resolve('/logins') }
+	{ label: 'Nómina', href: resolve('/nomina') }
 ];
 
 export function findDestination(pathname: string): Destination | undefined {
@@ -85,8 +79,12 @@ export const CASH_TABS = [
 	{ label: 'Registrar movimiento', shortLabel: 'Registrar', href: resolve('/caja/registrar') }
 ];
 
-/** Configuración's tabs: the system settings and the holidays editor. */
+/** Sistema's tabs: the system settings, the holidays editor and, for `ADMIN`, the logins. */
 export const SETTINGS_TABS = [
 	{ label: 'Configuración', href: resolve('/configuracion') },
 	{ label: 'Festivos', href: resolve('/configuracion/festivos') }
+];
+export const ADMIN_SETTINGS_TABS = [
+	...SETTINGS_TABS,
+	{ label: 'Logins', href: resolve('/logins') }
 ];

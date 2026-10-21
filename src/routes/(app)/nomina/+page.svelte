@@ -10,6 +10,7 @@
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import Select from '$lib/components/Select.svelte';
+	import Tabs from '$lib/components/Tabs.svelte';
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import WeekPicker from '$lib/components/WeekPicker.svelte';
 	import { addDays, formatLongDay, formatShortDay, getWeekStart } from '$lib/datetime';
@@ -21,6 +22,7 @@
 		PAYMENT_METHOD_LABELS,
 		PAYROLL_STATUS_LABELS
 	} from '$lib/labels';
+	import { PERSONAL_TABS } from '$lib/navigation';
 	import {
 		calculateSettlement,
 		parsePesos,
@@ -159,7 +161,8 @@
 <!-- Only a draft has the side column. -->
 <Screen wide={null !== draft && null === draft.payment}>
 	{#snippet header()}
-		<ScreenHeader title="Liquidación semanal">
+		<ScreenHeader>
+			<Tabs tabs={PERSONAL_TABS} current="Nómina" />
 			{#if draft}
 				<Badge tone={'PAID' === draft.status ? 'success' : undefined}>
 					{PAYROLL_STATUS_LABELS[draft.status]}
