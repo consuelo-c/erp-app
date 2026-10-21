@@ -1,5 +1,5 @@
 import { error, fail } from '@sveltejs/kit';
-import { requireRole } from '$lib/server/actor';
+import { isAdmin, requireRole } from '$lib/server/actor';
 import { getHolidays, overrideFrozenHoliday, updateHolidays } from '$lib/server/services/settings';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -8,7 +8,10 @@ export const load: PageServerLoad = async ({ locals, platform }) => {
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
-	return await getHolidays(platform.env.DB, locals.user);
+	return {
+		...(await getHolidays(platform.env.DB, locals.user)),
+		canManageLogins: isAdmin(locals.user)
+	};
 };
 
 export const actions: Actions = {

@@ -22,11 +22,7 @@
 
 <Screen>
 	{#snippet header()}
-		{#if data.canManageLogins}
-			<ScreenHeader><Tabs tabs={PERSONAL_TABS} current="Personal" /></ScreenHeader>
-		{:else}
-			<ScreenHeader title="Personal" />
-		{/if}
+		<ScreenHeader><Tabs tabs={PERSONAL_TABS} current="Personal" /></ScreenHeader>
 	{/snippet}
 
 	<!-- Set by Nuevo empleado's redirect after a save. -->

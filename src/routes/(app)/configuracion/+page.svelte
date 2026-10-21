@@ -12,7 +12,7 @@
 	import { toDialTime } from '$lib/datetime';
 	import { formatInteger } from '$lib/format';
 	import { SETTING_MODULE_LABELS } from '$lib/labels';
-	import { SETTINGS_TABS } from '$lib/navigation';
+	import { ADMIN_SETTINGS_TABS, SETTINGS_TABS } from '$lib/navigation';
 	import type { SystemSettingKey } from '$lib/server/services/settings';
 	import { getSettingInput, SETTINGS } from '$lib/settings';
 	import type { SubmitFunction } from '@sveltejs/kit';
@@ -56,7 +56,12 @@
 
 <Screen>
 	{#snippet header()}
-		<ScreenHeader><Tabs tabs={SETTINGS_TABS} current="Configuración" /></ScreenHeader>
+		<ScreenHeader
+			><Tabs
+				tabs={data.canManageLogins ? ADMIN_SETTINGS_TABS : SETTINGS_TABS}
+				current="Configuración"
+			/></ScreenHeader
+		>
 	{/snippet}
 
 	<UnsavedChangesGuard form="settings" />
