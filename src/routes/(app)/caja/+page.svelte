@@ -286,8 +286,12 @@
 		</li>
 	</ul>
 	<div class="detail__actions">
-		<!-- STUB: unit #193 (Recibo de caja y comprobante de egreso impresos, phase 07) makes this print the receipt. -->
-		<Button type="button" variant="secondary" disabled>
+		<Button
+			variant="secondary"
+			href="{resolve('/(app)/caja/comprobante')}?{new URLSearchParams({
+				movimiento: String(detail.id)
+			})}"
+		>
 			{0 < detail.amount ? 'Imprimir recibo de caja' : 'Imprimir comprobante de egreso'}
 		</Button>
 		{#if isReversible(detail)}

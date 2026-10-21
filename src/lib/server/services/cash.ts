@@ -1,10 +1,12 @@
 // Caja: every peso in or out. Movements are never edited or deleted: a mistake is offset by
 // another movement with the same concept and link, the opposite sign and `reverses_id`.
 
+import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { getMonthRange, getTodaysDate } from '$lib/datetime';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert } from '../audit';
+import { COMPANY_SETTINGS, readSettings, type CompanySettings } from './settings';
 
 // The cash book, its receipts and every movement recorded by hand.
 const MANAGES_CASH = ['ADMIN', 'MANAGER'] as const;
@@ -325,6 +327,22 @@ export async function getMovement(
 		.bind(id.data)
 		.first<DetailRow>();
 	return null === row ? null : toDetail(row);
+}
+
+/** A movement's printed receipt: its detail and the company's header. */
+export async function getReceipt(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<{ movement: MovementDetail; company: CompanySettings }> {
+	const [movement, company] = await Promise.all([
+		getMovement(db, input, actor),
+		readSettings(db, COMPANY_SETTINGS)
+	]);
+	if (null === movement) {
+		error(404, 'Ese movimiento no existe');
+	}
+	return { movement, company };
 }
 
 /** Every movement the filters let through, newest first, and the period's three totals. */

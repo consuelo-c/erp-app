@@ -279,3 +279,8 @@ async function findFreezeLine(db: D1Database): Promise<string | null> {
 		.first<{ periodStart: string | null }>();
 	return row?.periodStart ? getExtraHoursRange(row.periodStart).end : null;
 }
+
+// The printed formats' header.
+export const COMPANY_SETTINGS = ['COMPANY_NAME', 'COMPANY_ADDRESS', 'COMPANY_PHONE'] as const;
+
+export type CompanySettings = SettingValues<(typeof COMPANY_SETTINGS)[number]>;
