@@ -250,7 +250,8 @@ test("a movement's detail has what its receipt prints, plus who recorded it and 
 		recordedAt: expect.any(Number),
 		receiptNumber: 1,
 		reverses: null,
-		reversedBy: null
+		reversedBy: null,
+		settlement: null
 	});
 	expect(await getMovement(db, '1', manager)).toMatchObject({ id: 1 });
 	expect(await getMovement(db, 2, manager)).toBeNull();
@@ -263,7 +264,8 @@ test("a PAYROLL movement's detail names the week and the employee the settlement
 	expect(await getMovement(db, 1, manager)).toMatchObject({
 		weekNumber: 42,
 		employeeName: 'Ana Pérez',
-		payee: null
+		payee: null,
+		settlement: { employeeId: 1, periodStart: '2026-W42' }
 	});
 });
 

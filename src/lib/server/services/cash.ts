@@ -516,10 +516,14 @@ export type MovementDetail = CashBookEntry & {
 	/** The movement this one offsets, and the one that offsets it: at most one of the two is set. */
 	reverses: ReceiptReference | null;
 	reversedBy: ReceiptReference | null;
+	/** The settlement a PAYROLL movement pays, as Nómina opens it: its employee and week. */
+	settlement: { employeeId: number; periodStart: string } | null;
 };
 
 type DetailRow = Omit<EntryRow, 'full_name'> & {
 	employee_snapshot: string | null;
+	employee_id: number | null;
+	period_start: string | null;
 	original_amount: number | null;
 	original_receipt_number: number | null;
 	correction_amount: number | null;
@@ -543,7 +547,11 @@ function toDetail(row: DetailRow): MovementDetail {
 		bankAccount: attributes.bank_account ?? null,
 		notes: attributes.notes ?? null,
 		reverses: toReference(row.original_amount, row.original_receipt_number),
-		reversedBy: toReference(row.correction_amount, row.correction_receipt_number)
+		reversedBy: toReference(row.correction_amount, row.correction_receipt_number),
+		settlement:
+			null === row.employee_id || null === row.period_start
+				? null
+				: { employeeId: row.employee_id, periodStart: row.period_start }
 	};
 }
 
@@ -561,6 +569,7 @@ export async function getMovement(
 	const row = await db
 		.prepare(
 			`select cash_movements.*, payroll_runs.week_number, payroll_runs.employee_snapshot,
+				payroll_runs.employee_id, payroll_runs.period_start,
 				original.amount as original_amount, original.receipt_number as original_receipt_number,
 				correction.amount as correction_amount, correction.receipt_number as correction_receipt_number
 			from cash_movements
