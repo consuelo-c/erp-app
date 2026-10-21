@@ -163,11 +163,6 @@
 	{#snippet header()}
 		<ScreenHeader>
 			<Tabs tabs={PERSONAL_TABS} current="Nómina" />
-			{#if draft}
-				<Badge tone={'PAID' === draft.status ? 'success' : undefined}>
-					{PAYROLL_STATUS_LABELS[draft.status]}
-				</Badge>
-			{/if}
 		</ScreenHeader>
 	{/snippet}
 
@@ -202,11 +197,19 @@
 			? weekHref(addDays(week.periodStart, 7))
 			: null}
 	/>
-	<p class="meta">
-		Horas extras que paga: {formatShortDay(week.extraHours.start)} – {formatShortDay(
-			week.extraHours.end
-		)}
-	</p>
+	<!-- The settlement's state under the range it belongs to. -->
+	<div class="payroll__period">
+		<p class="meta">
+			Horas extras que paga: {formatShortDay(week.extraHours.start)} – {formatShortDay(
+				week.extraHours.end
+			)}
+		</p>
+		{#if draft}
+			<Badge tone={'PAID' === draft.status ? 'success' : undefined}>
+				{PAYROLL_STATUS_LABELS[draft.status]}
+			</Badge>
+		{/if}
+	</div>
 
 	{#if null === draft || null === shown}
 		<div class="payroll__notice">
@@ -481,6 +484,14 @@
 
 	.payroll__notice {
 		margin-block: var(--space-5);
+	}
+
+	.payroll__period {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-4);
+		align-items: center;
+		justify-content: space-between;
 	}
 
 	.payroll__fields {

@@ -341,9 +341,6 @@
 	<div class="book__header">
 		<ScreenHeader>
 			<Tabs tabs={CASH_TABS} current="Libro de caja" />
-			<span class="phone-only">
-				<IconButton icon="filter" label="Filtrar" onclick={() => (isSheetOpen = true)} />
-			</span>
 		</ScreenHeader>
 	</div>
 
@@ -389,6 +386,19 @@
 									{@render clearFilters()}
 								{/if}
 							</div>
+						</div>
+
+						<div class="book__filter phone-only">
+							<Button
+								type="button"
+								variant="secondary"
+								size="sm"
+								inline
+								onclick={() => (isSheetOpen = true)}
+							>
+								<Icon name="filter" size="sm" />
+								Filtros{extraCount ? ` (${extraCount})` : ''}
+							</Button>
 						</div>
 
 						<p class="meta phone-only">Totales de {period}{extras}</p>
@@ -644,6 +654,10 @@
 
 	.phone-only.meta {
 		margin-bottom: var(--space-4);
+	}
+
+	.book__filter {
+		margin-bottom: var(--space-6);
 	}
 
 	/* Stat tiles: the period's totals. */
