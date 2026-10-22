@@ -1,5 +1,5 @@
-// Contactos: the company's clients, providers and employees in one table, one phone each. Never
-// deleted: orders and employees point to them.
+// Contactos: the company's clients, providers and employees in one table, one document each; a phone
+// may be shared. Never deleted: orders and employees point to them.
 
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
@@ -37,27 +37,22 @@ export type Contact = {
 	id: number;
 	phone: string;
 	fullName: string;
-	documentId: string | null;
+	/** A real one, or the automatic one when none was given: `@` and 8 characters. */
+	documentId: string;
 	services: Service[];
 	email: string | null;
 	address1: string | null;
 	address2: string | null;
 	bankAccount: string | null;
 	notes: string | null;
-	/** An employee points to it: its ID number is then Manager's and Admin's alone. */
+	/** An employee points to it: its ID number is then never automatic. */
 	isEmployee: boolean;
 };
 
 export type SaveResult =
-	| { ok: true; id: number }
-	| {
-			ok: false;
-			message: string;
-			errors: Record<string, string>;
-			/** The contact that already has the phone, for the screen to open it. */
-			phoneOwner?: { id: number; fullName: string };
-	  };
+	{ ok: true; id: number } | { ok: false; message: string; errors: Record<string, string> };
 
+/** The columns as typed: `document_id` is null until the automatic one fills a blank. */
 type Columns = {
 	phone: string;
 	full_name: string;
@@ -66,7 +61,7 @@ type Columns = {
 	attributes: string;
 };
 
-type ContactRow = Columns & { id: number; is_employee: number };
+type ContactRow = Columns & { id: number; document_id: string; is_employee: number };
 
 const CHECK_FIELDS = 'Revisa los campos marcados en rojo antes de guardar.';
 
@@ -99,6 +94,23 @@ export const documentIdSchema = z
 	.string()
 	.optional()
 	.transform((value) => value?.replace(/[\s.-]/g, '').toUpperCase() || null);
+
+/** Marks a document the app made up because none was given; no real one starts with it. */
+export const AUTO_DOCUMENT_PREFIX = '@';
+
+export function isAutoDocument(documentId: string): boolean {
+	return documentId.startsWith(AUTO_DOCUMENT_PREFIX);
+}
+
+// Crockford's base32: 32 symbols divide 256 evenly, and none reads as another (no I, L, O, U).
+const AUTO_DOCUMENT_SYMBOLS = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+/** Most clients never give one, yet the document is the contact's key: `@` and 8 random symbols. */
+export function generateDocumentId(): string {
+	const bytes = crypto.getRandomValues(new Uint8Array(8));
+	const symbols = Array.from(bytes, (byte) => AUTO_DOCUMENT_SYMBOLS[byte % 32]);
+	return AUTO_DOCUMENT_PREFIX + symbols.join('');
+}
 
 const formSchema = z.object({
 	phone: phoneSchema,
@@ -172,25 +184,19 @@ function isOverwritten(current: string | null, next: string | null): boolean {
 }
 
 // Redirected money: whoever pays copies the saved account without checking it, so changing one
-// that's set is the manager's, and so is the ID number that goes with a refund, and a provider's
-// services. Sales fills in what's still empty, except an employee's ID number: payroll's.
-function changesLockedField(current: Columns, next: Columns, isEmployee: boolean): boolean {
-	const documentChanged = isEmployee
-		? current.document_id !== next.document_id
-		: isOverwritten(current.document_id, next.document_id);
+// that's set is the manager's, and so is a provider's services. The ID number goes with a refund
+// and is the contact's key: only the manager assigns it. Sales fills in an empty account.
+function changesLockedField(current: Columns, next: Columns): boolean {
 	return (
 		current.services !== next.services ||
-		documentChanged ||
+		current.document_id !== next.document_id ||
 		isOverwritten(bankAccountOf(current), bankAccountOf(next))
 	);
 }
 
 // The screen shows these fields locked to Sales; a save that changes them anyway was forged.
-function requireLockedFieldsKept(
-	actor: Actor,
-	{ current, next, isEmployee }: { current: Columns; next: Columns; isEmployee: boolean }
-): void {
-	if (!isAdminOrManager(actor) && changesLockedField(current, next, isEmployee)) {
+function requireLockedFieldsKept(actor: Actor, current: Columns, next: Columns): void {
+	if (!isAdminOrManager(actor) && changesLockedField(current, next)) {
 		error(403, 'Solo Gerente o Administrador cambian ese dato');
 	}
 }
@@ -203,47 +209,54 @@ export function invalidForm(zodError: z.ZodError): SaveResult {
 	return { ok: false, message: CHECK_FIELDS, errors };
 }
 
-type Owner = { id: number; full_name: string };
-
-// The UNIQUE columns still guard a race; this turns the common case into a message, not a 500.
-async function findOwner(
-	db: D1Database,
-	{ column, value, exceptId }: { column: 'phone' | 'document_id'; value: string; exceptId: number }
-): Promise<Owner | null> {
-	return db
-		.prepare(`select id, full_name from contacts where ${column} = ? and id != ?`)
-		.bind(value, exceptId)
-		.first<Owner>();
+function documentRefusal(message: string): SaveResult {
+	return { ok: false, message: CHECK_FIELDS, errors: { document_id: message } };
 }
 
-/** Why a phone or document number can't be saved on contact `exceptId`: another contact has it. */
-export async function takenRefusal(
+/** Why a document number can't be saved on contact `exceptId`: another contact has it. */
+export async function documentTakenRefusal(
 	db: D1Database,
-	columns: Pick<Columns, 'phone' | 'document_id'>,
+	documentId: string,
 	exceptId: number
 ): Promise<SaveResult | null> {
-	const phoneOwner = await findOwner(db, { column: 'phone', value: columns.phone, exceptId });
-	if (null !== phoneOwner) {
-		return {
-			ok: false,
-			message: CHECK_FIELDS,
-			errors: { phone: `Ese teléfono ya es de ${phoneOwner.full_name}` },
-			phoneOwner: { id: phoneOwner.id, fullName: phoneOwner.full_name }
-		};
+	// The UNIQUE column still guards a race; this turns the common case into a message, not a 500.
+	const owner = await db
+		.prepare('select full_name from contacts where document_id = ? and id != ?')
+		.bind(documentId, exceptId)
+		.first<{ full_name: string }>();
+	return null === owner ? null : documentRefusal(`Esa cédula o NIT ya es de ${owner.full_name}`);
+}
+
+const AUTO_DOCUMENT_TYPED = documentRefusal(
+	`Un documento no empieza con ${AUTO_DOCUMENT_PREFIX}: así empiezan los automáticos`
+);
+
+// Payroll prints it on every receipt: an employee's contact always has a real one.
+const EMPLOYEE_DOCUMENT_REQUIRED = documentRefusal('Es empleado: la cédula no puede quedar vacía');
+
+// A typed `@` would pass for an automatic document; the one already saved comes back as it was.
+function isForgedAutoDocument(typed: string | null, current: string | null): boolean {
+	return null !== typed && isAutoDocument(typed) && typed !== current;
+}
+
+// A blank keeps the automatic document there is, or makes one up.
+function documentOrAuto(typed: string | null, current: string | null): string {
+	if (null !== typed) {
+		return typed;
 	}
-	if (null === columns.document_id) {
-		return null;
+	return null !== current && isAutoDocument(current) ? current : generateDocumentId();
+}
+
+/** The document to save on a contact whose current one is `current`, or why it can't be saved. */
+async function resolveDocument(
+	db: D1Database,
+	{ typed, current, exceptId }: { typed: string | null; current: string | null; exceptId: number }
+): Promise<string | SaveResult> {
+	if (isForgedAutoDocument(typed, current)) {
+		return AUTO_DOCUMENT_TYPED;
 	}
-	const documentOwner = await findOwner(db, {
-		column: 'document_id',
-		value: columns.document_id,
-		exceptId
-	});
-	if (null === documentOwner) {
-		return null;
-	}
-	const message = `Esa cédula o NIT ya es de ${documentOwner.full_name}`;
-	return { ok: false, message: CHECK_FIELDS, errors: { document_id: message } };
+	const documentId = documentOrAuto(typed, current);
+	return (await documentTakenRefusal(db, documentId, exceptId)) ?? documentId;
 }
 
 async function findRow(db: D1Database, id: number): Promise<ContactRow | null> {
@@ -278,16 +291,20 @@ export async function createContact(
 		return invalidForm(parsed.error);
 	}
 	const columns = toColumns(parsed.data);
-	requireLockedFieldsKept(actor, { current: NEW_CONTACT, next: columns, isEmployee: false });
-	const refusal = await takenRefusal(db, columns, 0);
-	if (null !== refusal) {
-		return refusal;
+	requireLockedFieldsKept(actor, NEW_CONTACT, columns);
+	const documentId = await resolveDocument(db, {
+		typed: columns.document_id,
+		current: null,
+		exceptId: 0
+	});
+	if ('string' !== typeof documentId) {
+		return documentId;
 	}
 	const statements = auditedInsert(db, {
 		table: 'contacts',
 		entityType: 'CONTACT',
 		actor,
-		values: columns
+		values: { ...columns, document_id: documentId }
 	});
 	const [inserted] = await db.batch(statements);
 	return { ok: true, id: inserted.meta.last_row_id };
@@ -316,14 +333,6 @@ async function applyEdit(
 
 const NOT_FOUND: SaveResult = { ok: false, message: 'Ese contacto no existe', errors: {} };
 
-// Payroll prints it on every receipt: an employee's contact always has one.
-const EMPLOYEE_DOCUMENT_MESSAGE = 'Es empleado: la cédula no puede quedar vacía';
-const EMPLOYEE_DOCUMENT_REQUIRED: SaveResult = {
-	ok: false,
-	message: CHECK_FIELDS,
-	errors: { document_id: EMPLOYEE_DOCUMENT_MESSAGE }
-};
-
 /** The whole form: a locked field Sales can't change still arrives, with its current value. */
 export async function updateContact(
 	db: D1Database,
@@ -341,16 +350,19 @@ export async function updateContact(
 		return NOT_FOUND;
 	}
 	const columns = toColumns(form);
-	const isEmployee = 1 === row.is_employee;
-	requireLockedFieldsKept(actor, { current: row, next: columns, isEmployee });
-	const refusal =
-		isEmployee && null === columns.document_id
-			? EMPLOYEE_DOCUMENT_REQUIRED
-			: await takenRefusal(db, columns, id);
-	if (null !== refusal) {
-		return refusal;
+	requireLockedFieldsKept(actor, row, columns);
+	if (1 === row.is_employee && null === columns.document_id) {
+		return EMPLOYEE_DOCUMENT_REQUIRED;
 	}
-	return applyEdit(db, actor, { row, columns });
+	const documentId = await resolveDocument(db, {
+		typed: columns.document_id,
+		current: row.document_id,
+		exceptId: id
+	});
+	if ('string' !== typeof documentId) {
+		return documentId;
+	}
+	return applyEdit(db, actor, { row, columns: { ...columns, document_id: documentId } });
 }
 
 /** «Cargar más» brings this many at a time; the list never loads the whole table. */

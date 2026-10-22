@@ -115,7 +115,7 @@ const AUDIT = "0, 'gerente', 0, 'gerente'";
 // A paid settlement to link a PAYROLL movement to: only what the cash book reads off it.
 function insertRun({ employee, week }: { employee: string; week: number }): number {
 	database.exec(
-		`insert or ignore into contacts (phone, full_name, created_at, created_by, updated_at, updated_by) values ('${employee}', '${employee}', ${AUDIT})`
+		`insert or ignore into contacts (phone, full_name, document_id, created_at, created_by, updated_at, updated_by) values ('${employee}', '${employee}', '${employee}', ${AUDIT})`
 	);
 	database.exec(
 		`insert or ignore into employees (contact_id, created_at, created_by, updated_at, updated_by) values ((select id from contacts where phone = '${employee}'), ${AUDIT})`

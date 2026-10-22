@@ -35,7 +35,7 @@ CREATE TABLE `contacts` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`phone` text NOT NULL,
 	`full_name` text NOT NULL,
-	`document_id` text,
+	`document_id` text NOT NULL,
 	`services` text DEFAULT '[]' NOT NULL,
 	`attributes` text DEFAULT '{}' NOT NULL,
 	`created_at` integer NOT NULL,
@@ -44,7 +44,6 @@ CREATE TABLE `contacts` (
 	`updated_by` text NOT NULL
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `contacts_phone_unique` ON `contacts` (`phone`);--> statement-breakpoint
 CREATE UNIQUE INDEX `contacts_document_id_unique` ON `contacts` (`document_id`);--> statement-breakpoint
 CREATE TABLE `employees` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,

@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
+	import Badge from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import Field from '$lib/components/Field.svelte';
+	import Icon from '$lib/components/Icon.svelte';
 	import Input from '$lib/components/Input.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Notice from '$lib/components/Notice.svelte';
@@ -10,7 +12,8 @@
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import { formatIdNumber } from '$lib/format';
-	import type { PhoneMatch } from '$lib/server/services/employees';
+	import { formatPhone } from '$lib/phone';
+	import type { ContactCandidate } from '$lib/server/services/employees';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import type { PageProps } from './$types';
 
@@ -20,22 +23,42 @@
 	const value = (name: string) => String(form?.values[name] ?? '');
 	const errorOf = (name: string): string | undefined => form?.errors?.[name];
 
-	// Filled in from the contact a typed phone already belongs to.
+	// Filled in from the contact picked in the search; after a failed submit, what was typed.
+	let phone = $state(value('phone'));
 	let fullName = $state(value('full_name'));
 	let documentId = $state(value('document_id'));
-	let match = $state<PhoneMatch | null>(null);
+	let picked = $state<{ id: number; fullName: string } | null>(
+		value('contact_id') ? { id: Number(value('contact_id')), fullName: value('full_name') } : null
+	);
+	let candidates = $state<ContactCandidate[]>([]);
 
-	const phoneError = $derived(match?.error ?? errorOf('phone'));
-	const isReused = $derived(null !== match && null === match.error);
+	let typing: ReturnType<typeof setTimeout> | undefined;
+	let latestSearch = '';
 
-	async function matchPhone(event: Event & { currentTarget: HTMLInputElement }) {
-		const query = new URLSearchParams({ telefono: event.currentTarget.value });
+	// Searched once the typing pauses; an answer to an older search is dropped.
+	function searchSoon(event: Event & { currentTarget: HTMLInputElement }) {
+		const search = event.currentTarget.value;
+		latestSearch = search;
+		clearTimeout(typing);
+		typing = setTimeout(() => searchContacts(search), 300);
+	}
+
+	async function searchContacts(search: string) {
+		const query = new URLSearchParams({ texto: search });
 		const response = await fetch(`${resolve('/personal/nuevo/contacto')}?${query}`);
-		match = response.ok ? await response.json() : null;
-		if (null !== match && null === match.error) {
-			fullName = match.fullName;
-			documentId = match.documentId ? formatIdNumber(match.documentId) : '';
+		const found: ContactCandidate[] = response.ok ? await response.json() : [];
+		if (search === latestSearch) {
+			candidates = found;
 		}
+	}
+
+	// An automatic document isn't payroll's: the real cédula is typed.
+	function pick(candidate: ContactCandidate) {
+		picked = { id: candidate.id, fullName: candidate.fullName };
+		phone = formatPhone(candidate.phone);
+		fullName = candidate.fullName;
+		documentId = candidate.documentId ? formatIdNumber(candidate.documentId) : '';
+		candidates = [];
 	}
 
 	let employeeForm: HTMLFormElement;
@@ -68,6 +91,52 @@
 
 	<UnsavedChangesGuard form="employee" />
 
+	<!-- Outside the form: the search posts nothing, and Enter on it doesn't submit. -->
+	<div class="lookup">
+		<Field
+			label="Buscar en Contactos"
+			id="contact_search"
+			hint="Por nombre, teléfono, correo o cédula. Si no está, llena los datos y se crea."
+		>
+			<label class="search">
+				<Icon name="search" size="sm" />
+				<Input
+					id="contact_search"
+					type="search"
+					placeholder="Ej. Carlos o 310 442"
+					oninput={searchSoon}
+				/>
+			</label>
+		</Field>
+		{#if picked}
+			<div class="picked">
+				<span class="meta">✓ Se usará el contacto de <strong>{picked.fullName}</strong></span>
+				<Button type="button" variant="secondary" inline onclick={() => (picked = null)}>
+					Quitar
+				</Button>
+			</div>
+		{:else if candidates.length}
+			<ul class="candidates">
+				{#each candidates as candidate (candidate.id)}
+					<li>
+						<button
+							type="button"
+							class="candidate"
+							disabled={candidate.isEmployee}
+							onclick={() => pick(candidate)}
+						>
+							<span class="candidate__name">{candidate.fullName}</span>
+							<span class="meta">{formatPhone(candidate.phone)}</span>
+							{#if candidate.isEmployee}
+								<Badge tone="info">Empleado</Badge>
+							{/if}
+						</button>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	</div>
+
 	<!-- The submit button sits in the confirmation dialog and reaches this form through its `form` attribute. -->
 	<form
 		id="employee"
@@ -79,23 +148,16 @@
 		{#if form?.message}
 			<Notice tone="error">{form.message}</Notice>
 		{/if}
-		<Field
-			label="Teléfono"
-			id="phone"
-			hint={isReused
-				? '✓ Ya está en Contactos: se usará ese contacto'
-				: 'Si ya está en Contactos, se llenan el nombre y la cédula.'}
-			error={phoneError}
-		>
+		<input type="hidden" name="contact_id" value={picked?.id ?? ''} />
+		<Field label="Teléfono" id="phone" error={errorOf('phone')}>
 			<Input
 				id="phone"
 				name="phone"
 				type="tel"
 				inputmode="tel"
-				value={value('phone')}
+				bind:value={phone}
 				placeholder="Ej. 310 442 8890"
-				onchange={matchPhone}
-				aria-invalid={undefined !== phoneError}
+				aria-invalid={undefined !== errorOf('phone')}
 				required
 			/>
 		</Field>
@@ -171,3 +233,70 @@
 		{/snippet}
 	</Modal>
 </Screen>
+
+<style>
+	.lookup {
+		margin-bottom: var(--space-8);
+	}
+
+	.search {
+		position: relative;
+		display: block;
+	}
+
+	.search :global(.icon) {
+		position: absolute;
+		top: 50%;
+		left: var(--input-icon-inset);
+		color: var(--text-disabled);
+		pointer-events: none;
+		translate: 0 -50%;
+	}
+
+	.search :global(.input) {
+		padding-left: var(--input-icon-pad);
+	}
+
+	.picked {
+		display: flex;
+		gap: var(--space-4);
+		align-items: center;
+		justify-content: space-between;
+		margin-top: var(--space-5);
+	}
+
+	.candidates {
+		padding: 0;
+		margin: var(--space-5) 0 0;
+		list-style: none;
+		border-top: var(--border-w) solid var(--border-default);
+	}
+
+	.candidate {
+		box-sizing: border-box;
+		display: flex;
+		gap: var(--space-4);
+		align-items: center;
+		width: 100%;
+		min-height: var(--tap-min);
+		padding: var(--space-4) 0;
+		font: inherit;
+		color: var(--text-body);
+		text-align: left;
+		cursor: pointer;
+		background: none;
+		border: 0;
+		border-bottom: var(--border-w) solid var(--border-default);
+	}
+
+	.candidate:disabled {
+		color: var(--text-disabled);
+		cursor: default;
+	}
+
+	.candidate__name {
+		flex: 1;
+		min-width: 0;
+		font-weight: var(--weight-semibold);
+	}
+</style>

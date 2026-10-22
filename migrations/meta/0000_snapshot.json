@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e22a59e7-ea2e-4abc-a7f8-2a9e9a67ca39",
+  "id": "bde97179-51f3-46db-868e-005f41b3bc3d",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "cash_movements": {
@@ -203,7 +203,7 @@
           "name": "document_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "services": {
@@ -252,13 +252,6 @@
         }
       },
       "indexes": {
-        "contacts_phone_unique": {
-          "name": "contacts_phone_unique",
-          "columns": [
-            "phone"
-          ],
-          "isUnique": true
-        },
         "contacts_document_id_unique": {
           "name": "contacts_document_id_unique",
           "columns": [

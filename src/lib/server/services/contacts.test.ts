@@ -6,6 +6,7 @@ import { createMemoryD1 } from '../db/memory-d1';
 import {
 	contactAttributesSchema,
 	createContact,
+	generateDocumentId,
 	getContact,
 	listContacts,
 	servicesSchema,
@@ -104,27 +105,44 @@ test('the email is validated only when it has a value', async () => {
 	expect((await createContact(db, { ...luzMarina, email: '' }, sales)).ok).toBe(true);
 });
 
-test('a phone another contact has names that contact, to open it', async () => {
-	const owner = await create(luzMarina);
-	const result = await createContact(db, { phone: '+57 3104428890', full_name: 'Otra' }, sales);
-	expect(result).toEqual({
-		ok: false,
-		message: 'Revisa los campos marcados en rojo antes de guardar.',
-		errors: { phone: 'Ese teléfono ya es de Luz Marina Restrepo' },
-		phoneOwner: { id: owner, fullName: 'Luz Marina Restrepo' }
+test("a company's branches share its switchboard: two contacts can have one phone", async () => {
+	await create({ ...luzMarina, document_id: '900.456.123-4' });
+	await create({
+		phone: '+57 3104428890',
+		full_name: 'Sucursal Centro',
+		document_id: '9004561235'
 	});
+	expect((await listContacts(db, { search: '442 8890' }, sales)).contacts).toHaveLength(2);
 });
 
-test('one document per contact; several contacts can have none', async () => {
+test('the automatic document is @ and 8 symbols of Crockford base32', () => {
+	expect(generateDocumentId()).toMatch(/^@[0-9A-HJKMNP-TV-Z]{8}$/);
+	expect(generateDocumentId()).not.toBe(generateDocumentId());
+});
+
+test('one document per contact; one not given is made up, and not typed as such', async () => {
 	await create({ ...luzMarina, document_id: '1.036.452.118' });
 	const result = await createContact(
 		db,
 		{ phone: '300 771 2043', full_name: 'Jorge Iván Betancur', document_id: '1036452118' },
 		manager
 	);
-	expect(result).toMatchObject({ ok: false, errors: { document_id: expect.any(String) } });
-	await create({ phone: '300 771 2043', full_name: 'Jorge Iván Betancur' });
-	await create({ phone: '311 908 5512', full_name: 'Wilson Muñoz', document_id: '' });
+	expect(result).toMatchObject({
+		ok: false,
+		errors: { document_id: 'Esa cédula o NIT ya es de Luz Marina Restrepo' }
+	});
+	const jorge = await create({ phone: '300 771 2043', full_name: 'Jorge Iván Betancur' });
+	const wilson = await create({
+		phone: '311 908 5512',
+		full_name: 'Wilson Muñoz',
+		document_id: ''
+	});
+	const documentOf = async (id: number) => (await getContact(db, id, sales))?.documentId;
+	expect(await documentOf(jorge)).toMatch(/^@.{8}$/);
+	expect(await documentOf(jorge)).not.toBe(await documentOf(wilson));
+	expect(
+		await createContact(db, { ...luzMarina, document_id: '@ABCDEFGH' }, manager)
+	).toMatchObject({ ok: false, errors: { document_id: expect.stringContaining('automáticos') } });
 	expect(() =>
 		database
 			.prepare(
@@ -133,6 +151,14 @@ test('one document per contact; several contacts can have none', async () => {
 			)
 			.run()
 	).toThrow(/UNIQUE/);
+	expect(() =>
+		database
+			.prepare(
+				`insert into contacts (phone, full_name, created_at, created_by, updated_at, updated_by)
+				values ('13055550142', 'Tourist', 0, 'test', 0, 'test')`
+			)
+			.run()
+	).toThrow(/NOT NULL/);
 });
 
 test('search by name or by three digits of the phone, with the service filter, a page at a time', async () => {
@@ -173,7 +199,7 @@ const withAccount = {
 	services: ['DECORATOR']
 };
 
-test('Sales is rejected changing services, a set bank account or a set document', async () => {
+test('Sales is rejected changing services, a set bank account or the document', async () => {
 	const id = await create(withAccount);
 	for (const change of [
 		{ services: [] },
@@ -188,12 +214,31 @@ test('Sales is rejected changing services, a set bank account or a set document'
 	);
 });
 
-test('Sales fills in an empty bank account and document; Manager clears both', async () => {
+test('Sales fills in an empty bank account but never assigns a document', async () => {
 	const id = await create(luzMarina, sales);
-	const filled = { ...luzMarina, document_id: '1036452118', bank_account: 'Nequi 310 442 8890' };
-	expect(await updateContact(db, { ...filled, id }, sales)).toEqual({ ok: true, id });
-	expect(await updateContact(db, { ...luzMarina, id }, manager)).toEqual({ ok: true, id });
-	expect(await getContact(db, id, manager)).toMatchObject({ documentId: null, bankAccount: null });
+	const automatic = (await getContact(db, id, sales))!.documentId;
+	const kept = { ...luzMarina, document_id: automatic, bank_account: 'Nequi 310 442 8890' };
+	expect(await updateContact(db, { ...kept, id }, sales)).toEqual({ ok: true, id });
+	expect(
+		await rejection(updateContact(db, { ...kept, document_id: '1036452118', id }, sales))
+	).toBe(403);
+	expect(
+		await rejection(createContact(db, { ...luzMarina, document_id: '1036452118' }, sales))
+	).toBe(403);
+});
+
+test('Manager assigns a real document over the automatic one, and clearing it makes a new one', async () => {
+	const id = await create(luzMarina);
+	const automatic = (await getContact(db, id, manager))!.documentId;
+	await updateContact(db, { ...luzMarina, document_id: automatic, id }, manager);
+	expect((await getContact(db, id, manager))?.documentId).toBe(automatic);
+	await updateContact(db, { ...luzMarina, document_id: '1.036.452.118', id }, manager);
+	expect((await getContact(db, id, manager))?.documentId).toBe('1036452118');
+	await updateContact(db, { ...luzMarina, document_id: '', bank_account: '', id }, manager);
+	expect(await getContact(db, id, manager)).toMatchObject({
+		documentId: expect.stringMatching(/^@/),
+		bankAccount: null
+	});
 });
 
 test("an employee's document is Manager's and Admin's, and never left empty", async () => {

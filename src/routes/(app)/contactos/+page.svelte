@@ -5,6 +5,7 @@
 	import Button from '$lib/components/Button.svelte';
 	import Chip from '$lib/components/Chip.svelte';
 	import Icon from '$lib/components/Icon.svelte';
+	import IconButton from '$lib/components/IconButton.svelte';
 	import Input from '$lib/components/Input.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
@@ -137,14 +138,22 @@
 								</span>
 							{/if}
 						</a>
-						<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- a phone call, not a route -->
-						<a
-							class="contact__call"
-							href="tel:+{contact.phone}"
-							aria-label="Llamar a {contact.fullName} · {formatPhone(contact.phone)}"
-						>
-							<Icon name="phone" size="sm" />{formatPhone(contact.phone)}
-						</a>
+						<!-- The number is read; its icons call it or open a WhatsApp chat with it. -->
+						<span class="contact__reach">
+							<span class="contact__phone">{formatPhone(contact.phone)}</span>
+							<IconButton
+								icon="phone"
+								label="Llamar a {contact.fullName}"
+								href="tel:+{contact.phone}"
+							/>
+							<IconButton
+								icon="whatsapp"
+								label="Escribir por WhatsApp a {contact.fullName}"
+								href="https://wa.me/{contact.phone}"
+								target="_blank"
+								rel="noopener"
+							/>
+						</span>
 					</li>
 				{/each}
 			</ul>
@@ -241,7 +250,7 @@
 		border-bottom: var(--border-w) solid var(--border-default);
 	}
 
-	/* The name opens the contact; the phone, apart, calls it. */
+	/* The name opens the contact; the icons, apart, call it or write to it. */
 	.contact__open {
 		display: flex;
 		flex: 1;
@@ -268,18 +277,21 @@
 		gap: var(--space-3);
 	}
 
-	.contact__call {
+	/* 24px apart: each icon's 44px hit area overhangs its glyph by 12px on either side. */
+	.contact__reach {
 		display: flex;
 		flex: none;
-		gap: var(--space-3);
+		gap: var(--space-12);
 		align-items: center;
-		min-height: 48px;
-		padding-left: var(--space-6);
+		padding: 0 var(--space-6);
+		color: var(--link);
+	}
+
+	.contact__phone {
 		font: var(--weight-semibold) var(--text-base) / 1.2 var(--font-sans);
 		font-variant-numeric: tabular-nums;
-		color: var(--link);
+		color: var(--text-body);
 		white-space: nowrap;
-		text-decoration: none;
 	}
 
 	.more {

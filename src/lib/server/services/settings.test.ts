@@ -133,8 +133,8 @@ test('an event never carries both an id and a key', () => {
 function settle(periodStart: string, status: 'DRAFT' | 'PAID') {
 	const { lastInsertRowid: contactId } = database
 		.prepare(
-			`insert into contacts (phone, full_name, created_at, created_by, updated_at, updated_by)
-			values (?, 'Ana Pérez', 0, 'gerente', 0, 'gerente')`
+			`insert into contacts (phone, full_name, document_id, created_at, created_by, updated_at, updated_by)
+			values ('573104428890', 'Ana Pérez', ?, 0, 'gerente', 0, 'gerente')`
 		)
 		.run(periodStart);
 	const { lastInsertRowid: employeeId } = database
