@@ -385,7 +385,7 @@ export type CashBookTotals = { inflow: number; outflow: number; net: number };
 type Clause = { sql: string; params: (string | number)[] };
 
 // A LIKE pattern for typed text: its own % and _ match themselves.
-function containing(text: string): string {
+export function containing(text: string): string {
 	return `%${text.replace(/[\\%_]/g, '\\$&')}%`;
 }
 

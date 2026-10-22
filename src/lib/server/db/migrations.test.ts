@@ -45,6 +45,7 @@ function insertUser(username: string, employeeId: number | null) {
 test('creates exactly the tables of the phases built so far', () => {
 	expect(listTables()).toEqual([
 		'cash_movements',
+		'contacts',
 		'employees',
 		'events',
 		'payroll_runs',
