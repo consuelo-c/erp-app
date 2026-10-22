@@ -1,9 +1,10 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 
-	// No tone is the neutral grey (Inactivo, Retirado). Order-state tones arrive with the orders phase.
+	// No tone is the neutral grey (Inactivo, Retirado, a contact's services); `info` marks an employee.
+	// Order-state tones arrive with the orders phase.
 	interface Props {
-		tone?: 'success';
+		tone?: 'success' | 'info';
 		children: Snippet;
 	}
 
@@ -26,5 +27,10 @@
 	.badge--success {
 		color: var(--success-fg);
 		background: var(--success-bg);
+	}
+
+	.badge--info {
+		color: var(--info-fg);
+		background: var(--info-bg);
 	}
 </style>

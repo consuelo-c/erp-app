@@ -28,6 +28,12 @@ export const DESTINATIONS: Destination[] = [
 		paths: [resolve('/horas')]
 	},
 	{ label: 'Pedidos', icon: 'list' },
+	{
+		label: 'Contactos',
+		icon: 'contact',
+		href: resolve('/contactos'),
+		paths: [resolve('/contactos')]
+	},
 	{ label: 'Inventario', icon: 'package' },
 	{
 		label: 'Caja',

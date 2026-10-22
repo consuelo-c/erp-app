@@ -79,7 +79,8 @@ test('a contact saves its phone normalized and its optional fields in attributes
 		address1: 'Cra 43A #18-95',
 		address2: null,
 		bankAccount: null,
-		notes: null
+		notes: null,
+		isEmployee: false
 	});
 	expect(database.prepare('select action, before from events').all()).toMatchObject([
 		{ action: 'CREATED', before: null }
@@ -108,7 +109,7 @@ test('a phone another contact has names that contact, to open it', async () => {
 	const result = await createContact(db, { phone: '+57 3104428890', full_name: 'Otra' }, sales);
 	expect(result).toEqual({
 		ok: false,
-		message: 'Ese teléfono ya es de Luz Marina Restrepo',
+		message: 'Revisa los campos marcados en rojo antes de guardar.',
 		errors: { phone: 'Ese teléfono ya es de Luz Marina Restrepo' },
 		phoneOwner: { id: owner, fullName: 'Luz Marina Restrepo' }
 	});
@@ -147,7 +148,7 @@ test('search by name or by three digits of the phone, with the service filter, a
 	expect(await names({ search: '44' })).toHaveLength(3);
 	expect(await names({ service: 'TRANSPORTER' })).toEqual(['Wilson Muñoz']);
 	expect(await names({ service: 'TRANSPORTER', search: 'luz' })).toEqual([]);
-	expect(await names({ service: 'BOGUS', offset: 'x' })).toHaveLength(3);
+	expect(await names({ service: 'BOGUS', pages: 'x' })).toHaveLength(3);
 
 	for (let i = 0; i < 9; i++) {
 		await create({ phone: `320 000 00${10 + i}`, full_name: `Zoila ${i}` });
@@ -155,9 +156,14 @@ test('search by name or by three digits of the phone, with the service filter, a
 	const first = await listContacts(db, {}, sales);
 	expect(first).toMatchObject({ hasMore: true });
 	expect(first.contacts).toHaveLength(10);
-	const rest = await listContacts(db, { offset: '10' }, sales);
-	expect(rest.contacts.map((contact) => contact.fullName)).toEqual(['Zoila 7', 'Zoila 8']);
-	expect(rest.hasMore).toBe(false);
+	const more = await listContacts(db, { pages: '2' }, sales);
+	expect(more.contacts.slice(10).map((contact) => contact.fullName)).toEqual([
+		'Zoila 7',
+		'Zoila 8'
+	]);
+	expect(more.hasMore).toBe(false);
+	// Past the cap, a typed URL gets the first page, never the whole table.
+	expect((await listContacts(db, { pages: '1000' }, sales)).contacts).toHaveLength(10);
 });
 
 const withAccount = {
@@ -195,6 +201,8 @@ test("an employee's document is Manager's and Admin's, and never left empty", as
 	const hired = { ...ana, monthly_salary: '1750905', position: 'Bodega', start: '2026-07-01' };
 	await createEmployee(db, hired, manager);
 	const id = 1;
+	expect(await getContact(db, id, sales)).toMatchObject({ isEmployee: true });
+	expect((await listContacts(db, {}, sales)).contacts).toMatchObject([{ isEmployee: true }]);
 	expect(await rejection(updateContact(db, { ...ana, document_id: '1', id }, sales))).toBe(403);
 	expect(await updateContact(db, { ...ana, full_name: 'Ana P.', id }, sales)).toEqual({
 		ok: true,
