@@ -5,7 +5,14 @@
 import { z } from 'zod';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
-import { documentIdSchema, invalidForm, phoneSchema, takenRefusal } from './contacts';
+import { containing } from './cash';
+import {
+	documentIdSchema,
+	documentTakenRefusal,
+	invalidForm,
+	isAutoDocument,
+	phoneSchema
+} from './contacts';
 
 // Salaries live here, so only the ones who settle payroll see or touch employees.
 const MANAGES_EMPLOYEES = ['ADMIN', 'MANAGER'] as const;
@@ -75,8 +82,12 @@ const EMPLOYEE_SELECT = `select employees.id, employees.contact_id, contacts.pho
 const detailsSchema = z.object({
 	phone: phoneSchema,
 	full_name: z.string().trim().min(1, 'Escribe el nombre completo'),
-	// Optional on a contact, required on an employee: payroll prints it.
-	document_id: documentIdSchema.pipe(z.string('Escribe la cédula')),
+	// Optional on a contact, required and real on an employee: payroll prints it.
+	document_id: documentIdSchema.pipe(
+		z
+			.string('Escribe la cédula')
+			.refine((documentId) => !isAutoDocument(documentId), 'Escribe la cédula real')
+	),
 	// Punctuation is how people type it ($1.423.500): only the digits count.
 	monthly_salary: z
 		.string()
@@ -94,7 +105,15 @@ const detailsSchema = z.object({
 
 const idSchema = z.coerce.number().int().positive();
 
-const createSchema = detailsSchema.extend({ start: z.iso.date('Escoge la fecha de ingreso') });
+const createSchema = detailsSchema.extend({
+	start: z.iso.date('Escoge la fecha de ingreso'),
+	// The contact picked from the search; blank creates a new one.
+	contact_id: z
+		.string()
+		.optional()
+		.transform((value) => (value ? Number(value) : undefined))
+		.pipe(z.number().int().positive().optional())
+});
 const updateSchema = detailsSchema.extend({ id: idSchema });
 const endSchema = z.object({ id: idSchema, end: z.iso.date('Escoge la fecha de retiro') });
 const rehireSchema = z.object({ id: idSchema, start: z.iso.date('Escoge la fecha de ingreso') });
@@ -152,64 +171,116 @@ export async function getEmployee(
 	return null === row ? null : toEmployee(row);
 }
 
-type PhoneOwnerRow = {
+type CandidateRow = {
 	id: number;
 	full_name: string;
-	document_id: string | null;
+	phone: string;
+	document_id: string;
 	employee_id: number | null;
 };
 
-async function findPhoneOwner(db: D1Database, phone: string): Promise<PhoneOwnerRow | null> {
-	return db
-		.prepare(
-			`select contacts.id, contacts.full_name, contacts.document_id, employees.id as employee_id
-			from contacts left join employees on employees.contact_id = contacts.id
-			where contacts.phone = ?`
-		)
-		.bind(phone)
-		.first<PhoneOwnerRow>();
+const CANDIDATE_SELECT = `select contacts.id, contacts.full_name, contacts.phone, contacts.document_id,
+	employees.id as employee_id
+	from contacts left join employees on employees.contact_id = contacts.id`;
+
+async function findCandidate(db: D1Database, id: number): Promise<CandidateRow | null> {
+	return db.prepare(`${CANDIDATE_SELECT} where contacts.id = ?`).bind(id).first<CandidateRow>();
 }
 
-// A contact is at most one employee: `contact_id` is UNIQUE.
-function employedMessage(fullName: string): string {
-	return `Ese teléfono ya es de ${fullName}, que ya está en Personal`;
-}
+export type ContactCandidate = {
+	id: number;
+	fullName: string;
+	phone: string;
+	/** Null when it's the automatic one: an employee's has to be typed. */
+	documentId: string | null;
+	isEmployee: boolean;
+};
 
-function alreadyEmployed(fullName: string): Result {
-	return {
-		ok: false,
-		message: 'Revisa los campos marcados en rojo antes de guardar.',
-		errors: { phone: employedMessage(fullName) }
-	};
-}
+/** The search box shows this many; a longer list means the search needs more letters. */
+const CANDIDATES_SHOWN = 5;
 
-export type PhoneMatch = { fullName: string; documentId: string | null; error: string | null };
+type Clause = { sql: string; params: string[] };
+
+// Name or email by what's typed; the phone by its digits and the document as it's stored, three
+// or more of either, as in Contactos. Never an automatic document.
+function candidateClauses(search: string): Clause[] {
+	const text = containing(search);
+	const digits = search.replace(/\D/g, '');
+	const document = search.replace(/[\s.-]/g, '').toUpperCase();
+	return [
+		{ sql: "contacts.full_name like ? escape '\\'", params: [text] },
+		{ sql: "json_extract(contacts.attributes, '$.email') like ? escape '\\'", params: [text] },
+		...(3 > document.length
+			? []
+			: [
+					{
+						sql: "contacts.document_id like ? escape '\\' and contacts.document_id not like '@%'",
+						params: [containing(document)]
+					}
+				]),
+		...(3 > digits.length ? [] : [{ sql: 'contacts.phone like ?', params: [`%${digits}%`] }])
+	];
+}
 
 /**
- * The contact a new employee's typed phone would reuse, for the form to fill in its name and ID
- * number, or why it can't; null when the phone is new or not valid yet.
+ * The contacts a new employee could be, searched by name, phone, email or ID number, for the form
+ * to pick one and fill in its data; none until three characters are typed.
  */
-export async function matchPhone(
+export async function searchContactCandidates(
 	db: D1Database,
 	typed: unknown,
 	actor: Actor | null
-): Promise<PhoneMatch | null> {
+): Promise<ContactCandidate[]> {
 	requireRole(actor, MANAGES_EMPLOYEES);
-	const phone = phoneSchema.safeParse(typed);
-	const owner = phone.success ? await findPhoneOwner(db, phone.data) : null;
-	if (null === owner) {
-		return null;
+	const search = z.string().trim().catch('').parse(typed);
+	if (3 > search.length) {
+		return [];
+	}
+	const clauses = candidateClauses(search);
+	const { results } = await db
+		.prepare(
+			`${CANDIDATE_SELECT} where ${clauses.map((clause) => `(${clause.sql})`).join(' or ')}
+			order by contacts.full_name collate nocase, contacts.id limit ?`
+		)
+		.bind(...clauses.flatMap((clause) => clause.params), CANDIDATES_SHOWN)
+		.all<CandidateRow>();
+	return results.map((row) => ({
+		id: row.id,
+		fullName: row.full_name,
+		phone: row.phone,
+		documentId: isAutoDocument(row.document_id) ? null : row.document_id,
+		isEmployee: null !== row.employee_id
+	}));
+}
+
+// A contact is at most one employee: `contact_id` is UNIQUE.
+function alreadyEmployed(fullName: string): Result {
+	return { ok: false, message: `${fullName} ya está en Personal` };
+}
+
+const CONTACT_NOT_FOUND: Result = { ok: false, message: 'Ese contacto no existe' };
+
+// The picked contact, if any, and whether it can be this employee's.
+async function pickedContact(
+	db: D1Database,
+	contactId: number | undefined
+): Promise<{ picked: CandidateRow | null; refusal: Result | null }> {
+	if (undefined === contactId) {
+		return { picked: null, refusal: null };
+	}
+	const picked = await findCandidate(db, contactId);
+	if (null === picked) {
+		return { picked, refusal: CONTACT_NOT_FOUND };
 	}
 	return {
-		fullName: owner.full_name,
-		documentId: owner.document_id,
-		error: null === owner.employee_id ? null : employedMessage(owner.full_name)
+		picked,
+		refusal: null === picked.employee_id ? null : alreadyEmployed(picked.full_name)
 	};
 }
 
 /**
- * Creates the employee with their first employment period open, on the contact that has the phone:
- * the existing one, its name and ID number updated, or a new one, all in one batch.
+ * Creates the employee with their first employment period open, on the contact picked from the
+ * search, its phone, name and ID number updated, or on a new one, all in one batch.
  */
 export async function createEmployee(
 	db: D1Database,
@@ -221,19 +292,16 @@ export async function createEmployee(
 	if (!parsed.success) {
 		return invalidForm(parsed.error);
 	}
-	const { phone, full_name, document_id, start, ...details } = parsed.data;
-	const owner = await findPhoneOwner(db, phone);
-	if (null !== owner && null !== owner.employee_id) {
-		return alreadyEmployed(owner.full_name);
-	}
-	const refusal = await takenRefusal(db, { phone, document_id }, owner?.id ?? 0);
-	if (null !== refusal) {
-		return refusal;
+	const { contact_id, phone, full_name, document_id, start, ...details } = parsed.data;
+	const { picked, refusal } = await pickedContact(db, contact_id);
+	const taken = refusal ?? (await documentTakenRefusal(db, document_id, picked?.id ?? 0));
+	if (null !== taken) {
+		return taken;
 	}
 	const attributes = attributesJson({ ...details, employment: [{ start, end: null }] });
 	const results = await db.batch([
-		...contactWrite(db, actor, { owner, contact: { phone, full_name, document_id } }),
-		...employeeInsert(db, actor, { phone, attributes })
+		...contactWrite(db, actor, { picked, contact: { phone, full_name, document_id } }),
+		...employeeInsert(db, actor, { documentId: document_id, attributes })
 	]);
 	return { ok: true, id: results.at(-2)!.meta.last_row_id };
 }
@@ -242,32 +310,32 @@ type ContactColumns = { phone: string; full_name: string; document_id: string };
 
 const CONTACT = { table: 'contacts', entityType: 'CONTACT' };
 
-// A new phone inserts its contact; a known one gets the name and ID number typed.
+// A new contact is inserted; a picked one gets what was typed.
 function contactWrite(
 	db: D1Database,
 	actor: Actor,
-	{ owner, contact }: { owner: PhoneOwnerRow | null; contact: ContactColumns }
+	{ picked, contact }: { picked: CandidateRow | null; contact: ContactColumns }
 ) {
-	if (null === owner) {
+	if (null === picked) {
 		return auditedInsert(db, { ...CONTACT, actor, values: contact });
 	}
-	const { full_name, document_id } = contact;
-	const changes = { full_name, document_id };
-	return auditedUpdate(db, { ...CONTACT, actor, id: owner.id, current: owner, changes });
+	return auditedUpdate(db, { ...CONTACT, actor, id: picked.id, current: picked, changes: contact });
 }
 
-// The contact's id from its UNIQUE phone, not last_insert_rowid(): by now that's its event's.
+// The contact's id from its UNIQUE document, not last_insert_rowid(): by now that's its event's.
 function employeeInsert(
 	db: D1Database,
 	actor: Actor,
-	{ phone, attributes }: { phone: string; attributes: string }
+	{ documentId, attributes }: { documentId: string; attributes: string }
 ) {
 	return auditedInsert(db, {
 		table: 'employees',
 		entityType: 'EMPLOYEE',
 		actor,
 		values: { attributes },
-		computed: { contact_id: { sql: 'select id from contacts where phone = ?', params: [phone] } }
+		computed: {
+			contact_id: { sql: 'select id from contacts where document_id = ?', params: [documentId] }
+		}
 	});
 }
 
@@ -315,7 +383,7 @@ export async function updateEmployee(
 	if (null === row) {
 		return NOT_FOUND;
 	}
-	const refusal = await takenRefusal(db, { phone, document_id }, row.contact_id);
+	const refusal = await documentTakenRefusal(db, document_id, row.contact_id);
 	if (null !== refusal) {
 		return refusal;
 	}

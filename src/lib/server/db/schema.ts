@@ -54,14 +54,16 @@ export const events = sqliteTable(
 	]
 );
 
-// The company's clients, providers and employees: one phone, one row. Email, address, bank account and
-// notes live in `attributes` (JSON, validated with Zod). Being a client or an employee isn't stored:
-// orders or an `employees` row point here; an empty `services` means it isn't a provider.
+// The company's clients, providers and employees: one document, one row; a phone may be shared, as
+// a company's switchboard is by its branches. Email, address, bank account and notes live in
+// `attributes` (JSON, validated with Zod). Being a client or an employee isn't stored: orders or an
+// `employees` row point here; an empty `services` means it isn't a provider.
 export const contacts = sqliteTable('contacts', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
-	phone: text('phone').notNull().unique(), // digits with country code: 573104428890
+	phone: text('phone').notNull(), // digits with country code: 573104428890
 	fullName: text('full_name').notNull(),
-	documentId: text('document_id').unique(), // cédula, NIT or passport, normalized; null if not given
+	// Cédula, NIT or passport, normalized; when none is given, `@` and 8 random characters.
+	documentId: text('document_id').notNull().unique(),
 	services: text('services').notNull().default('[]'), // JSON: ["TRANSPORTER","DECORATOR"]
 	attributes: text('attributes').notNull().default('{}'),
 	...auditColumns

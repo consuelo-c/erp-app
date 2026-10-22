@@ -10,8 +10,8 @@ import {
 	endEmployment,
 	getEmployee,
 	listEmployees,
-	matchPhone,
 	rehire,
+	searchContactCandidates,
 	updateEmployee
 } from './employees';
 
@@ -53,7 +53,7 @@ function count(table: string) {
 
 const jorge = { phone: '300 771 2043', full_name: 'Jorge Iván Betancur', document_id: '71234567' };
 
-test('a new phone creates the contact and the employee in one batch, each with its CREATED event', async () => {
+test('without a picked contact, the contact and the employee in one batch, each with its CREATED event', async () => {
 	const id = await hire();
 	expect(await getEmployee(db, id, manager)).toEqual({
 		id,
@@ -75,15 +75,21 @@ test('a new phone creates the contact and the employee in one batch, each with i
 	]);
 });
 
-test('a phone already in Contactos reuses that contact, its name and ID number as typed', async () => {
-	await createContact(db, { phone: jorge.phone, full_name: 'Jorge Betancur' }, manager);
-	expect(await matchPhone(db, '3007712043', manager)).toEqual({
+test('a contact picked from the search is reused, its phone, name and ID number as typed', async () => {
+	const jorgeContact = { phone: jorge.phone, full_name: 'Jorge Betancur', email: 'jorge@b.co' };
+	await createContact(db, jorgeContact, manager);
+	const candidate = {
+		id: 1,
 		fullName: 'Jorge Betancur',
+		phone: '573007712043',
 		documentId: null,
-		error: null
-	});
+		isEmployee: false
+	};
+	for (const search of ['3007712043', 'betan', 'jorge@b']) {
+		expect(await searchContactCandidates(db, search, manager)).toEqual([candidate]);
+	}
 
-	const id = await hire({ ...carlos, ...jorge });
+	const id = await hire({ ...carlos, ...jorge, contact_id: '1' });
 	expect(count('contacts')).toBe(1);
 	expect(await getEmployee(db, id, manager)).toMatchObject({
 		fullName: 'Jorge Iván Betancur',
@@ -95,27 +101,39 @@ test('a phone already in Contactos reuses that contact, its name and ID number a
 		full_name: 'Jorge Iván Betancur',
 		document_id: '71234567'
 	});
+	expect(await searchContactCandidates(db, '71.234', manager)).toMatchObject([
+		{ isEmployee: true }
+	]);
 });
 
-test("a phone that's already another employee's is refused naming them", async () => {
+test("a contact that's already another employee's is refused naming them", async () => {
 	await hire();
-	const refusal = {
-		ok: false,
-		message: 'Revisa los campos marcados en rojo antes de guardar.',
-		errors: { phone: 'Ese teléfono ya es de Carlos Vélez, que ya está en Personal' }
-	};
-	expect(await createEmployee(db, { ...carlos, document_id: '1' }, manager)).toEqual(refusal);
-	expect(await matchPhone(db, '+57 315 284 7710', manager)).toMatchObject({
-		error: refusal.errors.phone
-	});
+	const refusal = { ok: false, message: 'Carlos Vélez ya está en Personal' };
+	expect(
+		await createEmployee(db, { ...carlos, document_id: '1', contact_id: '1' }, manager)
+	).toEqual(refusal);
 	expect(count('employees')).toBe(1);
 });
 
-test('matchPhone finds nothing for a new phone or one not valid yet', async () => {
+test('without a pick, a shared phone gets a contact of its own', async () => {
+	await createContact(db, { phone: carlos.phone, full_name: 'Bodega Central' }, manager);
 	await hire();
-	expect(await matchPhone(db, '300 771 2043', manager)).toBeNull();
-	expect(await matchPhone(db, '315 284', manager)).toBeNull();
-	expect(await matchPhone(db, null, manager)).toBeNull();
+	expect(count('contacts')).toBe(2);
+	expect(database.prepare('select contact_id from employees').get()?.contact_id).toBe(2);
+});
+
+test('the search needs three characters and never matches an automatic document', async () => {
+	await createContact(db, { phone: jorge.phone, full_name: 'Jorge Betancur' }, manager);
+	const automatic = String(database.prepare('select document_id from contacts').get()?.document_id);
+	expect(await searchContactCandidates(db, 'jo', manager)).toEqual([]);
+	expect(await searchContactCandidates(db, null, manager)).toEqual([]);
+	expect(await searchContactCandidates(db, '- -', manager)).toEqual([]);
+	expect(await searchContactCandidates(db, automatic.slice(1), manager)).toEqual([]);
+});
+
+test("an automatic document is not an employee's cédula", async () => {
+	const result = await createEmployee(db, { ...carlos, document_id: '@ABCDEFGH' }, manager);
+	expect(result).toMatchObject({ ok: false, errors: { document_id: 'Escribe la cédula real' } });
 });
 
 test('an ID number another contact has is refused naming that contact', async () => {
@@ -168,15 +186,15 @@ test('editing name, phone or ID number changes the contact, logged as CONTACT ED
 	expect(events()).toHaveLength(3);
 });
 
-test("changing the phone to another contact's is refused, and the employee keeps its contact", async () => {
+test("changing the phone to another contact's shares it, and the employee keeps its contact", async () => {
 	const id = await hire();
 	await createContact(db, jorge, manager);
 	const result = await updateEmployee(db, { ...carlos, id, phone: jorge.phone }, manager);
-	expect(result).toMatchObject({
-		ok: false,
-		errors: { phone: 'Ese teléfono ya es de Jorge Iván Betancur' }
+	expect(result).toEqual({ ok: true, id });
+	expect(await getEmployee(db, id, manager)).toMatchObject({
+		phone: '573007712043',
+		fullName: 'Carlos Vélez'
 	});
-	expect((await getEmployee(db, id, manager))?.phone).toBe('573152847710');
 });
 
 test('the payroll account is optional, kept across employment changes and cleared when blanked', async () => {

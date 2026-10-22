@@ -27,7 +27,8 @@
 		| 'info'
 		| 'edit'
 		| 'contact'
-		| 'lock';
+		| 'lock'
+		| 'whatsapp';
 
 	interface Props {
 		name: IconName;

@@ -30,9 +30,9 @@ function listColumns(table: string): string[] {
 
 const AUDIT = "0, 'admin', 0, 'admin'";
 
-function insertContact(phone: string) {
+function insertContact(documentId: string) {
 	database.exec(
-		`insert into contacts (phone, full_name, created_at, created_by, updated_at, updated_by) values ('${phone}', 'Ana Pérez', ${AUDIT})`
+		`insert into contacts (phone, full_name, document_id, created_at, created_by, updated_at, updated_by) values ('573104428890', 'Ana Pérez', '${documentId}', ${AUDIT})`
 	);
 }
 
@@ -64,7 +64,7 @@ test('creates exactly the tables of the phases built so far', () => {
 });
 
 test('users: username is unique, employee_id is unique but may be null on many rows', () => {
-	insertContact('573104428890');
+	insertContact('1036452118');
 	insertEmployee(1);
 	insertUser('admin', null);
 	insertUser('gerente', null);
@@ -79,7 +79,7 @@ test('users has no email, id_number or attributes', () => {
 });
 
 test('employees: contact_id is required and unique, attributes defaults to {}, no active', () => {
-	insertContact('573104428890');
+	insertContact('1036452118');
 	insertEmployee(1);
 	expect(() => insertEmployee(1)).toThrow(/UNIQUE/);
 	expect(() => insertEmployee(null)).toThrow(/NOT NULL/);

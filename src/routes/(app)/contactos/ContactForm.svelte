@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { resolve } from '$app/paths';
 	import Badge from '$lib/components/Badge.svelte';
 	import Chip from '$lib/components/Chip.svelte';
 	import Field from '$lib/components/Field.svelte';
@@ -11,11 +10,10 @@
 	import { formatPhone, normalizePhone } from '$lib/phone';
 	import type { Contact } from '$lib/server/services/contacts';
 
-	// A failed save: its message, each field's error, the contact that has the phone, what was typed.
+	// A failed save: its message, each field's error, what was typed.
 	type Submitted = {
 		message: string;
 		errors: Record<string, string>;
-		phoneOwner?: { id: number; fullName: string };
 		values: Record<string, unknown>;
 	};
 
@@ -37,21 +35,14 @@
 		Array.isArray(form?.values.services) ? form.values.services : (contact?.services ?? [])
 	);
 
-	// For Sales, what's set is the manager's to change, and so is an employee's ID number. A locked
-	// field still posts its saved value: the service rejects a save that changes it.
-	const isDocumentLocked = $derived(
-		!isManager && null !== contact && (null !== contact.documentId || contact.isEmployee)
-	);
+	// For Sales, a set account is the manager's to change, and so is the ID number, always: it's the
+	// contact's key. A locked field still posts its saved value: the service rejects a save that
+	// changes it.
 	const isAccountLocked = $derived(!isManager && null !== (contact?.bankAccount ?? null));
 
 	// What Sales fills in once stays: the hint says so before it's saved.
 	const ONCE = 'Cuando la guardes, solo Gerente o Administrador la cambian.';
-	const documentHint = $derived.by(() => {
-		if (isDocumentLocked) {
-			return lockedHint;
-		}
-		return isManager ? undefined : ONCE;
-	});
+	const AUTO_HINT = 'Si queda vacío, se asigna uno automático que empieza con @.';
 	const accountHint = $derived.by(() => {
 		if (isAccountLocked) {
 			return lockedHint;
@@ -84,7 +75,7 @@
 		label="Teléfono"
 		id="phone"
 		hint="Si es de otro país, escríbelo con + y el indicativo: +13055550142."
-		error={form?.phoneOwner ? phoneTaken : errorOf('phone')}
+		error={errorOf('phone')}
 	>
 		<Input
 			id="phone"
@@ -111,11 +102,11 @@
 	<Field
 		label="Cédula o NIT (opcional)"
 		id="document_id"
-		hint={documentHint}
+		hint={isManager ? AUTO_HINT : lockedHint}
 		error={errorOf('document_id')}
 	>
-		{#if isDocumentLocked}
-			{@render locked('document_id', contact?.documentId ?? '—')}
+		{#if !isManager}
+			{@render locked('document_id', contact?.documentId ?? 'Se asigna uno automático')}
 			<input type="hidden" name="document_id" value={contact?.documentId ?? ''} />
 		{:else}
 			<Input
@@ -163,12 +154,12 @@
 			{@render locked('bank_account', contact?.bankAccount ?? '')}
 			<input type="hidden" name="bank_account" value={contact?.bankAccount} />
 		{:else}
-			<textarea
+			<Input
 				id="bank_account"
 				name="bank_account"
-				rows="3"
-				placeholder="Ej. Nequi 311 908 5512, o banco, tipo y número de cuenta, titular y su cédula"
-				value={value('bank_account', contact?.bankAccount)}></textarea>
+				placeholder="Ej. Nequi 311 908 5512, o banco, tipo, número, titular y su cédula"
+				value={value('bank_account', contact?.bankAccount)}
+			/>
 		{/if}
 	</Field>
 	<Field
@@ -207,12 +198,6 @@
 		<Notice tone="error">{form.message}</Notice>
 	{/if}
 </form>
-
-{#snippet phoneTaken()}
-	{errorOf('phone')}.
-	<a href={resolve('/(app)/contactos/[id]', { id: String(form?.phoneOwner?.id) })}>Abrir contacto</a
-	>
-{/snippet}
 
 {#snippet lockedHint()}
 	<span class="locked-hint"
@@ -292,10 +277,5 @@
 		display: inline-flex;
 		gap: var(--space-3);
 		align-items: center;
-	}
-
-	a {
-		font-weight: var(--weight-semibold);
-		color: var(--link);
 	}
 </style>
