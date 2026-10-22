@@ -34,8 +34,12 @@ export type Product = {
 	isActive: boolean;
 };
 
+/** A variant group the form's picker offers, with the category its variants are in. */
+export type VariantGroup = { name: string; category: Category };
+
 type Failure = { ok: false; message: string; field?: string };
-export type Result = { ok: true; id: number } | Failure;
+/** A save also says the product's group: the screen goes back to it. */
+export type Result = { ok: true; id: number; variantGroup: string | null } | Failure;
 
 type ProductRow = {
 	id: number;
@@ -76,11 +80,11 @@ const productSchema = z
 			z.number().positive('El precio por día debe ser mayor que cero')
 		),
 		total_quantity: wholeNumberSchema('Escribe la cantidad total'),
-		// An unchecked checkbox isn't posted at all.
+		// The Activo and Inactivo radios; nothing posted reads as inactive, like an unchecked box.
 		active: z
-			.literal('on')
+			.enum(['on', 'off'])
 			.optional()
-			.transform((value) => (undefined === value ? 0 : 1))
+			.transform((value) => ('on' === value ? 1 : 0))
 	})
 	.transform((typed) => {
 		const { new_variant_group, ...columns } = typed;
@@ -185,6 +189,21 @@ export async function listProducts(db: D1Database, actor: Actor | null): Promise
 		.sort((first, second) => first.name.localeCompare(second.name, 'es'));
 }
 
+/** For the form's picker: a group is chosen from these, never typed again. */
+export async function listVariantGroups(
+	db: D1Database,
+	actor: Actor | null
+): Promise<VariantGroup[]> {
+	requireRole(actor, MANAGES_PRODUCTS);
+	// A group's variants share one category; should they differ, any of them pre-fills.
+	const { results } = await db
+		.prepare(
+			'select variant_group as name, min(category) as category from products where variant_group is not null group by variant_group order by variant_group collate nocase'
+		)
+		.all<VariantGroup>();
+	return results;
+}
+
 export async function getProduct(
 	db: D1Database,
 	id: number,
@@ -216,7 +235,11 @@ export async function createProduct(
 		values: parsed.data.columns
 	});
 	const results = await batchUnlessDuplicateVariant(db, statements);
-	return null === results ? DUPLICATE_VARIANT : { ok: true, id: results[0].meta.last_row_id };
+	if (null === results) {
+		return DUPLICATE_VARIANT;
+	}
+	const { variant_group: variantGroup } = parsed.data.columns;
+	return { ok: true, id: results[0].meta.last_row_id, variantGroup };
 }
 
 async function applyEdit(
@@ -225,6 +248,7 @@ async function applyEdit(
 	{ row, product }: { row: ProductRow; product: ParsedProduct }
 ): Promise<Result> {
 	const { id, ...current } = row;
+	const saved: Result = { ok: true, id, variantGroup: product.columns.variant_group };
 	const statements = auditedUpdate(db, {
 		table: 'products',
 		entityType: 'PRODUCT',
@@ -234,10 +258,10 @@ async function applyEdit(
 		changes: product.columns
 	});
 	if (0 === statements.length) {
-		return { ok: true, id };
+		return saved;
 	}
 	const results = await batchUnlessDuplicateVariant(db, statements);
-	return null === results ? DUPLICATE_VARIANT : { ok: true, id };
+	return null === results ? DUPLICATE_VARIANT : saved;
 }
 
 /** Every field, `active` included: a product is deactivated, never deleted. */

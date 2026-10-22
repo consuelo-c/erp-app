@@ -1,24 +1,38 @@
 <script lang="ts">
 	// Sibling views of one section, in place of the screen title. Each tab is a page of its own.
 	// `shortLabel` is what a phone shows when the full label doesn't fit beside the header's actions.
-	type Tab = { label: string; shortLabel?: string; href: string };
+	// A tab without `href` is a view a later phase builds: shown, but disabled.
+	type Tab = { label: string; shortLabel?: string; href?: string };
 
 	let { tabs, current }: { tabs: Tab[]; current: string } = $props();
 </script>
 
 <nav class="tabs">
-	{#each tabs as tab (tab.href)}
-		<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- the caller passes an href built with resolve() -->
-		<a class="tabs__item" href={tab.href} aria-current={current === tab.label ? 'page' : undefined}>
-			{#if tab.shortLabel}
-				<span class="tabs__label--short">{tab.shortLabel}</span>
-				<span class="tabs__label--full">{tab.label}</span>
-			{:else}
-				{tab.label}
-			{/if}
-		</a>
+	{#each tabs as tab (tab.label)}
+		{#if tab.href}
+			<!-- eslint-disable svelte/no-navigation-without-resolve -- the caller passes an href built with resolve() -->
+			<a
+				class="tabs__item"
+				href={tab.href}
+				aria-current={current === tab.label ? 'page' : undefined}
+			>
+				{@render label(tab)}
+			</a>
+			<!-- eslint-enable svelte/no-navigation-without-resolve -->
+		{:else}
+			<span class="tabs__item" aria-disabled="true">{@render label(tab)}</span>
+		{/if}
 	{/each}
 </nav>
+
+{#snippet label(tab: Tab)}
+	{#if tab.shortLabel}
+		<span class="tabs__label--short">{tab.shortLabel}</span>
+		<span class="tabs__label--full">{tab.label}</span>
+	{:else}
+		{tab.label}
+	{/if}
+{/snippet}
 
 <style>
 	.tabs {
@@ -44,6 +58,10 @@
 
 	.tabs__item:hover {
 		color: var(--text-disabled);
+	}
+
+	.tabs__item[aria-disabled='true'] {
+		cursor: default;
 	}
 
 	.tabs__item[aria-current='page'] {
