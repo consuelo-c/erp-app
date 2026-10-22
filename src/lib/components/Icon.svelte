@@ -25,7 +25,9 @@
 		| 'users'
 		| 'help'
 		| 'info'
-		| 'edit';
+		| 'edit'
+		| 'contact'
+		| 'lock';
 
 	interface Props {
 		name: IconName;

@@ -2,12 +2,13 @@
 	import type { Snippet } from 'svelte';
 
 	// `id` ties the label to the control rendered in `children`, which must carry the same id and,
-	// with an `error`, `aria-invalid`. The error takes the hint's place.
+	// with an `error`, `aria-invalid`. The error takes the hint's place. Either is text, or a snippet
+	// when it carries a link or an icon.
 	interface Props {
 		label: string;
 		id: string;
-		hint?: string;
-		error?: string;
+		hint?: string | Snippet;
+		error?: string | Snippet;
 		children: Snippet;
 	}
 
@@ -18,11 +19,15 @@
 	<label class="field__label" for={id}>{label}</label>
 	{@render children()}
 	{#if error}
-		<p class="field__error">{error}</p>
+		<p class="field__error">{@render message(error)}</p>
 	{:else if hint}
-		<p class="field__hint">{hint}</p>
+		<p class="field__hint">{@render message(hint)}</p>
 	{/if}
 </div>
+
+{#snippet message(content: string | Snippet)}
+	{#if 'string' === typeof content}{content}{:else}{@render content()}{/if}
+{/snippet}
 
 <style>
 	.field {

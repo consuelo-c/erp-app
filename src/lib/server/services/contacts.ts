@@ -44,6 +44,8 @@ export type Contact = {
 	address2: string | null;
 	bankAccount: string | null;
 	notes: string | null;
+	/** An employee points to it: its ID number is then Manager's and Admin's alone. */
+	isEmployee: boolean;
 };
 
 export type SaveResult =
@@ -65,6 +67,8 @@ type Columns = {
 };
 
 type ContactRow = Columns & { id: number; is_employee: number };
+
+const CHECK_FIELDS = 'Revisa los campos marcados en rojo antes de guardar.';
 
 const INVALID_PHONE =
 	'Número no válido. Un número de Colombia tiene 10 dígitos; uno de otro país empieza con +.';
@@ -146,7 +150,8 @@ function toContact(row: ContactRow): Contact {
 		address1: attributes.address_1 ?? null,
 		address2: attributes.address_2 ?? null,
 		bankAccount: attributes.bank_account ?? null,
-		notes: attributes.notes ?? null
+		notes: attributes.notes ?? null,
+		isEmployee: 1 === row.is_employee
 	};
 }
 
@@ -195,7 +200,7 @@ export function invalidForm(zodError: z.ZodError): SaveResult {
 	const errors = Object.fromEntries(
 		zodError.issues.map((issue) => [String(issue.path[0]), issue.message])
 	);
-	return { ok: false, message: 'Revisa los campos marcados en rojo antes de guardar.', errors };
+	return { ok: false, message: CHECK_FIELDS, errors };
 }
 
 type Owner = { id: number; full_name: string };
@@ -219,11 +224,10 @@ export async function takenRefusal(
 ): Promise<SaveResult | null> {
 	const phoneOwner = await findOwner(db, { column: 'phone', value: columns.phone, exceptId });
 	if (null !== phoneOwner) {
-		const message = `Ese teléfono ya es de ${phoneOwner.full_name}`;
 		return {
 			ok: false,
-			message,
-			errors: { phone: message },
+			message: CHECK_FIELDS,
+			errors: { phone: `Ese teléfono ya es de ${phoneOwner.full_name}` },
 			phoneOwner: { id: phoneOwner.id, fullName: phoneOwner.full_name }
 		};
 	}
@@ -239,7 +243,7 @@ export async function takenRefusal(
 		return null;
 	}
 	const message = `Esa cédula o NIT ya es de ${documentOwner.full_name}`;
-	return { ok: false, message, errors: { document_id: message } };
+	return { ok: false, message: CHECK_FIELDS, errors: { document_id: message } };
 }
 
 async function findRow(db: D1Database, id: number): Promise<ContactRow | null> {
@@ -316,7 +320,7 @@ const NOT_FOUND: SaveResult = { ok: false, message: 'Ese contacto no existe', er
 const EMPLOYEE_DOCUMENT_MESSAGE = 'Es empleado: la cédula no puede quedar vacía';
 const EMPLOYEE_DOCUMENT_REQUIRED: SaveResult = {
 	ok: false,
-	message: EMPLOYEE_DOCUMENT_MESSAGE,
+	message: CHECK_FIELDS,
 	errors: { document_id: EMPLOYEE_DOCUMENT_MESSAGE }
 };
 
@@ -352,16 +356,26 @@ export async function updateContact(
 /** «Cargar más» brings this many at a time; the list never loads the whole table. */
 export const CONTACTS_PAGE_SIZE = 10;
 
-// Filters come from the URL: an empty or tampered value is ignored, not an error.
+// Filters come from the URL: an empty or tampered value is ignored, not an error. `pages` is how
+// many «Cargar más» have been pressed plus one, capped so a typed URL can't ask for the whole table.
 const listSchema = z.object({
 	search: z.string().trim().catch(''),
 	service: z.enum(SERVICES).optional().catch(undefined),
-	offset: z.coerce.number().int().nonnegative().catch(0)
+	pages: z.coerce.number().int().min(1).max(100).catch(1)
 });
 
-export type ContactSummary = { id: number; fullName: string; phone: string; services: Service[] };
+export type ContactSummary = {
+	id: number;
+	fullName: string;
+	phone: string;
+	services: Service[];
+	isEmployee: boolean;
+};
 
-export type ContactPage = { contacts: ContactSummary[]; hasMore: boolean };
+export type ContactFilters = z.output<typeof listSchema>;
+
+/** The filters come back parsed: what the screen shows as chosen is what was applied. */
+export type ContactPage = { contacts: ContactSummary[]; hasMore: boolean; filters: ContactFilters };
 
 type Clause = { sql: string; params: string[] };
 
@@ -386,34 +400,44 @@ function serviceClause(service: Service | undefined): Clause | null {
 	};
 }
 
-type SummaryRow = { id: number; full_name: string; phone: string; services: string };
+type SummaryRow = {
+	id: number;
+	full_name: string;
+	phone: string;
+	services: string;
+	is_employee: number;
+};
 
-/** A page of contacts sorted by name, narrowed by name or phone and by service. */
+/** The first `pages` pages of contacts sorted by name, narrowed by name or phone and by service. */
 export async function listContacts(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
 ): Promise<ContactPage> {
 	requireRole(actor, EDITS_CONTACTS);
-	const { search, service, offset } = listSchema.parse(input ?? {});
+	const filters = listSchema.parse(input ?? {});
+	const { search, service, pages } = filters;
+	const shown = pages * CONTACTS_PAGE_SIZE;
 	const clauses = [searchClause(search), serviceClause(service)].filter(
 		(clause) => null !== clause
 	);
 	const where = clauses.map((clause) => `(${clause.sql})`).join(' and ') || '1';
 	// ponytail: nocase folds ASCII only, so «Ángela» sorts after Z; a sort key column if it bothers.
-	// One row past the page says whether «Cargar más» has more to bring.
+	// One row past the pages says whether «Cargar más» has more to bring.
 	const { results } = await db
 		.prepare(
-			`select id, full_name, phone, services from contacts where ${where}
-			order by full_name collate nocase, id limit ? offset ?`
+			`select contacts.id, full_name, phone, services, employees.id is not null as is_employee
+			from contacts left join employees on employees.contact_id = contacts.id where ${where}
+			order by full_name collate nocase, contacts.id limit ?`
 		)
-		.bind(...clauses.flatMap((clause) => clause.params), CONTACTS_PAGE_SIZE + 1, offset)
+		.bind(...clauses.flatMap((clause) => clause.params), shown + 1)
 		.all<SummaryRow>();
-	const contacts = results.slice(0, CONTACTS_PAGE_SIZE).map((row) => ({
+	const contacts = results.slice(0, shown).map((row) => ({
 		id: row.id,
 		fullName: row.full_name,
 		phone: row.phone,
-		services: servicesSchema.parse(JSON.parse(row.services))
+		services: servicesSchema.parse(JSON.parse(row.services)),
+		isEmployee: 1 === row.is_employee
 	}));
-	return { contacts, hasMore: CONTACTS_PAGE_SIZE < results.length };
+	return { contacts, hasMore: shown < results.length, filters };
 }

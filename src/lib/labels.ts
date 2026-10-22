@@ -78,6 +78,13 @@ export const SERVICE_LABELS: Record<Service, string> = {
 	CHEF: 'Chef'
 };
 
+/** «Nadie coincide … entre los transportadores». */
+export const SERVICE_PLURAL_LABELS: Record<Service, string> = {
+	TRANSPORTER: 'transportadores',
+	DECORATOR: 'decoradores',
+	CHEF: 'chefs'
+};
+
 export const PUNCH_LABELS: Record<Punch, string> = {
 	morningIn: 'Inicio mañana',
 	morningOut: 'Finalización mañana',
