@@ -54,6 +54,19 @@ export const events = sqliteTable(
 	]
 );
 
+// The company's clients, providers and employees: one phone, one row. Email, address, bank account and
+// notes live in `attributes` (JSON, validated with Zod). Being a client or an employee isn't stored:
+// orders or an `employees` row point here; an empty `services` means it isn't a provider.
+export const contacts = sqliteTable('contacts', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	phone: text('phone').notNull().unique(), // digits with country code: 573104428890
+	fullName: text('full_name').notNull(),
+	documentId: text('document_id').unique(), // cédula, NIT or passport, normalized; null if not given
+	services: text('services').notNull().default('[]'), // JSON: ["TRANSPORTER","DECORATOR"]
+	attributes: text('attributes').notNull().default('{}'),
+	...auditColumns
+});
+
 // The people on payroll. Salary, position, bank account and employment periods live in `attributes` (JSON,
 // validated with Zod); "currently employed" is the last period having no end, so there's no `active`.
 export const employees = sqliteTable('employees', {

@@ -50,6 +50,13 @@
       "when": 1792638391772,
       "tag": "0006_mixed_silk_fever",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1792639089699,
+      "tag": "0007_perfect_silver_sable",
+      "breakpoints": true
     }
   ]
 }

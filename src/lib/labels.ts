@@ -3,6 +3,7 @@
 import type { Role } from './server/actor';
 import type { DeductionConcept, EarningConcept } from './payroll';
 import type { CashConcept, PaymentMethod } from './server/services/cash';
+import type { Service } from './server/services/contacts';
 import type { Category } from './server/services/products';
 import type { Punch } from './server/services/timesheets';
 
@@ -71,7 +72,7 @@ export const CATEGORY_LABELS: Record<Category, string> = {
 	DECOR: 'Decoración'
 };
 
-export const SERVICE_LABELS = {
+export const SERVICE_LABELS: Record<Service, string> = {
 	TRANSPORTER: 'Transportador',
 	DECORATOR: 'Decorador',
 	CHEF: 'Chef'

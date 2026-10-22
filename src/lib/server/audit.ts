@@ -128,6 +128,37 @@ export function diffFields(current: Row, changes: Row): { before: Row; after: Ro
 	};
 }
 
+type Diff = { before: Row; after: Row };
+
+function parseObject(json: ColumnValue | undefined): Row {
+	return null === json || undefined === json ? {} : (JSON.parse(String(json)) as Row);
+}
+
+// The keys of a JSON column that changed, as `attributes.bank_account`; a missing key logs as null.
+function diffJsonColumn(column: string, before: ColumnValue, after: ColumnValue): Diff {
+	const old = parseObject(before);
+	const next = parseObject(after);
+	const keys = [...new Set([...Object.keys(old), ...Object.keys(next)])].filter(
+		(key) => old[key] !== next[key]
+	);
+	const prefixed = (object: Row) =>
+		Object.fromEntries(keys.map((key) => [`${column}.${key}`, object[key] ?? null]));
+	return { before: prefixed(old), after: prefixed(next) };
+}
+
+// What the event logs: the changed fields, each `jsonColumns` one replaced by its changed keys.
+function loggedFields(diff: Diff, jsonColumns: readonly string[]): Diff {
+	const plain = (row: Row) =>
+		Object.fromEntries(Object.entries(row).filter(([column]) => !jsonColumns.includes(column)));
+	const expanded = jsonColumns
+		.filter((column) => column in diff.after)
+		.map((column) => diffJsonColumn(column, diff.before[column], diff.after[column]));
+	return {
+		before: Object.assign(plain(diff.before), ...expanded.map((keys) => keys.before)),
+		after: Object.assign(plain(diff.after), ...expanded.map((keys) => keys.after))
+	};
+}
+
 type UpdateRow = AuditedWrite & {
 	id: number | string;
 	idColumn?: string;
@@ -150,7 +181,8 @@ function updateStatement(db: D1Database, write: UpdateRow): D1PreparedStatement 
  * Updates the row `id` (matched on `idColumn`, `id` by default) with the fields of `changes`
  * that differ from `current`, refreshes `updated_at`/`updated_by`, and logs an `EDITED` event
  * (or `action`) with those fields only, and `reason` when the write needs one. `unlogged` columns
- * are always written but never logged: a new password hash. Returns the statements for the caller's `db.batch()`, or none when
+ * are always written but never logged: a new password hash. `jsonColumns` are written whole but logged
+ * key by key, only the keys that changed. Returns the statements for the caller's `db.batch()`, or none when
  * nothing changed: an edit that changes nothing writes nothing.
  */
 export function auditedUpdate(
@@ -161,12 +193,13 @@ export function auditedUpdate(
 		current: Row;
 		changes: Row;
 		unlogged?: Row;
+		jsonColumns?: readonly string[];
 		action?: string;
 		reason?: string;
 	}
 ): D1PreparedStatement[] {
-	const { before, after } = diffFields(write.current, write.changes);
-	const columns = { ...after, ...write.unlogged };
+	const diff = diffFields(write.current, write.changes);
+	const columns = { ...diff.after, ...write.unlogged };
 	if (0 === Object.keys(columns).length) {
 		return [];
 	}
@@ -175,8 +208,7 @@ export function auditedUpdate(
 	const event = {
 		...write,
 		action: write.action ?? 'EDITED',
-		before,
-		after,
+		...loggedFields(diff, write.jsonColumns ?? []),
 		now,
 		...entityOf(write.id)
 	};
