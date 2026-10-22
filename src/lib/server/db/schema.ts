@@ -67,12 +67,15 @@ export const contacts = sqliteTable('contacts', {
 	...auditColumns
 });
 
-// The people on payroll. Salary, position, bank account and employment periods live in `attributes` (JSON,
-// validated with Zod); "currently employed" is the last period having no end, so there's no `active`.
+// The people on payroll. Name, phone and ID number are the contact's; salary, position, payroll
+// account and employment periods live in `attributes` (JSON, validated with Zod); "currently
+// employed" is the last period having no end, so there's no `active`.
 export const employees = sqliteTable('employees', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
-	fullName: text('full_name').notNull(),
-	idNumber: text('id_number').notNull().unique(),
+	contactId: integer('contact_id')
+		.notNull()
+		.unique()
+		.references(() => contacts.id),
 	attributes: text('attributes').notNull().default('{}'),
 	...auditColumns
 });

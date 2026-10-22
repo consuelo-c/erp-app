@@ -131,12 +131,18 @@ test('an event never carries both an id and a key', () => {
 // A settlement as far as the freeze line cares: which week, and whether it's paid. Each one its
 // own employee: a week holds one settlement per employee.
 function settle(periodStart: string, status: 'DRAFT' | 'PAID') {
-	const { lastInsertRowid: employeeId } = database
+	const { lastInsertRowid: contactId } = database
 		.prepare(
-			`insert into employees (full_name, id_number, created_at, created_by, updated_at, updated_by)
-			values ('Ana Pérez', ?, 0, 'gerente', 0, 'gerente')`
+			`insert into contacts (phone, full_name, created_at, created_by, updated_at, updated_by)
+			values (?, 'Ana Pérez', 0, 'gerente', 0, 'gerente')`
 		)
 		.run(periodStart);
+	const { lastInsertRowid: employeeId } = database
+		.prepare(
+			`insert into employees (contact_id, created_at, created_by, updated_at, updated_by)
+			values (?, 0, 'gerente', 0, 'gerente')`
+		)
+		.run(contactId);
 	database
 		.prepare(
 			`insert into payroll_runs (employee_id, status, week_number, period_start, period_end,

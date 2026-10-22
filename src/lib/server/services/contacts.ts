@@ -64,7 +64,7 @@ type Columns = {
 	attributes: string;
 };
 
-type ContactRow = Columns & { id: number };
+type ContactRow = Columns & { id: number; is_employee: number };
 
 const INVALID_PHONE =
 	'Número no válido. Un número de Colombia tiene 10 dígitos; uno de otro país empieza con +.';
@@ -80,21 +80,26 @@ const blankable = z
 	.optional()
 	.transform((value) => value || undefined);
 
+/** The typed phone, stored normalized; the employee form takes it the same way. */
+export const phoneSchema = requiredText('Escribe el teléfono').transform((typed, context) => {
+	const phone = normalizePhone(typed);
+	if (null === phone) {
+		context.addIssue({ code: 'custom', message: INVALID_PHONE });
+		return z.NEVER;
+	}
+	return phone;
+});
+
+/** Spaces, dots and hyphens are how it's typed: «1.036.452.118» and «1036452118» are one document. */
+export const documentIdSchema = z
+	.string()
+	.optional()
+	.transform((value) => value?.replace(/[\s.-]/g, '').toUpperCase() || null);
+
 const formSchema = z.object({
-	phone: requiredText('Escribe el teléfono').transform((typed, context) => {
-		const phone = normalizePhone(typed);
-		if (null === phone) {
-			context.addIssue({ code: 'custom', message: INVALID_PHONE });
-			return z.NEVER;
-		}
-		return phone;
-	}),
+	phone: phoneSchema,
 	full_name: requiredText('Escribe el nombre'),
-	// Spaces, dots and hyphens are how it's typed: «1.036.452.118» and «1036452118» are one document.
-	document_id: z
-		.string()
-		.optional()
-		.transform((value) => value?.replace(/[\s.-]/g, '').toUpperCase() || null),
+	document_id: documentIdSchema,
 	email: blankable.pipe(z.email('Revisa el correo: le falta la @ o el dominio').optional()),
 	address_1: blankable,
 	address_2: blankable,
@@ -163,23 +168,30 @@ function isOverwritten(current: string | null, next: string | null): boolean {
 
 // Redirected money: whoever pays copies the saved account without checking it, so changing one
 // that's set is the manager's, and so is the ID number that goes with a refund, and a provider's
-// services. Sales fills in what's still empty.
-function changesLockedField(current: Columns, next: Columns): boolean {
+// services. Sales fills in what's still empty, except an employee's ID number: payroll's.
+function changesLockedField(current: Columns, next: Columns, isEmployee: boolean): boolean {
+	const documentChanged = isEmployee
+		? current.document_id !== next.document_id
+		: isOverwritten(current.document_id, next.document_id);
 	return (
 		current.services !== next.services ||
-		isOverwritten(current.document_id, next.document_id) ||
+		documentChanged ||
 		isOverwritten(bankAccountOf(current), bankAccountOf(next))
 	);
 }
 
 // The screen shows these fields locked to Sales; a save that changes them anyway was forged.
-function requireLockedFieldsKept(actor: Actor, current: Columns, next: Columns): void {
-	if (!isAdminOrManager(actor) && changesLockedField(current, next)) {
+function requireLockedFieldsKept(
+	actor: Actor,
+	{ current, next, isEmployee }: { current: Columns; next: Columns; isEmployee: boolean }
+): void {
+	if (!isAdminOrManager(actor) && changesLockedField(current, next, isEmployee)) {
 		error(403, 'Solo Gerente o Administrador cambian ese dato');
 	}
 }
 
-function invalid(zodError: z.ZodError): SaveResult {
+/** Each field's first message, for the form to show under it. */
+export function invalidForm(zodError: z.ZodError): SaveResult {
 	const errors = Object.fromEntries(
 		zodError.issues.map((issue) => [String(issue.path[0]), issue.message])
 	);
@@ -199,9 +211,10 @@ async function findOwner(
 		.first<Owner>();
 }
 
-async function takenRefusal(
+/** Why a phone or document number can't be saved on contact `exceptId`: another contact has it. */
+export async function takenRefusal(
 	db: D1Database,
-	columns: Columns,
+	columns: Pick<Columns, 'phone' | 'document_id'>,
 	exceptId: number
 ): Promise<SaveResult | null> {
 	const phoneOwner = await findOwner(db, { column: 'phone', value: columns.phone, exceptId });
@@ -232,7 +245,9 @@ async function takenRefusal(
 async function findRow(db: D1Database, id: number): Promise<ContactRow | null> {
 	return db
 		.prepare(
-			'select id, phone, full_name, document_id, services, attributes from contacts where id = ?'
+			`select id, phone, full_name, document_id, services, attributes,
+			exists (select 1 from employees where contact_id = contacts.id) as is_employee
+			from contacts where id = ?`
 		)
 		.bind(id)
 		.first<ContactRow>();
@@ -256,10 +271,10 @@ export async function createContact(
 	requireRole(actor, EDITS_CONTACTS);
 	const parsed = formSchema.safeParse(input);
 	if (!parsed.success) {
-		return invalid(parsed.error);
+		return invalidForm(parsed.error);
 	}
 	const columns = toColumns(parsed.data);
-	requireLockedFieldsKept(actor, NEW_CONTACT, columns);
+	requireLockedFieldsKept(actor, { current: NEW_CONTACT, next: columns, isEmployee: false });
 	const refusal = await takenRefusal(db, columns, 0);
 	if (null !== refusal) {
 		return refusal;
@@ -297,6 +312,14 @@ async function applyEdit(
 
 const NOT_FOUND: SaveResult = { ok: false, message: 'Ese contacto no existe', errors: {} };
 
+// Payroll prints it on every receipt: an employee's contact always has one.
+const EMPLOYEE_DOCUMENT_MESSAGE = 'Es empleado: la cédula no puede quedar vacía';
+const EMPLOYEE_DOCUMENT_REQUIRED: SaveResult = {
+	ok: false,
+	message: EMPLOYEE_DOCUMENT_MESSAGE,
+	errors: { document_id: EMPLOYEE_DOCUMENT_MESSAGE }
+};
+
 /** The whole form: a locked field Sales can't change still arrives, with its current value. */
 export async function updateContact(
 	db: D1Database,
@@ -306,7 +329,7 @@ export async function updateContact(
 	requireRole(actor, EDITS_CONTACTS);
 	const parsed = updateSchema.safeParse(input);
 	if (!parsed.success) {
-		return invalid(parsed.error);
+		return invalidForm(parsed.error);
 	}
 	const { id, ...form } = parsed.data;
 	const row = await findRow(db, id);
@@ -314,8 +337,12 @@ export async function updateContact(
 		return NOT_FOUND;
 	}
 	const columns = toColumns(form);
-	requireLockedFieldsKept(actor, row, columns);
-	const refusal = await takenRefusal(db, columns, id);
+	const isEmployee = 1 === row.is_employee;
+	requireLockedFieldsKept(actor, { current: row, next: columns, isEmployee });
+	const refusal =
+		isEmployee && null === columns.document_id
+			? EMPLOYEE_DOCUMENT_REQUIRED
+			: await takenRefusal(db, columns, id);
 	if (null !== refusal) {
 		return refusal;
 	}

@@ -29,7 +29,8 @@ beforeEach(() => {
 });
 
 async function hire(fullName: string, idNumber: string): Promise<number> {
-	const input = { full_name: fullName, id_number: idNumber, monthly_salary: '1423500' };
+	const phone = `310${idNumber.slice(-7)}`;
+	const input = { phone, full_name: fullName, document_id: idNumber, monthly_salary: '1423500' };
 	const result = await createEmployee(
 		db,
 		{ ...input, position: 'Bodega', start: '2024-07-15' },

@@ -31,8 +31,9 @@ async function hire(fullName: string, idNumber: string, start: string): Promise<
 	const result = await createEmployee(
 		db,
 		{
+			phone: `310${idNumber.slice(-7)}`,
 			full_name: fullName,
-			id_number: idNumber,
+			document_id: idNumber,
 			monthly_salary: '1750905',
 			position: 'Bodega',
 			start
@@ -358,14 +359,32 @@ test('a paid settlement shows what was stored and is never written again', async
 	expect(movements()).toHaveLength(1);
 });
 
+test('a settlement paid before a rename keeps the old name and ID number', async () => {
+	await recordPayment(db, { ...formOf(await openDraft(), WEEK), ...CASH }, manager);
+	const renamed = {
+		id: String(anaId),
+		phone: '3106452118',
+		full_name: 'Ana María Pérez',
+		document_id: '1036452119',
+		monthly_salary: '1750905',
+		position: 'Bodega'
+	};
+	expect(await updateEmployee(db, renamed, manager)).toEqual({ ok: true, id: anaId });
+	expect((await openDraft()).payment).toMatchObject({
+		employeeName: 'Ana Pérez',
+		employeeIdNumber: '1036452118'
+	});
+});
+
 test("a transfer keeps a copy of the account, pre-filled from the employee's", async () => {
 	const details = {
 		id: String(anaId),
+		phone: '3106452118',
 		full_name: 'Ana Pérez',
-		id_number: '1036452118',
+		document_id: '1036452118',
 		monthly_salary: '1750905',
 		position: 'Bodega',
-		bank_account: 'Bancolombia ahorros 0123-456789-01'
+		salary_bank_account: 'Bancolombia ahorros 0123-456789-01'
 	};
 	await updateEmployee(db, details, manager);
 	const draft = await openDraft();

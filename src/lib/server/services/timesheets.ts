@@ -88,7 +88,10 @@ async function findEmployee(db: D1Database, id: number | null): Promise<HoursEmp
 		return null;
 	}
 	const row = await db
-		.prepare('select id, full_name, attributes from employees where id = ?')
+		.prepare(
+			`select employees.id, contacts.full_name, employees.attributes
+			from employees join contacts on contacts.id = employees.contact_id where employees.id = ?`
+		)
 		.bind(id)
 		.first<{ id: number; full_name: string; attributes: string }>();
 	if (null === row) {
@@ -468,7 +471,10 @@ function overlapsWeek(employment: Period[], weekDates: string[]): boolean {
 
 async function findTeam(db: D1Database, weekDates: string[]) {
 	const { results } = await db
-		.prepare('select id, full_name, attributes from employees')
+		.prepare(
+			`select employees.id, contacts.full_name, employees.attributes
+			from employees join contacts on contacts.id = employees.contact_id`
+		)
 		.all<{ id: number; full_name: string; attributes: string }>();
 	return results
 		.map((row) => ({ ...row, attributes: teamAttributesSchema.parse(JSON.parse(row.attributes)) }))

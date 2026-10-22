@@ -11,6 +11,7 @@ import {
 	servicesSchema,
 	updateContact
 } from './contacts';
+import { createEmployee } from './employees';
 
 function actorWith(role: Role): Actor {
 	return { username: role.toLowerCase(), employeeId: null, roles: [role], kind: 'user' };
@@ -187,6 +188,22 @@ test('Sales fills in an empty bank account and document; Manager clears both', a
 	expect(await updateContact(db, { ...filled, id }, sales)).toEqual({ ok: true, id });
 	expect(await updateContact(db, { ...luzMarina, id }, manager)).toEqual({ ok: true, id });
 	expect(await getContact(db, id, manager)).toMatchObject({ documentId: null, bankAccount: null });
+});
+
+test("an employee's document is Manager's and Admin's, and never left empty", async () => {
+	const ana = { phone: '310 442 8890', full_name: 'Ana Pérez', document_id: '1036452118' };
+	const hired = { ...ana, monthly_salary: '1750905', position: 'Bodega', start: '2026-07-01' };
+	await createEmployee(db, hired, manager);
+	const id = 1;
+	expect(await rejection(updateContact(db, { ...ana, document_id: '1', id }, sales))).toBe(403);
+	expect(await updateContact(db, { ...ana, full_name: 'Ana P.', id }, sales)).toEqual({
+		ok: true,
+		id
+	});
+	expect(await updateContact(db, { ...ana, document_id: '', id }, manager)).toMatchObject({
+		ok: false,
+		errors: { document_id: 'Es empleado: la cédula no puede quedar vacía' }
+	});
 });
 
 test('an edit logs only the changed attributes key, old and new', async () => {

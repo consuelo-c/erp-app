@@ -497,7 +497,7 @@ async function buildDraft(db: D1Database, employee: Employee, period: Period): P
 		employeeId: employee.id,
 		previousWeekNumber: proposal.previousWeekNumber,
 		monthlySalary: employee.monthlySalary,
-		employeeBankAccount: employee.bankAccount
+		employeeBankAccount: employee.salaryBankAccount
 	};
 	if (null === row) {
 		const run = calculate(newEntries(context, period), context);
