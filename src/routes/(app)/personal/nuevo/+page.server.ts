@@ -19,7 +19,7 @@ export const actions: Actions = {
 		const values = Object.fromEntries(await request.formData());
 		const result = await createEmployee(platform.env.DB, values, locals.user);
 		if (!result.ok) {
-			return fail(400, { message: result.message, values });
+			return fail(400, { message: result.message, errors: result.errors, values });
 		}
 		// The list shows the saved notice for this flag.
 		redirect(303, `${resolve('/personal')}?guardado`);

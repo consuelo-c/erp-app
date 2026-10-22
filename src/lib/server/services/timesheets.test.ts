@@ -27,8 +27,9 @@ async function hire(idNumber: string, start: string): Promise<number> {
 	const result = await createEmployee(
 		db,
 		{
+			phone: `310${idNumber.slice(-7)}`,
 			full_name: 'Ana Pérez',
-			id_number: idNumber,
+			document_id: idNumber,
 			monthly_salary: '1750905',
 			position: 'Ventas',
 			start

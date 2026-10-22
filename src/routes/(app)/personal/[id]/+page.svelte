@@ -12,6 +12,7 @@
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import { formatCivilDate } from '$lib/datetime';
 	import { formatIdNumber, formatPesos } from '$lib/format';
+	import { formatPhone } from '$lib/phone';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import type { PageProps } from './$types';
 
@@ -27,6 +28,7 @@
 
 	// After a failed save the fields come back with what was typed.
 	const value = (name: string, saved: string) => String(form?.values?.[name] ?? saved);
+	const errorOf = (name: string): string | undefined => form?.errors?.[name];
 
 	// Saving stays on the screen: the fields keep what was typed until the reloaded employee replaces it.
 	const keepValues: SubmitFunction = () => {
@@ -61,24 +63,37 @@
 		{:else if form?.saved}
 			<Notice tone="success">Datos guardados con éxito</Notice>
 		{/if}
-		<Field label="Nombre completo" id="full_name">
+		<Field label="Teléfono" id="phone" error={errorOf('phone')}>
+			<Input
+				id="phone"
+				name="phone"
+				type="tel"
+				inputmode="tel"
+				value={value('phone', formatPhone(employee.phone))}
+				aria-invalid={undefined !== errorOf('phone')}
+				required
+			/>
+		</Field>
+		<Field label="Nombre completo" id="full_name" error={errorOf('full_name')}>
 			<Input
 				id="full_name"
 				name="full_name"
 				value={value('full_name', employee.fullName)}
+				aria-invalid={undefined !== errorOf('full_name')}
 				required
 			/>
 		</Field>
-		<Field label="Cédula" id="id_number">
+		<Field label="Cédula" id="document_id" error={errorOf('document_id')}>
 			<Input
-				id="id_number"
-				name="id_number"
-				value={value('id_number', formatIdNumber(employee.idNumber))}
+				id="document_id"
+				name="document_id"
+				value={value('document_id', formatIdNumber(employee.idNumber))}
 				inputmode="numeric"
+				aria-invalid={undefined !== errorOf('document_id')}
 				required
 			/>
 		</Field>
-		<Field label="Salario mensual" id="monthly_salary">
+		<Field label="Salario mensual" id="monthly_salary" error={errorOf('monthly_salary')}>
 			<Input
 				id="monthly_salary"
 				name="monthly_salary"
@@ -87,15 +102,20 @@
 				required
 			/>
 		</Field>
-		<Field label="Cargo" id="position">
+		<Field label="Cargo" id="position" error={errorOf('position')}>
 			<Input id="position" name="position" value={value('position', employee.position)} required />
 		</Field>
-		<Field label="Cuenta bancaria" id="bank_account" hint="Cuenta a la que se consigna la nómina.">
+		<Field
+			label="Cuenta para nómina"
+			id="salary_bank_account"
+			hint="Adonde se transfiere la nómina."
+			error={errorOf('salary_bank_account')}
+		>
 			<Input
-				id="bank_account"
-				name="bank_account"
-				value={value('bank_account', employee.bankAccount ?? '')}
-				placeholder="Ej. Cuenta ahorros Bancolombia 123-122334-12"
+				id="salary_bank_account"
+				name="salary_bank_account"
+				value={value('salary_bank_account', employee.salaryBankAccount ?? '')}
+				placeholder="Ej. Bancolombia ahorros 123-456789-01"
 			/>
 		</Field>
 	</form>

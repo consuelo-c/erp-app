@@ -16,9 +16,9 @@ export function formatInteger(value: number): string {
 	return grouped.format(value);
 }
 
-/** A stored ID number (digits only) as people write it: `71.384.902`. */
-export function formatIdNumber(digits: string): string {
-	return formatInteger(Number(digits));
+/** A stored ID number as people write it: `71.384.902`; a passport, with letters, as stored. */
+export function formatIdNumber(documentId: string): string {
+	return /^\d+$/.test(documentId) ? formatInteger(Number(documentId)) : documentId;
 }
 
 /** Worked minutes as hours with one decimal, a dot as the separator: `8.1 h`. */

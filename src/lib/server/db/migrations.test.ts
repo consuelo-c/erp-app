@@ -30,9 +30,15 @@ function listColumns(table: string): string[] {
 
 const AUDIT = "0, 'admin', 0, 'admin'";
 
-function insertEmployee(idNumber: string) {
+function insertContact(phone: string) {
 	database.exec(
-		`insert into employees (full_name, id_number, created_at, created_by, updated_at, updated_by) values ('Ana Pérez', '${idNumber}', ${AUDIT})`
+		`insert into contacts (phone, full_name, created_at, created_by, updated_at, updated_by) values ('${phone}', 'Ana Pérez', ${AUDIT})`
+	);
+}
+
+function insertEmployee(contactId: number | null) {
+	database.exec(
+		`insert into employees (contact_id, created_at, created_by, updated_at, updated_by) values (${contactId}, ${AUDIT})`
 	);
 }
 
@@ -58,7 +64,8 @@ test('creates exactly the tables of the phases built so far', () => {
 });
 
 test('users: username is unique, employee_id is unique but may be null on many rows', () => {
-	insertEmployee('1036452118');
+	insertContact('573104428890');
+	insertEmployee(1);
 	insertUser('admin', null);
 	insertUser('gerente', null);
 	insertUser('ventas', 1);
@@ -71,16 +78,18 @@ test('users has no email, id_number or attributes', () => {
 	expect(listColumns('users').filter((column) => forbidden.includes(column))).toEqual([]);
 });
 
-test('employees: id_number is required and unique, attributes defaults to {}, no active', () => {
-	insertEmployee('71384902');
-	expect(() => insertEmployee('71384902')).toThrow(/UNIQUE/);
-	expect(() =>
-		database.exec(
-			`insert into employees (full_name, created_at, created_by, updated_at, updated_by) values ('Sin cédula', ${AUDIT})`
-		)
-	).toThrow(/NOT NULL/);
+test('employees: contact_id is required and unique, attributes defaults to {}, no active', () => {
+	insertContact('573104428890');
+	insertEmployee(1);
+	expect(() => insertEmployee(1)).toThrow(/UNIQUE/);
+	expect(() => insertEmployee(null)).toThrow(/NOT NULL/);
 	expect(database.prepare('select attributes from employees').get()?.attributes).toBe('{}');
 	expect(listColumns('employees')).not.toContain('active');
+});
+
+test("employees has no name, phone or ID number: they are the contact's", () => {
+	const forbidden = ['full_name', 'phone', 'id_number', 'document_id'];
+	expect(listColumns('employees').filter((column) => forbidden.includes(column))).toEqual([]);
 });
 
 function insertProduct(category: string, variantGroup: string | null, variantName: string | null) {
@@ -185,33 +194,6 @@ test('receipt_number is required and unique per sign', () => {
 	insert(100, 1);
 	expect(() => insert(-50, 1)).toThrow(/UNIQUE/);
 	expect(() => insert(-50, null)).toThrow(/NOT NULL/);
-});
-
-test('rebuilding cash_movements numbers the existing rows in id order, one sequence per sign', () => {
-	const rebuilt = new DatabaseSync(':memory:');
-	const files = readdirSync('migrations')
-		.filter((file) => file.endsWith('.sql'))
-		.sort();
-	const rebuild = files.find((file) => file.startsWith('0005'))!;
-	for (const file of files.filter((earlier) => earlier < rebuild)) {
-		rebuilt.exec(readFileSync(`migrations/${file}`, 'utf8'));
-	}
-	const insert = rebuilt.prepare(
-		`insert into cash_movements (concept, payment_method, amount, movement_date, entity_type, entity_id, created_at, created_by, updated_at, updated_by) values (?, 'CASH', ?, '2026-10-17', ?, ?, ${AUDIT})`
-	);
-	insert.run('PAYROLL', -100, 'PAYROLL_RUN', 1);
-	insert.run('INSTALLMENT', 500, 'ORDER', 7);
-	insert.run('PAYROLL', -200, 'PAYROLL_RUN', 2);
-	rebuilt.exec(readFileSync(`migrations/${rebuild}`, 'utf8'));
-
-	const rows = rebuilt.prepare(
-		'select id, receipt_number, reverses_id from cash_movements order by id'
-	);
-	expect(rows.all().map((row) => ({ ...row }))).toEqual([
-		{ id: 1, receipt_number: 1, reverses_id: null },
-		{ id: 2, receipt_number: 1, reverses_id: null },
-		{ id: 3, receipt_number: 2, reverses_id: null }
-	]);
 });
 
 test('users, employees, sessions and products carry the audit columns', () => {

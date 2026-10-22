@@ -115,9 +115,16 @@ const AUDIT = "0, 'gerente', 0, 'gerente'";
 // A paid settlement to link a PAYROLL movement to: only what the cash book reads off it.
 function insertRun({ employee, week }: { employee: string; week: number }): number {
 	database.exec(
-		`insert or ignore into employees (full_name, id_number, created_at, created_by, updated_at, updated_by) values ('${employee}', '${employee}', ${AUDIT})`
+		`insert or ignore into contacts (phone, full_name, created_at, created_by, updated_at, updated_by) values ('${employee}', '${employee}', ${AUDIT})`
 	);
-	const { id } = database.prepare('select id from employees where full_name = ?').get(employee)!;
+	database.exec(
+		`insert or ignore into employees (contact_id, created_at, created_by, updated_at, updated_by) values ((select id from contacts where phone = '${employee}'), ${AUDIT})`
+	);
+	const { id } = database
+		.prepare(
+			'select employees.id from employees join contacts on contacts.id = employees.contact_id where phone = ?'
+		)
+		.get(employee)!;
 	const { lastInsertRowid } = database
 		.prepare(
 			`insert into payroll_runs (employee_id, status, week_number, period_start, period_end, payment_date, employee_snapshot, prepared_by, earnings, deductions, settings_snapshot, total_earnings, total_deductions, net_pay, created_at, created_by, updated_at, updated_by) values (?, 'PAID', ?, ?, '2026-10-17', '2026-10-17', ?, 'gerente', '{}', '{}', '{}', 0, 0, 0, ${AUDIT})`
@@ -260,7 +267,7 @@ test("a movement's detail has what its receipt prints, plus who recorded it and 
 
 test("a PAYROLL movement's detail names the week and the employee the settlement kept", async () => {
 	await record(payroll(insertRun({ employee: 'Ana Pérez', week: 42 }), -480000));
-	database.exec("update employees set full_name = 'Ana Pérez Gómez'");
+	database.exec("update contacts set full_name = 'Ana Pérez Gómez'");
 	expect(await getMovement(db, 1, manager)).toMatchObject({
 		weekNumber: 42,
 		employeeName: 'Ana Pérez',

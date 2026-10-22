@@ -9,6 +9,8 @@
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
+	import { formatIdNumber } from '$lib/format';
+	import type { PhoneMatch } from '$lib/server/services/employees';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import type { PageProps } from './$types';
 
@@ -16,6 +18,25 @@
 
 	// After a failed submit the form comes back with what was typed.
 	const value = (name: string) => String(form?.values[name] ?? '');
+	const errorOf = (name: string): string | undefined => form?.errors?.[name];
+
+	// Filled in from the contact a typed phone already belongs to.
+	let fullName = $state(value('full_name'));
+	let documentId = $state(value('document_id'));
+	let match = $state<PhoneMatch | null>(null);
+
+	const phoneError = $derived(match?.error ?? errorOf('phone'));
+	const isReused = $derived(null !== match && null === match.error);
+
+	async function matchPhone(event: Event & { currentTarget: HTMLInputElement }) {
+		const query = new URLSearchParams({ telefono: event.currentTarget.value });
+		const response = await fetch(`${resolve('/personal/nuevo/contacto')}?${query}`);
+		match = response.ok ? await response.json() : null;
+		if (null !== match && null === match.error) {
+			fullName = match.fullName;
+			documentId = match.documentId ? formatIdNumber(match.documentId) : '';
+		}
+	}
 
 	let employeeForm: HTMLFormElement;
 	let confirmOpen = $state(false);
@@ -58,26 +79,48 @@
 		{#if form?.message}
 			<Notice tone="error">{form.message}</Notice>
 		{/if}
-		<Field label="Nombre completo" id="full_name">
+		<Field
+			label="Teléfono"
+			id="phone"
+			hint={isReused
+				? '✓ Ya está en Contactos: se usará ese contacto'
+				: 'Si ya está en Contactos, se llenan el nombre y la cédula.'}
+			error={phoneError}
+		>
+			<Input
+				id="phone"
+				name="phone"
+				type="tel"
+				inputmode="tel"
+				value={value('phone')}
+				placeholder="Ej. 310 442 8890"
+				onchange={matchPhone}
+				aria-invalid={undefined !== phoneError}
+				required
+			/>
+		</Field>
+		<Field label="Nombre completo" id="full_name" error={errorOf('full_name')}>
 			<Input
 				id="full_name"
 				name="full_name"
-				value={value('full_name')}
+				bind:value={fullName}
 				placeholder="Nombre y apellidos"
+				aria-invalid={undefined !== errorOf('full_name')}
 				required
 			/>
 		</Field>
-		<Field label="Cédula" id="id_number">
+		<Field label="Cédula" id="document_id" error={errorOf('document_id')}>
 			<Input
-				id="id_number"
-				name="id_number"
-				value={value('id_number')}
+				id="document_id"
+				name="document_id"
+				bind:value={documentId}
 				placeholder="Número de cédula"
 				inputmode="numeric"
+				aria-invalid={undefined !== errorOf('document_id')}
 				required
 			/>
 		</Field>
-		<Field label="Salario mensual" id="monthly_salary">
+		<Field label="Salario mensual" id="monthly_salary" error={errorOf('monthly_salary')}>
 			<Input
 				id="monthly_salary"
 				name="monthly_salary"
@@ -87,7 +130,7 @@
 				required
 			/>
 		</Field>
-		<Field label="Cargo" id="position">
+		<Field label="Cargo" id="position" error={errorOf('position')}>
 			<Input
 				id="position"
 				name="position"
@@ -96,12 +139,17 @@
 				required
 			/>
 		</Field>
-		<Field label="Cuenta bancaria" id="bank_account" hint="Cuenta a la que se consigna la nómina.">
+		<Field
+			label="Cuenta para nómina"
+			id="salary_bank_account"
+			hint="Adonde se transfiere la nómina."
+			error={errorOf('salary_bank_account')}
+		>
 			<Input
-				id="bank_account"
-				name="bank_account"
-				value={value('bank_account')}
-				placeholder="Ej. Cuenta ahorros Bancolombia 123-122334-12"
+				id="salary_bank_account"
+				name="salary_bank_account"
+				value={value('salary_bank_account')}
+				placeholder="Ej. Bancolombia ahorros 123-456789-01"
 			/>
 		</Field>
 		<Field label="Fecha de ingreso" id="start" hint="Abre el primer período de trabajo.">

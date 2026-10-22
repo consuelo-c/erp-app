@@ -3,12 +3,14 @@ import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import type { Actor, Role } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
+import { createContact } from './contacts';
 import {
 	createEmployee,
 	employmentSchema,
 	endEmployment,
 	getEmployee,
 	listEmployees,
+	matchPhone,
 	rehire,
 	updateEmployee
 } from './employees';
@@ -23,8 +25,9 @@ beforeEach(() => {
 });
 
 const carlos = {
+	phone: '315 284 7710',
 	full_name: 'Carlos Vélez',
-	id_number: '71.384.902',
+	document_id: '71.384.902',
 	monthly_salary: '$1.423.500',
 	position: 'Bodega',
 	start: '2024-07-15'
@@ -39,50 +42,160 @@ async function hire(input: Record<string, string> = carlos): Promise<number> {
 }
 
 function events() {
-	return database.prepare('select action, before, after from events order by id').all();
+	return database
+		.prepare('select entity_type, entity_id, action, before, after from events order by id')
+		.all();
 }
 
-test('creating stores digits only and opens the first period, with a CREATED event', async () => {
+function count(table: string) {
+	return database.prepare(`select count(*) as count from ${table}`).get()?.count;
+}
+
+const jorge = { phone: '300 771 2043', full_name: 'Jorge Iván Betancur', document_id: '71234567' };
+
+test('a new phone creates the contact and the employee in one batch, each with its CREATED event', async () => {
 	const id = await hire();
 	expect(await getEmployee(db, id, manager)).toEqual({
 		id,
+		phone: '573152847710',
 		fullName: 'Carlos Vélez',
 		idNumber: '71384902',
 		monthlySalary: 1423500,
 		position: 'Bodega',
-		bankAccount: null,
+		salaryBankAccount: null,
 		employment: [{ start: '2024-07-15', end: null }],
 		isEmployed: true
 	});
-	expect(events()).toMatchObject([{ action: 'CREATED', before: null }]);
+	const contact = database.prepare('select id, full_name, document_id from contacts').get();
+	expect(contact).toEqual({ id: 1, full_name: 'Carlos Vélez', document_id: '71384902' });
+	expect(database.prepare('select contact_id from employees').get()?.contact_id).toBe(1);
+	expect(events()).toMatchObject([
+		{ entity_type: 'CONTACT', entity_id: 1, action: 'CREATED' },
+		{ entity_type: 'EMPLOYEE', entity_id: id, action: 'CREATED' }
+	]);
 });
 
-test('a second employee with the same ID number is rejected with a message', async () => {
-	await hire();
-	const result = await createEmployee(db, { ...carlos, id_number: '71384902' }, manager);
-	expect(result).toEqual({ ok: false, message: 'Ya existe un empleado con esa cédula' });
-});
+test('a phone already in Contactos reuses that contact, its name and ID number as typed', async () => {
+	await createContact(db, { phone: jorge.phone, full_name: 'Jorge Betancur' }, manager);
+	expect(await matchPhone(db, '3007712043', manager)).toEqual({
+		fullName: 'Jorge Betancur',
+		documentId: null,
+		error: null
+	});
 
-test('editing logs only the changed fields in before/after', async () => {
-	const id = await hire();
-	await updateEmployee(db, { ...carlos, id, full_name: 'Carlos A. Vélez' }, manager);
+	const id = await hire({ ...carlos, ...jorge });
+	expect(count('contacts')).toBe(1);
+	expect(await getEmployee(db, id, manager)).toMatchObject({
+		fullName: 'Jorge Iván Betancur',
+		idNumber: '71234567'
+	});
 	const edited = events()[1];
-	expect(edited).toMatchObject({ action: 'EDITED' });
-	expect(JSON.parse(String(edited.before))).toEqual({ full_name: 'Carlos Vélez' });
-	expect(JSON.parse(String(edited.after))).toEqual({ full_name: 'Carlos A. Vélez' });
+	expect(edited).toMatchObject({ entity_type: 'CONTACT', entity_id: 1, action: 'EDITED' });
+	expect(JSON.parse(String(edited.after))).toEqual({
+		full_name: 'Jorge Iván Betancur',
+		document_id: '71234567'
+	});
 });
 
-test('the bank account is optional, kept across employment changes and cleared when blanked', async () => {
-	const id = await hire({ ...carlos, bank_account: '  Bancolombia ahorros 123-456789-01 ' });
+test("a phone that's already another employee's is refused naming them", async () => {
+	await hire();
+	const refusal = {
+		ok: false,
+		message: 'Revisa los campos marcados en rojo antes de guardar.',
+		errors: { phone: 'Ese teléfono ya es de Carlos Vélez, que ya está en Personal' }
+	};
+	expect(await createEmployee(db, { ...carlos, document_id: '1' }, manager)).toEqual(refusal);
+	expect(await matchPhone(db, '+57 315 284 7710', manager)).toMatchObject({
+		error: refusal.errors.phone
+	});
+	expect(count('employees')).toBe(1);
+});
+
+test('matchPhone finds nothing for a new phone or one not valid yet', async () => {
+	await hire();
+	expect(await matchPhone(db, '300 771 2043', manager)).toBeNull();
+	expect(await matchPhone(db, '315 284', manager)).toBeNull();
+	expect(await matchPhone(db, null, manager)).toBeNull();
+});
+
+test('an ID number another contact has is refused naming that contact', async () => {
+	await hire();
+	const result = await createEmployee(
+		db,
+		{ ...carlos, ...jorge, document_id: '71384902' },
+		manager
+	);
+	expect(result).toMatchObject({
+		ok: false,
+		errors: { document_id: 'Esa cédula o NIT ya es de Carlos Vélez' }
+	});
+	expect(count('contacts')).toBe(1);
+});
+
+test('phone, name and ID number are required', async () => {
+	const result = await createEmployee(
+		db,
+		{ ...carlos, phone: '', full_name: ' ', document_id: '' },
+		manager
+	);
+	expect(result).toMatchObject({
+		ok: false,
+		errors: {
+			phone: 'Escribe el teléfono',
+			full_name: 'Escribe el nombre completo',
+			document_id: 'Escribe la cédula'
+		}
+	});
+});
+
+test('editing name, phone or ID number changes the contact, logged as CONTACT EDITED', async () => {
+	const id = await hire();
+	await updateEmployee(
+		db,
+		{ ...carlos, id, full_name: 'Carlos A. Vélez', phone: '315 284 7711' },
+		manager
+	);
+	const edited = events()[2];
+	expect(edited).toMatchObject({ entity_type: 'CONTACT', entity_id: 1, action: 'EDITED' });
+	expect(JSON.parse(String(edited.before))).toEqual({
+		phone: '573152847710',
+		full_name: 'Carlos Vélez'
+	});
+	expect(JSON.parse(String(edited.after))).toEqual({
+		phone: '573152847711',
+		full_name: 'Carlos A. Vélez'
+	});
+	expect(events()).toHaveLength(3);
+});
+
+test("changing the phone to another contact's is refused, and the employee keeps its contact", async () => {
+	const id = await hire();
+	await createContact(db, jorge, manager);
+	const result = await updateEmployee(db, { ...carlos, id, phone: jorge.phone }, manager);
+	expect(result).toMatchObject({
+		ok: false,
+		errors: { phone: 'Ese teléfono ya es de Jorge Iván Betancur' }
+	});
+	expect((await getEmployee(db, id, manager))?.phone).toBe('573152847710');
+});
+
+test('the payroll account is optional, kept across employment changes and cleared when blanked', async () => {
+	const id = await hire({
+		...carlos,
+		salary_bank_account: '  Bancolombia ahorros 123-456789-01 '
+	});
 	await endEmployment(db, { id, end: '2025-06-30' }, manager);
-	expect((await getEmployee(db, id, manager))?.bankAccount).toBe(
+	expect((await getEmployee(db, id, manager))?.salaryBankAccount).toBe(
 		'Bancolombia ahorros 123-456789-01'
 	);
+	const attributes = () =>
+		JSON.parse(String(database.prepare('select attributes from employees').get()?.attributes));
+	expect(attributes()).toHaveProperty('salary_bank_account');
+	expect(attributes()).not.toHaveProperty('bank_account');
 
-	await updateEmployee(db, { ...carlos, id, bank_account: '' }, manager);
-	expect((await getEmployee(db, id, manager))?.bankAccount).toBeNull();
-	const attributes = database.prepare('select attributes from employees').get()?.attributes;
-	expect(JSON.parse(String(attributes))).not.toHaveProperty('bank_account');
+	await updateEmployee(db, { ...carlos, id, salary_bank_account: '' }, manager);
+	expect((await getEmployee(db, id, manager))?.salaryBankAccount).toBeNull();
+	expect(attributes()).not.toHaveProperty('salary_bank_account');
 });
 
 test('ending sets the last period end; rehiring appends a period to the same row', async () => {
@@ -101,8 +214,8 @@ test('ending sets the last period end; rehiring appends a period to the same row
 		{ start: '2024-07-15', end: '2025-06-30' },
 		{ start: '2026-01-13', end: null }
 	]);
-	expect(database.prepare('select count(*) as count from employees').get()?.count).toBe(1);
-	expect(events().map((row) => row.action)).toEqual(['CREATED', 'EDITED', 'EDITED']);
+	expect(count('employees')).toBe(1);
+	expect(events().map((row) => row.action)).toEqual(['CREATED', 'CREATED', 'EDITED', 'EDITED']);
 });
 
 test('an employment cannot end before it started', async () => {
@@ -115,10 +228,11 @@ test('an employment cannot end before it started', async () => {
 });
 
 test('the list puts the currently employed first, by name', async () => {
-	const jorge = await hire({ ...carlos, full_name: 'Jorge Salamanca', id_number: '98552017' });
-	await endEmployment(db, { id: jorge, end: '2026-03-31' }, manager);
-	await hire({ ...carlos, full_name: 'Carlos Vélez' });
-	await hire({ ...carlos, full_name: 'Ana Pérez', id_number: '1036452118' });
+	const salamanca = { phone: '3001112233', full_name: 'Jorge Salamanca', document_id: '98552017' };
+	const gone = await hire({ ...carlos, ...salamanca });
+	await endEmployment(db, { id: gone, end: '2026-03-31' }, manager);
+	await hire();
+	await hire({ ...carlos, phone: '3104428890', full_name: 'Ana Pérez', document_id: '1036452118' });
 	const names = (await listEmployees(db, manager)).map((employee) => employee.fullName);
 	expect(names).toEqual(['Ana Pérez', 'Carlos Vélez', 'Jorge Salamanca']);
 });

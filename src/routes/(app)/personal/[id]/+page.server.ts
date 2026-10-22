@@ -31,7 +31,7 @@ async function submit({ locals, platform, request, params }: RequestEvent, servi
 	}
 	const values = Object.fromEntries(await request.formData());
 	const result = await service(platform.env.DB, { ...values, id: params.id }, locals.user);
-	return result.ok ? null : fail(400, { message: result.message, values });
+	return result.ok ? null : fail(400, { message: result.message, errors: result.errors, values });
 }
 
 export const actions: Actions = {

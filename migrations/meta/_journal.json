@@ -5,57 +5,8 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1791301151216,
-      "tag": "0000_init",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1791926280071,
-      "tag": "0001_polite_may_parker",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1792209713972,
-      "tag": "0002_stale_post",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1792297563689,
-      "tag": "0003_amusing_silvermane",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1792470302337,
-      "tag": "0004_tidy_dreadnoughts",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1792538115996,
-      "tag": "0005_nosy_shen",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "6",
-      "when": 1792638391772,
-      "tag": "0006_mixed_silk_fever",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "6",
-      "when": 1792639089699,
-      "tag": "0007_perfect_silver_sable",
+      "when": 1792641877489,
+      "tag": "0000_lazy_next_avengers",
       "breakpoints": true
     }
   ]

@@ -407,7 +407,8 @@ function employeeClause(pattern: string): Clause {
 	return {
 		sql: `cash_movements.entity_type = 'PAYROLL_RUN' and cash_movements.entity_id in (
 			select payroll_runs.id from payroll_runs join employees on employees.id = payroll_runs.employee_id
-			where employees.full_name like ? escape '\\')`,
+			join contacts on contacts.id = employees.contact_id
+			where contacts.full_name like ? escape '\\')`,
 		params: [pattern]
 	};
 }
@@ -477,10 +478,11 @@ async function listEntries(db: D1Database, where: Clause): Promise<CashBookEntry
 			`select cash_movements.id, cash_movements.movement_date, cash_movements.concept, cash_movements.amount,
 				cash_movements.payment_method, cash_movements.payee, cash_movements.attributes,
 				cash_movements.receipt_number, cash_movements.created_by, cash_movements.created_at,
-				payroll_runs.week_number, employees.full_name
+				payroll_runs.week_number, contacts.full_name
 			from cash_movements
 			left join payroll_runs on cash_movements.entity_type = 'PAYROLL_RUN' and payroll_runs.id = cash_movements.entity_id
 			left join employees on employees.id = payroll_runs.employee_id
+			left join contacts on contacts.id = employees.contact_id
 			where ${where.sql}
 			order by cash_movements.movement_date desc, cash_movements.id desc`
 		)

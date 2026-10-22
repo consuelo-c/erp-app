@@ -70,8 +70,9 @@ const reassignSchema = z.object({
 });
 const loginIdSchema = z.object({ id: idSchema });
 
-const SELECT_LOGIN =
-	'select users.id, users.username, users.roles, users.active, users.employee_id, employees.full_name from users left join employees on employees.id = users.employee_id';
+const SELECT_LOGIN = `select users.id, users.username, users.roles, users.active, users.employee_id, contacts.full_name
+	from users left join employees on employees.id = users.employee_id
+	left join contacts on contacts.id = employees.contact_id`;
 
 // The foreign key guarantees `full_name` whenever `employee_id` is set.
 function toLogin(row: LoginRow): Login {
