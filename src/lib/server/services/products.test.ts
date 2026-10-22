@@ -3,7 +3,13 @@ import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import type { Actor, Role } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
-import { createProduct, getProduct, listProducts, updateProduct } from './products';
+import {
+	createProduct,
+	getProduct,
+	listProducts,
+	listVariantGroups,
+	updateProduct
+} from './products';
 
 const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
 
@@ -71,10 +77,21 @@ test('editing logs only the changed fields in before/after', async () => {
 	expect(JSON.parse(String(edited.after))).toEqual({ rental_price: 9000 });
 });
 
-test('unchecking Activo deactivates the product, which stays in the list', async () => {
+test('Inactivo deactivates the product, which stays in the list', async () => {
 	const id = await create(chair);
-	await updateProduct(db, { ...chair, id, active: undefined }, manager);
+	await updateProduct(db, { ...chair, id, active: 'off' }, manager);
 	expect(await listProducts(db, manager)).toMatchObject([{ id, isActive: false }]);
+});
+
+test('the picker lists each group once, with its category, and a save says its group', async () => {
+	const result = await createProduct(db, golden, manager);
+	expect(result).toMatchObject({ ok: true, variantGroup: 'Mantel cuadrado 50×50' });
+	const picked = { ...golden, new_variant_group: '', variant_group: 'Mantel cuadrado 50×50' };
+	await create({ ...picked, variant_name: 'Rojo' });
+	await create(chair);
+	expect(await listVariantGroups(db, manager)).toEqual([
+		{ name: 'Mantel cuadrado 50×50', category: 'LINENS' }
+	]);
 });
 
 test('a variant group and a variant name go together', async () => {

@@ -34,7 +34,12 @@ export const DESTINATIONS: Destination[] = [
 		href: resolve('/contactos'),
 		paths: [resolve('/contactos')]
 	},
-	{ label: 'Inventario', icon: 'package' },
+	{
+		label: 'Inventario',
+		icon: 'package',
+		href: resolve('/inventario/productos'),
+		paths: [resolve('/inventario/productos')]
+	},
 	{
 		label: 'Caja',
 		icon: 'wallet',
@@ -94,3 +99,17 @@ export const ADMIN_SETTINGS_TABS = [
 	...SETTINGS_TABS,
 	{ label: 'Logins', href: resolve('/logins') }
 ];
+
+/** Inventario's tabs. */
+export const INVENTORY_TABS = [
+	// STUB: phase 11 replaces this with the physical count's tab, its href and its screen.
+	{ label: 'Conteo físico' },
+	{ label: 'Productos', href: resolve('/inventario/productos') }
+];
+
+/** Productos, or with a group one group's variants; `query` adds the rest, like `guardado`. */
+export function catalogHref(group: string | null, query: Record<string, string> = {}): string {
+	const search = String(new URLSearchParams(null === group ? query : { grupo: group, ...query }));
+	const productsHref = resolve('/inventario/productos');
+	return '' === search ? productsHref : `${productsHref}?${search}`;
+}
