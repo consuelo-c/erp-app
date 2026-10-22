@@ -3,6 +3,7 @@
 import type { Role } from './server/actor';
 import type { DeductionConcept, EarningConcept } from './payroll';
 import type { CashConcept, PaymentMethod } from './server/services/cash';
+import type { Category } from './server/services/products';
 import type { Punch } from './server/services/timesheets';
 
 export const ROLE_LABELS: Record<Role, string> = {
@@ -60,7 +61,7 @@ export const RESPONSIBLE_PARTY_LABELS = {
 	COMPANY: 'La empresa'
 };
 
-export const CATEGORY_LABELS = {
+export const CATEGORY_LABELS: Record<Category, string> = {
 	CHAIRS_TABLES: 'Sillas y mesas',
 	LINENS: 'Manteles y ruches',
 	GLASSWARE: 'Cristalería',

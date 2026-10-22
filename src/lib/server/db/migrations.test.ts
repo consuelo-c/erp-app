@@ -48,6 +48,7 @@ test('creates exactly the tables of the phases built so far', () => {
 		'employees',
 		'events',
 		'payroll_runs',
+		'products',
 		'sessions',
 		'settings',
 		'timesheets',
@@ -79,6 +80,28 @@ test('employees: id_number is required and unique, attributes defaults to {}, no
 	).toThrow(/NOT NULL/);
 	expect(database.prepare('select attributes from employees').get()?.attributes).toBe('{}');
 	expect(listColumns('employees')).not.toContain('active');
+});
+
+function insertProduct(category: string, variantGroup: string | null, variantName: string | null) {
+	database
+		.prepare(
+			`insert into products (name, category, variant_group, variant_name, rental_price, total_quantity, created_at, created_by, updated_at, updated_by) values ('Mantel', ?, ?, ?, 8000, 10, ${AUDIT})`
+		)
+		.run(category, variantGroup, variantName);
+}
+
+test('products: the database rejects an unknown category', () => {
+	insertProduct('LINENS', null, null);
+	expect(() => insertProduct('FURNITURE', null, null)).toThrow(/CHECK/);
+	expect(database.prepare('select active from products').get()?.active).toBe(1);
+});
+
+test('products: a variant name repeats in its group only by case, and products without variants never collide', () => {
+	insertProduct('LINENS', 'Mantel cuadrado 50×50', 'Dorado');
+	insertProduct('LINENS', 'Mantel cuadrado 50×50', 'Rojo');
+	insertProduct('LINENS', null, null);
+	insertProduct('LINENS', null, null);
+	expect(() => insertProduct('LINENS', 'mantel CUADRADO 50×50', 'DORADO')).toThrow(/UNIQUE/);
 });
 
 type MovementInsert = {
@@ -190,9 +213,9 @@ test('rebuilding cash_movements numbers the existing rows in id order, one seque
 	]);
 });
 
-test('users, employees and sessions carry the audit columns', () => {
+test('users, employees, sessions and products carry the audit columns', () => {
 	const audit = ['created_at', 'created_by', 'updated_at', 'updated_by'];
-	for (const table of ['users', 'employees', 'sessions']) {
+	for (const table of ['users', 'employees', 'sessions', 'products']) {
 		expect(listColumns(table)).toEqual(expect.arrayContaining(audit));
 	}
 });

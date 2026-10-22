@@ -33,38 +33,38 @@ beforeEach(() => {
 	}
 	// A table with an INTEGER id, like every table after settings.
 	database.exec(
-		'create table products (id integer primary key, name text not null, created_at integer not null, created_by text not null, updated_at integer not null, updated_by text not null)'
+		'create table sample_rows (id integer primary key, name text not null, created_at integer not null, created_by text not null, updated_at integer not null, updated_by text not null)'
 	);
 });
 
 test('an insert fills all four audit columns, with updated_* equal to created_*', () => {
 	runBatch(
 		auditedInsert(db, {
-			table: 'products',
-			entityType: 'PRODUCT',
+			table: 'sample_rows',
+			entityType: 'SAMPLE_ROW',
 			actor: manager,
 			values: { name: 'Silla' }
 		})
 	);
-	const row = database.prepare('select * from products').get();
+	const row = database.prepare('select * from sample_rows').get();
 	expect(row).toMatchObject({ name: 'Silla', created_by: 'gerente', updated_by: 'gerente' });
 	expect(row?.created_at).toBeTypeOf('number');
 	expect(row?.updated_at).toBe(row?.created_at);
 });
 
 test('an insert logs CREATED with the new id and a null before', () => {
-	database.exec("insert into products values (7, 'Mesa', 0, 'system', 0, 'system')");
+	database.exec("insert into sample_rows values (7, 'Mesa', 0, 'system', 0, 'system')");
 	runBatch(
 		auditedInsert(db, {
-			table: 'products',
-			entityType: 'PRODUCT',
+			table: 'sample_rows',
+			entityType: 'SAMPLE_ROW',
 			actor: manager,
 			values: { name: 'Silla' }
 		})
 	);
 	expect(readEvents()).toEqual([
 		expect.objectContaining({
-			entity_type: 'PRODUCT',
+			entity_type: 'SAMPLE_ROW',
 			entity_id: 8,
 			action: 'CREATED',
 			actor_username: 'gerente',
@@ -108,8 +108,8 @@ test('an update logs before and after with only the changed fields', () => {
 
 test('an update that changes nothing writes nothing', () => {
 	const statements = auditedUpdate(db, {
-		table: 'products',
-		entityType: 'PRODUCT',
+		table: 'sample_rows',
+		entityType: 'SAMPLE_ROW',
 		actor: manager,
 		id: 1,
 		current: { name: 'Silla' },
@@ -128,8 +128,8 @@ test('diffFields reports a column missing from current as null before', () => {
 test('a column name that is not a plain identifier is rejected', () => {
 	expect(() =>
 		auditedInsert(db, {
-			table: 'products',
-			entityType: 'PRODUCT',
+			table: 'sample_rows',
+			entityType: 'SAMPLE_ROW',
 			actor: manager,
 			values: { 'name) values (1); --': 'x' }
 		})
