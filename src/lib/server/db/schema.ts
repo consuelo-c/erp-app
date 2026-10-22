@@ -144,6 +144,34 @@ export const payrollRuns = sqliteTable(
 	]
 );
 
+// The rental catalog. A variant is a complete, sellable row of its own (price, quantity), never
+// a child of a parent row: `variant_group` + `variant_name` only group it on the catalog screen.
+export const products = sqliteTable(
+	'products',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		name: text('name').notNull(), // the full name, frozen into orders: never composed from the variant
+		category: text('category').notNull(),
+		variantGroup: text('variant_group'),
+		variantName: text('variant_name'),
+		description: text('description'),
+		rentalPrice: integer('rental_price').notNull(), // whole pesos per day
+		totalQuantity: integer('total_quantity').notNull(),
+		active: integer('active').notNull().default(1),
+		...auditColumns
+	},
+	(table) => [
+		uniqueIndex('products_variant_unique').on(
+			sql`${table.variantGroup} COLLATE NOCASE`,
+			sql`${table.variantName} COLLATE NOCASE`
+		),
+		check(
+			'products_category',
+			sql`${table.category} IN ('CHAIRS_TABLES', 'LINENS', 'GLASSWARE', 'CUTLERY', 'TABLEWARE', 'CHAFERS_TRAYS', 'DECOR')`
+		)
+	]
+);
+
 // All the company's money: the sign is the direction (+ in, − out). Immutable by rule, not by
 // schema: no route edits or deletes a movement, a mistake is corrected with an offsetting one.
 // Linked like `events`, by entity_type + entity_id with no foreign key, so a new business line
