@@ -28,6 +28,7 @@
 		| 'edit'
 		| 'contact'
 		| 'lock'
+		| 'clipboard'
 		| 'whatsapp';
 
 	interface Props {

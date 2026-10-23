@@ -180,13 +180,52 @@ async function batchUnlessDuplicateVariant(
 	}
 }
 
-/** Every product, inactive ones included, by name; the screen groups them. */
-export async function listProducts(db: D1Database, actor: Actor | null): Promise<Product[]> {
+// Filters come from the URL: an empty or tampered value is ignored, not an error.
+const listSchema = z.object({
+	search: z.string().trim().catch(''),
+	category: z.enum(CATEGORIES).optional().catch(undefined)
+});
+
+export type ProductFilters = z.output<typeof listSchema>;
+
+/** The filters come back parsed: what the screen shows as chosen is what was applied. */
+export type ProductList = { products: Product[]; filters: ProductFilters };
+
+// «mantel» finds «Mantel», «cristaleria» finds «Cristalería».
+function fold(text: string): string {
+	return text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+}
+
+function matches(product: Product, search: string): boolean {
+	const { name, variantGroup, variantName } = product;
+	return [name, variantGroup, variantName].some(
+		(text) => null !== text && fold(text).includes(search)
+	);
+}
+
+/**
+ * Every product, inactive ones included, by name, narrowed by text and category; the screen groups
+ * them. A group is kept whole when its name or any of its variants matches: it's one row there.
+ */
+export async function listProducts(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<ProductList> {
 	requireRole(actor, VIEWS_PRODUCTS);
+	const filters = listSchema.parse(input ?? {});
+	const search = fold(filters.search);
+	// ponytail: the whole catalog read, narrowed here so accents fold; SQL if it reaches thousands.
 	const { results } = await db.prepare(SELECT_PRODUCT).all<ProductRow>();
-	return results
+	const inCategory = results
 		.map(toProduct)
+		.filter(({ category }) => undefined === filters.category || category === filters.category);
+	const found = inCategory.filter((product) => matches(product, search));
+	const foundGroups = new Set(found.map(({ variantGroup }) => variantGroup).filter(Boolean));
+	const products = inCategory
+		.filter((product) => found.includes(product) || foundGroups.has(product.variantGroup))
 		.sort((first, second) => first.name.localeCompare(second.name, 'es'));
+	return { products, filters };
 }
 
 /** For the form's picker: a group is chosen from these, never typed again. */
