@@ -3,13 +3,15 @@
 	import { page } from '$app/state';
 	import Badge from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import Icon from '$lib/components/Icon.svelte';
+	import Input from '$lib/components/Input.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
-	import Tabs from '$lib/components/Tabs.svelte';
+	import Select from '$lib/components/Select.svelte';
 	import { formatInteger, formatPesos } from '$lib/format';
 	import { CATEGORY_LABELS } from '$lib/labels';
-	import { catalogHref, INVENTORY_TABS } from '$lib/navigation';
+	import { catalogHref } from '$lib/navigation';
 	import type { Product } from '$lib/server/services/products';
 	import { describeGroup, findVariants, groupCatalog, summarizeGroup } from './catalog';
 	import type { PageProps } from './$types';
@@ -20,6 +22,32 @@
 	// `?grupo=` opens one group's variants; a group with none left falls back to the list.
 	const group = $derived(page.url.searchParams.get('grupo'));
 	const variants = $derived(null === group ? [] : findVariants(data.products, group));
+
+	const filters = $derived(data.filters);
+	const isFiltered = $derived('' !== filters.search || undefined !== filters.category);
+	// No product at all, as opposed to none matching: the filters have nothing to narrow.
+	const isEmpty = $derived(!isFiltered && 0 === sections.length);
+
+	const noneText = $derived.by(() => {
+		const { search, category } = filters;
+		const among = category ? ` en ${CATEGORY_LABELS[category]}` : '';
+		return '' === search
+			? `Aún no hay productos${among}.`
+			: `Nada coincide con «${search}»${among}.`;
+	});
+
+	let typing: ReturnType<typeof setTimeout> | undefined;
+
+	// The list narrows as it's typed, once the typing pauses; a category applies when picked.
+	function searchSoon(event: Event & { currentTarget: HTMLInputElement }) {
+		const { form } = event.currentTarget;
+		clearTimeout(typing);
+		typing = setTimeout(() => form?.requestSubmit(), 300);
+	}
+
+	function apply(event: Event & { currentTarget: HTMLSelectElement }) {
+		event.currentTarget.form?.requestSubmit();
+	}
 </script>
 
 <svelte:head>
@@ -31,7 +59,7 @@
 		{#if variants.length}
 			<ScreenHeader title={group!} backHref={catalogHref(null)} />
 		{:else}
-			<ScreenHeader><Tabs tabs={INVENTORY_TABS} current="Productos" /></ScreenHeader>
+			<ScreenHeader title="Productos" />
 		{/if}
 	{/snippet}
 
@@ -59,7 +87,7 @@
 								{#if data.canEdit}
 									<a
 										class="table__link"
-										href={resolve('/(app)/inventario/productos/[id]', { id: String(variant.id) })}
+										href={resolve('/(app)/productos/[id]', { id: String(variant.id) })}
 										>{variant.variantName}</a
 									>
 								{:else}
@@ -75,7 +103,7 @@
 				{/each}
 			</tbody>
 		</table>
-	{:else if 0 === sections.length}
+	{:else if isEmpty}
 		<!-- Empty state: the action sits centered under the message. -->
 		<div class="empty">
 			<p><strong>Aún no hay productos</strong></p>
@@ -85,6 +113,45 @@
 			{/if}
 		</div>
 	{:else}
+		<!-- Each filter is in the URL, so a reload or the browser's back keeps it. -->
+		<form
+			class="tools"
+			method="GET"
+			data-sveltekit-keepfocus
+			data-sveltekit-noscroll
+			data-sveltekit-replacestate
+		>
+			<label class="search">
+				<Icon name="search" size="sm" />
+				<Input
+					type="search"
+					name="texto"
+					aria-label="Buscar por nombre o variante"
+					placeholder="Nombre o variante"
+					value={filters.search}
+					oninput={searchSoon}
+				/>
+			</label>
+			<Select
+				name="categoria"
+				aria-label="Categoría"
+				value={filters.category ?? ''}
+				onchange={apply}
+			>
+				<option value="">Todas las categorías</option>
+				{#each Object.entries(CATEGORY_LABELS) as [category, label] (category)}
+					<option value={category}>{label}</option>
+				{/each}
+			</Select>
+		</form>
+
+		{#if 0 === sections.length}
+			<div class="none">
+				<p class="meta">{noneText}</p>
+				<Button href={resolve('/productos')} variant="secondary" inline>Ver todos</Button>
+			</div>
+		{/if}
+
 		{#each sections as section (section.category)}
 			<section class="category">
 				<h2 class="section-title">{CATEGORY_LABELS[section.category]}</h2>
@@ -100,7 +167,7 @@
 							{:else if data.canEdit}
 								<a
 									class={['product', !row.product.isActive && 'product--inactive']}
-									href={resolve('/(app)/inventario/productos/[id]', { id: String(row.product.id) })}
+									href={resolve('/(app)/productos/[id]', { id: String(row.product.id) })}
 								>
 									{@render productRow(row.product)}
 									<span class="chevron">›</span>
@@ -141,7 +208,7 @@
 {/snippet}
 
 {#snippet newProduct()}
-	<Button href={resolve('/inventario/productos/nuevo')}>Nuevo producto</Button>
+	<Button href={resolve('/productos/nuevo')}>Nuevo producto</Button>
 {/snippet}
 
 <style>
@@ -162,6 +229,46 @@
 
 	.empty__action {
 		margin-top: var(--space-8);
+	}
+
+	.search {
+		position: relative;
+		display: block;
+	}
+
+	.search :global(.icon) {
+		position: absolute;
+		top: 50%;
+		left: var(--input-icon-inset);
+		color: var(--text-disabled);
+		pointer-events: none;
+		translate: 0 -50%;
+	}
+
+	.search :global(.input) {
+		padding-left: var(--input-icon-pad);
+	}
+
+	/* Stacked on a phone; side by side, the text wider, from 1024px. */
+	.tools {
+		display: grid;
+		gap: var(--space-4);
+		margin-bottom: var(--space-10);
+	}
+
+	@container (width >= 1024px) {
+		.tools {
+			grid-template-columns: 3fr 2fr;
+		}
+	}
+
+	.none {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-8);
+		align-items: center;
+		padding-top: var(--space-14);
+		text-align: center;
 	}
 
 	.category {

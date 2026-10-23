@@ -80,7 +80,7 @@ test('editing logs only the changed fields in before/after', async () => {
 test('Inactivo deactivates the product, which stays in the list', async () => {
 	const id = await create(chair);
 	await updateProduct(db, { ...chair, id, active: 'off' }, manager);
-	expect(await listProducts(db, manager)).toMatchObject([{ id, isActive: false }]);
+	expect((await listProducts(db, {}, manager)).products).toMatchObject([{ id, isActive: false }]);
 });
 
 test('the picker lists each group once, with its category, and a save says its group', async () => {
@@ -141,7 +141,7 @@ test('the price per day must be above zero; the total quantity may be zero', asy
 test('SALES lists products but cannot open, create or edit one', async () => {
 	const id = await create(chair);
 	const sales: Actor = { ...manager, roles: ['SALES'] };
-	expect(await listProducts(db, sales)).toHaveLength(1);
+	expect((await listProducts(db, {}, sales)).products).toHaveLength(1);
 	const refusals = await Promise.all([
 		getProduct(db, id, sales).catch((caught: unknown) => caught),
 		createProduct(db, chair, sales).catch((caught: unknown) => caught),
@@ -155,6 +155,29 @@ test('SALES lists products but cannot open, create or edit one', async () => {
 test('WAREHOUSE and DRIVER get a 403 on the list', async () => {
 	for (const role of ['WAREHOUSE', 'DRIVER'] satisfies Role[]) {
 		const actor: Actor = { ...manager, roles: [role] };
-		await expect(listProducts(db, actor)).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
+		await expect(listProducts(db, {}, actor)).rejects.toSatisfy((thrown) =>
+			isHttpError(thrown, 403)
+		);
 	}
+});
+
+test('the list narrows by text and category, a group kept whole by any variant', async () => {
+	await create(chair);
+	await create(golden);
+	const red = { name: 'Mantel cuadrado 50×50 — Rojo', variant_name: 'Rojo' };
+	await create({
+		...golden,
+		...red,
+		new_variant_group: '',
+		variant_group: 'Mantel cuadrado 50×50'
+	});
+	await create({ ...chair, name: 'Copa cristalería', category: 'GLASSWARE' });
+	const names = async (input: Record<string, string>) =>
+		(await listProducts(db, input, manager)).products.map(({ name }) => name);
+	expect(await names({ search: 'ROJO' })).toEqual([golden.name, red.name]);
+	expect(await names({ search: 'cristaleria' })).toEqual(['Copa cristalería']);
+	expect(await names({ search: 'silla', category: 'LINENS' })).toEqual([]);
+	expect(await names({ category: 'CHAIRS_TABLES' })).toEqual(['Silla Tiffany']);
+	// A tampered category is ignored, not an error.
+	expect(await names({ category: 'NOPE' })).toHaveLength(4);
 });
