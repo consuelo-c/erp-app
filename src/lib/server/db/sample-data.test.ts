@@ -1,6 +1,8 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
+import { rolesSchema } from '../actor';
+import { verifyPassword } from '../password';
 import { contactAttributesSchema, servicesSchema } from '../services/contacts';
 
 const sampleData = readFileSync('scripts/sample-data.sql', 'utf8');
@@ -54,13 +56,33 @@ test('loads two clients, a transporter, a decorator and a client with a US numbe
 
 test('a second run duplicates nothing and keeps an edit', () => {
 	database.exec("update products set rental_price = 3000 where name = 'Silla Tiffany dorada'");
-	const before = [readAll('products'), readAll('contacts')];
+	database.exec("update users set password_hash = 'set-by-admin' where username = 'gerente'");
+	const tables = () => [readAll('products'), readAll('contacts'), readAll('users')];
+	const before = tables();
 	database.exec(sampleData);
-	expect([readAll('products'), readAll('contacts')]).toEqual(before);
+	expect(tables()).toEqual(before);
+});
+
+test('loads a login per role, with no employee and no password', async () => {
+	const logins = readAll('users');
+	expect(logins.map((login) => [login.username, login.roles, login.employee_id])).toEqual([
+		['gerente', '["MANAGER"]', null],
+		['representante', '["SALES"]', null],
+		['bodega', '["WAREHOUSE"]', null]
+	]);
+	for (const login of logins) {
+		expect(rolesSchema.safeParse(JSON.parse(String(login.roles))).success).toBe(true);
+		const stored = {
+			hash: String(login.password_hash),
+			salt: String(login.password_salt),
+			iterations: Number(login.password_iterations)
+		};
+		expect(await verifyPassword(String(login.username), 'pepper', stored)).toBe(false);
+	}
 });
 
 test('every row is created by system and writes no events', () => {
-	for (const row of [...readAll('products'), ...readAll('contacts')]) {
+	for (const row of [...readAll('products'), ...readAll('contacts'), ...readAll('users')]) {
 		expect([row.created_by, row.updated_by]).toEqual(['system', 'system']);
 	}
 	expect(database.prepare('select count(*) as count from events').get()).toEqual({ count: 0 });

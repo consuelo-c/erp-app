@@ -49,7 +49,9 @@ function create(input: Record<string, unknown>, actor: Actor = admin) {
 }
 
 function logInAs(username: string, password: string) {
-	const context = { secrets: { pepper }, request: { ip: null, userAgent: null } };
+	// With no `admin` login yet, the first attempt creates it from the secret.
+	const secrets = { pepper, adminPassword: 'clave-admin' };
+	const context = { secrets, request: { ip: null, userAgent: null } };
 	return logIn(db, { username, password }, context);
 }
 

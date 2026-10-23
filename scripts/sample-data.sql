@@ -1,6 +1,7 @@
--- Sample data, development only: the Design Brief's products and a few contacts. `npm run db:seed`
--- loads it into the local D1 after settings-defaults.sql; deploy.yml never applies it. Idempotent:
--- a product whose name exists, or a contact whose document exists, is skipped. Writes no events row.
+-- Sample data, development only: the Design Brief's products, a few contacts and a login per role.
+-- `npm run db:seed` loads it into the local D1 after settings-defaults.sql; deploy.yml never applies
+-- it. Idempotent: a product whose name exists, a contact whose document exists, or a login whose
+-- username exists, is skipped, so a password admin set survives. Writes no events row.
 -- Every JSON must pass its Zod schema in the services; sample-data.test.ts checks it.
 INSERT INTO products (name, category, variant_group, variant_name, rental_price, total_quantity, created_at, created_by, updated_at, updated_by)
 SELECT column1, column2, column3, column4, column5, column6, unixepoch(), 'system', unixepoch(), 'system'
@@ -33,3 +34,15 @@ FROM (VALUES
 ) AS sample
 WHERE true -- SQLite reads ON CONFLICT after a SELECT only past a WHERE
 ON CONFLICT (document_id) DO NOTHING;
+
+-- A login per role, with no employee and no password: the empty hash matches none, and none is in
+-- the repository. Each signs in once admin sets one in Logins › Contraseña.
+INSERT INTO users (username, roles, password_hash, password_salt, password_iterations, created_at, created_by, updated_at, updated_by)
+SELECT column1, column2, '', '', 10000, unixepoch(), 'system', unixepoch(), 'system'
+FROM (VALUES
+	('gerente', '["MANAGER"]'),
+	('representante', '["SALES"]'),
+	('bodega', '["WAREHOUSE"]')
+) AS sample
+WHERE true -- SQLite reads ON CONFLICT after a SELECT only past a WHERE
+ON CONFLICT (username) DO NOTHING;
