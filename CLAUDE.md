@@ -47,7 +47,7 @@ Claude runs `test`, `lint` and `typecheck`; the developer runs every other one.
 - `npm run db:generate` — new migration from the schema
 - `npx wrangler d1 migrations apply consueloc-erp-db --local` — apply migrations locally; remote is applied only by `deploy.yml`
 - `npm run db:reset` — local only: deletes the on-disk D1, applies every migration and runs the seed
-- `npm run db:seed` — local only: loads `scripts/settings-defaults.sql` (default `settings`, holidays included), then `scripts/sample-data.sql` (sample products and contacts); idempotent, writes no `events`. `deploy.yml` applies only the first to production
+- `npm run db:seed` — local only: loads `scripts/settings-defaults.sql` (default `settings`, holidays included), then `scripts/sample-data.sql` (sample products and contacts, and the `gerente`, `representante` and `bodega` logins with no password until admin sets one); idempotent, writes no `events`. `deploy.yml` applies only the first to production
 - `npm run db:export` — SQL dump of production to `db-export.sql` (git-ignored)
 - `npm run env:create` — creates the D1 database and the R2 bucket; copy the printed IDs into `wrangler.jsonc`
 - `npm run build`, `npx wrangler dev` — local run on the Workers runtime
@@ -77,7 +77,7 @@ Claude runs `test`, `lint` and `typecheck`; the developer runs every other one.
 - `src/lib/settings.ts` — `SETTINGS`: each key's module, Spanish label, unit, placeholder and Zod schema (parses the stored `value` TEXT); `getSettingInput`: how the screen takes it
 - `src/service-worker.ts` — PWA shell cache; `static/` — app icons, the icon sprite and `manifest.json`
 - `migrations/` — generated SQL; squashed freely until launch, append-only after
-- `scripts/` — `wipe-d1-if-squashed.js`: the deploy's pre-launch production wipe; `settings-defaults.sql`: default `settings`, applied locally by `db:seed` and to production by the deploy; `sample-data.sql`: development-only products and contacts, applied only by `db:seed`
+- `scripts/` — `wipe-d1-if-squashed.js`: the deploy's pre-launch production wipe; `settings-defaults.sql`: default `settings`, applied locally by `db:seed` and to production by the deploy; `sample-data.sql`: development-only products, contacts and a login per role, applied only by `db:seed`
 - `.github/workflows/` — `verify.yml` (PRs), `deploy.yml` (merge to `main`)
 - `.husky/` — `pre-commit`, `commit-msg`; `.claude/settings.json` — plan mode and the deny list; `.claude/skills/` — `start-phase`
 

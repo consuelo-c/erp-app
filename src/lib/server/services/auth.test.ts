@@ -47,6 +47,15 @@ test('the first attempt on an empty users creates admin, once, from ADMIN_PASSWO
 	expect(actions.map((row) => row.action)).toEqual(['LOGIN_FAILED', 'LOGIN']);
 });
 
+test('admin is created even when other logins exist, and never again once it does', async () => {
+	await addUser('bodega');
+	expect(await attempt('admin', 'clave-admin')).not.toBeNull();
+	database.exec("update users set active = 0 where username = 'admin'");
+	expect(await attempt('admin', 'clave-admin')).toBeNull();
+	const usernames = database.prepare('select username from users order by id').all();
+	expect(usernames.map((row) => row.username)).toEqual(['bodega', 'admin']);
+});
+
 test('the username is matched in lowercase', async () => {
 	await addUser('bodega');
 	expect(await attempt('  Bodega ', 'clave')).not.toBeNull();

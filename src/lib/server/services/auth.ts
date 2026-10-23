@@ -10,7 +10,7 @@ const DAY_SECONDS = 24 * 60 * 60;
 export const SESSION_SECONDS = 30 * DAY_SECONDS;
 const TOKEN_BYTES = 32;
 
-/** The Worker's secrets: `ADMIN_PASSWORD` is only read while `users` is empty. */
+/** The Worker's secrets: `ADMIN_PASSWORD` is only read while no `admin` login exists. */
 export type AuthSecrets = { pepper: string; adminPassword?: string };
 
 /** Who's knocking, for the LOGIN / LOGIN_FAILED / LOGOUT rows in `events`. */
@@ -63,14 +63,16 @@ function accessEvent(
 		.bind(attempt.userId, action, attempt.username, attempt.ip, attempt.userAgent, nowInSeconds());
 }
 
-// Created by the Worker, not the seed, so the production pepper never leaves Cloudflare. Like the
-// seed it writes no events row; `username` being UNIQUE makes a concurrent second attempt a no-op.
+// Created by the Worker, not the seed, so the production pepper never leaves Cloudflare. Keyed on
+// `admin` itself, not on an empty `users`, so the development seed's logins don't keep it from
+// being created; a deactivated `admin` still exists, and a username never changes. Like the seed it
+// writes no events row; `username` being UNIQUE makes a concurrent second attempt a no-op.
 async function ensureFirstAdmin(db: D1Database, secrets: AuthSecrets): Promise<void> {
-	if (null !== (await db.prepare('select 1 from users limit 1').first())) {
+	if (null !== (await db.prepare("select 1 from users where username = 'admin'").first())) {
 		return;
 	}
 	if (!secrets.adminPassword) {
-		throw new Error('ADMIN_PASSWORD is not set and users is empty');
+		throw new Error('ADMIN_PASSWORD is not set and there is no admin login');
 	}
 	const stored = await hashPassword(secrets.adminPassword, secrets.pepper);
 	const roles = JSON.stringify(rolesSchema.parse(['ADMIN']));
