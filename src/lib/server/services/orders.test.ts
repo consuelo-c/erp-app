@@ -10,6 +10,7 @@ import {
 	cancelOrder,
 	checkOrderSchedule,
 	confirmOrder,
+	createExtension,
 	createOrder,
 	getAvailability,
 	getOrder,
@@ -1322,6 +1323,143 @@ test('an unknown order has no printout; WAREHOUSE and DRIVER get a 403', async (
 	expect(await getOrderPrintout(db, '99', sales)).toBeNull();
 	for (const actor of [warehouse, driver]) {
 		await expect(getOrderPrintout(db, id, actor)).rejects.toSatisfy((thrown) =>
+			isHttpError(thrown, 403)
+		);
+	}
+});
+
+// Some of #1043's chairs, kept three more days. Any delivery date sent is ignored.
+const extension = {
+	...order1043,
+	delivery_date: '2026-08-01',
+	pickup_date: '2026-08-19',
+	rental_days: 3,
+	order_items: [{ product_id: 1, qty: 100, unit_price: 2500 }],
+	discount: 0,
+	transport_cost: 60000,
+	deposit_amount: 0
+};
+
+function extend(parent: number, input: object = extension, actor: Actor = sales) {
+	return createExtension(db, { ...input, parent_order_id: String(parent) }, actor);
+}
+
+async function deliveredWithExtension(): Promise<{ parent: number; id: number }> {
+	const parent = await create();
+	setStatus(parent, 'DELIVERED');
+	const result = await extend(parent);
+	if (!result.ok) {
+		throw new Error(JSON.stringify(result.errors));
+	}
+	return { parent, id: result.id };
+}
+
+function orderRow(id: number) {
+	return database.prepare('select * from orders where id = ?').get(id);
+}
+
+test('an extension is born DELIVERED the day after the pickup, copying the original, which stays as it was', async () => {
+	const parent = await create();
+	setStatus(parent, 'DELIVERED');
+	database.prepare("update products set name = 'Silla', rental_price = 3000 where id = 1").run();
+	const before = orderRow(parent);
+	const result = await extend(parent);
+	if (!result.ok) {
+		throw new Error(JSON.stringify(result.errors));
+	}
+	expect(orderRow(parent)).toEqual(before);
+	const original = await read(parent);
+	expect(await read(result.id)).toMatchObject({
+		status: 'DELIVERED',
+		parentOrderId: parent,
+		client: original.client,
+		delivery: original.delivery,
+		pickup: original.pickup,
+		deliveryDate: '2026-08-17',
+		pickupDate: '2026-08-19',
+		rentalDays: 3,
+		items: [
+			{
+				product_id: 1,
+				name: 'Silla Tiffany dorada',
+				qty: 100,
+				list_price: 2500,
+				unit_price: 2500,
+				line_total: 750000
+			}
+		],
+		transportCost: 60000,
+		orderTotal: 810000
+	});
+	const events = database
+		.prepare("select action from events where entity_type = 'ORDER' and entity_id = ?")
+		.all(result.id);
+	expect(events).toEqual([{ action: 'CREATED' }]);
+});
+
+test('only an order that exists and is DELIVERED gets an extension', async () => {
+	const id = await create();
+	for (const status of ['DRAFT', 'CONFIRMED', 'OUT_FOR_PICKUP', 'COMPLETED', 'CANCELLED']) {
+		setStatus(id, status);
+		expect(await extend(id)).toMatchObject({
+			ok: false,
+			message: 'Solo un pedido entregado se puede extender'
+		});
+	}
+	expect(await extend(99)).toMatchObject({ ok: false, message: 'Ese pedido no existe' });
+	expect(database.prepare('select count(*) as count from orders').get()).toEqual({ count: 1 });
+});
+
+test("an extension's lines are the original's products, each up to its quantity", async () => {
+	const parent = await create();
+	setStatus(parent, 'DELIVERED');
+	const line = (productId: number, qty: number) => ({
+		...extension,
+		order_items: [{ product_id: productId, qty, unit_price: 900 }]
+	});
+	expect(await extend(parent, line(4, 1))).toMatchObject({
+		ok: false,
+		errors: { 'order_items.0.product_id': `No está en el pedido #${parent}` }
+	});
+	expect(await extend(parent, line(3, 121))).toMatchObject({
+		ok: false,
+		errors: { 'order_items.0.qty': `Máximo 120, lo que tiene el pedido #${parent}` }
+	});
+	expect(await extend(parent, line(3, 120))).toMatchObject({ ok: true });
+});
+
+test('an original on days 1–4 and its extension on 5–7 subtract the extended chairs once a day', async () => {
+	const parent = await book({
+		status: 'DELIVERED',
+		delivery: '2026-08-01',
+		pickup: '2026-08-04',
+		qty: 100
+	});
+	const lines = [{ product_id: 1, qty: 60, unit_price: 2500 }];
+	expect(
+		await extend(parent, { ...extension, pickup_date: '2026-08-07', order_items: lines })
+	).toMatchObject({ ok: true });
+	for (const [day, available] of [
+		['2026-08-01', 400],
+		['2026-08-04', 400],
+		['2026-08-05', 440],
+		['2026-08-07', 440],
+		['2026-08-08', 500]
+	] as const) {
+		expect(await chairsAvailable({ delivery_date: day, pickup_date: day })).toBe(available);
+	}
+});
+
+test('the original lists its extensions, which keep their link when edited; WAREHOUSE and DRIVER extend nothing', async () => {
+	const { parent, id } = await deliveredWithExtension();
+	expect((await getOrderDetail(db, parent, sales))?.extensions).toEqual([
+		{ id, status: 'DELIVERED', deliveryDate: '2026-08-17', pickupDate: '2026-08-19' }
+	]);
+	const edited = { ...extension, delivery_date: '2026-08-17', rental_days: 4, id };
+	expect(await updateOrder(db, edited, sales)).toMatchObject({ ok: true });
+	expect((await read(id)).parentOrderId).toBe(parent);
+	for (const actor of [warehouse, driver]) {
+		await expect(extend(parent, extension, actor)).rejects.toSatisfy((thrown) =>
 			isHttpError(thrown, 403)
 		);
 	}

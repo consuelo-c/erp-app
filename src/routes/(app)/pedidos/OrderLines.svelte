@@ -1,4 +1,7 @@
 <script lang="ts" module>
+	import { formatPesos } from '$lib/format';
+	import type { OrderItem } from '$lib/server/services/orders';
+
 	/** A line as the form holds it: quantity and price stay text, as typed, until saved. */
 	export type FormLine = {
 		productId: number;
@@ -7,6 +10,17 @@
 		qty: string;
 		unitPrice: string;
 	};
+
+	/** A saved line as the form holds it: its frozen name and prices, its quantity. */
+	export function toFormLine(item: OrderItem): FormLine {
+		return {
+			productId: item.product_id,
+			name: item.name,
+			listPrice: item.list_price,
+			qty: String(item.qty),
+			unitPrice: formatPesos(item.unit_price)
+		};
+	}
 </script>
 
 <script lang="ts">
@@ -15,10 +29,10 @@
 	import IconButton from '$lib/components/IconButton.svelte';
 	import Input from '$lib/components/Input.svelte';
 	import Notice from '$lib/components/Notice.svelte';
-	import { fold, formatPesos } from '$lib/format';
+	import { fold } from '$lib/format';
 	import { calculateOrderTotals } from '$lib/orders';
 	import { parsePesos, parseQuantity } from '$lib/payroll';
-	import type { CatalogProduct } from '$lib/server/services/orders';
+	import type { CatalogProduct, OrderDetail } from '$lib/server/services/orders';
 	import { moveThroughResults } from './order-form';
 
 	// The grid: an expandable compact row per line on a phone, one open at a time; an invoice table
@@ -35,6 +49,8 @@
 		rangeLabel: string;
 		rentalDays: number;
 		errorOf: (path: string) => string | undefined;
+		/** An extension's original: its lines are picked from there, no search, each up to its quantity. */
+		original?: Pick<OrderDetail, 'id' | 'items'> | null;
 	}
 
 	let {
@@ -43,7 +59,8 @@
 		availability,
 		rangeLabel,
 		rentalDays,
-		errorOf
+		errorOf,
+		original = null
 	}: Props = $props();
 
 	const SEARCH_ID = 'product-search';
@@ -122,6 +139,26 @@
 		lines = lines.filter((line) => productId !== line.productId);
 	}
 
+	function isPicked(item: OrderItem): boolean {
+		return lines.some((line) => item.product_id === line.productId);
+	}
+
+	// Picked again, a line comes back as the original has it.
+	function toggle(item: OrderItem) {
+		if (isPicked(item)) {
+			remove(item.product_id);
+		} else {
+			lines.push(toFormLine(item));
+		}
+	}
+
+	function maxNote(productId: number): string {
+		const item = original?.items.find((each) => productId === each.product_id);
+		return item
+			? `Máximo ${item.qty}, lo que tiene el pedido #${original?.id}. Con su precio.`
+			: '';
+	}
+
 	let resultList: HTMLElement | undefined = $state();
 
 	function resultButtons(): Iterable<HTMLElement> {
@@ -185,6 +222,19 @@
 	<p class="field-error">{errorOf('order_items')}</p>
 {/if}
 
+{#if original}
+	<fieldset class="picks">
+		<legend class="picks__legend">Líneas del pedido #{original.id}</legend>
+		{#each original.items as item (item.product_id)}
+			<label class="pick">
+				<input type="checkbox" checked={isPicked(item)} onchange={() => toggle(item)} />
+				<span class="pick__name">{item.name}</span>
+				<span class="meta">hasta {item.qty}</span>
+			</label>
+		{/each}
+	</fieldset>
+{/if}
+
 <div class="phone-only">
 	{#each lines as line, index (line.productId)}
 		<details class="order-line" name="lineas" open={line.productId === openId}>
@@ -225,6 +275,9 @@
 						<p class="field-error">{errorOf(`order_items.${index}.${key}`)}</p>
 					{/if}
 				{/each}
+				{#if original}
+					<p class="field__hint">{maxNote(line.productId)}</p>
+				{/if}
 				<div class="order-line__foot">
 					<span class="meta">
 						Lista {formatPesos(line.listPrice)} · {totalLabel}
@@ -260,6 +313,7 @@
 					<td>
 						{line.name}
 						<span class="meta">{availabilityText(line.productId)}</span>
+						{#if original}<span class="meta">{maxNote(line.productId)}</span>{/if}
 					</td>
 					<td class="num">
 						<Input
@@ -309,47 +363,49 @@
 	<span>Subtotal</span><span>{formatPesos(pricing.itemsTotal)}</span>
 </div>
 
-<label class="search">
-	<Icon name="search" size="sm" />
-	<Input
-		id={SEARCH_ID}
-		type="search"
-		placeholder="Buscar producto para agregar…"
-		aria-label="Buscar producto"
-		aria-keyshortcuts="Control+K"
-		aria-describedby="product-search-hint"
-		bind:value={query}
-		onkeydown={keyInSearch}
-	/>
-</label>
-<p class="meta search__hint" id="product-search-hint">
-	Ctrl+K te trae a esta búsqueda desde cualquier campo.
-</p>
+{#if !original}
+	<label class="search">
+		<Icon name="search" size="sm" />
+		<Input
+			id={SEARCH_ID}
+			type="search"
+			placeholder="Buscar producto para agregar…"
+			aria-label="Buscar producto"
+			aria-keyshortcuts="Control+K"
+			aria-describedby="product-search-hint"
+			bind:value={query}
+			onkeydown={keyInSearch}
+		/>
+	</label>
+	<p class="meta search__hint" id="product-search-hint">
+		Ctrl+K te trae a esta búsqueda desde cualquier campo.
+	</p>
 
-{#if isSearching}
-	<div class="results">
-		<p class="meta results__count">
-			{found.length}
-			{1 === found.length ? 'resultado' : 'resultados'}
-		</p>
-		<div class="results__list" bind:this={resultList}>
-			{#each found as product (product.id)}
-				<button
-					class="result"
-					type="button"
-					onclick={() => add(product)}
-					onkeydown={(event) => keyInResults(event, product)}
-				>
-					<span class="result__text">
-						<span>{product.name}</span>
-						<span class="meta">{availabilityText(product.id)}</span>
-					</span>
-					<span class="result__price">{formatPesos(product.rentalPrice)}</span>
-					<Icon name="plus" size="sm" />
-				</button>
-			{/each}
+	{#if isSearching}
+		<div class="results">
+			<p class="meta results__count">
+				{found.length}
+				{1 === found.length ? 'resultado' : 'resultados'}
+			</p>
+			<div class="results__list" bind:this={resultList}>
+				{#each found as product (product.id)}
+					<button
+						class="result"
+						type="button"
+						onclick={() => add(product)}
+						onkeydown={(event) => keyInResults(event, product)}
+					>
+						<span class="result__text">
+							<span>{product.name}</span>
+							<span class="meta">{availabilityText(product.id)}</span>
+						</span>
+						<span class="result__price">{formatPesos(product.rentalPrice)}</span>
+						<Icon name="plus" size="sm" />
+					</button>
+				{/each}
+			</div>
 		</div>
-	</div>
+	{/if}
 {/if}
 
 <style>
@@ -453,6 +509,54 @@
 	.result__price {
 		font-size: var(--text-base);
 		font-weight: var(--weight-semibold);
+	}
+
+	/* The original's lines: a checkbox row each, under an ink rule. */
+	.picks {
+		min-width: 0;
+		padding: 0;
+		margin: 0 0 var(--space-7);
+		border: 0;
+	}
+
+	.picks__legend {
+		padding: 0;
+		margin-bottom: var(--space-3);
+		font: var(--type-label);
+		color: var(--text-secondary);
+	}
+
+	.pick {
+		display: flex;
+		gap: var(--space-6);
+		align-items: center;
+		min-height: 48px;
+		cursor: pointer;
+		border-bottom: var(--border-w-hair) solid var(--border-default);
+	}
+
+	.pick:first-of-type {
+		border-top: var(--border-w-strong) solid var(--border-strong);
+	}
+
+	.pick input {
+		flex: none;
+		width: 20px;
+		height: 20px;
+		margin: 0;
+		accent-color: var(--neutral-800);
+	}
+
+	.pick__name {
+		flex: 1;
+		font-size: var(--text-base);
+	}
+
+	.field__hint {
+		margin: 0 0 var(--space-4);
+		font-size: var(--text-label);
+		font-style: italic;
+		color: var(--text-secondary);
 	}
 
 	.field-error {
