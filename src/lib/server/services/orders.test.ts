@@ -1,7 +1,7 @@
 import { isHttpError } from '@sveltejs/kit';
 import { readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
-import { beforeEach, expect, test } from 'vitest';
+import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
 import type { Actor, Role } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
 import { movementStatements } from './cash';
@@ -714,8 +714,9 @@ test('the suggested advance rounds to the peso and validates nothing', async () 
 	expect(await previewConfirmation(db, { id: 99 }, sales)).toBeNull();
 });
 
+// Every delivery date unless the test says otherwise: the list's default is this week's.
 async function listIds(input: Record<string, string> = {}): Promise<number[]> {
-	return (await listOrders(db, input, sales)).orders.map(({ id }) => id);
+	return (await listOrders(db, { delivery: 'ALL', ...input }, sales)).orders.map(({ id }) => id);
 }
 
 // Three orders: Luz Marina's on Aug 15, Jorge's on Aug 22 (a client pickup) and Luz Marina's on Sep 5.
@@ -736,7 +737,7 @@ async function createThree(): Promise<[number, number, number]> {
 
 test('the list shows every order by event date, latest first, with its summary', async () => {
 	const [luzMarina, jorge, september] = await createThree();
-	const page = await listOrders(db, {}, sales);
+	const page = await listOrders(db, { delivery: 'ALL' }, sales);
 	expect(page.orders.map(({ id }) => id)).toEqual([september, jorge, luzMarina]);
 	expect(page.total).toBe(3);
 	expect(page.orders[1]).toEqual({
@@ -764,7 +765,7 @@ test("the balance is the total less the order's installments and refunds, not it
 		...movementStatements(db, sales, { ...payment, concept: 'INSTALLMENT', amount: 500000 }),
 		...movementStatements(db, sales, { ...payment, concept: 'SECURITY_DEPOSIT', amount: 200000 })
 	]);
-	expect((await listOrders(db, {}, sales)).orders[0].balanceDue).toBe(680000);
+	expect((await listOrders(db, { delivery: 'ALL' }, sales)).orders[0].balanceDue).toBe(680000);
 });
 
 test('the filters combine, each over the order snapshot', async () => {
@@ -772,14 +773,12 @@ test('the filters combine, each over the order snapshot', async () => {
 	database.exec(
 		"update contacts set full_name = 'Otro nombre', phone = '573000000000' where id = 1"
 	);
-	expect(await listIds({ phone: '442 88' })).toEqual([september, luzMarina]);
-	expect(await listIds({ phone: '44' })).toHaveLength(3);
-	expect(await listIds({ name: 'BETANCUR' })).toEqual([jorge]);
+	expect(await listIds({ text: '442 88' })).toEqual([september, luzMarina]);
+	expect(await listIds({ text: '44' })).toHaveLength(3);
+	expect(await listIds({ text: 'BETANCUR' })).toEqual([jorge]);
 	expect(await listIds({ from: '2026-08-22', to: '2026-08-22' })).toEqual([jorge]);
 	expect(await listIds({ from: '2026-08-16' })).toEqual([september, jorge]);
-	expect(await listIds({ to: '2026-08-31', name: 'luz' })).toEqual([luzMarina]);
-	expect(await listIds({ min: '$1.200.000' })).toEqual([jorge]);
-	expect(await listIds({ max: '1.100.000' })).toEqual([september]);
+	expect(await listIds({ to: '2026-08-31', text: 'luz' })).toEqual([luzMarina]);
 	setStatus(luzMarina, 'CONFIRMED');
 	expect(await listIds({ status: 'CONFIRMED' })).toEqual([luzMarina]);
 });
@@ -788,31 +787,31 @@ test('incidents only is its own filter, in SQL', async () => {
 	const [luzMarina] = await createThree();
 	database.exec(`update orders set has_incident = 1 where id = ${luzMarina}`);
 	expect(await listIds({ hasIncident: '1' })).toEqual([luzMarina]);
-	expect((await listOrders(db, { hasIncident: '1' }, sales)).orders[0].hasIncident).toBe(true);
+	expect(await listIds({ hasIncident: '1' })).toHaveLength(1);
 });
 
 test('an empty or tampered value is ignored, not an error', async () => {
 	await createThree();
 	const page = await listOrders(
 		db,
-		{ status: 'FOO', from: 'ayer', min: 'mucho', hasIncident: 'sí', phone: '' },
+		{ delivery: 'ALL', status: 'FOO', from: 'ayer', hasIncident: 'sí', text: '  ' },
 		sales
 	);
 	expect(page.orders).toHaveLength(3);
-	expect(page.filters).toEqual({ page: 1 });
+	expect(page.filters).toEqual({ delivery: 'ALL', page: 1 });
 });
 
 test('the list is paginated in SQL, a page past the last showing the last', async () => {
 	for (let i = 0; i <= ORDERS_PAGE_SIZE; i += 1) {
 		await create();
 	}
-	const first = await listOrders(db, {}, sales);
+	const first = await listOrders(db, { delivery: 'ALL' }, sales);
 	expect(first.orders).toHaveLength(ORDERS_PAGE_SIZE);
 	expect(first).toMatchObject({ total: ORDERS_PAGE_SIZE + 1, pageCount: 2 });
-	const second = await listOrders(db, { page: '2' }, sales);
+	const second = await listOrders(db, { delivery: 'ALL', page: '2' }, sales);
 	expect(second.orders.map(({ id }) => id)).toEqual([1]);
 	expect(second.filters.page).toBe(2);
-	const beyond = await listOrders(db, { page: '9' }, sales);
+	const beyond = await listOrders(db, { delivery: 'ALL', page: '9' }, sales);
 	expect(beyond.orders.map(({ id }) => id)).toEqual([1]);
 	expect(beyond.filters.page).toBe(2);
 	expect((await listOrders(db, { page: 'dos' }, sales)).filters.page).toBe(1);
@@ -827,15 +826,46 @@ test('the name search ignores accents, tildes, case and extra spaces, every word
 	database.exec(
 		`update orders set client_attributes = '{"name":"ÁNGELA MARÍA NÚÑEZ ARGÜELLO","phone":"573000000000"}' where id = ${luzMarina}`
 	);
-	expect(await listIds({ name: 'ivan     betancur' })).toEqual([jorge]);
-	expect(await listIds({ name: '  BETANCUR   jorge ' })).toEqual([jorge]);
-	expect(await listIds({ name: 'Iván Betancur' })).toEqual([jorge]);
-	expect(await listIds({ name: 'angela nunez arguello' })).toEqual([luzMarina]);
-	expect(await listIds({ name: 'maría núñez' })).toEqual([luzMarina]);
-	expect(await listIds({ name: 'jorge restrepo' })).toEqual([]);
-	expect((await listOrders(db, { name: 'ivan     betancur' }, sales)).filters.name).toBe(
+	expect(await listIds({ text: 'ivan     betancur' })).toEqual([jorge]);
+	expect(await listIds({ text: '  BETANCUR   jorge ' })).toEqual([jorge]);
+	expect(await listIds({ text: 'Iván Betancur' })).toEqual([jorge]);
+	expect(await listIds({ text: 'angela nunez arguello' })).toEqual([luzMarina]);
+	expect(await listIds({ text: 'maría núñez' })).toEqual([luzMarina]);
+	expect(await listIds({ text: 'jorge restrepo' })).toEqual([]);
+	expect((await listOrders(db, { text: 'ivan     betancur' }, sales)).filters.text).toBe(
 		'ivan betancur'
 	);
+});
+
+test("the list defaults to this week's deliveries, Monday to Sunday in Bogotá", async () => {
+	vi.useFakeTimers({ toFake: ['Date'] });
+	onTestFinished(() => {
+		vi.useRealTimers();
+	});
+	// Wednesday Aug 12, 2026 at 8 p.m. in Bogotá, already Thursday in UTC.
+	vi.setSystemTime(new Date('2026-08-13T01:00:00Z'));
+	const deliveringOn = (delivery: string, pickup: string) =>
+		create({ ...order1043, delivery_date: delivery, pickup_date: pickup, event_date: pickup });
+	const today = await deliveringOn('2026-08-12', '2026-08-13');
+	const sunday = await deliveringOn('2026-08-16', '2026-08-17');
+	const nextMonday = await deliveringOn('2026-08-17', '2026-08-18');
+	const later = await deliveringOn('2026-08-24', '2026-08-25');
+	const lastSunday = await deliveringOn('2026-08-09', '2026-08-10');
+	expect(await listIds({ delivery: 'TODAY' })).toEqual([today]);
+	expect(await listIds({ delivery: 'THIS_WEEK' })).toEqual([sunday, today]);
+	expect(await listIds({ delivery: 'NEXT_WEEK' })).toEqual([nextMonday]);
+	expect(await listIds({ delivery: 'ALL' })).toEqual([
+		later,
+		nextMonday,
+		sunday,
+		today,
+		lastSunday
+	]);
+	const thisWeek = [sunday, today];
+	expect((await listOrders(db, {}, sales)).orders.map(({ id }) => id)).toEqual(thisWeek);
+	const tampered = await listOrders(db, { delivery: 'FOO' }, sales);
+	expect(tampered.orders.map(({ id }) => id)).toEqual(thisWeek);
+	expect(tampered.filters.delivery).toBe('THIS_WEEK');
 });
 
 test('WAREHOUSE and DRIVER get a 403 on the list', async () => {

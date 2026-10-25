@@ -1,5 +1,4 @@
 <script lang="ts">
-	import type { Snippet } from 'svelte';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import Badge, { ORDER_STATUS_TONES } from '$lib/components/Badge.svelte';
@@ -11,11 +10,12 @@
 	import Icon from '$lib/components/Icon.svelte';
 	import Input from '$lib/components/Input.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
+	import Select from '$lib/components/Select.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import { formatLongDay, formatPeriod, formatCivilDate } from '$lib/datetime';
 	import { formatPesos } from '$lib/format';
-	import { DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS } from '$lib/labels';
+	import { DELIVERY_METHOD_LABELS, DELIVERY_PERIOD_LABELS, ORDER_STATUS_LABELS } from '$lib/labels';
 	import type { OrderSummary } from '$lib/server/services/orders';
 	import type { PageProps } from './$types';
 
@@ -26,16 +26,15 @@
 
 	const filters = $derived(data.filters);
 
-	// What narrows the list, as the screen reads it; the event range counts as one filter.
+	// What narrows the list, as the screen reads it; the event range counts as one filter, and so
+	// does this week's deliveries, the default.
 	const applied = $derived.by(() => {
-		const { phone, name, from, to, status, min, max, hasIncident } = filters;
+		const { text, delivery, from, to, status, hasIncident } = filters;
 		return [
-			phone && `Teléfono: ${phone}`,
-			name && `Nombre: ${name}`,
+			text && `Búsqueda: ${text}`,
+			'ALL' !== delivery && `Entrega: ${DELIVERY_PERIOD_LABELS[delivery].toLowerCase()}`,
 			eventRange(from, to),
 			status && `Estado: ${ORDER_STATUS_LABELS[status]}`,
-			undefined !== min && `Valor mínimo ${formatPesos(min)}`,
-			undefined !== max && `Valor máximo ${formatPesos(max)}`,
 			hasIncident && 'Solo con novedad'
 		].filter((piece) => 'string' === typeof piece);
 	});
@@ -96,49 +95,23 @@
 	</Button>
 {/snippet}
 
-<!-- '' is «no filter»: the chips call it «Todos». -->
-{#snippet statusChips()}
-	<fieldset class="choice">
-		<legend class="choice__legend">Estado</legend>
-		<div class="chip-row">
-			<Chip
-				type="radio"
-				name="estado"
-				value=""
-				label="Todos"
-				checked={undefined === filters.status}
-			/>
-			{#each Object.entries(ORDER_STATUS_LABELS) as [status, label] (status)}
-				<Chip
-					type="radio"
-					name="estado"
-					value={status}
-					{label}
-					checked={status === filters.status}
-				/>
-			{/each}
-		</div>
-	</fieldset>
-{/snippet}
-
-{#snippet fields(prefix: string, status: Snippet)}
+{#snippet fields(prefix: string)}
 	<div class="filters">
-		<Field label="Teléfono" id="{prefix}telefono">
+		<Field label="Nombre o teléfono" id="{prefix}texto">
 			<Input
-				id="{prefix}telefono"
-				name="telefono"
-				inputmode="tel"
-				placeholder="Al menos 3 dígitos"
-				value={filters.phone ?? ''}
+				id="{prefix}texto"
+				name="texto"
+				type="search"
+				placeholder="Ej. Restrepo o 310 442"
+				value={filters.text ?? ''}
 			/>
 		</Field>
-		<Field label="Nombre" id="{prefix}nombre">
-			<Input
-				id="{prefix}nombre"
-				name="nombre"
-				placeholder="Ej. Restrepo"
-				value={filters.name ?? ''}
-			/>
+		<Field label="Entrega" id="{prefix}entrega">
+			<Select id="{prefix}entrega" name="entrega" value={filters.delivery}>
+				{#each Object.entries(DELIVERY_PERIOD_LABELS) as [period, label] (period)}
+					<option value={period}>{label}</option>
+				{/each}
+			</Select>
 		</Field>
 		<div class="filters__range">
 			<div class="field-row">
@@ -151,29 +124,15 @@
 			</div>
 			<p class="field__hint">La misma fecha en los dos es un día exacto.</p>
 		</div>
-		<div class="field-row">
-			<Field label="Valor mínimo" id="{prefix}minimo">
-				<Input
-					id="{prefix}minimo"
-					name="minimo"
-					inputmode="numeric"
-					placeholder="$0"
-					value={undefined === filters.min ? '' : formatPesos(filters.min)}
-				/>
-			</Field>
-			<Field label="Valor máximo" id="{prefix}maximo">
-				<Input
-					id="{prefix}maximo"
-					name="maximo"
-					inputmode="numeric"
-					placeholder="Sin límite"
-					value={undefined === filters.max ? '' : formatPesos(filters.max)}
-				/>
-			</Field>
-		</div>
-		<div class="filters__wide">
-			{@render status()}
-		</div>
+		<!-- '' is «no filter». -->
+		<Field label="Estado" id="{prefix}estado">
+			<Select id="{prefix}estado" name="estado" value={filters.status ?? ''}>
+				<option value="">Todos</option>
+				{#each Object.entries(ORDER_STATUS_LABELS) as [status, label] (status)}
+					<option value={status}>{label}</option>
+				{/each}
+			</Select>
+		</Field>
 		<!-- Not a status: an order completed with damage is still completed. -->
 		<div class="filters__wide">
 			<Chip
@@ -223,7 +182,7 @@
 					data-sveltekit-noscroll
 					onchange={submitOnChange}
 				>
-					{@render fields('desktop-', statusChips)}
+					{@render fields('desktop-')}
 				</form>
 			{/if}
 		</div>
@@ -231,7 +190,9 @@
 		{#if 0 === data.orders.length}
 			<div class="none">
 				<p>Ningún pedido coincide con estos filtros.</p>
-				<Button variant="secondary" inline href={resolve('/pedidos')}>Ver todos</Button>
+				<Button variant="secondary" inline href="{resolve('/pedidos')}?entrega=ALL"
+					>Ver todos</Button
+				>
 			</div>
 		{:else}
 			<div class="phone-only">
@@ -297,7 +258,7 @@
 
 <BottomSheet bind:open={isSheetOpen} title="Filtros">
 	<form method="GET" data-sveltekit-noscroll onsubmit={() => (isSheetOpen = false)}>
-		{@render fields('phone-', statusChips)}
+		{@render fields('phone-')}
 		<div class="sheet__actions">
 			<Button variant="secondary" href={resolve('/pedidos')} onclick={() => (isSheetOpen = false)}>
 				Limpiar
@@ -374,21 +335,6 @@
 	.field__hint {
 		margin-top: var(--space-3);
 		font-size: var(--text-xs);
-		color: var(--text-secondary);
-	}
-
-	.choice {
-		min-width: 0;
-		padding: 0;
-		margin: 0;
-		border: 0;
-	}
-
-	/* The same look as a Field's label. */
-	.choice__legend {
-		padding: 0;
-		margin-bottom: var(--space-3);
-		font: var(--type-label);
 		color: var(--text-secondary);
 	}
 
