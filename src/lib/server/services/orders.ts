@@ -3,8 +3,7 @@
 // only inform: nothing here blocks on them.
 
 import { z } from 'zod';
-import { addDays } from '$lib/datetime';
-import { fold } from '$lib/format';
+import { addDays, getTodaysDate, getWeekStart } from '$lib/datetime';
 import { normalizePhone } from '$lib/phone';
 import {
 	calculateOrderTotals,
@@ -20,11 +19,9 @@ import { auditedInsert, auditedUpdate, eventFieldsSchema } from '../audit';
 import { describeOrderEdit, type OrderChange } from '../order-changes';
 import { filterTimelineForActor } from '../timeline';
 import {
-	containing,
 	foldedSql,
 	optional,
 	recordLinkedMovement,
-	typedPesosSchema,
 	type CashConcept,
 	type PaymentMethod
 } from './cash';
@@ -35,6 +32,7 @@ import {
 	INVALID_PHONE,
 	listTransporters,
 	newClientStatements,
+	searchClause,
 	type NewClient,
 	type Transporter
 } from './contacts';
@@ -1069,26 +1067,24 @@ export async function previewConfirmation(
 /** A page of the order list: it never loads the whole table. */
 export const ORDERS_PAGE_SIZE = 20;
 
-// The name as typed, its runs of spaces collapsed: «ivan     betancur» is two words.
-const nameSearchSchema = z
+/** Which deliveries the list shows: this week's unless asked. Weeks run Monday to Sunday. */
+export const DELIVERY_PERIODS = ['TODAY', 'THIS_WEEK', 'NEXT_WEEK', 'ALL'] as const;
+
+export type DeliveryPeriod = (typeof DELIVERY_PERIODS)[number];
+
+// The text as typed, its runs of spaces collapsed: «ivan     betancur» is two words.
+const searchTextSchema = z
 	.string()
 	.transform((typed) => typed.trim().replace(/\s+/g, ' '))
 	.pipe(z.string().min(1));
 
 // `page` past the last one shows the last: a typed URL is tolerated like any other filter.
 const listSchema = z.object({
-	phone: optional(
-		z
-			.string()
-			.transform((typed) => typed.replace(/\D/g, ''))
-			.pipe(z.string().min(3))
-	),
-	name: optional(nameSearchSchema),
+	text: optional(searchTextSchema),
+	delivery: z.enum(DELIVERY_PERIODS).catch('THIS_WEEK'),
 	from: optional(z.iso.date()),
 	to: optional(z.iso.date()),
 	status: optional(z.enum(ORDER_STATUSES)),
-	min: optional(typedPesosSchema),
-	max: optional(typedPesosSchema),
 	hasIncident: optional(z.literal('1').transform(() => true)),
 	page: z.coerce.number().int().min(1).catch(1)
 });
@@ -1119,32 +1115,35 @@ type Clause = { sql: string; params: (string | number)[] };
 
 const FOLDED_NAME_SQL = foldedSql("json_extract(client_attributes, '$.name')");
 
-// Every word somewhere in the name, in any order: «jorge betancur» finds «Jorge Iván Betancur».
-function nameClauses(name: string | undefined): Clause[] {
-	const words = undefined === name ? [] : fold(name).split(' ');
-	return words.map((word) => ({
-		sql: `${FOLDED_NAME_SQL} like ? escape '\\'`,
-		params: [containing(word)]
-	}));
+// Bogotá's today, so the week turns at its midnight.
+function deliveryClause(period: DeliveryPeriod): Clause | null {
+	const today = getTodaysDate();
+	const monday = getWeekStart(today);
+	const ranges = {
+		TODAY: [today, today],
+		THIS_WEEK: [monday, addDays(monday, 6)],
+		NEXT_WEEK: [addDays(monday, 7), addDays(monday, 13)],
+		ALL: null
+	};
+	const range = ranges[period];
+	return null === range ? null : { sql: 'delivery_date between ? and ?', params: range };
 }
 
 // Each filter in SQL, over the order's own snapshot: never the contact, whose name or phone may
-// have changed since. The phone is a fragment, so no normalizer: «442 8890» finds 573104428890.
+// have changed since.
 function listClauses(filters: OrderFilters): Clause[] {
 	const candidates: [unknown, Clause][] = [
-		[
-			filters.phone,
-			{ sql: "json_extract(client_attributes, '$.phone') like ?", params: [`%${filters.phone}%`] }
-		],
 		[filters.from, { sql: 'event_date >= ?', params: [filters.from ?? ''] }],
 		[filters.to, { sql: 'event_date <= ?', params: [filters.to ?? ''] }],
 		[filters.status, { sql: 'status = ?', params: [filters.status ?? ''] }],
-		[filters.min, { sql: 'order_total >= ?', params: [filters.min ?? 0] }],
-		[filters.max, { sql: 'order_total <= ?', params: [filters.max ?? 0] }],
 		[filters.hasIncident, { sql: 'has_incident = 1', params: [] }]
 	];
 	const set = candidates.filter(([value]) => undefined !== value).map(([, clause]) => clause);
-	return [...set, ...nameClauses(filters.name)];
+	const search =
+		undefined === filters.text
+			? null
+			: searchClause(filters.text, FOLDED_NAME_SQL, "json_extract(client_attributes, '$.phone')");
+	return [...set, deliveryClause(filters.delivery), search].filter((clause) => null !== clause);
 }
 
 /** What the client still owes: the total less its installments and their refunds. */

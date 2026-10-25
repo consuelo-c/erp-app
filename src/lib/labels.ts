@@ -4,7 +4,12 @@ import type { Role } from './server/actor';
 import type { DeductionConcept, EarningConcept } from './payroll';
 import type { CashConcept, PaymentMethod } from './server/services/cash';
 import type { Service } from './server/services/contacts';
-import type { DeliveryMethod, OrderStatus, ReturnMethod } from './server/services/orders';
+import type {
+	DeliveryMethod,
+	DeliveryPeriod,
+	OrderStatus,
+	ReturnMethod
+} from './server/services/orders';
 import type { Category } from './server/services/products';
 import type { Punch } from './server/services/timesheets';
 
@@ -48,6 +53,13 @@ export const DELIVERY_METHOD_LABELS: Record<DeliveryMethod, string> = {
 	COMPANY_DELIVERY: 'Entrega la empresa',
 	CLIENT_PICKUP: 'Recoge el cliente',
 	EXTERNAL_CARRIER: 'Transportador externo'
+};
+
+export const DELIVERY_PERIOD_LABELS: Record<DeliveryPeriod, string> = {
+	TODAY: 'Hoy',
+	THIS_WEEK: 'Esta semana',
+	NEXT_WEEK: 'La semana entrante',
+	ALL: 'Todas'
 };
 
 export const RETURN_METHOD_LABELS: Record<ReturnMethod, string> = {

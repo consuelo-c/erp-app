@@ -395,7 +395,11 @@ type Clause = { sql: string; params: string[] };
 // Letters search the text (the name, unless told otherwise): every word somewhere in it, in any
 // order, accents and case folded. Otherwise the digits typed, three or more, anywhere in the
 // phone, so «442 8890» finds 573104428890: not the normalizer, a fragment isn't a phone.
-function searchClause(search: string, textSql = foldedSql('full_name')): Clause | null {
+export function searchClause(
+	search: string,
+	textSql = foldedSql('full_name'),
+	phoneSql = 'phone'
+): Clause | null {
 	if (/\p{L}/u.test(search)) {
 		const words = fold(search).split(/\s+/).filter(Boolean);
 		return {
@@ -404,7 +408,7 @@ function searchClause(search: string, textSql = foldedSql('full_name')): Clause 
 		};
 	}
 	const digits = search.replace(/\D/g, '');
-	return 3 <= digits.length ? { sql: 'phone like ?', params: [`%${digits}%`] } : null;
+	return 3 <= digits.length ? { sql: `${phoneSql} like ?`, params: [`%${digits}%`] } : null;
 }
 
 // In SQL: this table holds every client, so it can reach thousands of rows.
