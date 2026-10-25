@@ -163,48 +163,64 @@ type UpdateRow = AuditedWrite & {
 	id: number | string;
 	idColumn?: string;
 	columns: Row;
+	computed: Computed;
 	now: number;
 };
 
 function updateStatement(db: D1Database, write: UpdateRow): D1PreparedStatement {
 	const idColumn = write.idColumn ?? 'id';
-	assertIdentifiers([write.table, idColumn, ...Object.keys(write.columns)]);
-	const assignments = [...Object.keys(write.columns), 'updated_at', 'updated_by'].map(
-		(column) => `${column} = ?`
-	);
+	const subqueries = Object.values(write.computed);
+	assertIdentifiers([
+		write.table,
+		idColumn,
+		...Object.keys(write.columns),
+		...Object.keys(write.computed)
+	]);
+	const assignments = [
+		...[...Object.keys(write.columns), 'updated_at', 'updated_by'].map((column) => `${column} = ?`),
+		...Object.entries(write.computed).map(([column, { sql }]) => `${column} = (${sql})`)
+	];
 	return db
 		.prepare(`update ${write.table} set ${assignments.join(', ')} where ${idColumn} = ?`)
-		.bind(...Object.values(write.columns), write.now, write.actor.username, write.id);
+		.bind(
+			...Object.values(write.columns),
+			write.now,
+			write.actor.username,
+			...subqueries.flatMap(({ params }) => params),
+			write.id
+		);
 }
+
+type AuditedEdit = AuditedWrite & {
+	id: number | string;
+	idColumn?: string;
+	current: Row;
+	changes: Row;
+	unlogged?: Row;
+	jsonColumns?: readonly string[];
+	computed?: Computed;
+	action?: string;
+	reason?: string;
+};
 
 /**
  * Updates the row `id` (matched on `idColumn`, `id` by default) with the fields of `changes`
  * that differ from `current`, refreshes `updated_at`/`updated_by`, and logs an `EDITED` event
  * (or `action`) with those fields only, and `reason` when the write needs one. `unlogged` columns
  * are always written but never logged: a new password hash. `jsonColumns` are written whole but logged
- * key by key, only the keys that changed. Returns the statements for the caller's `db.batch()`, or none when
- * nothing changed: an edit that changes nothing writes nothing.
+ * key by key, only the keys that changed. `computed` columns are set from a subquery and not logged,
+ * like the id of a row inserted earlier in the same batch. Returns the statements for the caller's
+ * `db.batch()`, or none when nothing changed: an edit that changes nothing writes nothing.
  */
-export function auditedUpdate(
-	db: D1Database,
-	write: AuditedWrite & {
-		id: number | string;
-		idColumn?: string;
-		current: Row;
-		changes: Row;
-		unlogged?: Row;
-		jsonColumns?: readonly string[];
-		action?: string;
-		reason?: string;
-	}
-): D1PreparedStatement[] {
+export function auditedUpdate(db: D1Database, write: AuditedEdit): D1PreparedStatement[] {
 	const diff = diffFields(write.current, write.changes);
 	const columns = { ...diff.after, ...write.unlogged };
-	if (0 === Object.keys(columns).length) {
+	const computed = write.computed ?? {};
+	if (0 === Object.keys(columns).length + Object.keys(computed).length) {
 		return [];
 	}
 	const now = nowInSeconds();
-	const update = updateStatement(db, { ...write, columns, now });
+	const update = updateStatement(db, { ...write, columns, computed, now });
 	const event = {
 		...write,
 		action: write.action ?? 'EDITED',

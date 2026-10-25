@@ -93,6 +93,9 @@
 
 	.shell__screen {
 		grid-area: screen;
+
+		/* A wide child (a chip row, a table) scrolls inside the screen instead of widening it. */
+		min-width: 0;
 		min-height: 0;
 	}
 

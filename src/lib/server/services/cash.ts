@@ -389,6 +389,34 @@ export function containing(text: string): string {
 	return `%${text.replace(/[\\%_]/g, '\\$&')}%`;
 }
 
+// SQLite's lower() only knows ASCII, so the accented letters and tildes are swapped first, to match
+// what `fold` makes of the typed text. ponytail: these seven letters and their capitals only; a
+// stored folded name if names with other accents (ç, à) turn up.
+const FOLDED_LETTERS = [
+	'áa',
+	'ée',
+	'íi',
+	'óo',
+	'úu',
+	'üu',
+	'ñn',
+	'ÁA',
+	'ÉE',
+	'ÍI',
+	'ÓO',
+	'ÚU',
+	'ÜU',
+	'ÑN'
+];
+
+/** A text column as `fold` would leave it, for a LIKE against folded words. */
+export function foldedSql(column: string): string {
+	return `lower(${FOLDED_LETTERS.reduce(
+		(sql, [letter, plain]) => `replace(${sql}, '${letter}', '${plain}')`,
+		column
+	)})`;
+}
+
 // Free text over who was paid or paid us, the description and the notes.
 function textClause(pattern: string): Clause {
 	const columns = [

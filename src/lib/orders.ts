@@ -57,3 +57,17 @@ export function isLegalTransition(move: OrderMove): boolean {
 	}
 	return move.to === forwardStatus(move);
 }
+
+// Once the products are on their way back, or the order was cancelled, it's read-only.
+const EDITABLE: readonly OrderStatus[] = [
+	'DRAFT',
+	'CONFIRMED',
+	'PICKED',
+	'OUT_FOR_DELIVERY',
+	'DELIVERED'
+];
+
+/** Whether an order in this state can still be edited: from DRAFT through DELIVERED. */
+export function isEditableStatus(status: OrderStatus): boolean {
+	return EDITABLE.includes(status);
+}

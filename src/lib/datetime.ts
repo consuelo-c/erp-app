@@ -95,6 +95,23 @@ export function toClockTime({ hour, minute, period }: DialTime): string {
 	return `${String(hour24).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
+/**
+ * An optional time as typed in a `ClockField`: `HH:MM`, null when the hour is blank (the minutes
+ * then default to 00), or the text as typed when it isn't a time, for the server to refuse.
+ */
+export function typedClockTime(typed: {
+	hour: string;
+	minute: string;
+	period: 'am' | 'pm';
+}): string | null {
+	const { hour, minute, period } = typed;
+	if ('' === hour.trim()) {
+		return null;
+	}
+	const parsed = z.object(dialTimeShape).safeParse({ hour, minute: minute.trim() || '0', period });
+	return parsed.success ? toClockTime(parsed.data) : `${hour}:${minute}`;
+}
+
 /** `HH:MM` as the fields show it: 1 to 12, the minutes, and a.m. or p.m. */
 export function toDialTime(clockTime: string) {
 	const [hour24, minutes] = clockTime.split(':').map(Number);

@@ -3,8 +3,11 @@
 // only inform: nothing here blocks on them.
 
 import { z } from 'zod';
+import { fold } from '$lib/format';
+import { normalizePhone } from '$lib/phone';
 import {
 	calculateOrderTotals,
+	isEditableStatus,
 	isLegalTransition,
 	type OrderTotals,
 	type PricedLine
@@ -13,12 +16,21 @@ import { ROLES, requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
 import {
 	containing,
+	foldedSql,
 	optional,
 	typedPesosSchema,
 	type CashConcept,
 	type PaymentMethod
 } from './cash';
-import { fold } from './products';
+import { listProducts, type Product } from './products';
+import {
+	generateDocumentId,
+	INVALID_PHONE,
+	listTransporters,
+	newClientStatements,
+	type NewClient,
+	type Transporter
+} from './contacts';
 import { readSettings } from './settings';
 
 // The commercial side: whoever takes orders creates and edits them.
@@ -36,15 +48,6 @@ export const ORDER_STATUSES = [
 ] as const;
 
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
-
-// Once the products are on their way back, or the order was cancelled, it's read-only.
-const EDITABLE_STATUSES: readonly OrderStatus[] = [
-	'DRAFT',
-	'CONFIRMED',
-	'PICKED',
-	'OUT_FOR_DELIVERY',
-	'DELIVERED'
-];
 
 /** Two independent axes: the client may pick up and the company go get it back, or the reverse. */
 export const DELIVERY_METHODS = ['COMPANY_DELIVERY', 'CLIENT_PICKUP', 'EXTERNAL_CARRIER'] as const;
@@ -140,7 +143,10 @@ function tripInputSchema<Methods extends readonly [string, ...string[]]>(
 	return z
 		.object({
 			method: z.enum(methods, message),
-			time: clockTimeSchema.nullable().default(null),
+			time: z.iso
+				.time({ precision: -1, error: 'Escribe la hora como 2:30 p.m.' })
+				.nullable()
+				.default(null),
 			address_1: z.string('Escribe la dirección').trim().min(1, 'Escribe la dirección'),
 			address_2: blankable,
 			carrier_id: idSchema.nullable().default(null)
@@ -160,7 +166,14 @@ const lineInputSchema = z.strictObject({
 // Any total sent along is ignored: the service works them out.
 const orderInputSchema = z
 	.object({
-		client_id: z.number('Escoge el cliente').int().positive('Escoge el cliente'),
+		// Null is «Cliente nuevo»: a contact made from the phone and the name typed.
+		client_id: z.number('Escoge el cliente').int().positive('Escoge el cliente').nullable(),
+		// The order's own snapshot of the name: it may say more than the contact does.
+		client_name: z
+			.string('Escribe el nombre del cliente')
+			.trim()
+			.min(1, 'Escribe el nombre del cliente'),
+		client_phone: z.string().optional(),
 		event_date: z.iso.date('Escoge la fecha del evento'),
 		delivery_date: z.iso.date('Escoge la fecha de entrega'),
 		pickup_date: z.iso.date('Escoge la fecha de recogida'),
@@ -178,8 +191,8 @@ const orderInputSchema = z
 	})
 	// The event date isn't checked: the event can fall anywhere around the trips.
 	.refine((order) => order.delivery_date <= order.pickup_date, {
-		message: 'La recogida no puede ser antes de la entrega',
-		path: ['pickup_date']
+		message: 'La entrega no puede ser después de la recogida',
+		path: ['delivery_date']
 	})
 	// The discount comes off the items only, never off transport.
 	.refine((order) => order.discount <= totalsOf(order).itemsTotal, {
@@ -238,7 +251,7 @@ export type SaveResult =
 type Refusal = Extract<SaveResult, { ok: false }>;
 
 type Columns = {
-	client_id: number;
+	client_id: number | null; // null until «Cliente nuevo»'s contact exists, in the same batch
 	event_date: string;
 	delivery_date: string;
 	pickup_date: string;
@@ -255,7 +268,12 @@ type Columns = {
 	attributes: string;
 };
 
-type OrderRow = Columns & { id: number; status: OrderStatus; has_incident: number };
+type OrderRow = Omit<Columns, 'client_id'> & {
+	id: number;
+	client_id: number;
+	status: OrderStatus;
+	has_incident: number;
+};
 
 const SELECT_ORDER = `select id, status, has_incident, client_id, event_date, delivery_date,
 	pickup_date, rental_days, client_attributes, delivery_attributes, pickup_attributes, order_items,
@@ -305,19 +323,39 @@ async function findRow(db: D1Database, id: number): Promise<OrderRow | null> {
 	return db.prepare(`${SELECT_ORDER} where id = ?`).bind(id).first<OrderRow>();
 }
 
-// The order keeps what the client was called when picked: renaming the contact later changes nothing.
-async function snapshotClient(
-	db: D1Database,
-	clientId: number,
-	current: Order | null
-): Promise<ClientAttributes | null> {
-	if (clientId === current?.clientId) {
-		return current.client;
+type ResolvedClient = { snapshot: ClientAttributes; newClient: NewClient | null };
+
+// «Cliente nuevo» is made from the phone typed, normalized, and the name typed.
+function newClient(order: OrderInput): ResolvedClient | Refusal {
+	const phone = normalizePhone(order.client_phone ?? '');
+	if (null === phone) {
+		return refusal('client_phone', INVALID_PHONE);
 	}
-	return db
-		.prepare('select full_name as name, phone from contacts where id = ?')
-		.bind(clientId)
-		.first<ClientAttributes>();
+	const client = { phone, fullName: order.client_name, documentId: generateDocumentId() };
+	return { snapshot: { name: order.client_name, phone }, newClient: client };
+}
+
+// The order keeps the name typed and the phone it was taken with: renaming the contact, or
+// changing its phone, later changes nothing. No existing contact is ever written from here.
+async function resolveClient(
+	db: D1Database,
+	order: OrderInput,
+	current: Order | null
+): Promise<ResolvedClient | Refusal> {
+	if (null === order.client_id) {
+		return newClient(order);
+	}
+	if (order.client_id === current?.clientId) {
+		return { snapshot: { ...current.client, name: order.client_name }, newClient: null };
+	}
+	const contact = await db
+		.prepare('select phone from contacts where id = ?')
+		.bind(order.client_id)
+		.first<{ phone: string }>();
+	if (null === contact) {
+		return refusal('client_id', 'Ese cliente no existe');
+	}
+	return { snapshot: { name: order.client_name, phone: contact.phone }, newClient: null };
 }
 
 // A JSON key has no foreign key: the carrier must be a contact offering TRANSPORTER. One already
@@ -454,15 +492,17 @@ async function resolveTrips(
 	return { delivery, pickup };
 }
 
+type ResolvedOrder = { columns: Columns; newClient: NewClient | null };
+
 /** The columns to store for `order`, or why it can't be saved. `current` is the order being edited. */
 async function resolveColumns(
 	db: D1Database,
 	order: OrderInput,
 	current: Order | null
-): Promise<Columns | Refusal> {
-	const client = await snapshotClient(db, order.client_id, current);
-	if (null === client) {
-		return refusal('client_id', 'Ese cliente no existe');
+): Promise<ResolvedOrder | Refusal> {
+	const client = await resolveClient(db, order, current);
+	if ('ok' in client) {
+		return client;
 	}
 	const trips = await resolveTrips(db, order, current);
 	if ('ok' in trips) {
@@ -473,7 +513,8 @@ async function resolveColumns(
 		return items;
 	}
 	const parentOrderId = current?.parentOrderId ?? null;
-	return toColumns(order, { client, ...trips, items, parentOrderId });
+	const resolved = { client: client.snapshot, ...trips, items, parentOrderId };
+	return { columns: toColumns(order, resolved), newClient: client.newClient };
 }
 
 export async function getOrder(
@@ -486,7 +527,23 @@ export async function getOrder(
 	return null === row ? null : toOrder(row);
 }
 
-/** A new order on an existing client, born a draft: confirming is a step of its own. */
+// «Cliente nuevo»'s contact goes first in the order's batch, and the order finds its id by the
+// new document: never `last_insert_rowid()`, which its own event already relies on.
+function clientWrite(db: D1Database, actor: Actor, { columns, newClient }: ResolvedOrder) {
+	const { client_id: clientId, ...values } = columns;
+	if (null === newClient) {
+		return { values: { ...values, client_id: clientId }, computed: {}, clientStatements: [] };
+	}
+	const computed = {
+		client_id: {
+			sql: 'select id from contacts where document_id = ?',
+			params: [newClient.documentId]
+		}
+	};
+	return { values, computed, clientStatements: newClientStatements(db, actor, newClient) };
+}
+
+/** A new order, on a client picked or a new one, born a draft: confirming is a step of its own. */
 export async function createOrder(
 	db: D1Database,
 	input: unknown,
@@ -497,20 +554,22 @@ export async function createOrder(
 	if (!parsed.success) {
 		return invalidOrder(parsed.error);
 	}
-	const columns = await resolveColumns(db, parsed.data, null);
-	if ('ok' in columns) {
-		return columns;
+	const resolved = await resolveColumns(db, parsed.data, null);
+	if ('ok' in resolved) {
+		return resolved;
 	}
+	const { values, computed, clientStatements } = clientWrite(db, actor, resolved);
 	// The public lookup's key: it stays out of events, which every role's timeline reads.
 	const statements = auditedInsert(db, {
 		table: 'orders',
 		entityType: 'ORDER',
 		actor,
-		values: { ...columns, status: 'DRAFT' },
-		unlogged: { public_token: crypto.randomUUID() }
+		values: { ...values, status: 'DRAFT' },
+		unlogged: { public_token: crypto.randomUUID() },
+		computed
 	});
-	const [inserted] = await db.batch(statements);
-	return { ok: true, id: inserted.meta.last_row_id };
+	const results = await db.batch([...clientStatements, ...statements]);
+	return { ok: true, id: results[clientStatements.length].meta.last_row_id };
 }
 
 const NOT_FOUND: Refusal = { ok: false, message: 'Ese pedido no existe', errors: {} };
@@ -525,18 +584,20 @@ const NOT_EDITABLE: Refusal = {
 async function applyEdit(
 	db: D1Database,
 	actor: Actor,
-	{ row, columns }: { row: OrderRow; columns: Columns }
+	{ row, resolved }: { row: OrderRow; resolved: ResolvedOrder }
 ): Promise<SaveResult> {
+	const { values, computed, clientStatements } = clientWrite(db, actor, resolved);
 	const statements = auditedUpdate(db, {
 		table: 'orders',
 		entityType: 'ORDER',
 		actor,
 		id: row.id,
 		current: row,
-		changes: columns
+		changes: values,
+		computed
 	});
 	if (0 < statements.length) {
-		await db.batch(statements);
+		await db.batch([...clientStatements, ...statements]);
 	}
 	return { ok: true, id: row.id };
 }
@@ -560,11 +621,11 @@ export async function updateOrder(
 	if (null === row) {
 		return NOT_FOUND;
 	}
-	if (!EDITABLE_STATUSES.includes(row.status)) {
+	if (!isEditableStatus(row.status)) {
 		return NOT_EDITABLE;
 	}
-	const columns = await resolveColumns(db, parsed.data, toOrder(row));
-	return 'ok' in columns ? columns : applyEdit(db, actor, { row, columns });
+	const resolved = await resolveColumns(db, parsed.data, toOrder(row));
+	return 'ok' in resolved ? resolved : applyEdit(db, actor, { row, resolved });
 }
 
 // The orders whose products are out of the warehouse, or promised: a draft doesn't hold them yet,
@@ -588,8 +649,9 @@ const tripDatesSchema = z
 	})
 	.refine((trips) => trips.delivery_date <= trips.pickup_date, 'The pickup is before the delivery');
 
+// No list is the whole catalog: the order form shows each search result's availability too.
 const availabilitySchema = tripDatesSchema.safeExtend({
-	product_ids: z.array(z.coerce.number().int().positive())
+	product_ids: z.array(z.coerce.number().int().positive()).nullable().default(null)
 });
 
 /** What's left of a product on the range's tightest day. Negative when it's overbooked: never clamped. */
@@ -614,7 +676,7 @@ const AVAILABILITY_SQL = `with recursive days(day) as (
 	from products
 	join days
 	left join reserved on reserved.product_id = products.id and reserved.day = days.day
-	where products.id in (select value from json_each(?5))
+	where ?5 is null or products.id in (select value from json_each(?5))
 	group by products.id`;
 
 /**
@@ -643,7 +705,7 @@ async function queryAvailability(
 			range.pickup_date,
 			JSON.stringify(RESERVING_STATUSES),
 			range.order_id,
-			JSON.stringify(range.product_ids)
+			null === range.product_ids ? null : JSON.stringify(range.product_ids)
 		)
 		.all<Availability>();
 	return results;
@@ -654,8 +716,15 @@ export type TripKind = 'DELIVERY' | 'PICKUP';
 /** A trip on a holiday in `PAYROLL_HOLIDAYS`: the truck goes out or comes back that day. */
 export type HolidayWarning = { trip: TripKind; date: string; label: string };
 
-/** Another order with a delivery or pickup on this trip's date and time. */
-export type ScheduleClash = { trip: TripKind; orderId: number; clientName: string };
+/** Another order whose delivery or pickup (`theirTrip`) falls on this trip's date and time. */
+export type ScheduleClash = {
+	trip: TripKind;
+	theirTrip: TripKind;
+	orderId: number;
+	clientName: string;
+	date: string;
+	time: string;
+};
 
 export type OrderWarnings = { holidays: HolidayWarning[]; clashes: ScheduleClash[] };
 
@@ -686,15 +755,18 @@ async function findClashes(
 	}
 	const { results } = await db
 		.prepare(
-			`select id as orderId, json_extract(client_attributes, '$.name') as clientName from orders
-			where status != 'CANCELLED' and id is not ?3 and (
+			`select id as orderId, json_extract(client_attributes, '$.name') as clientName,
+			case when delivery_date = ?1 and json_extract(delivery_attributes, '$.time') = ?2
+				then 'DELIVERY' else 'PICKUP' end as theirTrip
+			from orders where status != 'CANCELLED' and id is not ?3 and (
 				(delivery_date = ?1 and json_extract(delivery_attributes, '$.time') = ?2)
 				or (pickup_date = ?1 and json_extract(pickup_attributes, '$.time') = ?2)
 			) order by id`
 		)
 		.bind(slot.date, slot.time, orderId)
-		.all<Omit<ScheduleClash, 'trip'>>();
-	return results.map((clash) => ({ trip: slot.trip, ...clash }));
+		.all<Pick<ScheduleClash, 'orderId' | 'clientName' | 'theirTrip'>>();
+	const { trip, date, time } = slot;
+	return results.map((clash) => ({ trip, ...clash, date, time }));
 }
 
 /** The form's banners: trips on a holiday and schedule clashes. They warn, and the order still saves. */
@@ -704,13 +776,42 @@ export async function getOrderWarnings(
 	actor: Actor | null
 ): Promise<OrderWarnings> {
 	requireRole(actor, TAKES_ORDERS);
-	const trips = warningsSchema.parse(input);
+	return findWarnings(db, warningsSchema.parse(input));
+}
+
+type Trips = z.output<typeof warningsSchema>;
+
+async function findWarnings(db: D1Database, trips: Trips): Promise<OrderWarnings> {
 	const slots: TripSlot[] = [
 		{ trip: 'DELIVERY', date: trips.delivery_date, time: trips.delivery_time },
 		{ trip: 'PICKUP', date: trips.pickup_date, time: trips.pickup_time }
 	];
 	const clashes = await Promise.all(slots.map((slot) => findClashes(db, slot, trips.order_id)));
 	return { holidays: await findHolidayWarnings(db, slots), clashes: clashes.flat() };
+}
+
+/** What the order form shows for its trips as they're typed: the whole catalog's availability and the warnings. */
+export type OrderSchedule = { availability: Availability[]; warnings: OrderWarnings };
+
+/**
+ * The form's live check, as its dates and times change. Dates still half-typed, or a delivery
+ * after the pickup, check nothing: null, not an error, since the form will ask again.
+ */
+export async function checkOrderSchedule(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<OrderSchedule | null> {
+	requireRole(actor, TAKES_ORDERS);
+	const parsed = warningsSchema.safeParse(input);
+	if (!parsed.success) {
+		return null;
+	}
+	const [availability, warnings] = await Promise.all([
+		queryAvailability(db, { ...parsed.data, product_ids: null }),
+		findWarnings(db, parsed.data)
+	]);
+	return { availability, warnings };
 }
 
 const transitionSchema = z.object({ id: z.coerce.number().int().positive() });
@@ -911,29 +1012,7 @@ export type OrderPage = {
 
 type Clause = { sql: string; params: (string | number)[] };
 
-// SQLite's lower() only knows ASCII, so the name's accented letters and tildes are swapped first,
-// to match what `fold` makes of the typed text. ponytail: these seven letters and their capitals
-// only; a stored folded name if names with other accents (ç, à) turn up.
-const FOLDED_LETTERS = [
-	'áa',
-	'ée',
-	'íi',
-	'óo',
-	'úu',
-	'üu',
-	'ñn',
-	'ÁA',
-	'ÉE',
-	'ÍI',
-	'ÓO',
-	'ÚU',
-	'ÜU',
-	'ÑN'
-];
-const FOLDED_NAME_SQL = `lower(${FOLDED_LETTERS.reduce(
-	(sql, [letter, plain]) => `replace(${sql}, '${letter}', '${plain}')`,
-	"json_extract(client_attributes, '$.name')"
-)})`;
+const FOLDED_NAME_SQL = foldedSql("json_extract(client_attributes, '$.name')");
 
 // Every word somewhere in the name, in any order: «jorge betancur» finds «Jorge Iván Betancur».
 function nameClauses(name: string | undefined): Clause[] {
@@ -1141,4 +1220,44 @@ export async function getOrderDetail(
 	const order = toOrder(row);
 	const paid = order.orderTotal - balances.balanceDue;
 	return { ...order, ...balances, paid, payments, cancellation };
+}
+
+/** A product the order form can add: active, with its catalog price and stock. */
+export type CatalogProduct = Pick<
+	Product,
+	'id' | 'name' | 'category' | 'variantGroup' | 'variantName' | 'rentalPrice' | 'totalQuantity'
+>;
+
+/** Everything the order form picks from, read once when it opens. */
+export type OrderFormOptions = {
+	products: CatalogProduct[];
+	transporters: Transporter[];
+	/** Where a client picks up or brings back: the warehouse, its address and the company's name. */
+	company: { name: string; address: string };
+};
+
+export async function getOrderFormOptions(
+	db: D1Database,
+	actor: Actor | null
+): Promise<OrderFormOptions> {
+	requireRole(actor, TAKES_ORDERS);
+	const [catalog, transporters, settings] = await Promise.all([
+		listProducts(db, {}, actor),
+		listTransporters(db, actor),
+		readSettings(db, ['COMPANY_NAME', 'COMPANY_ADDRESS'])
+	]);
+	// An inactive product can't be added; a line that holds one keeps it, frozen.
+	const products = catalog.products
+		.filter((product) => product.isActive)
+		.map(({ id, name, category, variantGroup, variantName, rentalPrice, totalQuantity }) => ({
+			id,
+			name,
+			category,
+			variantGroup,
+			variantName,
+			rentalPrice,
+			totalQuantity
+		}));
+	const company = { name: settings.COMPANY_NAME, address: settings.COMPANY_ADDRESS };
+	return { products, transporters, company };
 }

@@ -14,6 +14,8 @@
 		form?: string;
 		placeholder?: { hour: string; minute: string } | null;
 		error?: string;
+		// An optional time posts nothing when its hour is left blank.
+		optional?: boolean;
 	}
 
 	let {
@@ -24,7 +26,8 @@
 		period = $bindable(),
 		form,
 		placeholder,
-		error
+		error,
+		optional = false
 	}: Props = $props();
 </script>
 
@@ -40,7 +43,7 @@
 			aria-label="Hora"
 			aria-invalid={undefined !== error}
 			placeholder={placeholder?.hour}
-			required
+			required={!optional}
 			bind:value={hour}
 		/>
 		<span class="clock__colon">:</span>
