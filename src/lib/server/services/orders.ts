@@ -3,8 +3,13 @@
 // only inform: nothing here blocks on them.
 
 import { z } from 'zod';
-import { calculateOrderTotals, type OrderTotals, type PricedLine } from '$lib/orders';
-import { requireRole, type Actor } from '../actor';
+import {
+	calculateOrderTotals,
+	isLegalTransition,
+	type OrderTotals,
+	type PricedLine
+} from '$lib/orders';
+import { ROLES, requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
 import { readSettings } from './settings';
 
@@ -614,7 +619,15 @@ export async function getAvailability(
 	actor: Actor | null
 ): Promise<Availability[]> {
 	requireRole(actor, TAKES_ORDERS);
-	const range = availabilitySchema.parse(input);
+	return queryAvailability(db, availabilitySchema.parse(input));
+}
+
+type AvailabilityRange = z.output<typeof availabilitySchema>;
+
+async function queryAvailability(
+	db: D1Database,
+	range: AvailabilityRange
+): Promise<Availability[]> {
 	const { results } = await db
 		.prepare(AVAILABILITY_SQL)
 		.bind(
@@ -690,4 +703,151 @@ export async function getOrderWarnings(
 	];
 	const clashes = await Promise.all(slots.map((slot) => findClashes(db, slot, trips.order_id)));
 	return { holidays: await findHolidayWarnings(db, slots), clashes: clashes.flat() };
+}
+
+const transitionSchema = z.object({ id: z.coerce.number().int().positive() });
+
+const cancellationSchema = transitionSchema.extend({
+	reason: z.string('Escribe el motivo').trim().min(1, 'Escribe el motivo de la cancelación')
+});
+
+// Confirming and cancelling commit the company to the client, or release it: they have their
+// own functions, so this one can't be used to skip their role lock.
+const OPERATIONAL_STATUSES = [
+	'PICKED',
+	'OUT_FOR_DELIVERY',
+	'DELIVERED',
+	'OUT_FOR_PICKUP',
+	'COMPLETED'
+] as const;
+
+const advanceSchema = transitionSchema.extend({
+	status: z.enum(OPERATIONAL_STATUSES, 'Escoge el estado')
+});
+
+const ILLEGAL_TRANSITION: Refusal = {
+	ok: false,
+	message: 'El pedido no puede pasar a ese estado desde el que tiene',
+	errors: {}
+};
+
+type Transition = { id: number; to: OrderStatus; action: string; reason?: string };
+
+function isLegalFrom(row: OrderRow, to: OrderStatus): boolean {
+	const { delivery, pickup } = toOrder(row);
+	const methods = { deliveryMethod: delivery.method, returnMethod: pickup.method };
+	return isLegalTransition({ from: row.status, to, ...methods });
+}
+
+// Every status change goes through here: the one rule decides, whoever asks.
+async function applyTransition(
+	db: D1Database,
+	actor: Actor,
+	transition: Transition
+): Promise<SaveResult> {
+	const row = await findRow(db, transition.id);
+	if (null === row) {
+		return NOT_FOUND;
+	}
+	if (!isLegalFrom(row, transition.to)) {
+		return ILLEGAL_TRANSITION;
+	}
+	const { id, to, ...event } = transition;
+	const changes = { status: to };
+	const write = { table: 'orders', entityType: 'ORDER', actor, id, current: row, changes };
+	await db.batch(auditedUpdate(db, { ...write, ...event }));
+	return { ok: true, id };
+}
+
+/** A draft becomes a commitment. No advance is required: the salesperson confirms with $0 paid. */
+export async function confirmOrder(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<SaveResult> {
+	requireRole(actor, TAKES_ORDERS);
+	const parsed = transitionSchema.safeParse(input);
+	if (!parsed.success) {
+		return invalidOrder(parsed.error);
+	}
+	const transition = { id: parsed.data.id, to: 'CONFIRMED' as const, action: 'STATUS_CHANGED' };
+	return applyTransition(db, actor, transition);
+}
+
+/**
+ * Up to the delivery, with a required reason kept in the event. It releases the inventory on its
+ * own: availability only counts the reserving states. Payments already made are refunded by hand.
+ */
+export async function cancelOrder(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<SaveResult> {
+	requireRole(actor, TAKES_ORDERS);
+	const parsed = cancellationSchema.safeParse(input);
+	if (!parsed.success) {
+		return invalidOrder(parsed.error);
+	}
+	const { id, reason } = parsed.data;
+	return applyTransition(db, actor, { id, to: 'CANCELLED', action: 'CANCELLED', reason });
+}
+
+/**
+ * Picked, out for delivery, delivered, out for pickup, completed: open to every role. With five
+ * employees, locking them to one would stop the warehouse the day its person is out.
+ */
+export async function advanceOrder(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<SaveResult> {
+	requireRole(actor, ROLES);
+	const parsed = advanceSchema.safeParse(input);
+	if (!parsed.success) {
+		return invalidOrder(parsed.error);
+	}
+	const { id, status } = parsed.data;
+	return applyTransition(db, actor, { id, to: status, action: 'STATUS_CHANGED' });
+}
+
+/** A line the order asks more of than its range has left. */
+export type Shortage = { productId: number; name: string; short: number };
+
+/** What the confirmation shows. Neither blocks: the order confirms overbooked and with $0 paid. */
+export type ConfirmationPreview = { shortages: Shortage[]; suggestedAdvance: number };
+
+function findShortages(items: OrderItem[], availability: Availability[]): Shortage[] {
+	const available = new Map(availability.map((each) => [each.productId, each.available]));
+	return items
+		.map((item) => ({
+			productId: item.product_id,
+			name: item.name,
+			short: item.qty - (available.get(item.product_id) ?? 0)
+		}))
+		.filter((shortage) => shortage.short > 0);
+}
+
+/** Re-checks availability for the confirmation, and works out the suggested advance as a reference. */
+export async function previewConfirmation(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<ConfirmationPreview | null> {
+	requireRole(actor, TAKES_ORDERS);
+	const row = await findRow(db, transitionSchema.parse(input).id);
+	if (null === row) {
+		return null;
+	}
+	const order = toOrder(row);
+	const availability = await queryAvailability(db, {
+		order_id: order.id,
+		delivery_date: order.deliveryDate,
+		pickup_date: order.pickupDate,
+		product_ids: order.items.map((item) => item.product_id)
+	});
+	const { ORDERS_SUGGESTED_ADVANCE_PCT: percentage } = await readSettings(db, [
+		'ORDERS_SUGGESTED_ADVANCE_PCT'
+	]);
+	const suggestedAdvance = Math.round((order.orderTotal * percentage) / 100);
+	return { shortages: findShortages(order.items, availability), suggestedAdvance };
 }
