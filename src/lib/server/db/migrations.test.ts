@@ -54,6 +54,7 @@ test('creates exactly the tables of the phases built so far', () => {
 		'contacts',
 		'employees',
 		'events',
+		'orders',
 		'payroll_runs',
 		'products',
 		'sessions',
@@ -112,6 +113,77 @@ test('products: a variant name repeats in its group only by case, and products w
 	insertProduct('LINENS', null, null);
 	insertProduct('LINENS', null, null);
 	expect(() => insertProduct('LINENS', 'mantel CUADRADO 50×50', 'DORADO')).toThrow(/UNIQUE/);
+});
+
+type OrderInsert = {
+	status?: string;
+	deliveryMethod?: string;
+	pickupMethod?: string;
+	clientId?: number;
+};
+
+let publicToken = 0;
+
+// Each row gets a token of its own, so only the constraint under test can refuse it.
+function insertOrder({
+	status = 'DRAFT',
+	deliveryMethod = 'COMPANY_DELIVERY',
+	pickupMethod = 'COMPANY_PICKUP',
+	clientId = 1
+}: OrderInsert) {
+	publicToken += 1;
+	const columns =
+		'public_token, client_id, status, event_date, delivery_date, pickup_date, rental_days, client_attributes, delivery_attributes, pickup_attributes, order_items, items_total, order_total, created_at, created_by, updated_at, updated_by';
+	database
+		.prepare(
+			`insert into orders (${columns}) values (?, ?, ?, '2026-08-15', '2026-08-14', '2026-08-16', 2, '{}', ?, ?, '[]', 0, 0, ${AUDIT})`
+		)
+		.run(
+			String(publicToken),
+			clientId,
+			status,
+			JSON.stringify({ method: deliveryMethod }),
+			JSON.stringify({ method: pickupMethod })
+		);
+}
+
+test('orders: the database rejects an unknown status, delivery method or return method', () => {
+	insertContact('1036452118');
+	insertOrder({});
+	insertOrder({
+		status: 'DELIVERED',
+		deliveryMethod: 'CLIENT_PICKUP',
+		pickupMethod: 'CLIENT_RETURN'
+	});
+	expect(() => insertOrder({ status: 'LOST' })).toThrow(/CHECK/);
+	expect(() => insertOrder({ deliveryMethod: 'CLIENT_RETURN' })).toThrow(/CHECK/);
+	expect(() => insertOrder({ pickupMethod: 'CLIENT_PICKUP' })).toThrow(/CHECK/);
+	expect(() => database.exec(`update orders set delivery_attributes = '{}' where id = 1`)).toThrow(
+		/CHECK/
+	);
+	const order = database.prepare('select has_incident, discount, attributes from orders').get();
+	expect(order).toEqual({ has_incident: 0, discount: 0, attributes: '{}' });
+});
+
+test('orders: public_token is unique and client_id must be a contact', () => {
+	insertContact('1036452118');
+	insertOrder({});
+	publicToken -= 1;
+	expect(() => insertOrder({})).toThrow(/UNIQUE/);
+	expect(() => insertOrder({ clientId: 99 })).toThrow(/FOREIGN KEY/);
+});
+
+test('orders are indexed by its three dates, status and client_id', () => {
+	const indexedColumns = database
+		.prepare(
+			"select info.name from pragma_index_list('orders') as list, pragma_index_info(list.name) as info"
+		)
+		.all()
+		.map((row) => row.name);
+	expect(indexedColumns).toEqual(
+		expect.arrayContaining(['delivery_date', 'pickup_date', 'event_date', 'status', 'client_id'])
+	);
+	expect(indexedColumns).not.toContain('order_items');
 });
 
 type MovementInsert = {
@@ -196,9 +268,9 @@ test('receipt_number is required and unique per sign', () => {
 	expect(() => insert(-50, null)).toThrow(/NOT NULL/);
 });
 
-test('users, employees, sessions and products carry the audit columns', () => {
+test('users, employees, sessions, products and orders carry the audit columns', () => {
 	const audit = ['created_at', 'created_by', 'updated_at', 'updated_by'];
-	for (const table of ['users', 'employees', 'sessions', 'products']) {
+	for (const table of ['users', 'employees', 'sessions', 'products', 'orders']) {
 		expect(listColumns(table)).toEqual(expect.arrayContaining(audit));
 	}
 });

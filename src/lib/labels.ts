@@ -4,6 +4,7 @@ import type { Role } from './server/actor';
 import type { DeductionConcept, EarningConcept } from './payroll';
 import type { CashConcept, PaymentMethod } from './server/services/cash';
 import type { Service } from './server/services/contacts';
+import type { DeliveryMethod, OrderStatus, ReturnMethod } from './server/services/orders';
 import type { Category } from './server/services/products';
 import type { Punch } from './server/services/timesheets';
 
@@ -15,7 +16,7 @@ export const ROLE_LABELS: Record<Role, string> = {
 	DRIVER: 'Conductor'
 };
 
-export const ORDER_STATUS_LABELS = {
+export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
 	DRAFT: 'Borrador',
 	CONFIRMED: 'Confirmado',
 	PICKED: 'Separado',
@@ -43,13 +44,13 @@ export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
 	OTHER: 'Otro'
 };
 
-export const DELIVERY_METHOD_LABELS = {
+export const DELIVERY_METHOD_LABELS: Record<DeliveryMethod, string> = {
 	COMPANY_DELIVERY: 'Entrega la empresa',
 	CLIENT_PICKUP: 'Recoge el cliente',
 	EXTERNAL_CARRIER: 'Transportador externo'
 };
 
-export const RETURN_METHOD_LABELS = {
+export const RETURN_METHOD_LABELS: Record<ReturnMethod, string> = {
 	COMPANY_PICKUP: 'Recoge la empresa',
 	CLIENT_RETURN: 'Devuelve el cliente',
 	EXTERNAL_CARRIER: 'Transportador externo'
