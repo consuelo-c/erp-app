@@ -142,3 +142,8 @@ export function formatPesosInWords(pesos: number): string {
 	const words = `${number}${isRoundMillions ? ' de' : ''} pesos m/cte`;
 	return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
 }
+
+/** Lowercase, accents and tildes off: «mantel» finds «Mantel», «cristaleria» finds «Cristalería». */
+export function fold(text: string): string {
+	return text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+}

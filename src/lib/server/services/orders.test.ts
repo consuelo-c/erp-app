@@ -7,6 +7,7 @@ import { movementStatements } from './cash';
 import {
 	advanceOrder,
 	cancelOrder,
+	checkOrderSchedule,
 	confirmOrder,
 	createOrder,
 	getAvailability,
@@ -66,6 +67,8 @@ const address = { address_1: 'Calle 10 # 43-12, El Poblado', address_2: 'Salón 
 // The Design Brief's order #1043.
 const order1043 = {
 	client_id: LUZ_MARINA,
+	client_name: 'Luz Marina Restrepo',
+	client_phone: '310 442 8890',
 	event_date: '2026-08-15',
 	delivery_date: '2026-08-14',
 	pickup_date: '2026-08-16',
@@ -244,11 +247,11 @@ test('a discount above the subtotal is refused on its field; equal to it, the to
 	}
 });
 
-test('rental days are at least 1; a pickup before the delivery fails on its field; the event date is free', async () => {
+test('rental days are at least 1; a delivery after the pickup fails on its field; the event date is free', async () => {
 	const noDays = await createOrder(db, { ...order1043, rental_days: 0 }, sales);
 	expect(noDays).toMatchObject({ ok: false, errors: { rental_days: expect.any(String) } });
 	const early = await createOrder(db, { ...order1043, pickup_date: '2026-08-13' }, sales);
-	expect(early).toMatchObject({ ok: false, errors: { pickup_date: expect.any(String) } });
+	expect(early).toMatchObject({ ok: false, errors: { delivery_date: expect.any(String) } });
 	expect(await create({ ...order1043, pickup_date: '2026-08-14', event_date: '2026-09-01' })).toBe(
 		1
 	);
@@ -323,7 +326,8 @@ test('an edit logs only the changed fields; a save with no change logs nothing',
 
 test('changing the client changes client_id and its snapshot together, both logged', async () => {
 	const id = await create();
-	await updateOrder(db, { ...order1043, id, client_id: JORGE }, sales);
+	const jorge = { client_id: JORGE, client_name: 'Jorge Iván Betancur' };
+	await updateOrder(db, { ...order1043, id, ...jorge }, sales);
 	expect(await read(id)).toMatchObject({
 		clientId: JORGE,
 		client: { name: 'Jorge Iván Betancur', phone: '573007712043' }
@@ -447,7 +451,14 @@ test("a trip at another order's delivery or pickup date and time clashes; a canc
 		delivery_date: '2026-08-13'
 	};
 	expect((await getOrderWarnings(db, { ...trips, ...atItsDelivery }, sales)).clashes).toEqual([
-		{ trip: 'PICKUP', orderId: id, clientName: 'Luz Marina Restrepo' }
+		{
+			trip: 'PICKUP',
+			theirTrip: 'DELIVERY',
+			orderId: id,
+			clientName: 'Luz Marina Restrepo',
+			date: '2026-08-14',
+			time: '14:00'
+		}
 	]);
 	const atItsPickup = {
 		delivery_date: '2026-08-16',
@@ -455,7 +466,14 @@ test("a trip at another order's delivery or pickup date and time clashes; a canc
 		pickup_date: '2026-08-18'
 	};
 	expect((await getOrderWarnings(db, { ...trips, ...atItsPickup }, sales)).clashes).toEqual([
-		{ trip: 'DELIVERY', orderId: id, clientName: 'Luz Marina Restrepo' }
+		{
+			trip: 'DELIVERY',
+			theirTrip: 'PICKUP',
+			orderId: id,
+			clientName: 'Luz Marina Restrepo',
+			date: '2026-08-16',
+			time: '09:00'
+		}
 	]);
 	setStatus(id, 'CANCELLED');
 	expect((await getOrderWarnings(db, trips, sales)).clashes).toEqual([]);
@@ -662,6 +680,7 @@ async function createThree(): Promise<[number, number, number]> {
 	const jorge = await create({
 		...order1043,
 		client_id: JORGE,
+		client_name: 'Jorge Iván Betancur',
 		event_date: '2026-08-22',
 		delivery_attributes: atWarehouse,
 		discount: 0
@@ -903,4 +922,97 @@ test('an unknown or malformed id has no detail; WAREHOUSE and DRIVER get a 403',
 			isHttpError(thrown, 403)
 		);
 	}
+});
+
+test("the order's name is the one typed: it may say more than the contact, which stays as it is", async () => {
+	const id = await create({ ...order1043, client_name: 'Luz Marina Restrepo — boda Gil' });
+	expect((await read(id)).client).toEqual({
+		name: 'Luz Marina Restrepo — boda Gil',
+		phone: '573104428890'
+	});
+	const contact = database.prepare('select full_name from contacts where id = 1').get();
+	expect(contact?.full_name).toBe('Luz Marina Restrepo');
+});
+
+function contactsByPhone(phone: string) {
+	return database
+		.prepare(
+			'select id, full_name, document_id, services, attributes from contacts where phone = ?'
+		)
+		.all(phone);
+}
+
+test('«Cliente nuevo» makes the contact and the order in one batch, linked by its document', async () => {
+	const fresh = {
+		...order1043,
+		client_id: null,
+		client_name: 'Gloria Patricia Henao',
+		client_phone: '315 220 7781'
+	};
+	const id = await create(fresh);
+	const [contact] = contactsByPhone('573152207781');
+	expect(contact).toMatchObject({
+		full_name: 'Gloria Patricia Henao',
+		services: '[]',
+		attributes: '{}'
+	});
+	expect(String(contact.document_id)).toMatch(/^@[0-9A-HJKMNP-TV-Z]{8}$/);
+	expect(await read(id)).toMatchObject({
+		clientId: contact.id,
+		client: { name: 'Gloria Patricia Henao', phone: '573152207781' }
+	});
+	const created = database
+		.prepare("select entity_type, entity_id from events where action = 'CREATED' order by id")
+		.all();
+	expect(created).toEqual([
+		{ entity_type: 'CONTACT', entity_id: contact.id },
+		{ entity_type: 'ORDER', entity_id: id }
+	]);
+});
+
+test('«Cliente nuevo» needs a phone that normalizes, and writes nothing otherwise', async () => {
+	const fresh = { ...order1043, client_id: null, client_name: 'Gloria', client_phone: '12' };
+	const result = await createOrder(db, fresh, sales);
+	expect(result).toMatchObject({ ok: false, errors: { client_phone: expect.any(String) } });
+	expect(database.prepare('select count(*) as count from contacts').get()).toEqual({ count: 4 });
+	expect(database.prepare('select count(*) as count from orders').get()).toEqual({ count: 0 });
+});
+
+test('«Cliente nuevo» on an edit makes the contact and moves the order to it', async () => {
+	const id = await create();
+	const fresh = {
+		client_id: null,
+		client_name: 'Gloria Patricia Henao',
+		client_phone: '315 220 7781'
+	};
+	expect(await updateOrder(db, { ...order1043, id, ...fresh }, sales)).toEqual({ ok: true, id });
+	const [contact] = contactsByPhone('573152207781');
+	expect(await read(id)).toMatchObject({
+		clientId: contact.id,
+		client: { name: 'Gloria Patricia Henao' }
+	});
+	const contactLuz = database.prepare('select full_name, phone from contacts where id = 1').get();
+	expect(contactLuz).toEqual({ full_name: 'Luz Marina Restrepo', phone: '573104428890' });
+});
+
+test('with no product list, availability covers the whole catalog', async () => {
+	await book({ status: 'CONFIRMED', delivery: '2026-08-14', pickup: '2026-08-16', qty: 100 });
+	const range = { delivery_date: '2026-08-15', pickup_date: '2026-08-15' };
+	expect(await getAvailability(db, range, sales)).toEqual([
+		{ productId: 1, available: 400 },
+		{ productId: 2, available: 500 },
+		{ productId: 3, available: 500 },
+		{ productId: 4, available: 500 }
+	]);
+});
+
+test("the form's live check brings the catalog's availability and the warnings, or nothing for half-typed dates", async () => {
+	setHolidays();
+	const id = await create();
+	const schedule = await checkOrderSchedule(db, { ...trips, pickup_date: '2026-08-17' }, sales);
+	expect(schedule?.availability).toHaveLength(4);
+	expect(schedule?.warnings.holidays).toEqual([{ trip: 'PICKUP', ...ASSUMPTION }]);
+	expect(schedule?.warnings.clashes.map(({ orderId }) => orderId)).toEqual([id]);
+	expect(await checkOrderSchedule(db, { ...trips, pickup_date: '2026-08' }, sales)).toBeNull();
+	expect(await checkOrderSchedule(db, { ...trips, pickup_date: '2026-08-01' }, sales)).toBeNull();
 });

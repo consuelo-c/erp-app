@@ -9,6 +9,8 @@ import {
 	generateDocumentId,
 	getContact,
 	listContacts,
+	listTransporters,
+	searchClients,
 	servicesSchema,
 	updateContact
 } from './contacts';
@@ -170,6 +172,7 @@ test('search by name or by three digits of the phone, with the service filter, a
 
 	expect(await names({})).toEqual(['Jorge Iván Betancur', 'Luz Marina Restrepo', 'Wilson Muñoz']);
 	expect(await names({ search: 'marina' })).toEqual(['Luz Marina Restrepo']);
+	expect(await names({ search: 'réstrepo  LUZ' })).toEqual(['Luz Marina Restrepo']);
 	expect(await names({ search: '442 8890' })).toEqual(['Luz Marina Restrepo']);
 	expect(await names({ search: '44' })).toHaveLength(3);
 	expect(await names({ service: 'TRANSPORTER' })).toEqual(['Wilson Muñoz']);
@@ -288,4 +291,53 @@ test('Warehouse and Driver have no access to contacts', async () => {
 		expect(await rejection(listContacts(db, {}, actorWith(role)))).toBe(403);
 		expect(await rejection(createContact(db, luzMarina, actorWith(role)))).toBe(403);
 	}
+});
+
+test('the order form finds clients by name, address or phone, by name, with their address', async () => {
+	const company = { ...luzMarina, full_name: 'Eventos Restrepo S.A.S.', document_id: '900312554' };
+	const companyId = await create(company);
+	const luzMarinaId = await create({
+		...luzMarina,
+		address_1: 'Cra 43A #18-95, El Poblado',
+		address_2: 'Piso 2'
+	});
+	await create({ phone: '311 222 3344', full_name: 'Otro' });
+	const ids = async (typed: string) =>
+		(await searchClients(db, typed, sales)).map((client) => client.id);
+	expect(await searchClients(db, '+57 310 442 8890', sales)).toEqual([
+		{
+			id: companyId,
+			fullName: 'Eventos Restrepo S.A.S.',
+			phone: '573104428890',
+			address1: null,
+			address2: null
+		},
+		{
+			id: luzMarinaId,
+			fullName: 'Luz Marina Restrepo',
+			phone: '573104428890',
+			address1: 'Cra 43A #18-95, El Poblado',
+			address2: 'Piso 2'
+		}
+	]);
+	expect(await ids('restrepo')).toEqual([companyId, luzMarinaId]);
+	expect(await ids('poblado MARINA')).toEqual([luzMarinaId]);
+	expect(await ids('piso 2')).toEqual([luzMarinaId]);
+	expect(await ids('44')).toEqual([]);
+	expect(await rejection(searchClients(db, 'luz', actorWith('WAREHOUSE')))).toBe(403);
+});
+
+test('the transporters are the contacts with TRANSPORTER, by name', async () => {
+	await create({ phone: '311 908 5512', full_name: 'Wilson Muñoz', services: ['TRANSPORTER'] });
+	await create({
+		phone: '604 444 1290',
+		full_name: 'Transportes La 80',
+		services: ['TRANSPORTER', 'DECORATOR']
+	});
+	await create({ phone: '312 555 7788', full_name: 'Paula Andrea Ríos', services: ['DECORATOR'] });
+	await create(luzMarina);
+	expect((await listTransporters(db, sales)).map(({ fullName }) => fullName)).toEqual([
+		'Transportes La 80',
+		'Wilson Muñoz'
+	]);
 });

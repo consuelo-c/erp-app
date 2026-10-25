@@ -12,6 +12,7 @@ import {
 	formatShortDay,
 	formatWeekday,
 	formatWeekRange,
+	typedClockTime,
 	getTodaysDate,
 	getWeekStart
 } from './datetime';
@@ -98,4 +99,13 @@ test("formatInstantTime gives an instant's time in Bogotá", () => {
 	// 20:30 UTC is 3:30 p.m. in Bogotá (UTC−5).
 	expect(formatInstantTime(Date.UTC(2026, 9, 14, 20, 30) / 1000)).toBe('3:30 p.m.');
 	expect(formatInstantTime(Date.UTC(2026, 9, 15, 4, 5) / 1000)).toBe('11:05 p.m.');
+});
+
+test('an optional typed time: HH:MM, null when the hour is blank, the text when it is not a time', () => {
+	expect(typedClockTime({ hour: '2', minute: '', period: 'pm' })).toBe('14:00');
+	expect(typedClockTime({ hour: '9', minute: '30', period: 'am' })).toBe('09:30');
+	expect(typedClockTime({ hour: '12', minute: '05', period: 'am' })).toBe('00:05');
+	expect(typedClockTime({ hour: ' ', minute: '15', period: 'pm' })).toBeNull();
+	expect(typedClockTime({ hour: '13', minute: '00', period: 'pm' })).toBe('13:00');
+	expect(typedClockTime({ hour: '2', minute: '75', period: 'pm' })).toBe('2:75');
 });

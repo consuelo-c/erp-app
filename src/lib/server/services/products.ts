@@ -4,6 +4,7 @@
 import { z } from 'zod';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
+import { fold } from '$lib/format';
 
 /** Fixed, like the CHECK on `products.category`: a new category is a code change. */
 export const CATEGORIES = [
@@ -190,11 +191,6 @@ export type ProductFilters = z.output<typeof listSchema>;
 
 /** The filters come back parsed: what the screen shows as chosen is what was applied. */
 export type ProductList = { products: Product[]; filters: ProductFilters };
-
-/** Lowercase, accents and tildes off: «mantel» finds «Mantel», «cristaleria» finds «Cristalería». */
-export function fold(text: string): string {
-	return text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
-}
 
 function matches(product: Product, search: string): boolean {
 	const { name, variantGroup, variantName } = product;

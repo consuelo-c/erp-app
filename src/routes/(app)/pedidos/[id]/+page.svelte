@@ -2,6 +2,7 @@
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import Badge, { ORDER_STATUS_TONES } from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import Field from '$lib/components/Field.svelte';
@@ -19,7 +20,7 @@
 		PAYMENT_METHOD_LABELS,
 		RETURN_METHOD_LABELS
 	} from '$lib/labels';
-	import { isLegalTransition } from '$lib/orders';
+	import { isEditableStatus, isLegalTransition } from '$lib/orders';
 	import { formatPhone } from '$lib/phone';
 	import type { Carrier, OrderPayment } from '$lib/server/services/orders';
 	import type { PageProps } from './$types';
@@ -33,6 +34,7 @@
 	const pickup = $derived(order.pickup);
 
 	const isDraft = $derived('DRAFT' === order.status);
+	const canEdit = $derived(isEditableStatus(order.status));
 	const canCancel = $derived(
 		isLegalTransition({
 			from: order.status,
@@ -129,6 +131,11 @@
 		</ScreenHeader>
 	{/snippet}
 
+	<!-- Set by the order form's redirect after a save. -->
+	{#if page.url.searchParams.has('guardado')}
+		<div class="lead-notice"><Notice tone="success">Pedido guardado con éxito</Notice></div>
+	{/if}
+
 	{#if order.cancellation}
 		<div class="lead-notice">
 			<Notice tone="info">
@@ -156,10 +163,19 @@
 	</div>
 	<div class="delivery-address">{@render address(delivery.address_1, delivery.address_2)}</div>
 
-	{#if isDraft || canCancel}
+	{#if isDraft || canEdit || canCancel}
 		<div class="actions">
 			{#if isDraft}
 				<Button onclick={() => (isConfirmOpen = true)}>Confirmar</Button>
+			{/if}
+			{#if canEdit}
+				<Button
+					variant="secondary"
+					size="sm"
+					href={resolve('/(app)/pedidos/[id]/editar', { id: String(order.id) })}
+				>
+					Editar
+				</Button>
 			{/if}
 			{#if canCancel}
 				<span class="actions__cancel">

@@ -3,10 +3,11 @@
 
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
+import { fold } from '$lib/format';
 import { normalizePhone } from '$lib/phone';
 import { isAdminOrManager, requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
-import { containing } from './cash';
+import { containing, foldedSql } from './cash';
 
 // Whoever takes orders adds the clients.
 const EDITS_CONTACTS = ['ADMIN', 'MANAGER', 'SALES'] as const;
@@ -65,7 +66,7 @@ type ContactRow = Columns & { id: number; document_id: string; is_employee: numb
 
 const CHECK_FIELDS = 'Revisa los campos marcados en rojo antes de guardar.';
 
-const INVALID_PHONE =
+export const INVALID_PHONE =
 	'Número no válido. Un número de Colombia tiene 10 dígitos; uno de otro país empieza con +.';
 
 function requiredText(message: string) {
@@ -391,11 +392,16 @@ export type ContactPage = { contacts: ContactSummary[]; hasMore: boolean; filter
 
 type Clause = { sql: string; params: string[] };
 
-// Letters search the name. Otherwise the digits typed, three or more, anywhere in the phone, so
-// «442 8890» finds 573104428890: not the normalizer, a fragment isn't a phone.
-function searchClause(search: string): Clause | null {
+// Letters search the text (the name, unless told otherwise): every word somewhere in it, in any
+// order, accents and case folded. Otherwise the digits typed, three or more, anywhere in the
+// phone, so «442 8890» finds 573104428890: not the normalizer, a fragment isn't a phone.
+function searchClause(search: string, textSql = foldedSql('full_name')): Clause | null {
 	if (/\p{L}/u.test(search)) {
-		return { sql: "full_name like ? escape '\\'", params: [containing(search)] };
+		const words = fold(search).split(/\s+/).filter(Boolean);
+		return {
+			sql: words.map(() => `${textSql} like ? escape '\\'`).join(' and '),
+			params: words.map(containing)
+		};
 	}
 	const digits = search.replace(/\D/g, '');
 	return 3 <= digits.length ? { sql: 'phone like ?', params: [`%${digits}%`] } : null;
@@ -452,4 +458,94 @@ export async function listContacts(
 		isEmployee: 1 === row.is_employee
 	}));
 	return { contacts, hasMore: shown < results.length, filters };
+}
+
+/** A client added from the order form: the phone and the name typed, and an automatic document. */
+export type NewClient = { phone: string; fullName: string; documentId: string };
+
+/**
+ * The contact's insert and its `CREATED` event, for the order's own `db.batch()`: the order then
+ * finds its id by `document_id`, never by `last_insert_rowid()`.
+ */
+export function newClientStatements(
+	db: D1Database,
+	actor: Actor,
+	client: NewClient
+): D1PreparedStatement[] {
+	return auditedInsert(db, {
+		table: 'contacts',
+		entityType: 'CONTACT',
+		actor,
+		values: {
+			phone: client.phone,
+			full_name: client.fullName,
+			document_id: client.documentId,
+			services: '[]',
+			attributes: '{}'
+		}
+	});
+}
+
+/** A contact the order form lists: its name and address pre-fill the order. */
+export type ClientCandidate = {
+	id: number;
+	fullName: string;
+	phone: string;
+	address1: string | null;
+	address2: string | null;
+};
+
+// The name and both address lines, folded, so «diana poblado» finds Diana in El Poblado.
+const CLIENT_TEXT_SQL = foldedSql(
+	`full_name || ' ' || coalesce(json_extract(attributes, '$.address_1'), '') || ' ' ||
+	coalesce(json_extract(attributes, '$.address_2'), '')`
+);
+
+/**
+ * The first page of contacts by name whose name or address has every word typed, or whose phone
+ * has the digits typed. None is picked for the salesperson: several may share a phone.
+ */
+export async function searchClients(
+	db: D1Database,
+	typed: unknown,
+	actor: Actor | null
+): Promise<ClientCandidate[]> {
+	requireRole(actor, EDITS_CONTACTS);
+	const clause = searchClause(z.string().trim().catch('').parse(typed), CLIENT_TEXT_SQL);
+	if (null === clause) {
+		return [];
+	}
+	const { results } = await db
+		.prepare(
+			`select id, phone, full_name, document_id, services, attributes, 0 as is_employee
+			from contacts where ${clause.sql} order by full_name collate nocase, id limit ?`
+		)
+		.bind(...clause.params, CONTACTS_PAGE_SIZE)
+		.all<ContactRow>();
+	return results.map(toContact).map(({ id, fullName, phone, address1, address2 }) => ({
+		id,
+		fullName,
+		phone,
+		address1,
+		address2
+	}));
+}
+
+/** A carrier the order form offers: a contact with TRANSPORTER in its services. */
+export type Transporter = { id: number; fullName: string; phone: string };
+
+/** Every transporter by name, filtered in SQL. Creating one is the manager's, in Contactos. */
+export async function listTransporters(
+	db: D1Database,
+	actor: Actor | null
+): Promise<Transporter[]> {
+	requireRole(actor, EDITS_CONTACTS);
+	const { results } = await db
+		.prepare(
+			`select id, full_name as fullName, phone from contacts
+			where exists (select 1 from json_each(contacts.services) where value = 'TRANSPORTER')
+			order by full_name collate nocase, id`
+		)
+		.all<Transporter>();
+	return results;
 }
