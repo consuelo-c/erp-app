@@ -33,7 +33,8 @@ export type OrderMove = {
 const CANCELLABLE: readonly OrderStatus[] = ['DRAFT', 'CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY'];
 
 // The route branches on the methods: nobody drives out when the client picks up at the warehouse,
-// nor goes to fetch what the client brings back.
+// nor goes to fetch what the client brings back. A cancelled order reopens as a draft, often for
+// another date: confirming it again re-checks the availability it released.
 function forwardStatus(move: OrderMove): OrderStatus | null {
 	const isClientPickup = 'CLIENT_PICKUP' === move.deliveryMethod;
 	const isClientReturn = 'CLIENT_RETURN' === move.returnMethod;
@@ -45,7 +46,7 @@ function forwardStatus(move: OrderMove): OrderStatus | null {
 		DELIVERED: isClientReturn ? 'COMPLETED' : 'OUT_FOR_PICKUP',
 		OUT_FOR_PICKUP: 'COMPLETED',
 		COMPLETED: null,
-		CANCELLED: null
+		CANCELLED: 'DRAFT'
 	};
 	return next[move.from];
 }

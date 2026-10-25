@@ -25,6 +25,7 @@ import {
 	orderItemsSchema,
 	previewConfirmation,
 	recordOrderPayment,
+	reopenOrder,
 	updateOrder
 } from './orders';
 
@@ -610,6 +611,43 @@ test('the operational path cannot confirm or cancel, whoever asks', async () => 
 		expect(result).toMatchObject({ ok: false, errors: { status: expect.any(String) } });
 	}
 	expect(await status(id)).toBe('DRAFT');
+});
+
+test('a cancelled order reopens as a draft that holds nothing until confirmed again', async () => {
+	const id = await book({
+		status: 'CONFIRMED',
+		delivery: '2026-08-14',
+		pickup: '2026-08-16',
+		qty: 100
+	});
+	const range = { delivery_date: '2026-08-15', pickup_date: '2026-08-15' };
+	await cancelOrder(db, { id, reason: 'El cliente aplazó el evento' }, sales);
+	expect(await reopenOrder(db, { id: String(id) }, sales)).toEqual({ ok: true, id });
+	expect(orderEvents().at(-1)).toEqual({
+		action: 'STATUS_CHANGED',
+		before: { status: 'CANCELLED' },
+		after: { status: 'DRAFT' }
+	});
+	expect((await getOrderDetail(db, id, sales))?.cancellation).toBeNull();
+	expect(await chairsAvailable(range)).toBe(500);
+	await confirmOrder(db, { id }, sales);
+	expect(await chairsAvailable(range)).toBe(400);
+});
+
+test('only a cancelled order reopens, and only for whoever cancels', async () => {
+	const id = await create();
+	for (const from of ['DRAFT', 'CONFIRMED', 'DELIVERED', 'COMPLETED']) {
+		setStatus(id, from);
+		expect(await reopenOrder(db, { id }, admin)).toMatchObject({ ok: false });
+		expect(await status(id)).toBe(from);
+	}
+	setStatus(id, 'CANCELLED');
+	for (const actor of [warehouse, driver]) {
+		await expect(reopenOrder(db, { id }, actor)).rejects.toSatisfy((thrown) =>
+			isHttpError(thrown, 403)
+		);
+	}
+	expect(await status(id)).toBe('CANCELLED');
 });
 
 test('an illegal transition fails for every role, and writes nothing', async () => {

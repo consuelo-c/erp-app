@@ -4,7 +4,8 @@ import {
 	cancelOrder,
 	confirmOrder,
 	getOrderDetail,
-	previewConfirmation
+	previewConfirmation,
+	reopenOrder
 } from '$lib/server/services/orders';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -49,5 +50,13 @@ export const actions: Actions = {
 			return { cancelled: true };
 		}
 		return fail(400, { cancelMessage: result.errors.reason ?? result.message });
+	},
+	reabrir: async ({ locals, params, platform }) => {
+		requireRole(locals.user, TAKES_ORDERS);
+		if (undefined === platform) {
+			error(500, 'Sin acceso a la base de datos');
+		}
+		const result = await reopenOrder(platform.env.DB, { id: params.id }, locals.user);
+		return result.ok ? { reopened: true } : fail(400, { reopenMessage: result.message });
 	}
 };

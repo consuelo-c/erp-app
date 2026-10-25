@@ -43,6 +43,14 @@
 			returnMethod: pickup.method
 		})
 	);
+	const canReopen = $derived(
+		isLegalTransition({
+			from: order.status,
+			to: 'DRAFT',
+			deliveryMethod: delivery.method,
+			returnMethod: pickup.method
+		})
+	);
 	// The pickup address only when the products come back from somewhere else.
 	const isPickupElsewhere = $derived(
 		delivery.address_1 !== pickup.address_1 || delivery.address_2 !== pickup.address_2
@@ -175,9 +183,20 @@
 		<div class="lead-notice">
 			<Notice tone="info">
 				Cancelado el {formatInstant(order.cancellation.cancelledAt)} por {order.cancellation
-					.cancelledBy}: {order.cancellation.reason}. Solo se pueden registrar pagos.
+					.cancelledBy}: {order.cancellation.reason}. Se puede reabrir como borrador o registrar
+				pagos.
 			</Notice>
 		</div>
+	{/if}
+
+	{#if form?.reopened}
+		<div class="lead-notice">
+			<Notice tone="success">Pedido reabierto como borrador: edítalo y confírmalo de nuevo.</Notice>
+		</div>
+	{/if}
+
+	{#if form?.reopenMessage}
+		<div class="lead-notice"><Notice tone="error">{form.reopenMessage}</Notice></div>
 	{/if}
 
 	<h2 class="section-title client">{order.client.name}</h2>
@@ -202,6 +221,12 @@
 	<div class="actions">
 		{#if isDraft}
 			<Button size="sm" onclick={() => (isConfirmOpen = true)}>Confirmar</Button>
+		{/if}
+		<!-- Back to a draft, often for another date: confirming it again holds the products. -->
+		{#if canReopen}
+			<form method="POST" action="?/reabrir" use:enhance>
+				<Button type="submit" size="sm">Reabrir pedido</Button>
+			</form>
 		{/if}
 		<!-- Products already at the client's, kept for more days: a new order. -->
 		{#if 'DELIVERED' === order.status}
