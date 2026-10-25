@@ -12,7 +12,9 @@ import {
 	createOrder,
 	getAvailability,
 	getOrder,
+	getOrderChange,
 	getOrderDetail,
+	getOrderTimeline,
 	getOrderWarnings,
 	getPaymentOptions,
 	listOrders,
@@ -1186,4 +1188,115 @@ test("the payment entry pre-fills from the client's and each carrier's saved acc
 			{ trip: 'PICKUP', name: 'Wilson Muñoz', bankAccount: 'Cuenta Wilson' }
 		]
 	});
+});
+
+// The Design Brief's #1043 edited: another client, a later pickup by a carrier, lines and money.
+const edited1043 = {
+	...order1043,
+	client_id: JORGE,
+	client_name: 'Jorge Iván Betancur',
+	pickup_date: '2026-08-17',
+	rental_days: 3,
+	pickup_attributes: { ...address, method: 'EXTERNAL_CARRIER', time: '09:00', carrier_id: WILSON },
+	order_items: [
+		{ product_id: 1, qty: 100, unit_price: 2500 },
+		{ product_id: 3, qty: 120, unit_price: 1000 }
+	],
+	transport_cost: 150000,
+	notes: 'Portón blanco después del puente'
+};
+
+async function timeline(id: number, actor: Actor = sales) {
+	const entries = await getOrderTimeline(db, id, actor);
+	if (null === entries) {
+		throw new Error(`Order ${id} not found`);
+	}
+	return entries;
+}
+
+async function editId(id: number): Promise<number> {
+	const entry = (await timeline(id)).find(({ action }) => 'EDITED' === action);
+	return entry?.id ?? 0;
+}
+
+test("the timeline lists the order's events newest first, who and when, without their fields", async () => {
+	const id = await create();
+	expect(await updateOrder(db, { ...edited1043, id }, sales)).toMatchObject({ ok: true });
+	await confirmOrder(db, { id }, sales);
+	await cancelOrder(db, { id, reason: 'El cliente aplazó el evento' }, manager);
+	const entries = await timeline(id);
+	expect(
+		entries.map(({ action, status, reason, actorUsername }) => ({
+			action,
+			status,
+			reason,
+			actorUsername
+		}))
+	).toEqual([
+		{
+			action: 'CANCELLED',
+			status: 'CANCELLED',
+			reason: 'El cliente aplazó el evento',
+			actorUsername: 'gerente'
+		},
+		{ action: 'STATUS_CHANGED', status: 'CONFIRMED', reason: null, actorUsername: 'ventas' },
+		{ action: 'EDITED', status: null, reason: null, actorUsername: 'ventas' },
+		{ action: 'CREATED', status: 'DRAFT', reason: null, actorUsername: 'ventas' }
+	]);
+	expect(entries[0].createdAt).toEqual(expect.any(Number));
+	expect(entries[0]).not.toHaveProperty('before');
+	expect(entries[0]).not.toHaveProperty('after');
+	expect(await getOrderTimeline(db, 999, sales)).toBeNull();
+});
+
+test('an edit opens in its named, formatted changes, the client by name and lines per product', async () => {
+	const id = await create();
+	await updateOrder(db, { ...edited1043, id }, sales);
+	expect(await getOrderChange(db, { order: id, event: await editId(id) }, sales)).toEqual([
+		{ label: 'Cliente', change: 'Luz Marina Restrepo → Jorge Iván Betancur' },
+		{ label: 'Teléfono', change: '310 442 8890 → 300 771 2043' },
+		{ label: 'Fecha de recogida', change: '16 ago 2026 → 17 ago 2026' },
+		{ label: 'Días cobrados', change: '2 → 3' },
+		{ label: 'Método de retorno', change: 'Recoge la empresa → Transportador externo' },
+		{ label: 'Transportador del retorno', change: '— → Wilson Muñoz' },
+		{ label: 'Silla Tiffany dorada', change: 'Cantidad 120 → 100' },
+		{ label: 'Copa para vino tinto', change: 'Precio $900 → $1.000' },
+		{ label: 'Mesa redonda 10 puestos', change: 'Quitada: 12 × $12.000' },
+		{ label: 'Transporte', change: '$180.000 → $150.000' },
+		{ label: 'Notas', change: '— → Portón blanco después del puente' }
+	]);
+});
+
+test('a line added back reads as added, with its quantity and price', async () => {
+	const id = await create({ ...order1043, order_items: order1043.order_items.slice(0, 1) });
+	await updateOrder(db, { ...order1043, id }, sales);
+	const changes = await getOrderChange(db, { order: id, event: await editId(id) }, sales);
+	expect(changes).toEqual([
+		{ label: 'Mesa redonda 10 puestos', change: 'Agregada: 12 × $12.000' },
+		{ label: 'Copa para vino tinto', change: 'Agregada: 120 × $900' }
+	]);
+});
+
+test('only an edit of that order opens, and only for whoever sees edits', async () => {
+	const id = await create();
+	const other = await create();
+	await updateOrder(db, { ...edited1043, id }, sales);
+	const event = await editId(id);
+	const created = (await timeline(id)).at(-1)?.id;
+	expect(await getOrderChange(db, { order: other, event }, sales)).toBeNull();
+	expect(await getOrderChange(db, { order: id, event: created }, sales)).toBeNull();
+	expect(await getOrderChange(db, { order: id, event: 'x' }, sales)).toBeNull();
+	expect(await getOrderChange(db, { order: id, event }, warehouse)).toBeNull();
+	expect(await getOrderChange(db, { order: id, event }, manager)).toHaveLength(11);
+});
+
+test('the warehouse and the driver see only status changes and cancellations', async () => {
+	const id = await create();
+	await updateOrder(db, { ...edited1043, id }, sales);
+	await confirmOrder(db, { id }, sales);
+	await cancelOrder(db, { id, reason: 'El cliente aplazó el evento' }, sales);
+	for (const actor of [warehouse, driver]) {
+		const actions = (await timeline(id, actor)).map(({ action }) => action);
+		expect(actions).toEqual(['CANCELLED', 'STATUS_CHANGED']);
+	}
 });

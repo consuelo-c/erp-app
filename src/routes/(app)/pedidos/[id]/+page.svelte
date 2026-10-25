@@ -208,6 +208,13 @@
 		>
 			Registrar pago
 		</Button>
+		<Button
+			variant="secondary"
+			size="sm"
+			href={resolve('/(app)/pedidos/[id]/historial', { id: String(order.id) })}
+		>
+			Historial
+		</Button>
 		{#if canCancel}
 			<span class="actions__cancel">
 				<Button variant="secondary" size="sm" onclick={startCancel}>Cancelar pedido</Button>

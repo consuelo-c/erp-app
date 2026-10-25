@@ -15,7 +15,9 @@ import {
 	type PricedLine
 } from '$lib/orders';
 import { ROLES, requireRole, type Actor } from '../actor';
-import { auditedInsert, auditedUpdate } from '../audit';
+import { auditedInsert, auditedUpdate, eventFieldsSchema } from '../audit';
+import { describeOrderEdit, type OrderChange } from '../order-changes';
+import { filterTimelineForActor } from '../timeline';
 import {
 	containing,
 	foldedSql,
@@ -131,6 +133,7 @@ export type Carrier = z.infer<typeof carrierSchema>;
 export type DeliveryAttributes = z.infer<typeof deliveryAttributesSchema>;
 export type PickupAttributes = z.infer<typeof pickupAttributesSchema>;
 export type OrderItem = z.infer<typeof orderItemSchema>;
+export type OrderAttributes = z.infer<typeof orderAttributesSchema>;
 
 function pesosInputSchema(message: string) {
 	return z.number(message).int(message).min(0, 'No puede ser negativo').default(0);
@@ -1373,4 +1376,107 @@ export async function getOrderFormOptions(
 		}));
 	const company = { name: settings.COMPANY_NAME, address: settings.COMPANY_ADDRESS };
 	return { products, transporters, company };
+}
+
+/** One row of the order's timeline. The edit's fields stay in `events` until it's expanded. */
+export type TimelineEntry = {
+	id: number;
+	action: 'CREATED' | 'EDITED' | 'STATUS_CHANGED' | 'CANCELLED';
+	/** The status a `STATUS_CHANGED` moved to. */
+	status: OrderStatus | null;
+	/** A cancellation's. */
+	reason: string | null;
+	actorUsername: string;
+	createdAt: number;
+};
+
+/**
+ * The order's events, newest first, as `actor` may see them: `WAREHOUSE` and `DRIVER` get only its
+ * status changes, which Phase 10's operational detail shows them. Null when there's no such order.
+ */
+export async function getOrderTimeline(
+	db: D1Database,
+	id: unknown,
+	actor: Actor | null
+): Promise<TimelineEntry[] | null> {
+	requireRole(actor, ROLES);
+	const parsedId = orderIdSchema.safeParse(id);
+	if (!parsedId.success || null === (await findRow(db, parsedId.data))) {
+		return null;
+	}
+	const { results } = await db
+		.prepare(
+			`select id, action, json_extract(after, '$.status') as status, reason,
+			actor_username as actorUsername, created_at as createdAt from events
+			where entity_type = 'ORDER' and entity_id = ? order by created_at desc, id desc`
+		)
+		.bind(parsedId.data)
+		.all<TimelineEntry>();
+	return filterTimelineForActor(results, actor);
+}
+
+// What an edit logs, read back through each column's schema. The client shows as its name, and the
+// totals the lines and the discount work out aren't changes of their own: z.object drops them.
+function jsonColumn<T extends z.ZodType>(schema: T) {
+	return z
+		.string()
+		.transform((json): unknown => JSON.parse(json))
+		.pipe(schema)
+		.optional();
+}
+
+const editedFieldsSchema = z.object({
+	event_date: z.iso.date().optional(),
+	delivery_date: z.iso.date().optional(),
+	pickup_date: z.iso.date().optional(),
+	rental_days: z.number().int().optional(),
+	discount: pesosSchema.optional(),
+	transport_cost: pesosSchema.optional(),
+	deposit_amount: pesosSchema.optional(),
+	client_attributes: jsonColumn(clientAttributesSchema),
+	delivery_attributes: jsonColumn(deliveryAttributesSchema),
+	pickup_attributes: jsonColumn(pickupAttributesSchema),
+	order_items: jsonColumn(orderItemsSchema),
+	attributes: jsonColumn(orderAttributesSchema)
+});
+
+export type EditedFields = z.infer<typeof editedFieldsSchema>;
+
+function toEditedFields(json: string | null): EditedFields {
+	return editedFieldsSchema.parse(eventFieldsSchema.parse(JSON.parse(json ?? '{}')));
+}
+
+const changeInputSchema = z.object({ order: orderIdSchema, event: orderIdSchema });
+
+type EditRow = { action: string; before: string | null; after: string | null };
+
+/**
+ * One edit's diff, fetched when its timeline row opens. Null for an event that isn't an edit of
+ * that order, or one `actor` doesn't see on its timeline.
+ */
+export async function getOrderChange(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<OrderChange[] | null> {
+	requireRole(actor, ROLES);
+	const parsed = changeInputSchema.safeParse(input);
+	if (!parsed.success) {
+		return null;
+	}
+	const row = await db
+		.prepare(
+			`select action, before, after from events
+			where id = ? and entity_type = 'ORDER' and entity_id = ?`
+		)
+		.bind(parsed.data.event, parsed.data.order)
+		.first<EditRow>();
+	if (
+		null === row ||
+		'EDITED' !== row.action ||
+		0 === filterTimelineForActor([row], actor).length
+	) {
+		return null;
+	}
+	return describeOrderEdit(toEditedFields(row.before), toEditedFields(row.after));
 }
