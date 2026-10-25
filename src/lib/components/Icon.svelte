@@ -29,6 +29,7 @@
 		| 'contact'
 		| 'lock'
 		| 'clipboard'
+		| 'pin'
 		| 'whatsapp';
 
 	interface Props {

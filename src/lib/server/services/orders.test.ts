@@ -11,6 +11,7 @@ import {
 	createOrder,
 	getAvailability,
 	getOrder,
+	getOrderDetail,
 	getOrderWarnings,
 	listOrders,
 	ORDERS_PAGE_SIZE,
@@ -776,5 +777,130 @@ test('the name search ignores accents, tildes, case and extra spaces, every word
 test('WAREHOUSE and DRIVER get a 403 on the list', async () => {
 	for (const actor of [warehouse, driver]) {
 		await expect(listOrders(db, {}, actor)).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
+	}
+});
+
+type Payment = { concept: string; amount: number; reversesId?: number; date?: string };
+
+// Through the cash service's single insert, as every module records money.
+async function pay(orderId: number, payments: Payment[]) {
+	const statements = payments.flatMap(({ concept, amount, reversesId, date }) =>
+		movementStatements(db, admin, {
+			concept: concept as 'INSTALLMENT',
+			amount,
+			payment_method: 'TRANSFER',
+			movement_date: date ?? '2026-08-01',
+			entity_type: 'ORDER',
+			entity_id: orderId,
+			reverses_id: reversesId ?? null,
+			attributes: {}
+		})
+	);
+	await db.batch(statements);
+}
+
+async function detail(id: number) {
+	const found = await getOrderDetail(db, String(id), sales);
+	if (null === found) {
+		throw new Error(`Order ${id} not found`);
+	}
+	return found;
+}
+
+test('two installments and a refund: what was paid, and the balance left', async () => {
+	const id = await create();
+	await pay(id, [
+		{ concept: 'INSTALLMENT', amount: 500000 },
+		{ concept: 'INSTALLMENT', amount: 300000 },
+		{ concept: 'INSTALLMENT_REFUND', amount: -100000 }
+	]);
+	expect(await detail(id)).toMatchObject({ paid: 700000, balanceDue: 480000, depositHeld: 0 });
+});
+
+test('an installment offset from Caja counts as a negative one', async () => {
+	const id = await create();
+	await pay(id, [{ concept: 'INSTALLMENT', amount: 500000 }]);
+	const [original] = (await detail(id)).payments;
+	await pay(id, [{ concept: 'INSTALLMENT', amount: -500000, reversesId: original.id }]);
+	expect(await detail(id)).toMatchObject({ paid: 0, balanceDue: 1180000 });
+});
+
+test('a deposit and its partial refund are held apart, never lowering the balance', async () => {
+	const id = await create();
+	await pay(id, [
+		{ concept: 'SECURITY_DEPOSIT', amount: 200000 },
+		{ concept: 'DEPOSIT_REFUND', amount: -150000 }
+	]);
+	expect(await detail(id)).toMatchObject({
+		paid: 0,
+		balanceDue: 1180000,
+		depositHeld: 50000,
+		depositAmount: 200000,
+		orderTotal: 1180000
+	});
+});
+
+test('a carrier payment changes neither the balance nor the total', async () => {
+	const delivery = {
+		...order1043.delivery_attributes,
+		method: 'EXTERNAL_CARRIER',
+		carrier_id: WILSON
+	};
+	const id = await create({ ...order1043, delivery_attributes: delivery });
+	await pay(id, [{ concept: 'CARRIER_PAYMENT', amount: -120000 }]);
+	expect(await detail(id)).toMatchObject({ paid: 0, balanceDue: 1180000, orderTotal: 1180000 });
+});
+
+test("an overpaid order's balance comes back negative: the client's credit", async () => {
+	const id = await create();
+	await pay(id, [{ concept: 'INSTALLMENT', amount: 1200000 }]);
+	expect((await detail(id)).balanceDue).toBe(-20000);
+});
+
+test('the detail lists the order movements oldest first, and says who cancelled it and why', async () => {
+	const id = await create();
+	await pay(id, [
+		{ concept: 'SECURITY_DEPOSIT', amount: 200000, date: '2026-08-10' },
+		{ concept: 'INSTALLMENT', amount: 500000, date: '2026-08-02' }
+	]);
+	const other = await create();
+	await pay(other, [{ concept: 'INSTALLMENT', amount: 1000 }]);
+	const order = await detail(id);
+	expect(order.payments).toEqual([
+		{
+			id: 2,
+			movementDate: '2026-08-02',
+			concept: 'INSTALLMENT',
+			amount: 500000,
+			method: 'TRANSFER',
+			otherMethod: null,
+			receiptNumber: 2
+		},
+		{
+			id: 1,
+			movementDate: '2026-08-10',
+			concept: 'SECURITY_DEPOSIT',
+			amount: 200000,
+			method: 'TRANSFER',
+			otherMethod: null,
+			receiptNumber: 1
+		}
+	]);
+	expect(order.cancellation).toBeNull();
+	await cancelOrder(db, { id, reason: 'El cliente aplazó el evento' }, sales);
+	expect((await detail(id)).cancellation).toMatchObject({
+		cancelledBy: 'ventas',
+		reason: 'El cliente aplazó el evento'
+	});
+});
+
+test('an unknown or malformed id has no detail; WAREHOUSE and DRIVER get a 403', async () => {
+	const id = await create();
+	expect(await getOrderDetail(db, '99', sales)).toBeNull();
+	expect(await getOrderDetail(db, 'abc', sales)).toBeNull();
+	for (const actor of [warehouse, driver]) {
+		await expect(getOrderDetail(db, id, actor)).rejects.toSatisfy((thrown) =>
+			isHttpError(thrown, 403)
+		);
 	}
 });

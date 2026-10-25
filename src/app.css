@@ -276,6 +276,14 @@ a:hover {
 	font-weight: var(--weight-bold);
 }
 
+.detail-list__row--plain > :last-child {
+	font-weight: var(--weight-regular);
+}
+
+.detail-list + .section-title {
+	margin-top: var(--space-9);
+}
+
 /* The primary action, last in the body on screens with the bottom navigation (a fixed footer
    would cover it). On a wide screen it sits at the column's right edge. */
 .screen__action {
