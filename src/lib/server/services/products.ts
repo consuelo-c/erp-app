@@ -191,8 +191,8 @@ export type ProductFilters = z.output<typeof listSchema>;
 /** The filters come back parsed: what the screen shows as chosen is what was applied. */
 export type ProductList = { products: Product[]; filters: ProductFilters };
 
-// «mantel» finds «Mantel», «cristaleria» finds «Cristalería».
-function fold(text: string): string {
+/** Lowercase, accents and tildes off: «mantel» finds «Mantel», «cristaleria» finds «Cristalería». */
+export function fold(text: string): string {
 	return text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 }
 

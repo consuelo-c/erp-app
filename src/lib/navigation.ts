@@ -27,7 +27,12 @@ export const DESTINATIONS: Destination[] = [
 		href: resolve('/horas'),
 		paths: [resolve('/horas')]
 	},
-	{ label: 'Pedidos', icon: 'list' },
+	{
+		label: 'Pedidos',
+		icon: 'list',
+		href: resolve('/pedidos'),
+		paths: [resolve('/pedidos')]
+	},
 	{
 		label: 'Contactos',
 		icon: 'contact',
@@ -107,4 +112,21 @@ export function catalogHref(group: string | null, query: Record<string, string> 
 	const search = String(new URLSearchParams(null === group ? query : { grupo: group, ...query }));
 	const productsHref = resolve('/productos');
 	return '' === search ? productsHref : `${productsHref}?${search}`;
+}
+
+/**
+ * The page numbers a pagination shows: the first, the last, and the current one with its
+ * neighbors; `null` is an ellipsis for the pages skipped, never for a single one.
+ */
+export function getPageNumbers(current: number, count: number): (number | null)[] {
+	const shown = [...new Set([1, current - 1, current, current + 1, count])]
+		.filter((pageNumber) => 1 <= pageNumber && pageNumber <= count)
+		.sort((first, second) => first - second);
+	return shown.flatMap((pageNumber, index) => {
+		const gap = pageNumber - (shown[index - 1] ?? pageNumber - 1);
+		if (1 === gap) {
+			return [pageNumber];
+		}
+		return 2 === gap ? [pageNumber - 1, pageNumber] : [null, pageNumber];
+	});
 }
