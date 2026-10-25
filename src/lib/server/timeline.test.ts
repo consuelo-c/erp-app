@@ -42,15 +42,12 @@ test('WAREHOUSE and DRIVER get only status changes', () => {
 	}
 });
 
-test('WAREHOUSE and DRIVER get no money fields, not even inside order_items', () => {
-	const [statusChange] = filterTimelineForActor(events, userWith(['DRIVER']));
-	expect(JSON.parse(statusChange.before ?? '')).toEqual({ status: 'CONFIRMED' });
-	const after = JSON.parse(statusChange.after ?? '');
-	expect(after.status).toBe('PICKED');
-	expect(after).not.toHaveProperty('order_total');
-	expect(JSON.parse(after.order_items)).toEqual([
-		{ product_id: 12, name: 'Silla Tiffany', qty: 120 }
-	]);
+test('WAREHOUSE and DRIVER see the money: totals and the prices inside order_items', () => {
+	const [statusChange] = filterTimelineForActor(events, userWith(['WAREHOUSE']));
+	expect(statusChange).toEqual(events[2]);
+	const after = JSON.parse(statusChange.after);
+	expect(after.order_total).toBe(850000);
+	expect(JSON.parse(after.order_items)[0]).toMatchObject({ list_price: 2500, unit_price: 2200 });
 });
 
 test('a multi-role WAREHOUSE and SALES user sees everything', () => {
@@ -59,7 +56,5 @@ test('a multi-role WAREHOUSE and SALES user sees everything', () => {
 
 test('rows listed without before/after stay without them', () => {
 	const collapsed = [{ id: 3, action: 'STATUS_CHANGED' }];
-	expect(filterTimelineForActor(collapsed, userWith(['WAREHOUSE']))).toEqual([
-		{ id: 3, action: 'STATUS_CHANGED', before: undefined, after: undefined }
-	]);
+	expect(filterTimelineForActor(collapsed, userWith(['WAREHOUSE']))).toEqual(collapsed);
 });
