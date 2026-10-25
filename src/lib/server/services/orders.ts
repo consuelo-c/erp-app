@@ -3,6 +3,7 @@
 // only inform: nothing here blocks on them.
 
 import { z } from 'zod';
+import { addDays } from '$lib/datetime';
 import { fold } from '$lib/format';
 import { normalizePhone } from '$lib/phone';
 import {
@@ -553,6 +554,25 @@ function clientWrite(db: D1Database, actor: Actor, { columns, newClient }: Resol
 	return { values, computed, clientStatements: newClientStatements(db, actor, newClient) };
 }
 
+async function insertOrder(
+	db: D1Database,
+	actor: Actor,
+	{ resolved, status }: { resolved: ResolvedOrder; status: OrderStatus }
+): Promise<SaveResult> {
+	const { values, computed, clientStatements } = clientWrite(db, actor, resolved);
+	// The public lookup's key: it stays out of events, which every role's timeline reads.
+	const statements = auditedInsert(db, {
+		table: 'orders',
+		entityType: 'ORDER',
+		actor,
+		values: { ...values, status },
+		unlogged: { public_token: crypto.randomUUID() },
+		computed
+	});
+	const results = await db.batch([...clientStatements, ...statements]);
+	return { ok: true, id: results[clientStatements.length].meta.last_row_id };
+}
+
 /** A new order, on a client picked or a new one, born a draft: confirming is a step of its own. */
 export async function createOrder(
 	db: D1Database,
@@ -565,21 +585,7 @@ export async function createOrder(
 		return invalidOrder(parsed.error);
 	}
 	const resolved = await resolveColumns(db, parsed.data, null);
-	if ('ok' in resolved) {
-		return resolved;
-	}
-	const { values, computed, clientStatements } = clientWrite(db, actor, resolved);
-	// The public lookup's key: it stays out of events, which every role's timeline reads.
-	const statements = auditedInsert(db, {
-		table: 'orders',
-		entityType: 'ORDER',
-		actor,
-		values: { ...values, status: 'DRAFT' },
-		unlogged: { public_token: crypto.randomUUID() },
-		computed
-	});
-	const results = await db.batch([...clientStatements, ...statements]);
-	return { ok: true, id: results[clientStatements.length].meta.last_row_id };
+	return 'ok' in resolved ? resolved : insertOrder(db, actor, { resolved, status: 'DRAFT' });
 }
 
 const NOT_FOUND: Refusal = { ok: false, message: 'Ese pedido no existe', errors: {} };
@@ -636,6 +642,78 @@ export async function updateOrder(
 	}
 	const resolved = await resolveColumns(db, parsed.data, toOrder(row));
 	return 'ok' in resolved ? resolved : applyEdit(db, actor, { row, resolved });
+}
+
+const extensionInputSchema = z.object({ parent_order_id: z.coerce.number().int().positive() });
+
+const NOT_EXTENDABLE: Refusal = {
+	ok: false,
+	message: 'Solo un pedido entregado se puede extender',
+	errors: {}
+};
+
+// Only the original's products, each up to the quantity the client has.
+function exceedsOriginal(lines: LineInput[], original: Order): Refusal | null {
+	const held = new Map(original.items.map((item) => [item.product_id, item.qty]));
+	for (const [index, line] of lines.entries()) {
+		const qty = held.get(line.product_id);
+		if (undefined === qty) {
+			return refusal(`order_items.${index}.product_id`, `No está en el pedido #${original.id}`);
+		}
+		if (line.qty > qty) {
+			return refusal(
+				`order_items.${index}.qty`,
+				`Máximo ${qty}, lo que tiene el pedido #${original.id}`
+			);
+		}
+	}
+	return null;
+}
+
+async function findExtendable(db: D1Database, input: unknown): Promise<Order | Refusal> {
+	const parsed = extensionInputSchema.safeParse(input);
+	if (!parsed.success) {
+		return invalidOrder(parsed.error);
+	}
+	const row = await findRow(db, parsed.data.parent_order_id);
+	if (null === row) {
+		return NOT_FOUND;
+	}
+	return 'DELIVERED' === row.status ? toOrder(row) : NOT_EXTENDABLE;
+}
+
+/**
+ * Some of a delivered order's products kept for more days: a new order, born DELIVERED, since
+ * they're already at the client's. The original isn't touched. Its client, trips and lines are
+ * copied, each line keeping its name and prices; the dates, rental days and transport are its own.
+ */
+export async function createExtension(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<SaveResult> {
+	requireRole(actor, TAKES_ORDERS);
+	const original = await findExtendable(db, input);
+	if ('ok' in original) {
+		return original;
+	}
+	// The day after the original's pickup, whatever was sent: availability counts both ends of
+	// each range, so starting on the pickup day would count it twice.
+	const deliveryDate = addDays(original.pickupDate, 1);
+	const parsed = orderInputSchema.safeParse({ ...(input as object), delivery_date: deliveryDate });
+	if (!parsed.success) {
+		return invalidOrder(parsed.error);
+	}
+	const exceeded = exceedsOriginal(parsed.data.order_items, original);
+	if (null !== exceeded) {
+		return exceeded;
+	}
+	// Resolved against the original, so its snapshots and its lines' frozen names and prices carry over.
+	const resolved = await resolveColumns(db, parsed.data, {
+		...original,
+		parentOrderId: original.id
+	});
+	return 'ok' in resolved ? resolved : insertOrder(db, actor, { resolved, status: 'DELIVERED' });
 }
 
 // The orders whose products are out of the warehouse, or promised: a draft doesn't hold them yet,
@@ -1144,7 +1222,28 @@ export type OrderDetail = Order & {
 	depositHeld: number;
 	payments: OrderPayment[];
 	cancellation: Cancellation | null;
+	extensions: Extension[];
 };
+
+/** An order made to keep some of this one's products longer. */
+export type Extension = {
+	id: number;
+	status: OrderStatus;
+	deliveryDate: string;
+	pickupDate: string;
+};
+
+// No index: extensions are rare.
+async function findExtensions(db: D1Database, orderId: number): Promise<Extension[]> {
+	const { results } = await db
+		.prepare(
+			`select id, status, delivery_date as deliveryDate, pickup_date as pickupDate from orders
+			where json_extract(attributes, '$.parent_order_id') = ? order by id`
+		)
+		.bind(orderId)
+		.all<Extension>();
+	return results;
+}
 
 type PaymentRow = {
 	id: number;
@@ -1222,18 +1321,19 @@ export async function getOrderDetail(
 		return null;
 	}
 	const orderId = parsedId.data;
-	const [row, payments, cancellation, balances] = await Promise.all([
+	const [row, payments, cancellation, balances, extensions] = await Promise.all([
 		findRow(db, orderId),
 		findPayments(db, orderId),
 		findCancellation(db, orderId),
-		findBalances(db, orderId)
+		findBalances(db, orderId),
+		findExtensions(db, orderId)
 	]);
 	if (null === row) {
 		return null;
 	}
 	const order = toOrder(row);
 	const paid = order.orderTotal - balances.balanceDue;
-	return { ...order, ...balances, paid, payments, cancellation };
+	return { ...order, ...balances, paid, payments, cancellation, extensions };
 }
 
 /** A trip as the printout carries it: the client signs that paper and never sees the carrier. */

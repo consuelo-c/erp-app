@@ -10,6 +10,7 @@
 	import Select from '$lib/components/Select.svelte';
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import {
+		addDays,
 		formatClockTime,
 		formatDayRange,
 		formatLongDay,
@@ -35,7 +36,7 @@
 		OrderSchedule,
 		ReturnMethod
 	} from '$lib/server/services/orders';
-	import OrderLines, { type FormLine } from './OrderLines.svelte';
+	import OrderLines, { toFormLine, type FormLine } from './OrderLines.svelte';
 	import { moveThroughResults } from './order-form';
 
 	// One screen, top to bottom, no wizard: the salesperson fills it in while the client talks.
@@ -45,11 +46,13 @@
 		options: OrderFormOptions;
 		/** Null for a new order. */
 		order: OrderDetail | null;
+		/** The delivered order a new extension comes from. */
+		original?: OrderDetail | null;
 		/** A refused save: its message and each field's. */
 		form: { message: string; errors: Record<string, string> } | null | undefined;
 	}
 
-	let { options, order, form }: Props = $props();
+	let { options, order, original = null, form }: Props = $props();
 
 	// While the save is on its way, so the button doesn't post it twice.
 	let isSaving = $state(false);
@@ -80,16 +83,6 @@
 			address1: trip.address_1,
 			address2: trip.address_2 ?? ''
 		};
-	}
-
-	function linesOf(saved: OrderDetail): FormLine[] {
-		return saved.items.map((item) => ({
-			productId: item.product_id,
-			name: item.name,
-			listPrice: item.list_price,
-			qty: String(item.qty),
-			unitPrice: formatPesos(item.unit_price)
-		}));
 	}
 
 	// The order's client as its snapshot: the contact may have changed since.
@@ -165,7 +158,7 @@
 			deliveryTime: dialOf(trip.time),
 			pickupTime: dialOf(back.time),
 			rentalDays: String(saved.rentalDays),
-			lines: linesOf(saved),
+			lines: saved.items.map(toFormLine),
 			deliveryMethod: trip.method,
 			returnMethod: back.method,
 			delivery: tripOf(trip),
@@ -179,7 +172,25 @@
 		};
 	}
 
+	// An extension starts as its original: the client, the trips and every line. Its dates, from the
+	// day after the original's pickup, and its money are its own.
+	function extensionFields(from: OrderDetail): Fields {
+		return {
+			...savedFields(from),
+			deliveryDate: addDays(from.pickupDate, 1),
+			pickupDate: '',
+			rentalDays: '1',
+			notes: '',
+			discount: '',
+			transport: '',
+			deposit: ''
+		};
+	}
+
 	function readFields(): Fields {
+		if (null !== original) {
+			return extensionFields(original);
+		}
 		return null === order ? structuredClone(NEW_ORDER) : savedFields(order);
 	}
 
@@ -454,7 +465,8 @@
 </script>
 
 {#snippet carrierPicker(id: string, label: string, trip: Trip)}
-	{@const current = 'delivery-carrier' === id ? order?.delivery.carrier : order?.pickup.carrier}
+	{@const saved = order ?? original}
+	{@const current = 'delivery-carrier' === id ? saved?.delivery.carrier : saved?.pickup.carrier}
 	<Field
 		{label}
 		{id}
@@ -493,6 +505,17 @@
 
 	{#if form}
 		<div class="order__notice"><Notice tone="error">{form.message}</Notice></div>
+	{/if}
+
+	{#if original}
+		<div class="order__notice">
+			<Notice tone="info">
+				Sale del pedido
+				<a href={resolve('/(app)/pedidos/[id]', { id: String(original.id) })}>#{original.id}</a>
+				(Entregado): las líneas, con sus precios, el cliente, las direcciones y los métodos. Se guarda
+				como Entregado.
+			</Notice>
+		</div>
 	{/if}
 
 	<div class="order__main">
@@ -572,10 +595,16 @@
 
 		<div class="trips">
 			<div class="trip">
-				<Field label="↧ Entrega" id="delivery-date" error={errorOf('delivery_date')}>
+				<Field
+					label="↧ Entrega"
+					id="delivery-date"
+					error={errorOf('delivery_date')}
+					hint={original ? `El día siguiente a la recogida del pedido #${original.id}.` : ''}
+				>
 					<Input
 						id="delivery-date"
 						type="date"
+						disabled={null !== original}
 						aria-invalid={undefined !== errorOf('delivery_date')}
 						bind:value={deliveryDate}
 					/>
@@ -650,6 +679,7 @@
 			{rangeLabel}
 			rentalDays={rentalDayCount}
 			{errorOf}
+			{original}
 		/>
 	</div>
 
@@ -808,7 +838,9 @@
 		{/if}
 
 		<div class="order__save">
-			<Button type="submit" disabled={isSaving}>Guardar pedido</Button>
+			<Button type="submit" disabled={isSaving}>
+				{original ? 'Guardar extensión' : 'Guardar pedido'}
+			</Button>
 		</div>
 	</div>
 </form>

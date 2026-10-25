@@ -160,6 +160,17 @@
 		</div>
 	{/if}
 
+	{#if order.parentOrderId}
+		<div class="lead-notice">
+			<Notice tone="info">
+				Extensión del pedido
+				<a href={resolve('/(app)/pedidos/[id]', { id: String(order.parentOrderId) })}
+					>#{order.parentOrderId}</a
+				>
+			</Notice>
+		</div>
+	{/if}
+
 	{#if order.cancellation}
 		<div class="lead-notice">
 			<Notice tone="info">
@@ -190,7 +201,17 @@
 	<!-- Payments are recorded in any state, a cancelled order's refunds included. -->
 	<div class="actions">
 		{#if isDraft}
-			<Button onclick={() => (isConfirmOpen = true)}>Confirmar</Button>
+			<Button size="sm" onclick={() => (isConfirmOpen = true)}>Confirmar</Button>
+		{/if}
+		<!-- Products already at the client's, kept for more days: a new order. -->
+		{#if 'DELIVERED' === order.status}
+			<Button
+				variant="secondary"
+				size="sm"
+				href={resolve('/(app)/pedidos/[id]/extension', { id: String(order.id) })}
+			>
+				Crear extensión
+			</Button>
 		{/if}
 		{#if canEdit}
 			<Button
@@ -228,6 +249,24 @@
 			</span>
 		{/if}
 	</div>
+
+	{#if order.extensions.length}
+		<h2 class="section-title">Extensiones</h2>
+		<ul class="detail-list">
+			{#each order.extensions as extension (extension.id)}
+				<li>
+					<a href={resolve('/(app)/pedidos/[id]', { id: String(extension.id) })}>
+						#{extension.id} · {formatShortDay(extension.deliveryDate)} – {formatShortDay(
+							extension.pickupDate
+						)}
+					</a>
+					<Badge tone={ORDER_STATUS_TONES[extension.status]}>
+						{ORDER_STATUS_LABELS[extension.status]}
+					</Badge>
+				</li>
+			{/each}
+		</ul>
+	{/if}
 
 	<h2 class="section-title">Entrega y recogida</h2>
 	<ul class="detail-list">
@@ -458,6 +497,17 @@
 
 	.actions__cancel :global(.btn) {
 		color: var(--error-fg);
+	}
+
+	/* A desktop: every action side by side, sharing the row. */
+	@container (width >= 1024px) {
+		.actions {
+			flex-direction: row;
+		}
+
+		.actions > :global(*) {
+			flex: 1;
+		}
 	}
 
 	.notes {
