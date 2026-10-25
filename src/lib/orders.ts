@@ -85,3 +85,21 @@ export type OrderPaymentConcept = (typeof ORDER_PAYMENT_CONCEPTS)[number];
 export function isOrderInflow(concept: OrderPaymentConcept): boolean {
 	return (ORDER_INFLOWS as readonly string[]).includes(concept);
 }
+
+// A half-letter sheet holds this many lines under the order's header. The totals and the
+// signature take the room of CLOSING_LINES of them, and are never split across two sheets.
+export const LINES_PER_PAGE = 20;
+const CLOSING_LINES = 10;
+
+/** The printout's lines, sheet by sheet: the last one keeps room for the totals and signature. */
+export function splitIntoPages<Line>(lines: Line[]): Line[][] {
+	const pages: Line[][] = [];
+	for (let start = 0; start < lines.length; start += LINES_PER_PAGE) {
+		pages.push(lines.slice(start, start + LINES_PER_PAGE));
+	}
+	const lastPage = pages.at(-1);
+	if (undefined === lastPage || lastPage.length > LINES_PER_PAGE - CLOSING_LINES) {
+		pages.push([]);
+	}
+	return pages;
+}

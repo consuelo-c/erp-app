@@ -211,6 +211,13 @@
 		<Button
 			variant="secondary"
 			size="sm"
+			href={resolve('/(app)/pedidos/[id]/impresion', { id: String(order.id) })}
+		>
+			Imprimir
+		</Button>
+		<Button
+			variant="secondary"
+			size="sm"
 			href={resolve('/(app)/pedidos/[id]/historial', { id: String(order.id) })}
 		>
 			Historial

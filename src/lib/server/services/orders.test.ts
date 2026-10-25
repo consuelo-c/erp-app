@@ -1,4 +1,5 @@
 import { isHttpError } from '@sveltejs/kit';
+import { readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import type { Actor, Role } from '../actor';
@@ -14,6 +15,7 @@ import {
 	getOrder,
 	getOrderChange,
 	getOrderDetail,
+	getOrderPrintout,
 	getOrderTimeline,
 	getOrderWarnings,
 	getPaymentOptions,
@@ -1298,5 +1300,29 @@ test('the warehouse and the driver see only status changes and cancellations', a
 	for (const actor of [warehouse, driver]) {
 		const actions = (await timeline(id, actor)).map(({ action }) => action);
 		expect(actions).toEqual(['CANCELLED', 'STATUS_CHANGED']);
+	}
+});
+
+test('the printout carries no carrier, and the company from its settings', async () => {
+	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
+	const external = { method: 'EXTERNAL_CARRIER', carrier_id: WILSON };
+	const id = await create({
+		...order1043,
+		delivery_attributes: { ...order1043.delivery_attributes, ...external },
+		pickup_attributes: { ...order1043.pickup_attributes, ...external }
+	});
+	const printout = await getOrderPrintout(db, String(id), sales);
+	expect(printout?.company.COMPANY_NAME).toBe('Banquetes Consuelo C');
+	expect(JSON.stringify(printout)).not.toMatch(/Wilson|573119085512/);
+});
+
+test('an unknown order has no printout; WAREHOUSE and DRIVER get a 403', async () => {
+	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
+	const id = await create();
+	expect(await getOrderPrintout(db, '99', sales)).toBeNull();
+	for (const actor of [warehouse, driver]) {
+		await expect(getOrderPrintout(db, id, actor)).rejects.toSatisfy((thrown) =>
+			isHttpError(thrown, 403)
+		);
 	}
 });
