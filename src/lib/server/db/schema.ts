@@ -190,6 +190,58 @@ export const products = sqliteTable(
 	]
 );
 
+// `id` is the number printed as «Pedido #1043», continuing the paper sequence. What the app filters,
+// sorts or indexes is a column; what it only reads lives in four JSON columns, validated with Zod:
+// the client's snapshot, each trip (method, time, address, carrier) and the rest (`attributes`).
+// The lines are JSON too, with `name` and `list_price` frozen when each is added.
+export const orders = sqliteTable(
+	'orders',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		publicToken: text('public_token').notNull().unique(), // crypto.randomUUID()
+		clientId: integer('client_id')
+			.notNull()
+			.references(() => contacts.id),
+		status: text('status').notNull(),
+		hasIncident: integer('has_incident').notNull().default(0),
+		eventDate: text('event_date').notNull(), // YYYY-MM-DD
+		deliveryDate: text('delivery_date').notNull(),
+		pickupDate: text('pickup_date').notNull(),
+		rentalDays: integer('rental_days').notNull(), // drives the price, never derived from the dates
+		clientAttributes: text('client_attributes').notNull(),
+		deliveryAttributes: text('delivery_attributes').notNull(),
+		pickupAttributes: text('pickup_attributes').notNull(),
+		orderItems: text('order_items').notNull(),
+		itemsTotal: integer('items_total').notNull(), // whole pesos, like every money column
+		discount: integer('discount').notNull().default(0),
+		transportCost: integer('transport_cost').notNull().default(0),
+		orderTotal: integer('order_total').notNull(),
+		depositAmount: integer('deposit_amount').notNull().default(0), // held, never part of the total
+		attributes: text('attributes').notNull().default('{}'),
+		...auditColumns
+	},
+	(table) => [
+		index('orders_delivery_date').on(table.deliveryDate),
+		index('orders_pickup_date').on(table.pickupDate),
+		index('orders_event_date').on(table.eventDate),
+		index('orders_status').on(table.status),
+		index('orders_client_id').on(table.clientId),
+		check(
+			'orders_status',
+			sql`${table.status} IN ('DRAFT', 'CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'OUT_FOR_PICKUP', 'COMPLETED', 'CANCELLED')`
+		),
+		// coalesce: a missing method makes json_extract NULL, and a CHECK that evaluates to NULL passes.
+		check(
+			'orders_delivery_method',
+			sql`coalesce(json_extract(${table.deliveryAttributes}, '$.method'), '') IN ('COMPANY_DELIVERY', 'CLIENT_PICKUP', 'EXTERNAL_CARRIER')`
+		),
+		check(
+			'orders_pickup_method',
+			sql`coalesce(json_extract(${table.pickupAttributes}, '$.method'), '') IN ('COMPANY_PICKUP', 'CLIENT_RETURN', 'EXTERNAL_CARRIER')`
+		)
+	]
+);
+
 // All the company's money: the sign is the direction (+ in, − out). Immutable by rule, not by
 // schema: no route edits or deletes a movement, a mistake is corrected with an offsetting one.
 // Linked like `events`, by entity_type + entity_id with no foreign key, so a new business line
