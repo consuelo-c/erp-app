@@ -3,7 +3,14 @@ import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import type { Actor, Role } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
-import { createOrder, getOrder, orderItemsSchema, updateOrder } from './orders';
+import {
+	createOrder,
+	getAvailability,
+	getOrder,
+	getOrderWarnings,
+	orderItemsSchema,
+	updateOrder
+} from './orders';
 
 const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
 
@@ -331,5 +338,161 @@ test('WAREHOUSE and DRIVER get a 403 creating, editing or reading an order', asy
 		for (const refusal of refusals) {
 			expect(isHttpError(refusal, 403)).toBe(true);
 		}
+	}
+});
+
+type Booking = { status: string; delivery: string; pickup: string; qty: number };
+
+// An order of `qty` Tiffany chairs, moved to `status` by hand: transitions are their own unit.
+async function book({ status, delivery, pickup, qty }: Booking): Promise<number> {
+	const lines = [{ product_id: 1, qty, unit_price: 2500 }];
+	const dates = { delivery_date: delivery, pickup_date: pickup, event_date: delivery };
+	const id = await create({ ...order1043, ...dates, order_items: lines, discount: 0 });
+	setStatus(id, status);
+	return id;
+}
+
+async function chairsAvailable(range: object): Promise<number | undefined> {
+	const availability = await getAvailability(db, { ...range, product_ids: [1] }, sales);
+	return availability.find(({ productId }) => 1 === productId)?.available;
+}
+
+test('only orders holding their products subtract: not a draft, a cancelled or a completed one', async () => {
+	for (const status of ['DRAFT', 'CANCELLED', 'COMPLETED']) {
+		await book({ status, delivery: '2026-08-14', pickup: '2026-08-16', qty: 100 });
+	}
+	const range = { delivery_date: '2026-08-15', pickup_date: '2026-08-15' };
+	expect(await chairsAvailable(range)).toBe(500);
+	await book({ status: 'CONFIRMED', delivery: '2026-08-14', pickup: '2026-08-16', qty: 100 });
+	expect(await chairsAvailable(range)).toBe(400);
+});
+
+test('an order subtracts on its delivery day and on its pickup day, both included', async () => {
+	await book({ status: 'PICKED', delivery: '2026-08-14', pickup: '2026-08-16', qty: 100 });
+	const day = (date: string) => chairsAvailable({ delivery_date: date, pickup_date: date });
+	expect(await day('2026-08-13')).toBe(500);
+	expect(await day('2026-08-14')).toBe(400);
+	expect(await day('2026-08-16')).toBe(400);
+	expect(await day('2026-08-17')).toBe(500);
+});
+
+test("a range's availability is its tightest day, and an overbooked product comes back negative", async () => {
+	await book({ status: 'CONFIRMED', delivery: '2026-08-10', pickup: '2026-08-12', qty: 300 });
+	await book({ status: 'DELIVERED', delivery: '2026-08-12', pickup: '2026-08-14', qty: 250 });
+	const range = { delivery_date: '2026-08-08', pickup_date: '2026-08-20' };
+	expect(await chairsAvailable(range)).toBe(-50);
+	const availability = await getAvailability(db, { ...range, product_ids: [1, 2] }, sales);
+	expect(availability).toEqual([
+		{ productId: 1, available: -50 },
+		{ productId: 2, available: 500 }
+	]);
+});
+
+test('the order being edited leaves its own lines out', async () => {
+	const id = await book({
+		status: 'CONFIRMED',
+		delivery: '2026-08-14',
+		pickup: '2026-08-16',
+		qty: 120
+	});
+	const range = { delivery_date: '2026-08-14', pickup_date: '2026-08-16' };
+	expect(await chairsAvailable(range)).toBe(380);
+	expect(await chairsAvailable({ ...range, order_id: String(id) })).toBe(500);
+});
+
+const ASSUMPTION = { date: '2026-08-17', label: 'La Asunción de la Virgen' };
+
+function setHolidays() {
+	database
+		.prepare(
+			`insert into settings (key, value, created_at, created_by, updated_at, updated_by) values ('PAYROLL_HOLIDAYS', ?, ${AUDIT})`
+		)
+		.run(JSON.stringify([ASSUMPTION]));
+}
+
+const trips = {
+	delivery_date: '2026-08-14',
+	delivery_time: '14:00',
+	pickup_date: '2026-08-16',
+	pickup_time: '09:00'
+};
+
+test('a delivery or a pickup on a holiday warns; an event on one shows nothing', async () => {
+	setHolidays();
+	const warnings = (input: object) => getOrderWarnings(db, { ...trips, ...input }, sales);
+	expect((await warnings({})).holidays).toEqual([]);
+	expect((await warnings({ pickup_date: '2026-08-17' })).holidays).toEqual([
+		{ trip: 'PICKUP', ...ASSUMPTION }
+	]);
+	const onDelivery = { delivery_date: '2026-08-17', pickup_date: '2026-08-18' };
+	expect((await warnings(onDelivery)).holidays).toEqual([{ trip: 'DELIVERY', ...ASSUMPTION }]);
+	// The event date isn't part of the input: only the trucks' days count.
+	expect((await warnings({ event_date: '2026-08-17' })).holidays).toEqual([]);
+});
+
+test("a trip at another order's delivery or pickup date and time clashes; a cancelled one doesn't", async () => {
+	setHolidays();
+	const id = await create();
+	const atItsDelivery = {
+		pickup_date: '2026-08-14',
+		pickup_time: '14:00',
+		delivery_date: '2026-08-13'
+	};
+	expect((await getOrderWarnings(db, { ...trips, ...atItsDelivery }, sales)).clashes).toEqual([
+		{ trip: 'PICKUP', orderId: id, clientName: 'Luz Marina Restrepo' }
+	]);
+	const atItsPickup = {
+		delivery_date: '2026-08-16',
+		delivery_time: '09:00',
+		pickup_date: '2026-08-18'
+	};
+	expect((await getOrderWarnings(db, { ...trips, ...atItsPickup }, sales)).clashes).toEqual([
+		{ trip: 'DELIVERY', orderId: id, clientName: 'Luz Marina Restrepo' }
+	]);
+	setStatus(id, 'CANCELLED');
+	expect((await getOrderWarnings(db, trips, sales)).clashes).toEqual([]);
+});
+
+test('an order never clashes with itself, and a time left empty never clashes', async () => {
+	setHolidays();
+	const id = await create();
+	expect((await getOrderWarnings(db, { ...trips, order_id: id }, sales)).clashes).toEqual([]);
+	const noTimes = { ...trips, delivery_time: null, pickup_time: null };
+	expect((await getOrderWarnings(db, noTimes, sales)).clashes).toEqual([]);
+	expect((await getOrderWarnings(db, trips, sales)).clashes).toHaveLength(2);
+});
+
+test('an order saves overbooked, on a holiday and clashing, all at once', async () => {
+	setHolidays();
+	await book({ status: 'CONFIRMED', delivery: '2026-08-17', pickup: '2026-08-18', qty: 450 });
+	const lines = [{ product_id: 1, qty: 100, unit_price: 2500 }];
+	const dates = {
+		delivery_date: '2026-08-17',
+		pickup_date: '2026-08-18',
+		event_date: '2026-08-17'
+	};
+	const id = await create({ ...order1043, ...dates, order_items: lines, discount: 0 });
+	const range = { ...dates, order_id: id };
+	expect(await chairsAvailable(range)).toBe(50);
+	const warnings = await getOrderWarnings(
+		db,
+		{ ...range, delivery_time: '14:00', pickup_time: '09:00' },
+		sales
+	);
+	expect(warnings.holidays).toHaveLength(1);
+	expect(warnings.clashes).toHaveLength(2);
+	expect((await read(id)).items[0].qty).toBe(100);
+});
+
+test('WAREHOUSE and DRIVER get a 403 asking for availability or warnings', async () => {
+	for (const role of ['WAREHOUSE', 'DRIVER'] satisfies Role[]) {
+		const actor: Actor = { ...sales, roles: [role] };
+		const range = { delivery_date: '2026-08-14', pickup_date: '2026-08-16', product_ids: [1] };
+		await expect(getAvailability(db, range, actor)).rejects.toSatisfy((thrown) =>
+			isHttpError(thrown, 403)
+		);
+		await expect(getOrderWarnings(db, range, actor)).rejects.toSatisfy((thrown) =>
+			isHttpError(thrown, 403)
+		);
 	}
 });
