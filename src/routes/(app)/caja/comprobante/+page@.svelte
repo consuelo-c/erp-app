@@ -13,8 +13,12 @@
 	const { movement, company } = $derived(data.receipt);
 	const isInflow = $derived(0 < movement.amount);
 	const title = $derived(isInflow ? 'RECIBO DE CAJA' : 'COMPROBANTE DE EGRESO');
+	// Sales came from the order: Caja isn't theirs.
+	const backsToOrder = $derived(!data.opensCashBook && null !== movement.orderId);
 	const backHref = $derived(
-		`${resolve('/(app)/caja')}?${new URLSearchParams({ movimiento: String(movement.id) })}`
+		backsToOrder
+			? resolve('/(app)/pedidos/[id]', { id: String(movement.orderId) })
+			: `${resolve('/(app)/caja')}?${new URLSearchParams({ movimiento: String(movement.id) })}`
 	);
 	// A PAYROLL movement names its week; a standalone one, its description.
 	const concept = $derived(
@@ -34,7 +38,9 @@
 
 <div class="receipt">
 	<div class="receipt__toolbar">
-		<Button href={backHref} variant="secondary" size="sm" inline>Volver al movimiento</Button>
+		<Button href={backHref} variant="secondary" size="sm" inline>
+			{backsToOrder ? 'Volver al pedido' : 'Volver al movimiento'}
+		</Button>
 		<Button type="button" size="sm" inline onclick={() => window.print()}>Imprimir</Button>
 	</div>
 
@@ -62,6 +68,9 @@
 			<span>{movement.employeeName ?? movement.payee ?? ''}</span>
 		</div>
 		<div class="print-row"><span>Concepto</span><span>{concept}</span></div>
+		{#if null !== movement.orderId}
+			<div class="print-row"><span>Pedido relacionado</span><span>#{movement.orderId}</span></div>
+		{/if}
 		<div class="print-row">
 			<span>Método de pago</span>
 			<span>{movement.otherMethod ?? PAYMENT_METHOD_LABELS[movement.method]}</span>

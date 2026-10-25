@@ -28,9 +28,9 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
 };
 
 export const CASH_CONCEPT_LABELS: Record<CashConcept, string> = {
-	INSTALLMENT: 'Abono',
+	INSTALLMENT: 'Pago',
 	SECURITY_DEPOSIT: 'Depósito de garantía',
-	INSTALLMENT_REFUND: 'Devolución de abono',
+	INSTALLMENT_REFUND: 'Devolución de pago',
 	DEPOSIT_REFUND: 'Devolución de depósito',
 	PAYROLL: 'Pago de nómina',
 	CARRIER_PAYMENT: 'Pago a transportador',

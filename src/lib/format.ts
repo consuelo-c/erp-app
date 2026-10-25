@@ -11,6 +11,11 @@ export function formatSignedPesos(pesos: number): string {
 	return `${pesos < 0 ? '−' : '+'}${formatPesos(Math.abs(pesos))}`;
 }
 
+/** A balance or a net: a minus sign below zero, nothing above it: `−$20.000`, `$680.000`. */
+export function formatBalance(pesos: number): string {
+	return `${pesos < 0 ? '−' : ''}${formatPesos(Math.abs(pesos))}`;
+}
+
 /** A whole number with its thousands grouped, the way people type it: `1.750.905`. */
 export function formatInteger(value: number): string {
 	return grouped.format(value);

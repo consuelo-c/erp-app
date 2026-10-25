@@ -12,6 +12,9 @@ import { COMPANY_SETTINGS, readSettings, type CompanySettings } from './settings
 // The cash book, its receipts and every movement recorded by hand.
 const MANAGES_CASH = ['ADMIN', 'MANAGER'] as const;
 
+// Whoever records an order's money in prints its receipt from the order.
+const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
+
 export const CASH_CONCEPTS = [
 	'INSTALLMENT',
 	'SECURITY_DEPOSIT',
@@ -24,6 +27,9 @@ export const CASH_CONCEPTS = [
 ] as const;
 
 export type CashConcept = (typeof CASH_CONCEPTS)[number];
+
+/** The concepts whose money comes in: every other one goes out. An offset flips the sign. */
+const INFLOW_CONCEPTS: readonly CashConcept[] = ['INSTALLMENT', 'SECURITY_DEPOSIT', 'OTHER_INCOME'];
 
 export const PAYMENT_METHODS = ['CASH', 'TRANSFER', 'OTHER'] as const;
 
@@ -138,32 +144,30 @@ const entryBase = z.object({
 
 type EntryForm = z.infer<typeof entryBase>;
 
-// «Otro» says which method; an outflow by transfer names the account the money went to.
+// «Otro» says which method; a transfer names where the money went: the bank an inflow came
+// into, the account an outflow was paid to.
 function checkMethod<T extends z.ZodType<EntryForm>>(isInflow: boolean, schema: T): T {
 	return schema
 		.refine((form) => 'OTHER' !== form.payment_method || undefined !== form.other_method, {
 			path: ['other_method'],
 			message: 'Escribe el medio de pago'
 		})
-		.refine((form) => !needsBankAccount(isInflow, form) || undefined !== form.bank_account, {
+		.refine((form) => !isTransfer(form) || undefined !== form.bank_account, {
 			path: ['bank_account'],
-			message: 'Escribe la cuenta de destino'
+			message: isInflow ? 'Escribe el banco' : 'Escribe la cuenta de destino'
 		});
 }
 
-function needsBankAccount(isInflow: boolean, form: { payment_method: PaymentMethod }): boolean {
-	return !isInflow && 'TRANSFER' === form.payment_method;
+function isTransfer(form: { payment_method: PaymentMethod }): boolean {
+	return 'TRANSFER' === form.payment_method;
 }
 
-// Only the keys the method uses: which one «Otro» was, and an outflow's transfer account.
-function toAttributes(
-	isInflow: boolean,
-	form: EntryForm & { description?: string }
-): Movement['attributes'] {
+// Only the keys the method uses: which one «Otro» was, and a transfer's bank or account.
+function toAttributes(form: EntryForm & { description?: string }): Movement['attributes'] {
 	return {
 		description: form.description,
 		other_method: 'OTHER' === form.payment_method ? form.other_method : undefined,
-		bank_account: needsBankAccount(isInflow, form) ? form.bank_account : undefined,
+		bank_account: isTransfer(form) ? form.bank_account : undefined,
 		notes: form.notes
 	};
 }
@@ -216,7 +220,41 @@ export async function recordMovement(
 		entity_type: null,
 		entity_id: null,
 		payee: form.data.payee,
-		attributes: toAttributes(isInflow, form.data)
+		attributes: toAttributes(form.data)
+	});
+}
+
+/** A movement another module links: its concept, its link and who it's with come from the caller. */
+export type LinkedMovement = {
+	/** Method, amount, date and notes, as the entry form posts them. */
+	form: unknown;
+	concept: CashConcept;
+	entityType: string;
+	entityId: number;
+	payee: string;
+};
+
+/** Records a linked movement as typed: Valor positive, the sign from the concept. */
+export async function recordLinkedMovement(
+	db: D1Database,
+	movement: LinkedMovement,
+	actor: Actor
+): Promise<RecordResult> {
+	const isInflow = INFLOW_CONCEPTS.includes(movement.concept);
+	const schema = checkMethod(isInflow, entryBase.extend({ amount: amountSchema }));
+	const form = schema.safeParse(movement.form);
+	if (!form.success) {
+		return invalid(form.error);
+	}
+	return insertMovement(db, actor, {
+		concept: movement.concept,
+		payment_method: form.data.payment_method,
+		amount: isInflow ? form.data.amount : -form.data.amount,
+		movement_date: form.data.movement_date,
+		entity_type: movement.entityType,
+		entity_id: movement.entityId,
+		payee: movement.payee,
+		attributes: toAttributes(form.data)
 	});
 }
 
@@ -312,12 +350,11 @@ export async function recordOffset(
 		return invalid(form.error);
 	}
 	// ponytail: two corrections racing past the check: the UNIQUE on reverses_id rejects the second as a 500.
-	return insertMovement(db, actor, toOffset(original, isInflow, form.data));
+	return insertMovement(db, actor, toOffset(original, form.data));
 }
 
 function toOffset(
 	original: OriginalRow,
-	isInflow: boolean,
 	form: EntryForm & { description?: string; payee?: string }
 ): Movement {
 	return {
@@ -329,7 +366,7 @@ function toOffset(
 		entity_id: original.entity_id,
 		payee: form.payee ?? original.payee,
 		reverses_id: original.id,
-		attributes: toAttributes(isInflow, form)
+		attributes: toAttributes(form)
 	};
 }
 
@@ -354,6 +391,7 @@ const cashBookFiltersSchema = z.object({
 	method: optional(z.enum(PAYMENT_METHODS)),
 	direction: optional(z.enum(DIRECTIONS)),
 	employee: optional(z.string().trim().min(1)),
+	order: optional(typedPesosSchema), // the order number, typed as #1043
 	min: optional(typedPesosSchema),
 	max: optional(typedPesosSchema),
 	text: optional(z.string().trim().min(1))
@@ -368,7 +406,9 @@ export type CashBookEntry = {
 	concept: CashConcept;
 	amount: number;
 	method: PaymentMethod;
-	/** The link: the payroll week a PAYROLL movement pays and to whom, or a standalone one's payee. */
+	/** The link: the order it belongs to, the payroll week a PAYROLL movement pays and to whom,
+	 * or a standalone one's payee. */
+	orderId: number | null;
 	weekNumber: number | null;
 	employeeName: string | null;
 	payee: string | null;
@@ -453,6 +493,13 @@ const CLAUSES: ((filters: CashBookFilters) => Clause | null)[] = [
 		return { sql: `cash_movements.amount ${'IN' === direction ? '>' : '<'} 0`, params: [] };
 	},
 	({ employee }) => (employee ? employeeClause(containing(employee)) : null),
+	({ order }) =>
+		undefined === order
+			? null
+			: {
+					sql: "cash_movements.entity_type = 'ORDER' and cash_movements.entity_id = ?",
+					params: [order]
+				},
 	({ min }) =>
 		undefined === min ? null : { sql: 'abs(cash_movements.amount) >= ?', params: [min] },
 	({ max }) =>
@@ -475,6 +522,8 @@ type EntryRow = {
 	amount: number;
 	payment_method: PaymentMethod;
 	payee: string | null;
+	entity_type: string | null;
+	entity_id: number | null;
 	attributes: string;
 	receipt_number: number;
 	created_by: string;
@@ -490,6 +539,7 @@ function toEntry(row: EntryRow): CashBookEntry {
 		concept: row.concept,
 		amount: row.amount,
 		method: row.payment_method,
+		orderId: 'ORDER' === row.entity_type ? row.entity_id : null,
 		weekNumber: row.week_number,
 		employeeName: row.full_name,
 		payee: row.payee,
@@ -504,7 +554,8 @@ async function listEntries(db: D1Database, where: Clause): Promise<CashBookEntry
 	const { results } = await db
 		.prepare(
 			`select cash_movements.id, cash_movements.movement_date, cash_movements.concept, cash_movements.amount,
-				cash_movements.payment_method, cash_movements.payee, cash_movements.attributes,
+				cash_movements.payment_method, cash_movements.payee, cash_movements.entity_type,
+				cash_movements.entity_id, cash_movements.attributes,
 				cash_movements.receipt_number, cash_movements.created_by, cash_movements.created_at,
 				payroll_runs.week_number, contacts.full_name
 			from cash_movements
@@ -592,6 +643,10 @@ export async function getMovement(
 	actor: Actor | null
 ): Promise<MovementDetail | null> {
 	requireRole(actor, MANAGES_CASH);
+	return findDetail(db, input);
+}
+
+async function findDetail(db: D1Database, input: unknown): Promise<MovementDetail | null> {
 	const id = z.coerce.number().int().positive().safeParse(input);
 	if (!id.success) {
 		return null;
@@ -613,18 +668,25 @@ export async function getMovement(
 	return null === row ? null : toDetail(row);
 }
 
-/** A movement's printed receipt: its detail and the company's header. */
+/**
+ * A movement's printed receipt: its detail and the company's header. Sales prints an order
+ * movement's from the order; the rest of Caja stays the manager's.
+ */
 export async function getReceipt(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
 ): Promise<{ movement: MovementDetail; company: CompanySettings }> {
+	requireRole(actor, TAKES_ORDERS);
 	const [movement, company] = await Promise.all([
-		getMovement(db, input, actor),
+		findDetail(db, input),
 		readSettings(db, COMPANY_SETTINGS)
 	]);
 	if (null === movement) {
 		error(404, 'Ese movimiento no existe');
+	}
+	if (null === movement.orderId) {
+		requireRole(actor, MANAGES_CASH);
 	}
 	return { movement, company };
 }
