@@ -436,7 +436,7 @@
 	<Modal
 		bind:open={isCancelOpen}
 		title="Cancelar pedido #{order.id}"
-		body="El pedido queda cancelado y solo de lectura; se pueden seguir registrando pagos. No se puede deshacer."
+		body="El pedido queda cancelado y solo de lectura hasta que se reabra como borrador; se pueden seguir registrando pagos."
 	>
 		<form
 			id="cancel"
