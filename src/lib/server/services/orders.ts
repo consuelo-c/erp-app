@@ -9,6 +9,8 @@ import {
 	calculateOrderTotals,
 	isEditableStatus,
 	isLegalTransition,
+	isOrderInflow,
+	ORDER_PAYMENT_CONCEPTS,
 	type OrderTotals,
 	type PricedLine
 } from '$lib/orders';
@@ -18,6 +20,7 @@ import {
 	containing,
 	foldedSql,
 	optional,
+	recordLinkedMovement,
 	typedPesosSchema,
 	type CashConcept,
 	type PaymentMethod
@@ -25,6 +28,7 @@ import {
 import { listProducts, type Product } from './products';
 import {
 	generateDocumentId,
+	getContact,
 	INVALID_PHONE,
 	listTransporters,
 	newClientStatements,
@@ -35,6 +39,9 @@ import { readSettings } from './settings';
 
 // The commercial side: whoever takes orders creates and edits them.
 const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
+
+// Money out of an order, refunds included, is the manager's.
+const PAYS_OUT = ['ADMIN', 'MANAGER'] as const;
 
 export const ORDER_STATUSES = [
 	'DRAFT',
@@ -1115,6 +1122,8 @@ export type OrderPayment = {
 	method: PaymentMethod;
 	/** «¿Cuál medio de pago?» for `OTHER`. */
 	otherMethod: string | null;
+	/** The client's name, or the carrier's for a carrier payment, as it was recorded. */
+	payee: string | null;
 	receiptNumber: number;
 };
 
@@ -1122,7 +1131,7 @@ export type OrderPayment = {
 export type Cancellation = { cancelledAt: number; cancelledBy: string; reason: string };
 
 /**
- * The order with its money: «Abonado» is what its installments and refunds add up to, the deposit
+ * The order with its money: «Pagado» is what its installments and refunds add up to, the deposit
  * held what its deposits and their refunds do. A carrier payment touches neither: it's the
  * company's money out, not the client's.
  */
@@ -1141,6 +1150,7 @@ type PaymentRow = {
 	amount: number;
 	payment_method: PaymentMethod;
 	other_method: string | null;
+	payee: string | null;
 	receipt_number: number;
 };
 
@@ -1152,6 +1162,7 @@ function toPayment(row: PaymentRow): OrderPayment {
 		amount: row.amount,
 		method: row.payment_method,
 		otherMethod: row.other_method,
+		payee: row.payee,
 		receiptNumber: row.receipt_number
 	};
 }
@@ -1160,7 +1171,7 @@ async function findPayments(db: D1Database, orderId: number): Promise<OrderPayme
 	const { results } = await db
 		.prepare(
 			`select id, movement_date, concept, amount, payment_method,
-			json_extract(attributes, '$.other_method') as other_method, receipt_number
+			json_extract(attributes, '$.other_method') as other_method, payee, receipt_number
 			from cash_movements where entity_type = 'ORDER' and entity_id = ?
 			order by movement_date, id`
 		)
@@ -1220,6 +1231,108 @@ export async function getOrderDetail(
 	const order = toOrder(row);
 	const paid = order.orderTotal - balances.balanceDue;
 	return { ...order, ...balances, paid, payments, cancellation };
+}
+
+const paymentInputSchema = z.object({
+	order_id: orderIdSchema,
+	concept: z.enum(ORDER_PAYMENT_CONCEPTS, 'Escoge el concepto'),
+	trip: z.enum(['DELIVERY', 'PICKUP']).optional(),
+	payee: blankable
+});
+
+type PaymentInput = z.output<typeof paymentInputSchema>;
+
+type TripCarrier = { trip: TripKind; carrier: Carrier };
+
+/** The carriers an order pays, by trip: one when both trips go with the same one. */
+function carriersOf(order: Order): TripCarrier[] {
+	const trips: [TripKind, Carrier | null][] = [
+		['DELIVERY', order.delivery.carrier],
+		['PICKUP', order.pickup.carrier]
+	];
+	const carriers = trips.flatMap(([trip, carrier]) =>
+		null === carrier ? [] : [{ trip, carrier }]
+	);
+	return carriers.filter(
+		(entry, index) => index === carriers.findIndex((other) => other.carrier.id === entry.carrier.id)
+	);
+}
+
+// The client's name, copied; a carrier payment's is the carrier's, editable. With two carriers
+// the payment says which one.
+function payeeOf(order: Order, payment: PaymentInput): string | Refusal {
+	if ('CARRIER_PAYMENT' !== payment.concept) {
+		return order.client.name;
+	}
+	const carriers = carriersOf(order);
+	if (0 === carriers.length) {
+		return { ok: false, message: 'Este pedido no tiene transportador.', errors: {} };
+	}
+	const chosen =
+		1 === carriers.length ? carriers[0] : carriers.find((entry) => entry.trip === payment.trip);
+	if (undefined === chosen) {
+		return refusal('trip', 'Escoge a cuál transportador');
+	}
+	return payment.payee ?? chosen.carrier.name;
+}
+
+/**
+ * Records one of the order's movements, in any state, cancelled included: nothing blocks on the
+ * balance or the deposit. Valor is typed positive; the concept gives the sign.
+ */
+export async function recordOrderPayment(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<SaveResult> {
+	requireRole(actor, TAKES_ORDERS);
+	const parsed = paymentInputSchema.safeParse(input);
+	if (!parsed.success) {
+		return invalidOrder(parsed.error);
+	}
+	if (!isOrderInflow(parsed.data.concept)) {
+		requireRole(actor, PAYS_OUT);
+	}
+	const row = await findRow(db, parsed.data.order_id);
+	if (null === row) {
+		return { ok: false, message: 'Ese pedido no existe.', errors: {} };
+	}
+	const order = toOrder(row);
+	const payee = payeeOf(order, parsed.data);
+	if ('string' !== typeof payee) {
+		return payee;
+	}
+	const { concept } = parsed.data;
+	const link = { concept, entityType: 'ORDER', entityId: order.id, payee };
+	return recordLinkedMovement(db, { form: input, ...link }, actor);
+}
+
+/** A carrier the order can pay, with the account its contact keeps. */
+export type PayableCarrier = { trip: TripKind; name: string; bankAccount: string | null };
+
+/** What the payment entry pre-fills Cuenta de destino and «Pagado a» from: the contacts' accounts. */
+export type PaymentOptions = { clientBankAccount: string | null; carriers: PayableCarrier[] };
+
+export async function getPaymentOptions(
+	db: D1Database,
+	order: Order,
+	actor: Actor | null
+): Promise<PaymentOptions> {
+	requireRole(actor, TAKES_ORDERS);
+	const carriers = carriersOf(order);
+	const [client, ...contacts] = await Promise.all(
+		[order.clientId, ...carriers.map((entry) => entry.carrier.id)].map((id) =>
+			getContact(db, id, actor)
+		)
+	);
+	return {
+		clientBankAccount: client?.bankAccount ?? null,
+		carriers: carriers.map(({ trip, carrier }, index) => ({
+			trip,
+			name: carrier.name,
+			bankAccount: contacts[index]?.bankAccount ?? null
+		}))
+	};
 }
 
 /** A product the order form can add: active, with its catalog price and stock. */

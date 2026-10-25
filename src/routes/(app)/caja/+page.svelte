@@ -21,7 +21,7 @@
 		formatPeriod,
 		formatShortDay
 	} from '$lib/datetime';
-	import { formatPesos, formatReceiptNumber, formatSignedPesos } from '$lib/format';
+	import { formatBalance, formatPesos, formatReceiptNumber, formatSignedPesos } from '$lib/format';
 	import { CASH_CONCEPT_LABELS, PAYMENT_METHOD_LABELS } from '$lib/labels';
 	import { CASH_TABS } from '$lib/navigation';
 	import type { CashBookEntry, MovementDetail, ReceiptReference } from '$lib/server/services/cash';
@@ -46,6 +46,7 @@
 			filters.direction,
 			filters.concept,
 			filters.method,
+			filters.order,
 			filters.employee,
 			filters.min,
 			filters.max,
@@ -55,7 +56,7 @@
 	const extras = $derived(
 		0 === extraCount ? '' : ` · ${extraCount} ${1 === extraCount ? 'filtro más' : 'filtros más'}`
 	);
-	const net = $derived(`${totals.net < 0 ? '−' : ''}${formatPesos(Math.abs(totals.net))}`);
+	const net = $derived(formatBalance(totals.net));
 
 	let isSheetOpen = $state(false);
 	let areFiltersShown = $state(false);
@@ -91,9 +92,16 @@
 		current: filters.method ?? ''
 	});
 
-	// The link: the payroll week it pays, or the third party of a standalone movement.
+	// The link: the order it belongs to, the payroll week it pays, or a standalone movement's party.
 	function link(entry: CashBookEntry): string {
+		if (null !== entry.orderId) {
+			return `pedido #${entry.orderId}`;
+		}
 		return null === entry.weekNumber ? (entry.payee ?? '') : `Semana ${entry.weekNumber}`;
+	}
+
+	function orderHref(orderId: number): string {
+		return resolve('/(app)/pedidos/[id]', { id: String(orderId) });
 	}
 
 	// Who the money went to or came from: the employee paid, or the payee.
@@ -107,7 +115,7 @@
 
 	// A phone's second line: what it was and for whom.
 	function summary(entry: CashBookEntry): string {
-		if (null === entry.weekNumber) {
+		if (null === entry.weekNumber && null === entry.orderId) {
 			return joined(entry.description, entry.payee);
 		}
 		return joined(link(entry), party(entry));
@@ -148,9 +156,12 @@
 		return `${receiptTitle(receipt)} # ${formatReceiptNumber(receipt.receiptNumber)}`;
 	}
 
-	// A PAYROLL movement says which week it paid.
+	// A PAYROLL movement says which week it paid, an order's which order.
 	function detailTitle(detail: MovementDetail): string {
 		const concept = CASH_CONCEPT_LABELS[detail.concept];
+		if (null !== detail.orderId) {
+			return `${concept} · #${detail.orderId}`;
+		}
 		return null === detail.weekNumber ? concept : `${concept} · semana ${detail.weekNumber}`;
 	}
 
@@ -216,15 +227,26 @@
 			</Select>
 		</Field>
 		{@render choice(methodChoice, prefix)}
-		<Field label="Empleado" id="{prefix}empleado">
-			<Input
-				id="{prefix}empleado"
-				name="empleado"
-				type="search"
-				placeholder="Nombre del empleado"
-				value={filters.employee ?? ''}
-			/>
-		</Field>
+		<div class="field-row">
+			<Field label="Pedido" id="{prefix}pedido">
+				<Input
+					id="{prefix}pedido"
+					name="pedido"
+					inputmode="numeric"
+					placeholder="#1043"
+					value={undefined === filters.order ? '' : `#${filters.order}`}
+				/>
+			</Field>
+			<Field label="Empleado" id="{prefix}empleado">
+				<Input
+					id="{prefix}empleado"
+					name="empleado"
+					type="search"
+					placeholder="Nombre"
+					value={filters.employee ?? ''}
+				/>
+			</Field>
+		</div>
 		<div class="field-row">
 			<Field label="Valor desde" id="{prefix}minimo">
 				<Input
@@ -284,11 +306,18 @@
 		{#if null !== detail.weekNumber}
 			<li><span>Nómina</span><span>Semana {detail.weekNumber}</span></li>
 		{/if}
+		{#if null !== detail.orderId}
+			<li><span>Pedido</span><span>#{detail.orderId}</span></li>
+		{/if}
 		<li>
 			<span>Método</span><span>{detail.otherMethod ?? PAYMENT_METHOD_LABELS[detail.method]}</span>
 		</li>
 		{#if detail.bankAccount}
-			<li><span>Cuenta de destino</span><span>{detail.bankAccount}</span></li>
+			<li>
+				<span>{0 < detail.amount ? 'Banco' : 'Cuenta de destino'}</span><span
+					>{detail.bankAccount}</span
+				>
+			</li>
 		{/if}
 		{#if detail.notes}
 			<li><span>Notas</span><span>{detail.notes}</span></li>
@@ -318,7 +347,10 @@
 		>
 			{0 < detail.amount ? 'Imprimir recibo de caja' : 'Imprimir comprobante de egreso'}
 		</Button>
-		<!-- Where the money came from or went to: the settlement it paid. -->
+		<!-- Where the money came from or went to: its order, or the settlement it paid. -->
+		{#if null !== detail.orderId}
+			<Button variant="secondary" href={orderHref(detail.orderId)}>Ver origen</Button>
+		{/if}
 		{#if detail.settlement}
 			<Button
 				variant="secondary"
@@ -504,7 +536,15 @@
 												</b>
 											</td>
 											<td>{PAYMENT_METHOD_LABELS[entry.method]}</td>
-											<td>{link(entry)}</td>
+											<td>
+												{#if null === entry.orderId}
+													{link(entry)}
+												{:else}
+													<a href={resolve('/(app)/pedidos/[id]', { id: String(entry.orderId) })}
+														>{link(entry)}</a
+													>
+												{/if}
+											</td>
 											<td>{entry.recordedBy}</td>
 										</tr>
 									{/each}

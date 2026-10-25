@@ -12,7 +12,7 @@
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import { formatClockTime, formatInstant, formatLongDay, formatShortDay } from '$lib/datetime';
-	import { formatPesos, formatReceiptNumber, formatSignedPesos } from '$lib/format';
+	import { formatBalance, formatPesos, formatReceiptNumber, formatSignedPesos } from '$lib/format';
 	import {
 		CASH_CONCEPT_LABELS,
 		DELIVERY_METHOD_LABELS,
@@ -58,13 +58,27 @@
 			: `${formatShortDay(date)} · ${formatClockTime(time)}`;
 	}
 
-	// A balance below zero is the client's credit: a minus sign, never a plus on the rest.
-	function formatBalance(pesos: number): string {
-		return `${pesos < 0 ? '−' : ''}${formatPesos(Math.abs(pesos))}`;
-	}
-
 	function mapsHref(address: string): string {
 		return `https://www.google.com/maps/search/?api=1&${new URLSearchParams({ query: address })}`;
+	}
+
+	// Set by the payment entry's redirect: the payment just recorded, its receipt next.
+	const recordedPayment = $derived(
+		order.payments.find((payment) => String(payment.id) === page.url.searchParams.get('pago'))
+	);
+
+	function receiptHref(payment: OrderPayment): string {
+		const query = new URLSearchParams({ movimiento: String(payment.id) });
+		return `${resolve('/(app)/caja/comprobante')}?${query}`;
+	}
+
+	// The method, and who a carrier payment went to: the client is the order's own.
+	function paymentMeta(payment: OrderPayment): string {
+		const method = payment.otherMethod ?? PAYMENT_METHOD_LABELS[payment.method];
+		const payee = 'CARRIER_PAYMENT' === payment.concept ? payment.payee : null;
+		return [formatLongDay(payment.movementDate), method, payee, receiptName(payment)]
+			.filter(Boolean)
+			.join(' · ');
 	}
 
 	function receiptName(payment: OrderPayment): string {
@@ -136,6 +150,16 @@
 		<div class="lead-notice"><Notice tone="success">Pedido guardado con éxito</Notice></div>
 	{/if}
 
+	{#if recordedPayment}
+		<div class="lead-notice">
+			<Notice tone="success">
+				Pago registrado: {CASH_CONCEPT_LABELS[recordedPayment.concept]} · {formatPesos(
+					Math.abs(recordedPayment.amount)
+				)}
+			</Notice>
+		</div>
+	{/if}
+
 	{#if order.cancellation}
 		<div class="lead-notice">
 			<Notice tone="info">
@@ -163,27 +187,33 @@
 	</div>
 	<div class="delivery-address">{@render address(delivery.address_1, delivery.address_2)}</div>
 
-	{#if isDraft || canEdit || canCancel}
-		<div class="actions">
-			{#if isDraft}
-				<Button onclick={() => (isConfirmOpen = true)}>Confirmar</Button>
-			{/if}
-			{#if canEdit}
-				<Button
-					variant="secondary"
-					size="sm"
-					href={resolve('/(app)/pedidos/[id]/editar', { id: String(order.id) })}
-				>
-					Editar
-				</Button>
-			{/if}
-			{#if canCancel}
-				<span class="actions__cancel">
-					<Button variant="secondary" size="sm" onclick={startCancel}>Cancelar pedido</Button>
-				</span>
-			{/if}
-		</div>
-	{/if}
+	<!-- Payments are recorded in any state, a cancelled order's refunds included. -->
+	<div class="actions">
+		{#if isDraft}
+			<Button onclick={() => (isConfirmOpen = true)}>Confirmar</Button>
+		{/if}
+		{#if canEdit}
+			<Button
+				variant="secondary"
+				size="sm"
+				href={resolve('/(app)/pedidos/[id]/editar', { id: String(order.id) })}
+			>
+				Editar
+			</Button>
+		{/if}
+		<Button
+			variant="secondary"
+			size="sm"
+			href={resolve('/(app)/pedidos/[id]/pago', { id: String(order.id) })}
+		>
+			Registrar pago
+		</Button>
+		{#if canCancel}
+			<span class="actions__cancel">
+				<Button variant="secondary" size="sm" onclick={startCancel}>Cancelar pedido</Button>
+			</span>
+		{/if}
+	</div>
 
 	<h2 class="section-title">Entrega y recogida</h2>
 	<ul class="detail-list">
@@ -253,7 +283,7 @@
 			<span>Total</span><span>{formatPesos(order.orderTotal)}</span>
 		</li>
 		<li class="detail-list__row--plain">
-			<span>Abonado</span><span>{formatBalance(order.paid)}</span>
+			<span>Pagado</span><span>{formatBalance(order.paid)}</span>
 		</li>
 		<li class="detail-list__row--strong">
 			<span>Saldo</span><span>{formatBalance(order.balanceDue)}</span>
@@ -277,10 +307,10 @@
 						<span>{CASH_CONCEPT_LABELS[payment.concept]}</span>
 						<b>{formatSignedPesos(payment.amount)}</b>
 					</div>
-					<p class="meta">
-						{formatLongDay(payment.movementDate)} · {payment.otherMethod ??
-							PAYMENT_METHOD_LABELS[payment.method]} · {receiptName(payment)}
-					</p>
+					<p class="meta payment__meta">{paymentMeta(payment)}</p>
+					<Button variant="secondary" size="sm" inline href={receiptHref(payment)}>
+						Imprimir recibo
+					</Button>
 				</li>
 			{/each}
 		</ul>
@@ -443,6 +473,10 @@
 	.payment {
 		padding: var(--space-6) 0;
 		border-bottom: var(--border-w-hair) solid var(--border-default);
+	}
+
+	.payment__meta {
+		margin: var(--space-1) 0 var(--space-4);
 	}
 
 	.payment__head {

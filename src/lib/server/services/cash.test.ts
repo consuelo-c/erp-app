@@ -169,6 +169,7 @@ test("by default the book shows this month's movements, newest first, with link 
 		concept: 'PAYROLL',
 		amount: -480000,
 		method: 'TRANSFER',
+		orderId: null,
 		weekNumber: 42,
 		employeeName: 'Ana Pérez',
 		payee: null,
@@ -198,6 +199,43 @@ test('each filter narrows the book on its own', async () => {
 	expect(await bookIds({ text: 'gloria' })).toEqual([1]);
 	expect(await bookIds({ text: 'jabón' })).toEqual([5, 1]);
 	expect(await bookIds({ text: '%' })).toEqual([]);
+});
+
+// An order movement needs no order row: the link has no foreign key.
+const installment: Movement = {
+	concept: 'INSTALLMENT',
+	payment_method: 'TRANSFER',
+	amount: 500000,
+	movement_date: '2026-10-17',
+	entity_type: 'ORDER',
+	entity_id: 1043,
+	payee: 'Luz Marina Restrepo',
+	attributes: {}
+};
+
+test('an order movement links to its order, which narrows the book and its totals', async () => {
+	await record(income);
+	await record(installment);
+	await record({ ...installment, entity_id: 1051, amount: 300000 });
+	const book = await getCashBook(db, { order: '#1043' }, manager);
+	expect(book.entries).toMatchObject([{ id: 2, orderId: 1043, weekNumber: null }]);
+	expect(book.totals).toEqual({ inflow: 500000, outflow: 0, net: 500000 });
+	expect((await getMovement(db, 1, manager))?.orderId).toBeNull();
+	expect(await bookIds({ order: 'nada' })).toEqual([3, 2, 1]);
+});
+
+test("SALES prints an order movement's receipt, never a standalone one's", async () => {
+	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
+	await record(income);
+	await record(installment);
+	const actor: Actor = { ...manager, roles: ['SALES'] };
+	expect(await getReceipt(db, 2, actor)).toMatchObject({ movement: { id: 2, orderId: 1043 } });
+	await expect(getReceipt(db, 1, actor)).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
+	for (const role of ['WAREHOUSE', 'DRIVER'] as const) {
+		await expect(getReceipt(db, 2, { ...manager, roles: [role] })).rejects.toSatisfy((thrown) =>
+			isHttpError(thrown, 403)
+		);
+	}
 });
 
 test('a tampered filter is ignored, not an error', async () => {
@@ -247,6 +285,7 @@ test("a movement's detail has what its receipt prints, plus who recorded it and 
 		amount: -45000,
 		method: 'TRANSFER',
 		otherMethod: null,
+		orderId: null,
 		weekNumber: null,
 		employeeName: null,
 		payee: 'Almacén La Gloria',
@@ -363,17 +402,25 @@ test('«Otro» needs which method, kept in attributes.other_method', async () =>
 	expect(JSON.parse(String(storedMovement(1).attributes))).toMatchObject({ other_method: 'Nequi' });
 });
 
-test('only an outflow by transfer needs, and keeps, the destination account', async () => {
+test("a transfer needs, and keeps, an outflow's account or an inflow's bank", async () => {
 	const transfer = { ...typedExpense, payment_method: 'TRANSFER' };
 	expect(await recordMovement(db, transfer, manager)).toMatchObject({
 		ok: false,
 		errors: { bank_account: 'Escribe la cuenta de destino' }
 	});
+	expect(await recordMovement(db, { ...transfer, direction: 'IN' }, manager)).toMatchObject({
+		ok: false,
+		errors: { bank_account: 'Escribe el banco' }
+	});
 	const account = 'Bancolombia ahorros 123-456789-01';
 	await recordMovement(db, { ...transfer, bank_account: account }, manager);
-	await recordMovement(db, { ...transfer, direction: 'IN', bank_account: account }, manager);
+	await recordMovement(db, { ...transfer, direction: 'IN', bank_account: 'Davivienda' }, manager);
+	await recordMovement(db, { ...typedExpense, bank_account: account }, manager);
 	expect(JSON.parse(String(storedMovement(1).attributes))).toMatchObject({ bank_account: account });
-	expect(JSON.parse(String(storedMovement(2).attributes))).not.toHaveProperty('bank_account');
+	expect(JSON.parse(String(storedMovement(2).attributes))).toMatchObject({
+		bank_account: 'Davivienda'
+	});
+	expect(JSON.parse(String(storedMovement(3).attributes))).not.toHaveProperty('bank_account');
 });
 
 test('only MANAGER and ADMIN record a movement, even calling the service directly', async () => {
@@ -441,7 +488,12 @@ test('a movement is offset once, and a correction never', async () => {
 test("a PAYROLL movement's offset keeps its link; the settlement stays PAID", async () => {
 	const runId = insertRun({ employee: 'Ana Pérez', week: 42 });
 	await record(payroll(runId, -480000));
-	const correction = { reverses_id: '1', payment_method: 'TRANSFER', movement_date: '2026-10-21' };
+	const correction = {
+		reverses_id: '1',
+		payment_method: 'TRANSFER',
+		bank_account: 'Bancolombia',
+		movement_date: '2026-10-21'
+	};
 	expect(await recordOffset(db, correction, manager)).toEqual({ ok: true, id: 2 });
 	expect(storedMovement(2)).toMatchObject({
 		concept: 'PAYROLL',

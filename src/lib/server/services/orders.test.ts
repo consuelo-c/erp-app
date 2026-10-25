@@ -14,10 +14,12 @@ import {
 	getOrder,
 	getOrderDetail,
 	getOrderWarnings,
+	getPaymentOptions,
 	listOrders,
 	ORDERS_PAGE_SIZE,
 	orderItemsSchema,
 	previewConfirmation,
+	recordOrderPayment,
 	updateOrder
 } from './orders';
 
@@ -893,6 +895,7 @@ test('the detail lists the order movements oldest first, and says who cancelled 
 			amount: 500000,
 			method: 'TRANSFER',
 			otherMethod: null,
+			payee: null,
 			receiptNumber: 2
 		},
 		{
@@ -902,6 +905,7 @@ test('the detail lists the order movements oldest first, and says who cancelled 
 			amount: 200000,
 			method: 'TRANSFER',
 			otherMethod: null,
+			payee: null,
 			receiptNumber: 1
 		}
 	]);
@@ -1015,4 +1019,171 @@ test("the form's live check brings the catalog's availability and the warnings, 
 	expect(schedule?.warnings.clashes.map(({ orderId }) => orderId)).toEqual([id]);
 	expect(await checkOrderSchedule(db, { ...trips, pickup_date: '2026-08' }, sales)).toBeNull();
 	expect(await checkOrderSchedule(db, { ...trips, pickup_date: '2026-08-01' }, sales)).toBeNull();
+});
+
+const manager: Actor = { ...sales, username: 'gerente', roles: ['MANAGER'] };
+
+// The payment entry as it posts: every field as text, the order's id from the URL.
+function typedPayment(orderId: number, fields: Record<string, string> = {}) {
+	return {
+		order_id: String(orderId),
+		concept: 'INSTALLMENT',
+		payment_method: 'CASH',
+		amount: '$300.000',
+		movement_date: '2026-08-01',
+		notes: '',
+		...fields
+	};
+}
+
+async function recordPayment(orderId: number, fields: Record<string, string>, actor = manager) {
+	const result = await recordOrderPayment(db, typedPayment(orderId, fields), actor);
+	if (!result.ok) {
+		throw new Error(JSON.stringify(result));
+	}
+	return { ...database.prepare('select * from cash_movements where id = ?').get(result.id) };
+}
+
+function withCarriers(deliveryCarrier: number | null, pickupCarrier: number | null) {
+	const trip = (method: string, carrier: number | null) =>
+		null === carrier ? { method } : { method: 'EXTERNAL_CARRIER', carrier_id: carrier };
+	return {
+		...order1043,
+		delivery_attributes: {
+			...order1043.delivery_attributes,
+			...trip('COMPANY_DELIVERY', deliveryCarrier)
+		},
+		pickup_attributes: { ...order1043.pickup_attributes, ...trip('COMPANY_PICKUP', pickupCarrier) }
+	};
+}
+
+test("an order payment is linked to its order, signed by its concept, its payee the client's name", async () => {
+	const id = await create();
+	const installment = await recordPayment(id, { payee: 'Otro nombre' }, sales);
+	expect(installment).toMatchObject({
+		concept: 'INSTALLMENT',
+		amount: 300000,
+		entity_type: 'ORDER',
+		entity_id: id,
+		payee: 'Luz Marina Restrepo',
+		created_by: 'ventas'
+	});
+	const refund = await recordPayment(id, { concept: 'INSTALLMENT_REFUND', amount: '50.000' });
+	expect(refund).toMatchObject({ amount: -50000, payee: 'Luz Marina Restrepo' });
+	const event = database
+		.prepare("select action, entity_id from events where entity_type = 'CASH_MOVEMENT'")
+		.all();
+	expect(event).toEqual([
+		{ action: 'CREATED', entity_id: installment.id },
+		{ action: 'CREATED', entity_id: refund.id }
+	]);
+	expect(await detail(id)).toMatchObject({ paid: 250000, balanceDue: 930000 });
+});
+
+test('a payment on an order that does not exist is rejected, and writes nothing', async () => {
+	const result = await recordOrderPayment(db, typedPayment(99), manager);
+	expect(result).toMatchObject({ ok: false, message: 'Ese pedido no existe.' });
+	expect(database.prepare('select count(*) as count from cash_movements').get()).toEqual({
+		count: 0
+	});
+});
+
+test('SALES records money in only; WAREHOUSE and DRIVER record nothing: a 403', async () => {
+	const id = await create(withCarriers(WILSON, null));
+	for (const concept of ['INSTALLMENT_REFUND', 'DEPOSIT_REFUND', 'CARRIER_PAYMENT']) {
+		await expect(recordOrderPayment(db, typedPayment(id, { concept }), sales)).rejects.toSatisfy(
+			(thrown) => isHttpError(thrown, 403)
+		);
+	}
+	for (const actor of [warehouse, driver]) {
+		await expect(recordOrderPayment(db, typedPayment(id), actor)).rejects.toSatisfy((thrown) =>
+			isHttpError(thrown, 403)
+		);
+	}
+	await recordPayment(id, { concept: 'SECURITY_DEPOSIT' }, sales);
+});
+
+test('a carrier payment needs an order with a carrier, and goes to its name, editable', async () => {
+	const without = await create();
+	const refused = await recordOrderPayment(
+		db,
+		typedPayment(without, { concept: 'CARRIER_PAYMENT' }),
+		manager
+	);
+	expect(refused).toMatchObject({ ok: false, message: 'Este pedido no tiene transportador.' });
+	const id = await create(withCarriers(null, WILSON));
+	const paid = await recordPayment(id, { concept: 'CARRIER_PAYMENT', amount: '60.000' });
+	expect(paid).toMatchObject({ amount: -60000, payee: 'Wilson Muñoz' });
+	const edited = await recordPayment(id, { concept: 'CARRIER_PAYMENT', payee: 'Wilson M.' });
+	expect(edited.payee).toBe('Wilson M.');
+	expect(await detail(id)).toMatchObject({ paid: 0, balanceDue: 1180000 });
+});
+
+test('with two different carriers, the carrier payment says which one it pays', async () => {
+	const id = await create(withCarriers(ABURRA, WILSON));
+	const unpicked = await recordOrderPayment(
+		db,
+		typedPayment(id, { concept: 'CARRIER_PAYMENT' }),
+		manager
+	);
+	expect(unpicked).toMatchObject({ ok: false, errors: { trip: 'Escoge a cuál transportador' } });
+	const paid = await recordPayment(id, { concept: 'CARRIER_PAYMENT', trip: 'DELIVERY' });
+	expect(paid.payee).toBe('Transportes Aburrá');
+	const same = await create(withCarriers(WILSON, WILSON));
+	expect((await recordPayment(same, { concept: 'CARRIER_PAYMENT' })).payee).toBe('Wilson Muñoz');
+});
+
+test('payments are recorded on a cancelled order too', async () => {
+	const id = await create();
+	await cancelOrder(db, { id, reason: 'El cliente aplazó el evento' }, sales);
+	await recordPayment(id, { concept: 'INSTALLMENT_REFUND' });
+	expect((await detail(id)).balanceDue).toBe(1480000);
+});
+
+test('a transfer out needs the account, a copy the contact or order never change', async () => {
+	const id = await create();
+	const transfer = { concept: 'DEPOSIT_REFUND', payment_method: 'TRANSFER' };
+	const missing = await recordOrderPayment(db, typedPayment(id, transfer), manager);
+	expect(missing).toMatchObject({
+		ok: false,
+		errors: { bank_account: 'Escribe la cuenta de destino' }
+	});
+	const account = 'Bancolombia ahorros 052-334198-07';
+	const refund = await recordPayment(id, { ...transfer, bank_account: account });
+	database.exec(
+		`update contacts set attributes = '{"bank_account":"Otra cuenta"}', full_name = 'Otra' where id = 1`
+	);
+	const edited = { ...order1043, client_id: JORGE, client_name: 'Jorge Iván Betancur' };
+	expect(await updateOrder(db, { ...edited, id }, sales)).toMatchObject({ ok: true });
+	const stored = database.prepare('select payee, attributes from cash_movements').get();
+	expect(stored).toEqual({
+		payee: refund.payee,
+		attributes: JSON.stringify({ bank_account: account })
+	});
+	const bank = { bank_account: 'Davivienda' };
+	const inflow = await recordPayment(id, { payment_method: 'TRANSFER', ...bank });
+	expect(inflow.attributes).toBe(JSON.stringify(bank));
+});
+
+test('nothing blocks on the amounts: above the balance, what was paid, or the deposit held', async () => {
+	const id = await create();
+	await recordPayment(id, { amount: '1.500.000' }, sales);
+	await recordPayment(id, { concept: 'INSTALLMENT_REFUND', amount: '2.000.000' });
+	await recordPayment(id, { concept: 'DEPOSIT_REFUND', amount: '100.000' });
+	expect(await detail(id)).toMatchObject({ paid: -500000, depositHeld: -100000 });
+});
+
+test("the payment entry pre-fills from the client's and each carrier's saved account", async () => {
+	database.exec(
+		`update contacts set attributes = '{"bank_account":"Cuenta Luz"}' where id = ${LUZ_MARINA};
+		update contacts set attributes = '{"bank_account":"Cuenta Wilson"}' where id = ${WILSON};`
+	);
+	const id = await create(withCarriers(ABURRA, WILSON));
+	expect(await getPaymentOptions(db, await read(id), manager)).toEqual({
+		clientBankAccount: 'Cuenta Luz',
+		carriers: [
+			{ trip: 'DELIVERY', name: 'Transportes Aburrá', bankAccount: null },
+			{ trip: 'PICKUP', name: 'Wilson Muñoz', bankAccount: 'Cuenta Wilson' }
+		]
+	});
 });

@@ -71,3 +71,17 @@ const EDITABLE: readonly OrderStatus[] = [
 export function isEditableStatus(status: OrderStatus): boolean {
 	return EDITABLE.includes(status);
 }
+
+// Sales records the money in; only the manager pays it out.
+const ORDER_INFLOWS = ['INSTALLMENT', 'SECURITY_DEPOSIT'] as const;
+const ORDER_OUTFLOWS = ['INSTALLMENT_REFUND', 'DEPOSIT_REFUND', 'CARRIER_PAYMENT'] as const;
+
+/** The movements an order records from its payment entry, in the order the entry offers them. */
+export const ORDER_PAYMENT_CONCEPTS = [...ORDER_INFLOWS, ...ORDER_OUTFLOWS] as const;
+
+export type OrderPaymentConcept = (typeof ORDER_PAYMENT_CONCEPTS)[number];
+
+/** Whether the money comes in: the rest goes out, and only the manager records it. */
+export function isOrderInflow(concept: OrderPaymentConcept): boolean {
+	return (ORDER_INFLOWS as readonly string[]).includes(concept);
+}
