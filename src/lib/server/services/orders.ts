@@ -1,10 +1,12 @@
 // Pedidos: an order, its client's snapshot, its two trips and its lines. Created on an existing
-// client, edited from DRAFT through DELIVERED, never deleted.
+// client, edited from DRAFT through DELIVERED, never deleted. Availability and the form's warnings
+// only inform: nothing here blocks on them.
 
 import { z } from 'zod';
 import { calculateOrderTotals, type OrderTotals, type PricedLine } from '$lib/orders';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
+import { readSettings } from './settings';
 
 // The commercial side: whoever takes orders creates and edits them.
 const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
@@ -550,4 +552,142 @@ export async function updateOrder(
 	}
 	const columns = await resolveColumns(db, parsed.data, toOrder(row));
 	return 'ok' in columns ? columns : applyEdit(db, actor, { row, columns });
+}
+
+// The orders whose products are out of the warehouse, or promised: a draft doesn't hold them yet,
+// and a cancelled or completed order no longer does, so cancelling releases them on its own.
+const RESERVING_STATUSES: readonly OrderStatus[] = [
+	'CONFIRMED',
+	'PICKED',
+	'OUT_FOR_DELIVERY',
+	'DELIVERED',
+	'OUT_FOR_PICKUP'
+];
+
+// An order is never deleted and there's no other to edit: `order_id` is the one being edited.
+const editedOrderSchema = z.coerce.number().int().positive().nullable().default(null);
+
+const tripDatesSchema = z
+	.object({
+		order_id: editedOrderSchema,
+		delivery_date: z.iso.date(),
+		pickup_date: z.iso.date()
+	})
+	.refine((trips) => trips.delivery_date <= trips.pickup_date, 'The pickup is before the delivery');
+
+const availabilitySchema = tripDatesSchema.safeExtend({
+	product_ids: z.array(z.coerce.number().int().positive())
+});
+
+/** What's left of a product on the range's tightest day. Negative when it's overbooked: never clamped. */
+export type Availability = { productId: number; available: number };
+
+// The block covers every day from delivery to pickup, both included. Each day subtracts the lines
+// of the reserving orders whose range holds it; a line's availability is its range's lowest day.
+const AVAILABILITY_SQL = `with recursive days(day) as (
+		select ?1 union all select date(day, '+1 day') from days where day < ?2
+	),
+	reserved(product_id, day, qty) as (
+		select json_extract(item.value, '$.product_id'), days.day,
+			sum(cast(json_extract(item.value, '$.qty') as integer))
+		from days
+		join orders on orders.delivery_date <= days.day and orders.pickup_date >= days.day
+		join json_each(orders.order_items) as item
+		where orders.status in (select value from json_each(?3)) and orders.id is not ?4
+		group by 1, 2
+	)
+	select products.id as productId,
+		min(products.total_quantity - coalesce(reserved.qty, 0)) as available
+	from products
+	join days
+	left join reserved on reserved.product_id = products.id and reserved.day = days.day
+	where products.id in (select value from json_each(?5))
+	group by products.id`;
+
+/**
+ * Each product's availability for the range: a live query, never a reservation or a lock. It only
+ * informs: nothing blocks on it. The order being edited leaves its own lines out.
+ */
+export async function getAvailability(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<Availability[]> {
+	requireRole(actor, TAKES_ORDERS);
+	const range = availabilitySchema.parse(input);
+	const { results } = await db
+		.prepare(AVAILABILITY_SQL)
+		.bind(
+			range.delivery_date,
+			range.pickup_date,
+			JSON.stringify(RESERVING_STATUSES),
+			range.order_id,
+			JSON.stringify(range.product_ids)
+		)
+		.all<Availability>();
+	return results;
+}
+
+export type TripKind = 'DELIVERY' | 'PICKUP';
+
+/** A trip on a holiday in `PAYROLL_HOLIDAYS`: the truck goes out or comes back that day. */
+export type HolidayWarning = { trip: TripKind; date: string; label: string };
+
+/** Another order with a delivery or pickup on this trip's date and time. */
+export type ScheduleClash = { trip: TripKind; orderId: number; clientName: string };
+
+export type OrderWarnings = { holidays: HolidayWarning[]; clashes: ScheduleClash[] };
+
+const warningsSchema = tripDatesSchema.safeExtend({
+	delivery_time: clockTimeSchema.nullable().default(null),
+	pickup_time: clockTimeSchema.nullable().default(null)
+});
+
+type TripSlot = { trip: TripKind; date: string; time: string | null };
+
+// Only the trips: the event date isn't checked.
+async function findHolidayWarnings(db: D1Database, slots: TripSlot[]): Promise<HolidayWarning[]> {
+	const { PAYROLL_HOLIDAYS: holidays } = await readSettings(db, ['PAYROLL_HOLIDAYS']);
+	return slots.flatMap(({ trip, date }) =>
+		holidays.filter((holiday) => date === holiday.date).map(({ label }) => ({ trip, date, label }))
+	);
+}
+
+// A time left empty never clashes. A cancelled order makes no trip, and an order never clashes
+// with itself.
+async function findClashes(
+	db: D1Database,
+	slot: TripSlot,
+	orderId: number | null
+): Promise<ScheduleClash[]> {
+	if (null === slot.time) {
+		return [];
+	}
+	const { results } = await db
+		.prepare(
+			`select id as orderId, json_extract(client_attributes, '$.name') as clientName from orders
+			where status != 'CANCELLED' and id is not ?3 and (
+				(delivery_date = ?1 and json_extract(delivery_attributes, '$.time') = ?2)
+				or (pickup_date = ?1 and json_extract(pickup_attributes, '$.time') = ?2)
+			) order by id`
+		)
+		.bind(slot.date, slot.time, orderId)
+		.all<Omit<ScheduleClash, 'trip'>>();
+	return results.map((clash) => ({ trip: slot.trip, ...clash }));
+}
+
+/** The form's banners: trips on a holiday and schedule clashes. They warn, and the order still saves. */
+export async function getOrderWarnings(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<OrderWarnings> {
+	requireRole(actor, TAKES_ORDERS);
+	const trips = warningsSchema.parse(input);
+	const slots: TripSlot[] = [
+		{ trip: 'DELIVERY', date: trips.delivery_date, time: trips.delivery_time },
+		{ trip: 'PICKUP', date: trips.pickup_date, time: trips.pickup_time }
+	];
+	const clashes = await Promise.all(slots.map((slot) => findClashes(db, slot, trips.order_id)));
+	return { holidays: await findHolidayWarnings(db, slots), clashes: clashes.flat() };
 }
