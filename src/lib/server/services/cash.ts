@@ -333,15 +333,15 @@ function toOffset(
 	};
 }
 
-// Filters come from the URL: an empty or tampered value is ignored, not an error.
-function optional<T extends z.ZodType>(schema: T) {
+/** A filter from the URL: an empty or tampered value is ignored, not an error. */
+export function optional<T extends z.ZodType>(schema: T) {
 	return z
 		.preprocess((value) => ('' === value || null === value ? undefined : value), schema.optional())
 		.catch(undefined);
 }
 
-// Pesos as people type them, $45.000: only the digits count.
-const pesosSchema = z
+/** Pesos as people type them, $45.000: only the digits count. */
+export const typedPesosSchema = z
 	.string()
 	.transform((value) => value.replace(/\D/g, ''))
 	.pipe(z.string().min(1))
@@ -354,8 +354,8 @@ const cashBookFiltersSchema = z.object({
 	method: optional(z.enum(PAYMENT_METHODS)),
 	direction: optional(z.enum(DIRECTIONS)),
 	employee: optional(z.string().trim().min(1)),
-	min: optional(pesosSchema),
-	max: optional(pesosSchema),
+	min: optional(typedPesosSchema),
+	max: optional(typedPesosSchema),
 	text: optional(z.string().trim().min(1))
 });
 

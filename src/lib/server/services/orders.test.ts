@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import type { Actor, Role } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
+import { movementStatements } from './cash';
 import {
 	advanceOrder,
 	cancelOrder,
@@ -11,6 +12,8 @@ import {
 	getAvailability,
 	getOrder,
 	getOrderWarnings,
+	listOrders,
+	ORDERS_PAGE_SIZE,
 	orderItemsSchema,
 	previewConfirmation,
 	updateOrder
@@ -645,4 +648,133 @@ test('the suggested advance rounds to the peso and validates nothing', async () 
 	const id = await create({ ...order1043, transport_cost: 180001 });
 	expect((await previewConfirmation(db, { id }, sales))?.suggestedAdvance).toBe(590001);
 	expect(await previewConfirmation(db, { id: 99 }, sales)).toBeNull();
+});
+
+async function listIds(input: Record<string, string> = {}): Promise<number[]> {
+	return (await listOrders(db, input, sales)).orders.map(({ id }) => id);
+}
+
+// Three orders: Luz Marina's on Aug 15, Jorge's on Aug 22 (a client pickup) and Luz Marina's on Sep 5.
+async function createThree(): Promise<[number, number, number]> {
+	const luzMarina = await create();
+	const atWarehouse = { ...order1043.delivery_attributes, method: 'CLIENT_PICKUP' };
+	const jorge = await create({
+		...order1043,
+		client_id: JORGE,
+		event_date: '2026-08-22',
+		delivery_attributes: atWarehouse,
+		discount: 0
+	});
+	const september = await create({ ...order1043, event_date: '2026-09-05', transport_cost: 0 });
+	return [luzMarina, jorge, september];
+}
+
+test('the list shows every order by event date, latest first, with its summary', async () => {
+	const [luzMarina, jorge, september] = await createThree();
+	const page = await listOrders(db, {}, sales);
+	expect(page.orders.map(({ id }) => id)).toEqual([september, jorge, luzMarina]);
+	expect(page.total).toBe(3);
+	expect(page.orders[1]).toEqual({
+		id: jorge,
+		clientName: 'Jorge Iván Betancur',
+		eventDate: '2026-08-22',
+		status: 'DRAFT',
+		hasIncident: false,
+		deliveryMethod: 'CLIENT_PICKUP',
+		orderTotal: 1284000,
+		balanceDue: 1284000
+	});
+});
+
+test("the balance is the total less the order's installments and refunds, not its deposit", async () => {
+	const id = await create();
+	const payment = {
+		payment_method: 'TRANSFER',
+		movement_date: '2026-08-01',
+		entity_type: 'ORDER',
+		entity_id: id,
+		attributes: {}
+	} as const;
+	await db.batch([
+		...movementStatements(db, sales, { ...payment, concept: 'INSTALLMENT', amount: 500000 }),
+		...movementStatements(db, sales, { ...payment, concept: 'SECURITY_DEPOSIT', amount: 200000 })
+	]);
+	expect((await listOrders(db, {}, sales)).orders[0].balanceDue).toBe(680000);
+});
+
+test('the filters combine, each over the order snapshot', async () => {
+	const [luzMarina, jorge, september] = await createThree();
+	database.exec(
+		"update contacts set full_name = 'Otro nombre', phone = '573000000000' where id = 1"
+	);
+	expect(await listIds({ phone: '442 88' })).toEqual([september, luzMarina]);
+	expect(await listIds({ phone: '44' })).toHaveLength(3);
+	expect(await listIds({ name: 'BETANCUR' })).toEqual([jorge]);
+	expect(await listIds({ from: '2026-08-22', to: '2026-08-22' })).toEqual([jorge]);
+	expect(await listIds({ from: '2026-08-16' })).toEqual([september, jorge]);
+	expect(await listIds({ to: '2026-08-31', name: 'luz' })).toEqual([luzMarina]);
+	expect(await listIds({ min: '$1.200.000' })).toEqual([jorge]);
+	expect(await listIds({ max: '1.100.000' })).toEqual([september]);
+	setStatus(luzMarina, 'CONFIRMED');
+	expect(await listIds({ status: 'CONFIRMED' })).toEqual([luzMarina]);
+});
+
+test('incidents only is its own filter, in SQL', async () => {
+	const [luzMarina] = await createThree();
+	database.exec(`update orders set has_incident = 1 where id = ${luzMarina}`);
+	expect(await listIds({ hasIncident: '1' })).toEqual([luzMarina]);
+	expect((await listOrders(db, { hasIncident: '1' }, sales)).orders[0].hasIncident).toBe(true);
+});
+
+test('an empty or tampered value is ignored, not an error', async () => {
+	await createThree();
+	const page = await listOrders(
+		db,
+		{ status: 'FOO', from: 'ayer', min: 'mucho', hasIncident: 'sí', phone: '' },
+		sales
+	);
+	expect(page.orders).toHaveLength(3);
+	expect(page.filters).toEqual({ page: 1 });
+});
+
+test('the list is paginated in SQL, a page past the last showing the last', async () => {
+	for (let i = 0; i <= ORDERS_PAGE_SIZE; i += 1) {
+		await create();
+	}
+	const first = await listOrders(db, {}, sales);
+	expect(first.orders).toHaveLength(ORDERS_PAGE_SIZE);
+	expect(first).toMatchObject({ total: ORDERS_PAGE_SIZE + 1, pageCount: 2 });
+	const second = await listOrders(db, { page: '2' }, sales);
+	expect(second.orders.map(({ id }) => id)).toEqual([1]);
+	expect(second.filters.page).toBe(2);
+	const beyond = await listOrders(db, { page: '9' }, sales);
+	expect(beyond.orders.map(({ id }) => id)).toEqual([1]);
+	expect(beyond.filters.page).toBe(2);
+	expect((await listOrders(db, { page: 'dos' }, sales)).filters.page).toBe(1);
+});
+
+test('no order at all is one empty page', async () => {
+	expect(await listOrders(db, {}, sales)).toMatchObject({ orders: [], total: 0, pageCount: 1 });
+});
+
+test('the name search ignores accents, tildes, case and extra spaces, every word in any order', async () => {
+	const [luzMarina, jorge] = await createThree();
+	database.exec(
+		`update orders set client_attributes = '{"name":"ÁNGELA MARÍA NÚÑEZ ARGÜELLO","phone":"573000000000"}' where id = ${luzMarina}`
+	);
+	expect(await listIds({ name: 'ivan     betancur' })).toEqual([jorge]);
+	expect(await listIds({ name: '  BETANCUR   jorge ' })).toEqual([jorge]);
+	expect(await listIds({ name: 'Iván Betancur' })).toEqual([jorge]);
+	expect(await listIds({ name: 'angela nunez arguello' })).toEqual([luzMarina]);
+	expect(await listIds({ name: 'maría núñez' })).toEqual([luzMarina]);
+	expect(await listIds({ name: 'jorge restrepo' })).toEqual([]);
+	expect((await listOrders(db, { name: 'ivan     betancur' }, sales)).filters.name).toBe(
+		'ivan betancur'
+	);
+});
+
+test('WAREHOUSE and DRIVER get a 403 on the list', async () => {
+	for (const actor of [warehouse, driver]) {
+		await expect(listOrders(db, {}, actor)).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
+	}
 });

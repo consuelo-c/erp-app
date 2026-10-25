@@ -11,6 +11,8 @@ import {
 } from '$lib/orders';
 import { ROLES, requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
+import { containing, optional, typedPesosSchema } from './cash';
+import { fold } from './products';
 import { readSettings } from './settings';
 
 // The commercial side: whoever takes orders creates and edits them.
@@ -850,4 +852,166 @@ export async function previewConfirmation(
 	]);
 	const suggestedAdvance = Math.round((order.orderTotal * percentage) / 100);
 	return { shortages: findShortages(order.items, availability), suggestedAdvance };
+}
+
+/** A page of the order list: it never loads the whole table. */
+export const ORDERS_PAGE_SIZE = 20;
+
+// The name as typed, its runs of spaces collapsed: «ivan     betancur» is two words.
+const nameSearchSchema = z
+	.string()
+	.transform((typed) => typed.trim().replace(/\s+/g, ' '))
+	.pipe(z.string().min(1));
+
+// `page` past the last one shows the last: a typed URL is tolerated like any other filter.
+const listSchema = z.object({
+	phone: optional(
+		z
+			.string()
+			.transform((typed) => typed.replace(/\D/g, ''))
+			.pipe(z.string().min(3))
+	),
+	name: optional(nameSearchSchema),
+	from: optional(z.iso.date()),
+	to: optional(z.iso.date()),
+	status: optional(z.enum(ORDER_STATUSES)),
+	min: optional(typedPesosSchema),
+	max: optional(typedPesosSchema),
+	hasIncident: optional(z.literal('1').transform(() => true)),
+	page: z.coerce.number().int().min(1).catch(1)
+});
+
+export type OrderFilters = z.output<typeof listSchema>;
+
+export type OrderSummary = {
+	id: number;
+	clientName: string;
+	eventDate: string;
+	status: OrderStatus;
+	hasIncident: boolean;
+	deliveryMethod: DeliveryMethod;
+	orderTotal: number;
+	/** The total less what was paid: negative is the client's credit. */
+	balanceDue: number;
+};
+
+/** The filters come back parsed, `page` clamped: what the screen shows as chosen is what was applied. */
+export type OrderPage = {
+	orders: OrderSummary[];
+	total: number;
+	pageCount: number;
+	filters: OrderFilters;
+};
+
+type Clause = { sql: string; params: (string | number)[] };
+
+// SQLite's lower() only knows ASCII, so the name's accented letters and tildes are swapped first,
+// to match what `fold` makes of the typed text. ponytail: these seven letters and their capitals
+// only; a stored folded name if names with other accents (ç, à) turn up.
+const FOLDED_LETTERS = [
+	'áa',
+	'ée',
+	'íi',
+	'óo',
+	'úu',
+	'üu',
+	'ñn',
+	'ÁA',
+	'ÉE',
+	'ÍI',
+	'ÓO',
+	'ÚU',
+	'ÜU',
+	'ÑN'
+];
+const FOLDED_NAME_SQL = `lower(${FOLDED_LETTERS.reduce(
+	(sql, [letter, plain]) => `replace(${sql}, '${letter}', '${plain}')`,
+	"json_extract(client_attributes, '$.name')"
+)})`;
+
+// Every word somewhere in the name, in any order: «jorge betancur» finds «Jorge Iván Betancur».
+function nameClauses(name: string | undefined): Clause[] {
+	const words = undefined === name ? [] : fold(name).split(' ');
+	return words.map((word) => ({
+		sql: `${FOLDED_NAME_SQL} like ? escape '\\'`,
+		params: [containing(word)]
+	}));
+}
+
+// Each filter in SQL, over the order's own snapshot: never the contact, whose name or phone may
+// have changed since. The phone is a fragment, so no normalizer: «442 8890» finds 573104428890.
+function listClauses(filters: OrderFilters): Clause[] {
+	const candidates: [unknown, Clause][] = [
+		[
+			filters.phone,
+			{ sql: "json_extract(client_attributes, '$.phone') like ?", params: [`%${filters.phone}%`] }
+		],
+		[filters.from, { sql: 'event_date >= ?', params: [filters.from ?? ''] }],
+		[filters.to, { sql: 'event_date <= ?', params: [filters.to ?? ''] }],
+		[filters.status, { sql: 'status = ?', params: [filters.status ?? ''] }],
+		[filters.min, { sql: 'order_total >= ?', params: [filters.min ?? 0] }],
+		[filters.max, { sql: 'order_total <= ?', params: [filters.max ?? 0] }],
+		[filters.hasIncident, { sql: 'has_incident = 1', params: [] }]
+	];
+	const set = candidates.filter(([value]) => undefined !== value).map(([, clause]) => clause);
+	return [...set, ...nameClauses(filters.name)];
+}
+
+/** What the client still owes: the total less its installments and their refunds. */
+const BALANCE_DUE_SQL = `order_total - coalesce((select sum(amount) from cash_movements
+	where entity_type = 'ORDER' and entity_id = orders.id
+	and concept in ('INSTALLMENT', 'INSTALLMENT_REFUND')), 0)`;
+
+type SummaryRow = {
+	id: number;
+	client_name: string;
+	event_date: string;
+	status: OrderStatus;
+	has_incident: number;
+	delivery_method: DeliveryMethod;
+	order_total: number;
+	balance_due: number;
+};
+
+function toSummary(row: SummaryRow): OrderSummary {
+	return {
+		id: row.id,
+		clientName: row.client_name,
+		eventDate: row.event_date,
+		status: row.status,
+		hasIncident: 1 === row.has_incident,
+		deliveryMethod: row.delivery_method,
+		orderTotal: row.order_total,
+		balanceDue: row.balance_due
+	};
+}
+
+/** One page of orders, latest event first, narrowed by every filter at once. */
+export async function listOrders(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<OrderPage> {
+	requireRole(actor, TAKES_ORDERS);
+	const parsed = listSchema.parse(input ?? {});
+	const clauses = listClauses(parsed);
+	const where = clauses.map((clause) => `(${clause.sql})`).join(' and ') || '1';
+	const params = clauses.flatMap((clause) => clause.params);
+	const count = await db
+		.prepare(`select count(*) as total from orders where ${where}`)
+		.bind(...params)
+		.first<{ total: number }>();
+	const total = count?.total ?? 0;
+	const pageCount = Math.max(1, Math.ceil(total / ORDERS_PAGE_SIZE));
+	const filters = { ...parsed, page: Math.min(parsed.page, pageCount) };
+	const { results } = await db
+		.prepare(
+			`select id, json_extract(client_attributes, '$.name') as client_name, event_date, status,
+			has_incident, json_extract(delivery_attributes, '$.method') as delivery_method,
+			order_total, ${BALANCE_DUE_SQL} as balance_due
+			from orders where ${where} order by event_date desc, id desc limit ? offset ?`
+		)
+		.bind(...params, ORDERS_PAGE_SIZE, (filters.page - 1) * ORDERS_PAGE_SIZE)
+		.all<SummaryRow>();
+	return { orders: results.map(toSummary), total, pageCount, filters };
 }
