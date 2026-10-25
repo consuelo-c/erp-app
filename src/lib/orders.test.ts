@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import type { OrderStatus } from '$lib/server/services/orders';
-import { calculateOrderTotals, isLegalTransition } from './orders';
+import { calculateOrderTotals, isLegalTransition, LINES_PER_PAGE, splitIntoPages } from './orders';
 
 // The Design Brief's order #1043.
 const order1043 = {
@@ -90,4 +90,22 @@ test('skipping a state, going back, leaving the end states and moving into DRAFT
 		expect(isLegal('COMPLETED', to)).toBe(false);
 		expect(isLegal('CANCELLED', to)).toBe(false);
 	}
+});
+
+function linesOf(count: number): number[] {
+	return Array.from({ length: count }, (_, index) => index);
+}
+
+test('a short order prints on one sheet, its totals and signature under its lines', () => {
+	expect(splitIntoPages(linesOf(3))).toEqual([linesOf(3)]);
+});
+
+test('30 lines spill onto a second sheet, which carries the totals and signature', () => {
+	const pages = splitIntoPages(linesOf(30));
+	expect(pages.map((page) => page.length)).toEqual([LINES_PER_PAGE, 30 - LINES_PER_PAGE]);
+	expect(pages.flat()).toEqual(linesOf(30));
+});
+
+test('lines filling the first sheet exactly leave the totals and signature a second one', () => {
+	expect(splitIntoPages(linesOf(LINES_PER_PAGE))).toEqual([linesOf(LINES_PER_PAGE), []]);
 });

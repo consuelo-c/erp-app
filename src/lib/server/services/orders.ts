@@ -37,7 +37,7 @@ import {
 	type NewClient,
 	type Transporter
 } from './contacts';
-import { readSettings } from './settings';
+import { COMPANY_SETTINGS, readSettings, type CompanySettings } from './settings';
 
 // The commercial side: whoever takes orders creates and edits them.
 const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
@@ -1234,6 +1234,50 @@ export async function getOrderDetail(
 	const order = toOrder(row);
 	const paid = order.orderTotal - balances.balanceDue;
 	return { ...order, ...balances, paid, payments, cancellation };
+}
+
+/** A trip as the printout carries it: the client signs that paper and never sees the carrier. */
+type PrintedTrip<Trip extends DeliveryAttributes | PickupAttributes> = Pick<
+	Trip,
+	'method' | 'time' | 'address_1' | 'address_2'
+>;
+
+export type OrderPrintout = {
+	order: Omit<OrderDetail, 'delivery' | 'pickup'> & {
+		delivery: PrintedTrip<DeliveryAttributes>;
+		pickup: PrintedTrip<PickupAttributes>;
+	};
+	company: CompanySettings;
+};
+
+function toPrintedTrip<Trip extends DeliveryAttributes | PickupAttributes>(
+	trip: Trip
+): PrintedTrip<Trip> {
+	return {
+		method: trip.method,
+		time: trip.time,
+		address_1: trip.address_1,
+		address_2: trip.address_2
+	};
+}
+
+/** The order's half-letter sheet, the same for sales, the warehouse and the driver. */
+export async function getOrderPrintout(
+	db: D1Database,
+	id: unknown,
+	actor: Actor | null
+): Promise<OrderPrintout | null> {
+	requireRole(actor, TAKES_ORDERS);
+	const [order, company] = await Promise.all([
+		getOrderDetail(db, id, actor),
+		readSettings(db, COMPANY_SETTINGS)
+	]);
+	if (null === order) {
+		return null;
+	}
+	const delivery = toPrintedTrip(order.delivery);
+	const pickup = toPrintedTrip(order.pickup);
+	return { order: { ...order, delivery, pickup }, company };
 }
 
 const paymentInputSchema = z.object({
