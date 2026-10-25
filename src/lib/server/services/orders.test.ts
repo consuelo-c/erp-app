@@ -4,11 +4,15 @@ import { beforeEach, expect, test } from 'vitest';
 import type { Actor, Role } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
 import {
+	advanceOrder,
+	cancelOrder,
+	confirmOrder,
 	createOrder,
 	getAvailability,
 	getOrder,
 	getOrderWarnings,
 	orderItemsSchema,
+	previewConfirmation,
 	updateOrder
 } from './orders';
 
@@ -495,4 +499,150 @@ test('WAREHOUSE and DRIVER get a 403 asking for availability or warnings', async
 			isHttpError(thrown, 403)
 		);
 	}
+});
+
+const warehouse: Actor = { ...sales, username: 'bodega', roles: ['WAREHOUSE'] };
+const driver: Actor = { ...sales, username: 'conductor', roles: ['DRIVER'] };
+const admin: Actor = { ...sales, username: 'admin', roles: ['ADMIN'] };
+
+async function status(id: number): Promise<string> {
+	return (await read(id)).status;
+}
+
+test('confirming needs no payment, and writes a STATUS_CHANGED event with the status', async () => {
+	const id = await create();
+	expect(await confirmOrder(db, { id }, sales)).toEqual({ ok: true, id });
+	expect(await status(id)).toBe('CONFIRMED');
+	expect(orderEvents()[1]).toEqual({
+		action: 'STATUS_CHANGED',
+		before: { status: 'DRAFT' },
+		after: { status: 'CONFIRMED' }
+	});
+});
+
+test('cancelling asks for a reason, kept in its CANCELLED event; the cancelled order is read-only', async () => {
+	const id = await create();
+	const noReason = await cancelOrder(db, { id, reason: '  ' }, sales);
+	expect(noReason).toMatchObject({ ok: false, errors: { reason: expect.any(String) } });
+	expect(await cancelOrder(db, { id, reason: 'El cliente aplazó el evento' }, sales)).toEqual({
+		ok: true,
+		id
+	});
+	const cancelled = database
+		.prepare("select action, before, after, reason from events where action = 'CANCELLED'")
+		.get();
+	expect(cancelled).toEqual({
+		action: 'CANCELLED',
+		before: '{"status":"DRAFT"}',
+		after: '{"status":"CANCELLED"}',
+		reason: 'El cliente aplazó el evento'
+	});
+	expect(await updateOrder(db, { ...order1043, id }, sales)).toMatchObject({ ok: false });
+	expect(await confirmOrder(db, { id }, sales)).toMatchObject({ ok: false });
+});
+
+test('a delivered order can no longer be cancelled', async () => {
+	const id = await create();
+	setStatus(id, 'DELIVERED');
+	const result = await cancelOrder(db, { id, reason: 'Ya no lo quiere' }, admin);
+	expect(result).toMatchObject({ ok: false });
+	expect(await status(id)).toBe('DELIVERED');
+});
+
+test('WAREHOUSE marks PICKED: operational transitions are open to every role', async () => {
+	const id = await create();
+	await confirmOrder(db, { id }, sales);
+	expect(await advanceOrder(db, { id, status: 'PICKED' }, warehouse)).toEqual({ ok: true, id });
+	expect(await advanceOrder(db, { id, status: 'OUT_FOR_DELIVERY' }, driver)).toEqual({
+		ok: true,
+		id
+	});
+	expect(orderEvents().at(-1)).toMatchObject({
+		action: 'STATUS_CHANGED',
+		after: { status: 'OUT_FOR_DELIVERY' }
+	});
+});
+
+test('DRIVER cannot confirm or cancel an order', async () => {
+	const id = await create();
+	for (const attempt of [
+		confirmOrder(db, { id }, driver),
+		cancelOrder(db, { id, reason: 'No contesta' }, driver)
+	]) {
+		await expect(attempt).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
+	}
+	expect(await status(id)).toBe('DRAFT');
+});
+
+test('the operational path cannot confirm or cancel, whoever asks', async () => {
+	const id = await create();
+	for (const target of ['CONFIRMED', 'CANCELLED', 'DRAFT']) {
+		const result = await advanceOrder(db, { id, status: target }, admin);
+		expect(result).toMatchObject({ ok: false, errors: { status: expect.any(String) } });
+	}
+	expect(await status(id)).toBe('DRAFT');
+});
+
+test('an illegal transition fails for every role, and writes nothing', async () => {
+	const id = await create();
+	await confirmOrder(db, { id }, sales);
+	for (const actor of [admin, sales, warehouse]) {
+		expect(await advanceOrder(db, { id, status: 'DELIVERED' }, actor)).toMatchObject({ ok: false });
+	}
+	expect(await confirmOrder(db, { id }, admin)).toMatchObject({ ok: false });
+	expect(await status(id)).toBe('CONFIRMED');
+	expect(orderEvents()).toHaveLength(2);
+	expect(await advanceOrder(db, { id: 99, status: 'PICKED' }, admin)).toMatchObject({ ok: false });
+});
+
+test('a client pickup and return goes picked → delivered → completed', async () => {
+	const atWarehouse = { ...address, time: null };
+	const id = await create({
+		...order1043,
+		delivery_attributes: { ...atWarehouse, method: 'CLIENT_PICKUP' },
+		pickup_attributes: { ...atWarehouse, method: 'CLIENT_RETURN' }
+	});
+	await confirmOrder(db, { id }, sales);
+	await advanceOrder(db, { id, status: 'PICKED' }, warehouse);
+	expect(await advanceOrder(db, { id, status: 'OUT_FOR_DELIVERY' }, driver)).toMatchObject({
+		ok: false
+	});
+	expect(await advanceOrder(db, { id, status: 'DELIVERED' }, warehouse)).toMatchObject({
+		ok: true
+	});
+	expect(await advanceOrder(db, { id, status: 'OUT_FOR_PICKUP' }, driver)).toMatchObject({
+		ok: false
+	});
+	expect(await advanceOrder(db, { id, status: 'COMPLETED' }, warehouse)).toMatchObject({
+		ok: true
+	});
+	expect(await status(id)).toBe('COMPLETED');
+});
+
+function setAdvancePercentage(percentage: number) {
+	database
+		.prepare(
+			`insert into settings (key, value, created_at, created_by, updated_at, updated_by) values ('ORDERS_SUGGESTED_ADVANCE_PCT', ?, ${AUDIT})`
+		)
+		.run(String(percentage));
+}
+
+test('the confirmation names the products short and by how much, and still confirms', async () => {
+	setAdvancePercentage(50);
+	await book({ status: 'CONFIRMED', delivery: '2026-08-15', pickup: '2026-08-15', qty: 430 });
+	const id = await create();
+	expect(await previewConfirmation(db, { id }, sales)).toEqual({
+		shortages: [{ productId: 1, name: 'Silla Tiffany dorada', short: 50 }],
+		suggestedAdvance: 590000
+	});
+	expect(await confirmOrder(db, { id }, sales)).toEqual({ ok: true, id });
+	// Once confirmed, its own lines still don't count against it.
+	expect((await previewConfirmation(db, { id }, sales))?.shortages).toHaveLength(1);
+});
+
+test('the suggested advance rounds to the peso and validates nothing', async () => {
+	setAdvancePercentage(50);
+	const id = await create({ ...order1043, transport_cost: 180001 });
+	expect((await previewConfirmation(db, { id }, sales))?.suggestedAdvance).toBe(590001);
+	expect(await previewConfirmation(db, { id: 99 }, sales)).toBeNull();
 });
