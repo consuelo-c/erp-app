@@ -11,7 +11,13 @@ import {
 } from '$lib/orders';
 import { ROLES, requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
-import { containing, optional, typedPesosSchema } from './cash';
+import {
+	containing,
+	optional,
+	typedPesosSchema,
+	type CashConcept,
+	type PaymentMethod
+} from './cash';
 import { fold } from './products';
 import { readSettings } from './settings';
 
@@ -1014,4 +1020,125 @@ export async function listOrders(
 		.bind(...params, ORDERS_PAGE_SIZE, (filters.page - 1) * ORDERS_PAGE_SIZE)
 		.all<SummaryRow>();
 	return { orders: results.map(toSummary), total, pageCount, filters };
+}
+
+/** What the client left as a guarantee and hasn't been given back: held, never income. */
+const DEPOSIT_HELD_SQL = `coalesce((select sum(amount) from cash_movements
+	where entity_type = 'ORDER' and entity_id = orders.id
+	and concept in ('SECURITY_DEPOSIT', 'DEPOSIT_REFUND')), 0)`;
+
+/** One of the order's movements, as its detail lists it. */
+export type OrderPayment = {
+	id: number;
+	movementDate: string;
+	concept: CashConcept;
+	amount: number;
+	method: PaymentMethod;
+	/** «¿Cuál medio de pago?» for `OTHER`. */
+	otherMethod: string | null;
+	receiptNumber: number;
+};
+
+/** Who cancelled the order, when, and why: its CANCELLED event. */
+export type Cancellation = { cancelledAt: number; cancelledBy: string; reason: string };
+
+/**
+ * The order with its money: «Abonado» is what its installments and refunds add up to, the deposit
+ * held what its deposits and their refunds do. A carrier payment touches neither: it's the
+ * company's money out, not the client's.
+ */
+export type OrderDetail = Order & {
+	paid: number;
+	balanceDue: number;
+	depositHeld: number;
+	payments: OrderPayment[];
+	cancellation: Cancellation | null;
+};
+
+type PaymentRow = {
+	id: number;
+	movement_date: string;
+	concept: CashConcept;
+	amount: number;
+	payment_method: PaymentMethod;
+	other_method: string | null;
+	receipt_number: number;
+};
+
+function toPayment(row: PaymentRow): OrderPayment {
+	return {
+		id: row.id,
+		movementDate: row.movement_date,
+		concept: row.concept,
+		amount: row.amount,
+		method: row.payment_method,
+		otherMethod: row.other_method,
+		receiptNumber: row.receipt_number
+	};
+}
+
+async function findPayments(db: D1Database, orderId: number): Promise<OrderPayment[]> {
+	const { results } = await db
+		.prepare(
+			`select id, movement_date, concept, amount, payment_method,
+			json_extract(attributes, '$.other_method') as other_method, receipt_number
+			from cash_movements where entity_type = 'ORDER' and entity_id = ?
+			order by movement_date, id`
+		)
+		.bind(orderId)
+		.all<PaymentRow>();
+	return results.map(toPayment);
+}
+
+async function findCancellation(db: D1Database, orderId: number): Promise<Cancellation | null> {
+	return db
+		.prepare(
+			`select created_at as cancelledAt, actor_username as cancelledBy, reason from events
+			where entity_type = 'ORDER' and entity_id = ? and action = 'CANCELLED'
+			order by id desc limit 1`
+		)
+		.bind(orderId)
+		.first<Cancellation>();
+}
+
+async function findBalances(
+	db: D1Database,
+	orderId: number
+): Promise<{ balanceDue: number; depositHeld: number }> {
+	const balances = await db
+		.prepare(
+			`select ${BALANCE_DUE_SQL} as balanceDue, ${DEPOSIT_HELD_SQL} as depositHeld
+			from orders where id = ?`
+		)
+		.bind(orderId)
+		.first<{ balanceDue: number; depositHeld: number }>();
+	return balances ?? { balanceDue: 0, depositHeld: 0 };
+}
+
+const orderIdSchema = z.coerce.number().int().positive();
+
+/** The order's detail screen: the order, its payments, its balances, and its cancellation if any. */
+export async function getOrderDetail(
+	db: D1Database,
+	id: unknown,
+	actor: Actor | null
+): Promise<OrderDetail | null> {
+	requireRole(actor, TAKES_ORDERS);
+	const parsedId = orderIdSchema.safeParse(id);
+	if (!parsedId.success) {
+		return null;
+	}
+	const orderId = parsedId.data;
+	const [row, payments, cancellation, balances] = await Promise.all([
+		findRow(db, orderId),
+		findPayments(db, orderId),
+		findCancellation(db, orderId),
+		findBalances(db, orderId)
+	]);
+	if (null === row) {
+		return null;
+	}
+	const order = toOrder(row);
+	const paid = order.orderTotal - balances.balanceDue;
+	return { ...order, ...balances, paid, payments, cancellation };
 }
