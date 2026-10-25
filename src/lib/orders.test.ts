@@ -79,11 +79,18 @@ test('cancelling is legal until the merchandise reaches the client', () => {
 	}
 });
 
-test('skipping a state, going back, leaving the end states and moving into DRAFT are illegal', () => {
+test('a cancelled order reopens as a draft, and only as one', () => {
+	expect(isLegal('CANCELLED', 'DRAFT')).toBe(true);
+	for (const to of ['CONFIRMED', 'PICKED', 'DELIVERED', 'COMPLETED'] as const) {
+		expect(isLegal('CANCELLED', to)).toBe(false);
+	}
+});
+
+test('skipping a state, going back, leaving COMPLETED and moving into DRAFT are illegal', () => {
 	expect(isLegal('CONFIRMED', 'DELIVERED')).toBe(false);
 	expect(isLegal('PICKED', 'CONFIRMED')).toBe(false);
 	expect(isLegal('DRAFT', 'DRAFT')).toBe(false);
-	for (const from of ['CONFIRMED', 'DELIVERED', 'COMPLETED', 'CANCELLED'] as const) {
+	for (const from of ['CONFIRMED', 'DELIVERED', 'COMPLETED'] as const) {
 		expect(isLegal(from, 'DRAFT')).toBe(false);
 	}
 	for (const to of ['DELIVERED', 'OUT_FOR_PICKUP', 'CONFIRMED'] as const) {

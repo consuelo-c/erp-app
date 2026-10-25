@@ -990,6 +990,23 @@ export async function cancelOrder(
 }
 
 /**
+ * A cancelled order back to a draft, often for another date, instead of taking it again. It holds
+ * nothing until it's confirmed again; its payments and refunds stay as they were recorded.
+ */
+export async function reopenOrder(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<SaveResult> {
+	requireRole(actor, TAKES_ORDERS);
+	const parsed = transitionSchema.safeParse(input);
+	if (!parsed.success) {
+		return invalidOrder(parsed.error);
+	}
+	return applyTransition(db, actor, { id: parsed.data.id, to: 'DRAFT', action: 'STATUS_CHANGED' });
+}
+
+/**
  * Picked, out for delivery, delivered, out for pickup, completed: open to every role. With five
  * employees, locking them to one would stop the warehouse the day its person is out.
  */
@@ -1282,11 +1299,13 @@ async function findPayments(db: D1Database, orderId: number): Promise<OrderPayme
 	return results.map(toPayment);
 }
 
+// Only while it's cancelled: a reopened order's cancellation stays in its timeline.
 async function findCancellation(db: D1Database, orderId: number): Promise<Cancellation | null> {
 	return db
 		.prepare(
 			`select created_at as cancelledAt, actor_username as cancelledBy, reason from events
-			where entity_type = 'ORDER' and entity_id = ? and action = 'CANCELLED'
+			where entity_type = 'ORDER' and entity_id = ?1 and action = 'CANCELLED'
+			and 'CANCELLED' = (select status from orders where id = ?1)
 			order by id desc limit 1`
 		)
 		.bind(orderId)
