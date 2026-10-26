@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import Badge, { ORDER_STATUS_TONES } from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import IconButton from '$lib/components/IconButton.svelte';
@@ -9,6 +10,7 @@
 	import { formatClockTime, formatLongDay, formatShortDay } from '$lib/datetime';
 	import { formatBalance, formatPesos } from '$lib/format';
 	import { DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, RETURN_METHOD_LABELS } from '$lib/labels';
+	import { dispatchTabHref } from '$lib/navigation';
 	import { formatPhone } from '$lib/phone';
 	import type { Carrier } from '$lib/server/services/orders';
 	import type { PageProps } from './$types';
@@ -21,6 +23,18 @@
 	const delivery = $derived(order.delivery);
 	const pickup = $derived(order.pickup);
 	const id = $derived(String(order.id));
+
+	// The tab the order was opened from: «Atrás» goes back to it, through the printout, the timeline
+	// and the orders linked here. Without one, Despachos opens on the login's own tab.
+	const origin = $derived(page.url.searchParams.get('desde'));
+
+	function keepOrigin(href: string): string {
+		return null === origin ? href : `${href}?${new URLSearchParams({ desde: origin })}`;
+	}
+
+	function orderHref(orderId: number): string {
+		return keepOrigin(resolve('/(app)/despachos/[id]', { id: String(orderId) }));
+	}
 
 	// The pickup address only when the products come back from somewhere else.
 	const isPickupElsewhere = $derived(
@@ -79,7 +93,7 @@
 
 <Screen>
 	{#snippet header()}
-		<ScreenHeader title="Pedido #{order.id}" backHref={resolve('/despachos')}>
+		<ScreenHeader title="Pedido #{order.id}" backHref={dispatchTabHref(origin)}>
 			<span class="badges">
 				<Badge tone={ORDER_STATUS_TONES[order.status]}>{ORDER_STATUS_LABELS[order.status]}</Badge>
 				{#if order.hasIncident}
@@ -113,9 +127,8 @@
 		<div class="lead-notice">
 			<Notice tone="info">
 				Extensión del pedido
-				<a href={resolve('/(app)/despachos/[id]', { id: String(order.parentOrderId) })}
-					>#{order.parentOrderId}</a
-				>
+				<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- orderHref() builds it with resolve() -->
+				<a href={orderHref(order.parentOrderId)}>#{order.parentOrderId}</a>
 			</Notice>
 		</div>
 	{/if}
@@ -124,7 +137,8 @@
 		<div class="lead-notice">
 			<Notice tone="info">
 				Sigue en el pedido
-				<a href={resolve('/(app)/despachos/[id]', { id: String(extension.id) })}>#{extension.id}</a>
+				<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- orderHref() builds it with resolve() -->
+				<a href={orderHref(extension.id)}>#{extension.id}</a>
 			</Notice>
 		</div>
 	{/each}
@@ -220,10 +234,16 @@
 	{/if}
 
 	<div class="actions">
-		<Button variant="secondary" href={resolve('/(app)/despachos/[id]/impresion', { id })}>
+		<Button
+			variant="secondary"
+			href={keepOrigin(resolve('/(app)/despachos/[id]/impresion', { id }))}
+		>
 			Imprimir pedido
 		</Button>
-		<Button variant="secondary" href={resolve('/(app)/despachos/[id]/historial', { id })}>
+		<Button
+			variant="secondary"
+			href={keepOrigin(resolve('/(app)/despachos/[id]/historial', { id }))}
+		>
 			Historial
 		</Button>
 	</div>

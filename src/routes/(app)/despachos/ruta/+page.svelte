@@ -6,6 +6,7 @@
 </script>
 
 <DispatchList
+	list="ROUTE"
 	tab="Ruta de hoy"
 	day={data.day}
 	empty="Hoy no hay entregas ni recogidas de la empresa."

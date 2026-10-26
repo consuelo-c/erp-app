@@ -5,4 +5,4 @@
 	let { data }: PageProps = $props();
 </script>
 
-<DispatchList tab="Preparar hoy" day={data.day} empty="Hoy no hay nada que preparar." />
+<DispatchList list="PREP" tab="Preparar hoy" day={data.day} empty="Hoy no hay nada que preparar." />

@@ -1,7 +1,7 @@
 import type { ComponentProps } from 'svelte';
 import { resolve } from '$app/paths';
 import type Icon from '$lib/components/Icon.svelte';
-import type { Role } from '$lib/server/actor';
+import type { DispatchList } from '$lib/server/services/dispatch';
 
 type IconName = ComponentProps<typeof Icon>['name'];
 
@@ -87,26 +87,15 @@ export function findDestination(pathname: string): Destination | undefined {
 }
 
 /** Despachos' tabs, the same for every login: the role only picks the one it opens on. */
-export const DISPATCH_TABS = [
-	{ label: 'Ruta de hoy', href: resolve('/despachos/ruta') },
-	{ label: 'Preparar hoy', href: resolve('/despachos/preparar') },
-	{ label: 'Sin ruta', href: resolve('/despachos/sin-ruta') }
+export const DISPATCH_TABS: { list: DispatchList; label: string; href: string }[] = [
+	{ list: 'ROUTE', label: 'Ruta de hoy', href: resolve('/despachos/ruta') },
+	{ list: 'PREP', label: 'Preparar hoy', href: resolve('/despachos/preparar') },
+	{ list: 'NO_ROUTE', label: 'Sin ruta', href: resolve('/despachos/sin-ruta') }
 ];
 
-// The first that matches wins: the warehouse prepares, the driver drives, the office oversees
-// the preparation, and sales follows what goes without a route.
-const DISPATCH_TAB_BY_ROLE: [Role, string][] = [
-	['WAREHOUSE', resolve('/despachos/preparar')],
-	['DRIVER', resolve('/despachos/ruta')],
-	['ADMIN', resolve('/despachos/preparar')],
-	['MANAGER', resolve('/despachos/preparar')],
-	['SALES', resolve('/despachos/sin-ruta')]
-];
-
-/** The tab `/despachos` opens on for a login's roles. */
-export function getDispatchTab(roles: readonly Role[]): string {
-	const match = DISPATCH_TAB_BY_ROLE.find(([role]) => roles.includes(role));
-	return match?.[1] ?? resolve('/despachos/preparar');
+/** A list's tab, or Despachos itself (the login's own tab) for anything else, typed in a URL. */
+export function dispatchTabHref(list: string | null): string {
+	return DISPATCH_TABS.find((tab) => tab.list === list)?.href ?? resolve('/despachos');
 }
 
 /** Horas' tabs, for the logins that log everyone's hours. */
