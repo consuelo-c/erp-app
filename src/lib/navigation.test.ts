@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { findDestination, getPageNumbers } from './navigation';
+import { findDestination, getDispatchTab, getPageNumbers } from './navigation';
 
 test('a path belongs to the destination that holds it, Nómina inside Personal y Nómina, Logins inside Sistema', () => {
 	expect(findDestination('/despachos')?.label).toBe('Despachos');
@@ -19,4 +19,14 @@ test('the pagination shows the first, the last and the neighbors of the current 
 	expect(getPageNumbers(5, 8)).toEqual([1, null, 4, 5, 6, 7, 8]);
 	expect(getPageNumbers(4, 8)).toEqual([1, 2, 3, 4, 5, null, 8]);
 	expect(getPageNumbers(8, 8)).toEqual([1, null, 7, 8]);
+});
+
+test('Despachos opens on the first tab that matches the login: a role alone or two together', () => {
+	expect(getDispatchTab(['WAREHOUSE'])).toBe('/despachos/preparar');
+	expect(getDispatchTab(['DRIVER'])).toBe('/despachos/ruta');
+	expect(getDispatchTab(['ADMIN'])).toBe('/despachos/preparar');
+	expect(getDispatchTab(['MANAGER'])).toBe('/despachos/preparar');
+	expect(getDispatchTab(['SALES'])).toBe('/despachos/sin-ruta');
+	expect(getDispatchTab(['DRIVER', 'WAREHOUSE'])).toBe('/despachos/preparar');
+	expect(getDispatchTab(['SALES', 'MANAGER'])).toBe('/despachos/preparar');
 });

@@ -1,6 +1,7 @@
 import type { ComponentProps } from 'svelte';
 import { resolve } from '$app/paths';
 import type Icon from '$lib/components/Icon.svelte';
+import type { Role } from '$lib/server/actor';
 
 type IconName = ComponentProps<typeof Icon>['name'];
 
@@ -83,6 +84,29 @@ export function findDestination(pathname: string): Destination | undefined {
 	return DESTINATIONS.find(({ paths = [] }) =>
 		paths.some((path) => pathname === path || pathname.startsWith(`${path}/`))
 	);
+}
+
+/** Despachos' tabs, the same for every login: the role only picks the one it opens on. */
+export const DISPATCH_TABS = [
+	{ label: 'Ruta de hoy', href: resolve('/despachos/ruta') },
+	{ label: 'Preparar hoy', href: resolve('/despachos/preparar') },
+	{ label: 'Sin ruta', href: resolve('/despachos/sin-ruta') }
+];
+
+// The first that matches wins: the warehouse prepares, the driver drives, the office oversees
+// the preparation, and sales follows what goes without a route.
+const DISPATCH_TAB_BY_ROLE: [Role, string][] = [
+	['WAREHOUSE', resolve('/despachos/preparar')],
+	['DRIVER', resolve('/despachos/ruta')],
+	['ADMIN', resolve('/despachos/preparar')],
+	['MANAGER', resolve('/despachos/preparar')],
+	['SALES', resolve('/despachos/sin-ruta')]
+];
+
+/** The tab `/despachos` opens on for a login's roles. */
+export function getDispatchTab(roles: readonly Role[]): string {
+	const match = DISPATCH_TAB_BY_ROLE.find(([role]) => roles.includes(role));
+	return match?.[1] ?? resolve('/despachos/preparar');
 }
 
 /** Horas' tabs, for the logins that log everyone's hours. */
