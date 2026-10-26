@@ -990,14 +990,12 @@ test('the detail lists the order movements oldest first, and says who cancelled 
 	});
 });
 
-test('an unknown or malformed id has no detail; WAREHOUSE and DRIVER get a 403', async () => {
+test('an unknown or malformed id has no detail; WAREHOUSE and DRIVER read it, for Despachos', async () => {
 	const id = await create();
 	expect(await getOrderDetail(db, '99', sales)).toBeNull();
 	expect(await getOrderDetail(db, 'abc', sales)).toBeNull();
 	for (const actor of [warehouse, driver]) {
-		await expect(getOrderDetail(db, id, actor)).rejects.toSatisfy((thrown) =>
-			isHttpError(thrown, 403)
-		);
+		expect((await getOrderDetail(db, id, actor))?.orderTotal).toBeGreaterThan(0);
 	}
 });
 
@@ -1385,14 +1383,12 @@ test('the printout carries no carrier, and the company from its settings', async
 	expect(JSON.stringify(printout)).not.toMatch(/Wilson|573119085512/);
 });
 
-test('an unknown order has no printout; WAREHOUSE and DRIVER get a 403', async () => {
+test('an unknown order has no printout; WAREHOUSE and DRIVER print it, for Despachos', async () => {
 	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
 	const id = await create();
 	expect(await getOrderPrintout(db, '99', sales)).toBeNull();
 	for (const actor of [warehouse, driver]) {
-		await expect(getOrderPrintout(db, id, actor)).rejects.toSatisfy((thrown) =>
-			isHttpError(thrown, 403)
-		);
+		expect((await getOrderPrintout(db, id, actor))?.order.id).toBe(id);
 	}
 });
 
