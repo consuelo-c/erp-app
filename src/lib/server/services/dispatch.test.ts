@@ -1,8 +1,8 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
-import type { Actor } from '../actor';
+import type { Actor, Role } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
-import { getDispatchDay, type DispatchList } from './dispatch';
+import { getDefaultDispatchList, getDispatchDay, type DispatchList } from './dispatch';
 import { createExtension, createOrder } from './orders';
 
 const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
@@ -177,6 +177,7 @@ test("an external carrier's row carries that direction's carrier", async () => {
 	expect(row).toMatchObject({
 		id,
 		clientName: 'Luz Marina Restrepo',
+		direction: 'delivery',
 		method: 'EXTERNAL_CARRIER',
 		carrier: { name: 'Wilson Muñoz', phone: '573119085512' }
 	});
@@ -214,4 +215,15 @@ test('the warehouse prepares only what is still to go out, and keeps what comes 
 	const back = await create('OUT_FOR_PICKUP');
 	expect(await ids('PREP')).toEqual({ deliveries: [confirmed, picked], pickups: [back] });
 	expect((await ids('ROUTE')).deliveries).toEqual([confirmed, picked, out]);
+});
+
+test('Despachos opens on the first list that matches the login: a role alone or two together', () => {
+	const listOf = (...roles: Role[]) => getDefaultDispatchList({ ...sales, roles });
+	expect(listOf('WAREHOUSE')).toBe('PREP');
+	expect(listOf('DRIVER')).toBe('ROUTE');
+	expect(listOf('ADMIN')).toBe('PREP');
+	expect(listOf('MANAGER')).toBe('PREP');
+	expect(listOf('SALES')).toBe('NO_ROUTE');
+	expect(listOf('DRIVER', 'WAREHOUSE')).toBe('PREP');
+	expect(listOf('SALES', 'MANAGER')).toBe('PREP');
 });

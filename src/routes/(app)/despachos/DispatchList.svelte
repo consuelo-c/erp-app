@@ -9,18 +9,21 @@
 	import { DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, RETURN_METHOD_LABELS } from '$lib/labels';
 	import { DISPATCH_TABS } from '$lib/navigation';
 	import { formatPhone } from '$lib/phone';
-	import type { DispatchDay, DispatchRow } from '$lib/server/services/dispatch';
+	import type { DispatchDay, DispatchList, DispatchRow } from '$lib/server/services/dispatch';
 	import type { OrderStatus } from '$lib/server/services/orders';
 
 	// One of Despachos' tabs: today's deliveries, then pickups, late ones first. A row only opens
 	// its operational detail: the status changes there. `route` is the driver's: one list, what goes
 	// out then what comes back, and a badge only once the order is on the street or at the client's.
-	let {
-		tab,
-		day,
-		empty,
-		route = false
-	}: { tab: string; day: DispatchDay; empty: string; route?: boolean } = $props();
+	type Props = {
+		list: DispatchList;
+		tab: string;
+		day: DispatchDay;
+		empty: string;
+		route?: boolean;
+	};
+
+	let { list, tab, day, empty, route = false }: Props = $props();
 
 	const sections = $derived(
 		route
@@ -33,8 +36,17 @@
 	const ROUTE_BADGES: OrderStatus[] = ['OUT_FOR_DELIVERY', 'DELIVERED', 'OUT_FOR_PICKUP'];
 	const isEmpty = $derived(0 === day.deliveries.length + day.pickups.length);
 
-	// «Transportador externo» reads the same both ways.
-	const METHOD_LABELS = { ...DELIVERY_METHOD_LABELS, ...RETURN_METHOD_LABELS };
+	// The row remembers its tab, so the detail's «Atrás» comes back to it.
+	function rowHref(row: DispatchRow): string {
+		const query = new URLSearchParams({ desde: list });
+		return `${resolve('/(app)/despachos/[id]', { id: String(row.id) })}?${query}`;
+	}
+
+	function methodLabel(row: DispatchRow): string {
+		return 'delivery' === row.direction
+			? DELIVERY_METHOD_LABELS[row.method]
+			: RETURN_METHOD_LABELS[row.method];
+	}
 
 	function isCompanyTrip(row: DispatchRow): boolean {
 		return 'COMPANY_DELIVERY' === row.method || 'COMPANY_PICKUP' === row.method;
@@ -65,7 +77,7 @@
 				<h2 class="section-title">{section.title} ({section.rows.length})</h2>
 			{/if}
 			{#each section.rows as row (row.id)}
-				<Card href={resolve('/(app)/despachos/[id]', { id: String(row.id) })}>
+				<Card href={rowHref(row)}>
 					{#snippet head()}
 						<b class="row__id">#{row.id}</b>
 						<span class="badges">
@@ -91,7 +103,7 @@
 						<p class="row__trip">{row.address1}</p>
 						{#if row.address2}<p class="meta">{row.address2}</p>{/if}
 					{:else}
-						<p class="row__trip">{METHOD_LABELS[row.method]}</p>
+						<p class="row__trip">{methodLabel(row)}</p>
 						<!-- Text, not a link: the whole row is one. The detail has the links. -->
 						{#if row.carrier}
 							<p class="meta row__carrier">

@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { addDays, getTodaysDate } from '$lib/datetime';
-import { ROLES, requireRole, type Actor } from '../actor';
+import { hasAnyRole, ROLES, requireRole, type Actor } from '../actor';
 import {
 	clientAttributesSchema,
 	DELIVERY_METHODS,
@@ -10,8 +10,10 @@ import {
 	pickupAttributesSchema,
 	RETURN_METHODS,
 	type Carrier,
+	type DeliveryAttributes,
 	type DeliveryMethod,
 	type OrderStatus,
+	type PickupAttributes,
 	type ReturnMethod
 } from './orders';
 
@@ -45,22 +47,42 @@ export const DISPATCH_LISTS = {
 
 export type DispatchList = keyof typeof DISPATCH_LISTS;
 
+/**
+ * The list `/despachos` opens on, the first that matches: the warehouse prepares, the driver
+ * drives, the office oversees the preparation, and sales, the only role left, follows what goes
+ * without a route.
+ */
+export function getDefaultDispatchList(actor: Actor): DispatchList {
+	if (hasAnyRole(actor, ['WAREHOUSE'])) {
+		return 'PREP';
+	}
+	if (hasAnyRole(actor, ['DRIVER'])) {
+		return 'ROUTE';
+	}
+	return hasAnyRole(actor, ['ADMIN', 'MANAGER']) ? 'PREP' : 'NO_ROUTE';
+}
+
+type TripFields = {
+	time: string | null;
+	address1: string;
+	address2: string | null;
+	carrier: Carrier | null;
+};
+
 /** One row of a list: an order's delivery or its pickup, never both. */
-export type DispatchRow = {
+export type DispatchRow = TripFields & {
 	id: number;
 	status: OrderStatus;
 	hasIncident: boolean;
 	clientName: string;
 	date: string;
 	isLate: boolean;
-	time: string | null;
-	method: DeliveryMethod | ReturnMethod;
-	address1: string;
-	address2: string | null;
-	carrier: Carrier | null;
 	/** A pickup's extensions: the products some of them keep go on in those orders. */
 	extensionIds: number[];
-};
+} & (
+		| { direction: 'delivery'; method: DeliveryMethod }
+		| { direction: 'pickup'; method: ReturnMethod }
+	);
 
 export type DispatchDay = { today: string; deliveries: DispatchRow[]; pickups: DispatchRow[] };
 
@@ -74,36 +96,45 @@ type Row = {
 	extension_ids: string;
 };
 
-// The column comes from the code, never from the input.
-const TRIP_SCHEMAS = { delivery: deliveryAttributesSchema, pickup: pickupAttributesSchema };
+type Direction = DispatchRow['direction'];
 
-type Direction = keyof typeof TRIP_SCHEMAS;
+function toTripFields(trip: DeliveryAttributes | PickupAttributes): TripFields {
+	return {
+		time: trip.time,
+		address1: trip.address_1,
+		address2: trip.address_2,
+		carrier: trip.carrier
+	};
+}
 
 function toDispatchRow(row: Row, direction: Direction, today: string): DispatchRow {
-	const trip = TRIP_SCHEMAS[direction].parse(JSON.parse(row.trip));
-	return {
+	const order = {
 		id: row.id,
 		status: row.status,
 		hasIncident: 1 === row.has_incident,
 		clientName: clientAttributesSchema.parse(JSON.parse(row.client_attributes)).name,
 		date: row.date,
 		isLate: row.date < today,
-		time: trip.time,
-		method: trip.method,
-		address1: trip.address_1,
-		address2: trip.address_2,
-		carrier: trip.carrier,
-		extensionIds:
-			'pickup' === direction ? z.array(z.number()).parse(JSON.parse(row.extension_ids)) : []
+		extensionIds: z.array(z.number()).parse(JSON.parse(row.extension_ids))
 	};
+	if ('delivery' === direction) {
+		const trip = deliveryAttributesSchema.parse(JSON.parse(row.trip));
+		return { ...order, ...toTripFields(trip), direction, method: trip.method };
+	}
+	const trip = pickupAttributesSchema.parse(JSON.parse(row.trip));
+	return { ...order, ...toTripFields(trip), direction, method: trip.method };
 }
+
+// Only a pickup names its extensions: the lookup scans every order's attributes.
+const EXTENSION_IDS = `(select json_group_array(extension.id) from orders extension
+	where json_extract(extension.attributes, '$.parent_order_id') = orders.id)`;
 
 const marks = (values: readonly string[]) => values.map(() => '?').join(', ');
 
 type Window = { earliest: string; today: string };
 
 // Pending on its date or any of the days after it up to today: late ones first, oldest first, then
-// by time, no time last.
+// by time, no time last. The column comes from the code, never from the input.
 async function findTrips(
 	db: D1Database,
 	direction: Direction,
@@ -114,8 +145,7 @@ async function findTrips(
 		.prepare(
 			`select id, status, has_incident, client_attributes, ${direction}_date as date,
 			${direction}_attributes as trip,
-			(select json_group_array(extension.id) from orders extension
-				where json_extract(extension.attributes, '$.parent_order_id') = orders.id) as extension_ids
+			${'pickup' === direction ? EXTENSION_IDS : "'[]'"} as extension_ids
 			from orders
 			where status in (${marks(statuses)}) and ${direction}_date between ? and ?
 			and json_extract(${direction}_attributes, '$.method') in (${marks(methods)})
