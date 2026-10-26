@@ -268,6 +268,16 @@
 		>
 			Historial
 		</Button>
+		<!-- A cancelled order is never delivered: Despachos has nothing to do with it. -->
+		{#if 'CANCELLED' !== order.status}
+			<Button
+				variant="secondary"
+				size="sm"
+				href={resolve('/(app)/despachos/[id]', { id: String(order.id) })}
+			>
+				Ver en Despachos
+			</Button>
+		{/if}
 		{#if canCancel}
 			<span class="actions__cancel">
 				<Button variant="secondary" size="sm" onclick={startCancel}>Cancelar pedido</Button>

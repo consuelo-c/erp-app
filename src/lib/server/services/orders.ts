@@ -1327,13 +1327,16 @@ async function findBalances(
 
 const orderIdSchema = z.coerce.number().int().positive();
 
-/** The order's detail screen: the order, its payments, its balances, and its cancellation if any. */
+/**
+ * The order's detail screen, and Despachos' operational detail: the order, its payments, its
+ * balances, and its cancellation if any. Open to every role: prices aren't hidden from anyone.
+ */
 export async function getOrderDetail(
 	db: D1Database,
 	id: unknown,
 	actor: Actor | null
 ): Promise<OrderDetail | null> {
-	requireRole(actor, TAKES_ORDERS);
+	requireRole(actor, ROLES);
 	const parsedId = orderIdSchema.safeParse(id);
 	if (!parsedId.success) {
 		return null;
@@ -1385,7 +1388,7 @@ export async function getOrderPrintout(
 	id: unknown,
 	actor: Actor | null
 ): Promise<OrderPrintout | null> {
-	requireRole(actor, TAKES_ORDERS);
+	requireRole(actor, ROLES);
 	const [order, company] = await Promise.all([
 		getOrderDetail(db, id, actor),
 		readSettings(db, COMPANY_SETTINGS)
