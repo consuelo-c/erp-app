@@ -1239,7 +1239,38 @@ export type OrderDetail = Order & {
 	payments: OrderPayment[];
 	cancellation: Cancellation | null;
 	extensions: Extension[];
+	/** When it was edited after the warehouse staged it (epoch seconds), or null. */
+	modifiedAfterStagingAt: number | null;
 };
+
+// Staged from PICKED on. A cancelled order reopened and confirmed again holds nothing staged until
+// it's picked again, which its status already says.
+const STAGED = ['PICKED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'OUT_FOR_PICKUP', 'COMPLETED'] as const;
+
+// ponytail: events has no (entity_type, entity_id) index, so each order scans it; add one if the
+// list slows down.
+/**
+ * The only rule for «modified after staging», over `orders` in the caller's query: the time of the
+ * order's latest `EDITED` event when it's later than its latest move to `PICKED`, else null. Never
+ * `updated_at`: every transition and the driver's notes move it too, and neither is an `EDITED`.
+ * An extension is born `DELIVERED`, with no `PICKED`: never. Event ids order it, not `created_at`,
+ * so an edit in the same second as the pick still counts.
+ */
+export const MODIFIED_AFTER_STAGING_AT = `(select edit.created_at from events edit
+	where orders.status in (${STAGED.map((status) => `'${status}'`).join(', ')})
+	and edit.entity_type = 'ORDER' and edit.entity_id = orders.id and edit.action = 'EDITED'
+	and edit.id > (select max(picked.id) from events picked
+		where picked.entity_type = 'ORDER' and picked.entity_id = orders.id
+		and picked.action = 'STATUS_CHANGED' and json_extract(picked.after, '$.status') = 'PICKED')
+	order by edit.id desc limit 1)`;
+
+async function findModifiedAfterStagingAt(db: D1Database, orderId: number): Promise<number | null> {
+	const row = await db
+		.prepare(`select ${MODIFIED_AFTER_STAGING_AT} as at from orders where id = ?`)
+		.bind(orderId)
+		.first<{ at: number | null }>();
+	return row?.at ?? null;
+}
 
 /** An order made to keep some of this one's products longer. */
 export type Extension = {
@@ -1342,19 +1373,22 @@ export async function getOrderDetail(
 		return null;
 	}
 	const orderId = parsedId.data;
-	const [row, payments, cancellation, balances, extensions] = await Promise.all([
-		findRow(db, orderId),
-		findPayments(db, orderId),
-		findCancellation(db, orderId),
-		findBalances(db, orderId),
-		findExtensions(db, orderId)
-	]);
+	const [row, payments, cancellation, balances, extensions, modifiedAfterStagingAt] =
+		await Promise.all([
+			findRow(db, orderId),
+			findPayments(db, orderId),
+			findCancellation(db, orderId),
+			findBalances(db, orderId),
+			findExtensions(db, orderId),
+			findModifiedAfterStagingAt(db, orderId)
+		]);
 	if (null === row) {
 		return null;
 	}
 	const order = toOrder(row);
 	const paid = order.orderTotal - balances.balanceDue;
-	return { ...order, ...balances, paid, payments, cancellation, extensions };
+	const linked = { payments, cancellation, extensions, modifiedAfterStagingAt };
+	return { ...order, ...balances, paid, ...linked };
 }
 
 /** A trip as the printout carries it: the client signs that paper and never sees the carrier. */

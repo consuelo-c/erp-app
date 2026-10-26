@@ -1,16 +1,19 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 
-	// Warnings advise and never block.
+	// Warnings advise and never block. `strong` is a one-line notice that must jump out.
 	interface Props {
 		tone: 'error' | 'info' | 'success' | 'warning';
+		strong?: boolean;
 		children: Snippet;
 	}
 
-	let { tone, children }: Props = $props();
+	let { tone, strong = false, children }: Props = $props();
 </script>
 
-<div class={['notice', `notice--${tone}`]} role="alert">{@render children()}</div>
+<div class={['notice', `notice--${tone}`, strong && 'notice--strong']} role="alert">
+	{@render children()}
+</div>
 
 <style>
 	.notice {
@@ -42,5 +45,9 @@
 		color: var(--info-fg);
 		background: var(--info-bg);
 		border-color: var(--info-bg);
+	}
+
+	.notice--strong {
+		font-weight: var(--weight-bold);
 	}
 </style>

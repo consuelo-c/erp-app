@@ -71,7 +71,7 @@
 	</div>
 
 	{#each day.rows as row (`${row.direction}-${row.id}`)}
-		<Card href={rowHref(row)}>
+		<Card href={rowHref(row)} modified={row.modifiedAfterStaging}>
 			{#snippet head()}
 				<b class="row__id">#{row.id}</b>
 				<span class="badges">

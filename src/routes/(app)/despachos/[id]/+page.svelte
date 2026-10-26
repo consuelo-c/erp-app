@@ -7,7 +7,7 @@
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
-	import { formatClockTime, formatLongDay, formatShortDay } from '$lib/datetime';
+	import { formatClockTime, formatInstant, formatLongDay, formatShortDay } from '$lib/datetime';
 	import { formatBalance, formatPesos } from '$lib/format';
 	import { DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, RETURN_METHOD_LABELS } from '$lib/labels';
 	import { formatPhone } from '$lib/phone';
@@ -101,6 +101,16 @@
 			</span>
 		</ScreenHeader>
 	{/snippet}
+
+	{#if null !== order.modifiedAfterStagingAt}
+		<div class="lead-notice">
+			<Notice tone="warning">
+				<strong class="modified__title">⚠ Modificado después de separado</strong>
+				Ventas lo cambió el {formatInstant(order.modifiedAfterStagingAt)}, después de separarlo.
+				Revisa las líneas contra lo separado; el cambio está en Historial.
+			</Notice>
+		</div>
+	{/if}
 
 	<h2 class="section-title client">{order.client.name}</h2>
 	<div class="reach">
@@ -261,6 +271,12 @@
 
 	.lead-notice {
 		margin-bottom: var(--space-8);
+	}
+
+	.modified__title {
+		display: block;
+		margin-bottom: var(--space-1);
+		font-size: var(--text-base);
 	}
 
 	.client {

@@ -3,7 +3,7 @@ import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
 import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
 import { getDispatchDay } from './dispatch';
-import { createExtension, createOrder } from './orders';
+import { advanceOrder, createExtension, createOrder } from './orders';
 
 const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
 const driver: Actor = { ...sales, username: 'conductor', roles: ['DRIVER'] };
@@ -219,4 +219,27 @@ test('another day holds only what is dated on it, none late, whatever its state'
 
 test('a malformed day is today', async () => {
 	expect((await getDispatchDay(db, 'mañana', driver)).date).toBe(TODAY);
+});
+
+test('a row says whether its order was modified after staging, both of its rows alike', async () => {
+	const untouched = await create('CONFIRMED', { pickup_date: TODAY });
+	const edited = await create('CONFIRMED', {
+		delivery: { time: '15:00' },
+		pickup: { time: '16:00' },
+		pickup_date: TODAY
+	});
+	await advanceOrder(db, { id: edited, status: 'PICKED' }, driver);
+	database
+		.prepare(
+			`insert into events (entity_type, entity_id, action, actor_username, actor_kind, after, created_at) values ('ORDER', ?, 'EDITED', 'ventas', 'user', '{"rental_days":3}', 0)`
+		)
+		.run(edited);
+	expect(
+		(await rows()).map((row) => [`${row.direction} ${row.id}`, row.modifiedAfterStaging])
+	).toEqual([
+		[`pickup ${untouched}`, false],
+		[`delivery ${untouched}`, false],
+		[`delivery ${edited}`, true],
+		[`pickup ${edited}`, true]
+	]);
 });

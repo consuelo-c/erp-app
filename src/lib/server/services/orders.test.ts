@@ -1528,3 +1528,84 @@ test('the original lists its extensions, which keep their link when edited; WARE
 		);
 	}
 });
+
+async function pickedOrder(): Promise<number> {
+	const id = await create();
+	await confirmOrder(db, { id }, sales);
+	await advanceOrder(db, { id, status: 'PICKED' }, warehouse);
+	return id;
+}
+
+function editOrder(id: number, rentalDays: number) {
+	return updateOrder(db, { ...order1043, id, rental_days: rentalDays }, sales);
+}
+
+async function modifiedAfterStagingAt(id: number) {
+	return (await getOrderDetail(db, id, warehouse))?.modifiedAfterStagingAt;
+}
+
+type RawEvent = { entityType: string; entityId: number; action: string; after: object };
+
+function insertEvent({ entityType, entityId, action, after }: RawEvent) {
+	database
+		.prepare(
+			`insert into events (entity_type, entity_id, action, actor_username, actor_kind, after, created_at) values (?, ?, ?, 'conductor', 'user', ?, 0)`
+		)
+		.run(entityType, entityId, action, JSON.stringify(after));
+}
+
+test('an edit before picking is no modification after staging; one after picking is, with its time', async () => {
+	const before = await create();
+	await confirmOrder(db, { id: before }, sales);
+	await editOrder(before, 3);
+	await advanceOrder(db, { id: before, status: 'PICKED' }, warehouse);
+	expect(await modifiedAfterStagingAt(before)).toBeNull();
+
+	const after = await pickedOrder();
+	vi.useFakeTimers({ toFake: ['Date'] });
+	vi.setSystemTime(new Date('2026-08-13T16:20:00-05:00'));
+	onTestFinished(() => {
+		vi.useRealTimers();
+	});
+	await editOrder(after, 3);
+	expect(await modifiedAfterStagingAt(after)).toBe(Date.parse('2026-08-13T21:20:00Z') / 1000);
+});
+
+test("a later status change with the driver's note, or an incident, isn't a modification after staging", async () => {
+	const id = await pickedOrder();
+	await advanceOrder(db, { id, status: 'OUT_FOR_DELIVERY' }, driver);
+	// What the transition's note writes: the delivery note rides on the STATUS_CHANGED event.
+	insertEvent({
+		entityType: 'ORDER',
+		entityId: id,
+		action: 'STATUS_CHANGED',
+		after: { status: 'DELIVERED', delivery_attributes: { notes: 'Lo recibió el portero' } }
+	});
+	// What an incident writes: its own event, and has_incident with no ORDER event.
+	insertEvent({ entityType: 'INCIDENT', entityId: 1, action: 'CREATED', after: { order_id: id } });
+	database
+		.prepare('update orders set status = ?, has_incident = 1 where id = ?')
+		.run('DELIVERED', id);
+	expect(await modifiedAfterStagingAt(id)).toBeNull();
+});
+
+test('a cancelled, reopened and picked again order is measured against its last PICKED', async () => {
+	const id = await pickedOrder();
+	await editOrder(id, 3);
+	await cancelOrder(db, { id, reason: 'El cliente aplazó el evento' }, sales);
+	await reopenOrder(db, { id }, sales);
+	await confirmOrder(db, { id }, sales);
+	// Confirmed again, nothing is staged: the edit before the cancellation no longer counts.
+	expect(await modifiedAfterStagingAt(id)).toBeNull();
+	await advanceOrder(db, { id, status: 'PICKED' }, warehouse);
+	expect(await modifiedAfterStagingAt(id)).toBeNull();
+	await editOrder(id, 4);
+	expect(await modifiedAfterStagingAt(id)).toEqual(expect.any(Number));
+});
+
+test('an extension has no PICKED, and is never modified after staging', async () => {
+	const { id } = await deliveredWithExtension();
+	const edited = { ...extension, delivery_date: '2026-08-17', rental_days: 4, id };
+	expect(await updateOrder(db, edited, sales)).toMatchObject({ ok: true });
+	expect(await modifiedAfterStagingAt(id)).toBeNull();
+});
