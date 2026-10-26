@@ -1,8 +1,8 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
-import type { Actor, Role } from '../actor';
+import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
-import { getDefaultDispatchList, getDispatchDay, type DispatchList } from './dispatch';
+import { getDispatchDay } from './dispatch';
 import { createExtension, createOrder } from './orders';
 
 const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
@@ -53,7 +53,8 @@ async function create(status: string, trips: Trips = {}): Promise<number> {
 			client_phone: '310 442 8890',
 			event_date: TODAY,
 			delivery_date: trips.delivery_date ?? TODAY,
-			pickup_date: trips.pickup_date ?? TODAY,
+			// Two days on: a delivery's test isn't crowded by its own pickup.
+			pickup_date: trips.pickup_date ?? '2026-08-16',
 			rental_days: 1,
 			delivery_attributes: {
 				method: 'COMPANY_DELIVERY',
@@ -76,48 +77,49 @@ async function create(status: string, trips: Trips = {}): Promise<number> {
 	return result.id;
 }
 
-async function ids(list: DispatchList) {
-	const day = await getDispatchDay(db, list, driver);
-	return {
-		deliveries: day.deliveries.map((row) => row.id),
-		pickups: day.pickups.map((row) => row.id)
-	};
+async function rows(date?: string) {
+	return (await getDispatchDay(db, date, driver)).rows;
+}
+
+async function trips(date?: string) {
+	return (await rows(date)).map((row) => `${row.direction} ${row.id}`);
 }
 
 test("at 8 p.m. in Bogotá it's still that day: tomorrow's order doesn't show", async () => {
 	const today = await create('CONFIRMED');
-	await create('CONFIRMED', { delivery_date: '2026-08-15', pickup_date: '2026-08-16' });
-	const day = await getDispatchDay(db, 'PREP', driver);
-	expect(day.today).toBe(TODAY);
-	expect(day.deliveries.map((row) => row.id)).toEqual([today]);
+	await create('CONFIRMED', { delivery_date: '2026-08-15' });
+	const day = await getDispatchDay(db, null, driver);
+	expect([day.today, day.date]).toEqual([TODAY, TODAY]);
+	expect(day.rows.map((row) => row.id)).toEqual([today]);
 });
 
-test('a client pickup is prepared and has no route, but the driver never takes it', async () => {
-	const id = await create('PICKED', { delivery: { method: 'CLIENT_PICKUP' } });
-	expect((await ids('PREP')).deliveries).toEqual([id]);
-	expect((await ids('NO_ROUTE')).deliveries).toEqual([id]);
-	expect((await ids('ROUTE')).deliveries).toEqual([]);
+test('a day holds every method and every state but a draft or a cancelled one', async () => {
+	const client = await create('PICKED', { delivery: { method: 'CLIENT_PICKUP', time: '08:00' } });
+	const returned = await create('COMPLETED', {
+		delivery_date: '2026-08-12',
+		pickup_date: TODAY,
+		pickup: { method: 'CLIENT_RETURN', time: '10:00' }
+	});
+	const delivered = await create('DELIVERED');
+	await create('DRAFT', { pickup_date: TODAY });
+	await create('CANCELLED', { pickup_date: TODAY });
+	expect(await trips()).toEqual([
+		`delivery ${client}`,
+		`pickup ${returned}`,
+		`delivery ${delivered}`
+	]);
 });
 
-test("the company's pickup is on the route and prepared, never without a route", async () => {
-	const id = await create('DELIVERED');
-	expect((await ids('ROUTE')).pickups).toEqual([id]);
-	expect((await ids('PREP')).pickups).toEqual([id]);
-	expect((await ids('NO_ROUTE')).pickups).toEqual([]);
-});
-
-test('a draft, a cancelled and a completed order dated today never show', async () => {
-	await create('DRAFT');
-	await create('CANCELLED');
-	await create('COMPLETED');
-	expect(await ids('PREP')).toEqual({ deliveries: [], pickups: [] });
-});
-
-test('a delivered delivery drops off the deliveries and waits as a pickup', async () => {
-	const id = await create('DELIVERED', { pickup_date: '2026-08-16' });
-	expect(await ids('PREP')).toEqual({ deliveries: [], pickups: [] });
-	database.prepare('update orders set pickup_date = ? where id = ?').run(TODAY, id);
-	expect(await ids('PREP')).toEqual({ deliveries: [], pickups: [id] });
+test('deliveries and pickups mix by time; at the same time, an order delivers first', async () => {
+	const both = await create('CONFIRMED', { delivery: { time: '09:00' }, pickup_date: TODAY });
+	const pickup = await create('DELIVERED', { delivery_date: '2026-08-13', pickup_date: TODAY });
+	const delivery = await create('CONFIRMED');
+	expect(await trips()).toEqual([
+		`delivery ${both}`,
+		`pickup ${both}`,
+		`pickup ${pickup}`,
+		`delivery ${delivery}`
+	]);
 });
 
 test("an extension is never a delivery: it's a pickup on its own date, named by its original's", async () => {
@@ -148,11 +150,11 @@ test("an extension is never a delivery: it's a pickup on its own date, named by 
 	if (!result.ok) {
 		throw new Error(JSON.stringify(result.errors));
 	}
-	const day = await getDispatchDay(db, 'ROUTE', driver);
-	expect(day.deliveries).toEqual([]);
-	expect(day.pickups.map((row) => [row.id, row.isLate, row.extensionIds])).toEqual([
-		[parent, true, [result.id]],
-		[result.id, false, []]
+	expect(
+		(await rows()).map((row) => [row.direction, row.id, row.isLate, row.extensionIds])
+	).toEqual([
+		['pickup', parent, true, [result.id]],
+		['pickup', result.id, false, []]
 	]);
 });
 
@@ -161,8 +163,7 @@ test("yesterday's delivery still on its way is late, ahead of today's by time, n
 	const afternoon = await create('CONFIRMED', { delivery: { time: '15:00' } });
 	const late = await create('OUT_FOR_DELIVERY', { delivery_date: '2026-08-13' });
 	const morning = await create('CONFIRMED', { delivery: { time: '08:00' } });
-	const day = await getDispatchDay(db, 'ROUTE', driver);
-	expect(day.deliveries.map((row) => [row.id, row.isLate])).toEqual([
+	expect((await rows()).map((row) => [row.id, row.isLate])).toEqual([
 		[late, true],
 		[morning, false],
 		[afternoon, false],
@@ -170,10 +171,23 @@ test("yesterday's delivery still on its way is late, ahead of today's by time, n
 	]);
 });
 
+test('today keeps what is still pending up to 4 days late, never what was done', async () => {
+	const fourDays = await create('CONFIRMED', { delivery_date: '2026-08-10' });
+	await create('CONFIRMED', { delivery_date: '2026-08-09' });
+	const pickupFour = await create('DELIVERED', {
+		delivery_date: '2026-08-08',
+		pickup_date: '2026-08-10'
+	});
+	await create('OUT_FOR_PICKUP', { delivery_date: '2026-08-08', pickup_date: '2026-08-09' });
+	await create('DELIVERED', { delivery_date: '2026-08-13' });
+	await create('COMPLETED', { delivery_date: '2026-08-12', pickup_date: '2026-08-13' });
+	expect(await trips()).toEqual([`pickup ${pickupFour}`, `delivery ${fourDays}`]);
+});
+
 test("an external carrier's row carries that direction's carrier", async () => {
 	const carrier = { method: 'EXTERNAL_CARRIER', carrier_id: WILSON };
 	const id = await create('CONFIRMED', { delivery: carrier });
-	const [row] = (await getDispatchDay(db, 'NO_ROUTE', sales)).deliveries;
+	const [row] = (await getDispatchDay(db, null, sales)).rows;
 	expect(row).toMatchObject({
 		id,
 		clientName: 'Luz Marina Restrepo',
@@ -183,47 +197,26 @@ test("an external carrier's row carries that direction's carrier", async () => {
 	});
 });
 
-test('an unknown list is refused', async () => {
-	await expect(getDispatchDay(db, 'TOMORROW', driver)).rejects.toThrow();
-});
-
-test('every list drops a row 5 or more days late, a delivery or a pickup', async () => {
-	const fourDays = await create('CONFIRMED', { delivery_date: '2026-08-10' });
-	await create('CONFIRMED', { delivery_date: '2026-08-09' });
-	const clientFour = await create('PICKED', {
+test('another day holds only what is dated on it, none late, whatever its state', async () => {
+	const SUNDAY = '2026-08-16';
+	const stillConfirmed = await create('CONFIRMED', { delivery_date: '2026-08-15' });
+	const delivery = await create('CONFIRMED', { delivery_date: SUNDAY, pickup_date: '2026-08-17' });
+	await create('DRAFT', { delivery_date: SUNDAY });
+	await create('CANCELLED', { delivery_date: SUNDAY });
+	await create('CONFIRMED', { delivery_date: '2026-08-13', pickup_date: '2026-08-15' });
+	const day = await getDispatchDay(db, SUNDAY, driver);
+	expect(day.date).toBe(SUNDAY);
+	expect(day.rows.map((row) => [row.direction, row.id, row.isLate])).toEqual([
+		['pickup', stillConfirmed, false],
+		['delivery', delivery, false]
+	]);
+	const completed = await create('COMPLETED', {
 		delivery_date: '2026-08-10',
-		delivery: { method: 'CLIENT_PICKUP' }
-	});
-	await create('PICKED', { delivery_date: '2026-08-09', delivery: { method: 'CLIENT_PICKUP' } });
-	const pickupFour = await create('DELIVERED', {
-		delivery_date: '2026-08-08',
 		pickup_date: '2026-08-10'
 	});
-	await create('OUT_FOR_PICKUP', {
-		delivery_date: '2026-08-08',
-		pickup_date: '2026-08-09'
-	});
-	expect(await ids('ROUTE')).toEqual({ deliveries: [fourDays], pickups: [pickupFour] });
-	expect(await ids('PREP')).toEqual({ deliveries: [fourDays, clientFour], pickups: [pickupFour] });
-	expect(await ids('NO_ROUTE')).toEqual({ deliveries: [clientFour], pickups: [] });
+	expect(await trips('2026-08-10')).toEqual([`pickup ${completed}`, `delivery ${completed}`]);
 });
 
-test('the warehouse prepares only what is still to go out, and keeps what comes back', async () => {
-	const confirmed = await create('CONFIRMED', { delivery: { time: '08:00' } });
-	const picked = await create('PICKED', { delivery: { time: '09:00' } });
-	const out = await create('OUT_FOR_DELIVERY', { delivery: { time: '10:00' } });
-	const back = await create('OUT_FOR_PICKUP');
-	expect(await ids('PREP')).toEqual({ deliveries: [confirmed, picked], pickups: [back] });
-	expect((await ids('ROUTE')).deliveries).toEqual([confirmed, picked, out]);
-});
-
-test('Despachos opens on the first list that matches the login: a role alone or two together', () => {
-	const listOf = (...roles: Role[]) => getDefaultDispatchList({ ...sales, roles });
-	expect(listOf('WAREHOUSE')).toBe('PREP');
-	expect(listOf('DRIVER')).toBe('ROUTE');
-	expect(listOf('ADMIN')).toBe('PREP');
-	expect(listOf('MANAGER')).toBe('PREP');
-	expect(listOf('SALES')).toBe('NO_ROUTE');
-	expect(listOf('DRIVER', 'WAREHOUSE')).toBe('PREP');
-	expect(listOf('SALES', 'MANAGER')).toBe('PREP');
+test('a malformed day is today', async () => {
+	expect((await getDispatchDay(db, 'mañana', driver)).date).toBe(TODAY);
 });
