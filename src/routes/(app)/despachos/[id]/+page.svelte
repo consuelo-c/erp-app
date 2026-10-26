@@ -10,7 +10,6 @@
 	import { formatClockTime, formatLongDay, formatShortDay } from '$lib/datetime';
 	import { formatBalance, formatPesos } from '$lib/format';
 	import { DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, RETURN_METHOD_LABELS } from '$lib/labels';
-	import { dispatchTabHref } from '$lib/navigation';
 	import { formatPhone } from '$lib/phone';
 	import type { Carrier } from '$lib/server/services/orders';
 	import type { PageProps } from './$types';
@@ -24,12 +23,12 @@
 	const pickup = $derived(order.pickup);
 	const id = $derived(String(order.id));
 
-	// The tab the order was opened from: «Atrás» goes back to it, through the printout, the timeline
-	// and the orders linked here. Without one, Despachos opens on the login's own tab.
-	const origin = $derived(page.url.searchParams.get('desde'));
+	// The day the order was opened from (`?fecha=`): «Atrás» goes back to it, through the printout,
+	// the timeline and the orders linked here. Without one, Despachos opens on today.
+	const backHref = $derived(`${resolve('/despachos')}${page.url.search}`);
 
 	function keepOrigin(href: string): string {
-		return null === origin ? href : `${href}?${new URLSearchParams({ desde: origin })}`;
+		return `${href}${page.url.search}`;
 	}
 
 	function orderHref(orderId: number): string {
@@ -93,7 +92,7 @@
 
 <Screen>
 	{#snippet header()}
-		<ScreenHeader title="Pedido #{order.id}" backHref={dispatchTabHref(origin)}>
+		<ScreenHeader title="Pedido #{order.id}" {backHref}>
 			<span class="badges">
 				<Badge tone={ORDER_STATUS_TONES[order.status]}>{ORDER_STATUS_LABELS[order.status]}</Badge>
 				{#if order.hasIncident}

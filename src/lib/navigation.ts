@@ -1,7 +1,6 @@
 import type { ComponentProps } from 'svelte';
 import { resolve } from '$app/paths';
 import type Icon from '$lib/components/Icon.svelte';
-import type { DispatchList } from '$lib/server/services/dispatch';
 
 type IconName = ComponentProps<typeof Icon>['name'];
 
@@ -84,18 +83,6 @@ export function findDestination(pathname: string): Destination | undefined {
 	return DESTINATIONS.find(({ paths = [] }) =>
 		paths.some((path) => pathname === path || pathname.startsWith(`${path}/`))
 	);
-}
-
-/** Despachos' tabs, the same for every login: the role only picks the one it opens on. */
-export const DISPATCH_TABS: { list: DispatchList; label: string; href: string }[] = [
-	{ list: 'ROUTE', label: 'Ruta de hoy', href: resolve('/despachos/ruta') },
-	{ list: 'PREP', label: 'Preparar hoy', href: resolve('/despachos/preparar') },
-	{ list: 'NO_ROUTE', label: 'Sin ruta', href: resolve('/despachos/sin-ruta') }
-];
-
-/** A list's tab, or Despachos itself (the login's own tab) for anything else, typed in a URL. */
-export function dispatchTabHref(list: string | null): string {
-	return DISPATCH_TABS.find((tab) => tab.list === list)?.href ?? resolve('/despachos');
 }
 
 /** Horas' tabs, for the logins that log everyone's hours. */

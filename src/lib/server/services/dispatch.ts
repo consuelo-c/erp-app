@@ -1,14 +1,13 @@
-// Despachos: the day's to-do lists, what to deliver and what to pick up, by who moves it.
+// Despachos: one day's deliveries and pickups, whoever moves them, for the driver and the warehouse.
 
 import { z } from 'zod';
 import { addDays, getTodaysDate } from '$lib/datetime';
-import { hasAnyRole, ROLES, requireRole, type Actor } from '../actor';
+import { ROLES, requireRole, type Actor } from '../actor';
 import {
 	clientAttributesSchema,
-	DELIVERY_METHODS,
 	deliveryAttributesSchema,
+	ORDER_STATUSES,
 	pickupAttributesSchema,
-	RETURN_METHODS,
 	type Carrier,
 	type DeliveryAttributes,
 	type DeliveryMethod,
@@ -17,50 +16,18 @@ import {
 	type ReturnMethod
 } from './orders';
 
-// A delivery is pending until it's delivered; a pickup, until it's back.
-const DELIVERY_PENDING = ['CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY'] as const;
-const PICKUP_PENDING = ['DELIVERED', 'OUT_FOR_PICKUP'] as const;
+// A day shows every trip dated on it, whatever its state, but a draft's or a cancelled one's.
+const ACTIVE = ORDER_STATUSES.filter((status) => 'DRAFT' !== status && 'CANCELLED' !== status);
 
-type Trips<Method> = { methods: readonly Method[]; statuses: readonly OrderStatus[] };
+// Today also shows what's still pending from the days before: a delivery until it's delivered, a
+// pickup until it's back.
+const PENDING = {
+	delivery: ['CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY'],
+	pickup: ['DELIVERED', 'OUT_FOR_PICKUP']
+} as const satisfies Record<Direction, readonly OrderStatus[]>;
 
-type ListSpec = { delivery: Trips<DeliveryMethod>; pickup: Trips<ReturnMethod> };
-
-// A row 5 or more days late is no longer the day's work, in any list: Pedidos still has it.
+// A trip 5 or more days late is no longer the day's work: Pedidos still has it.
 const MAX_LATE_DAYS = 4;
-
-/** «Ruta de hoy», «Preparar hoy» and «Sin ruta»: the trips each list holds, by method and status. */
-export const DISPATCH_LISTS = {
-	ROUTE: {
-		delivery: { methods: ['COMPANY_DELIVERY'], statuses: DELIVERY_PENDING },
-		pickup: { methods: ['COMPANY_PICKUP'], statuses: PICKUP_PENDING }
-	},
-	// A delivery already out has nothing left to prepare; what comes back still has to be received.
-	PREP: {
-		delivery: { methods: DELIVERY_METHODS, statuses: ['CONFIRMED', 'PICKED'] },
-		pickup: { methods: RETURN_METHODS, statuses: PICKUP_PENDING }
-	},
-	NO_ROUTE: {
-		delivery: { methods: ['CLIENT_PICKUP', 'EXTERNAL_CARRIER'], statuses: DELIVERY_PENDING },
-		pickup: { methods: ['CLIENT_RETURN', 'EXTERNAL_CARRIER'], statuses: PICKUP_PENDING }
-	}
-} as const satisfies Record<string, ListSpec>;
-
-export type DispatchList = keyof typeof DISPATCH_LISTS;
-
-/**
- * The list `/despachos` opens on, the first that matches: the warehouse prepares, the driver
- * drives, the office oversees the preparation, and sales, the only role left, follows what goes
- * without a route.
- */
-export function getDefaultDispatchList(actor: Actor): DispatchList {
-	if (hasAnyRole(actor, ['WAREHOUSE'])) {
-		return 'PREP';
-	}
-	if (hasAnyRole(actor, ['DRIVER'])) {
-		return 'ROUTE';
-	}
-	return hasAnyRole(actor, ['ADMIN', 'MANAGER']) ? 'PREP' : 'NO_ROUTE';
-}
 
 type TripFields = {
 	time: string | null;
@@ -69,7 +36,7 @@ type TripFields = {
 	carrier: Carrier | null;
 };
 
-/** One row of a list: an order's delivery or its pickup, never both. */
+/** One row of the list: an order's delivery or its pickup, never both. */
 export type DispatchRow = TripFields & {
 	id: number;
 	status: OrderStatus;
@@ -84,19 +51,21 @@ export type DispatchRow = TripFields & {
 		| { direction: 'pickup'; method: ReturnMethod }
 	);
 
-export type DispatchDay = { today: string; deliveries: DispatchRow[]; pickups: DispatchRow[] };
+/** The rows of `date`, deliveries and pickups mixed, by time; today's late ones first. */
+export type DispatchDay = { today: string; date: string; rows: DispatchRow[] };
+
+type Direction = DispatchRow['direction'];
 
 type Row = {
 	id: number;
 	status: OrderStatus;
 	has_incident: number;
 	client_attributes: string;
+	direction: Direction;
 	date: string;
 	trip: string;
 	extension_ids: string;
 };
-
-type Direction = DispatchRow['direction'];
 
 function toTripFields(trip: DeliveryAttributes | PickupAttributes): TripFields {
 	return {
@@ -107,70 +76,83 @@ function toTripFields(trip: DeliveryAttributes | PickupAttributes): TripFields {
 	};
 }
 
-function toDispatchRow(row: Row, direction: Direction, today: string): DispatchRow {
+function toDispatchRow(row: Row, date: string): DispatchRow {
 	const order = {
 		id: row.id,
 		status: row.status,
 		hasIncident: 1 === row.has_incident,
 		clientName: clientAttributesSchema.parse(JSON.parse(row.client_attributes)).name,
 		date: row.date,
-		isLate: row.date < today,
+		isLate: row.date < date,
 		extensionIds: z.array(z.number()).parse(JSON.parse(row.extension_ids))
 	};
-	if ('delivery' === direction) {
+	if ('delivery' === row.direction) {
 		const trip = deliveryAttributesSchema.parse(JSON.parse(row.trip));
-		return { ...order, ...toTripFields(trip), direction, method: trip.method };
+		return { ...order, ...toTripFields(trip), direction: row.direction, method: trip.method };
 	}
 	const trip = pickupAttributesSchema.parse(JSON.parse(row.trip));
-	return { ...order, ...toTripFields(trip), direction, method: trip.method };
+	return { ...order, ...toTripFields(trip), direction: row.direction, method: trip.method };
 }
 
-// Only a pickup names its extensions: the lookup scans every order's attributes.
+// Only a pickup names its extensions: the lookup scans every order's attributes. An extension is
+// born delivered, with nothing that went out: never a delivery.
 const EXTENSION_IDS = `(select json_group_array(extension.id) from orders extension
 	where json_extract(extension.attributes, '$.parent_order_id') = orders.id)`;
+const NOT_EXTENSION = `json_extract(attributes, '$.parent_order_id') is null`;
 
 const marks = (values: readonly string[]) => values.map(() => '?').join(', ');
 
-type Window = { earliest: string; today: string };
+// Statuses that count from `from` to `to`.
+type Window = { statuses: readonly OrderStatus[]; from: string; to: string };
 
-// Pending on its date or any of the days after it up to today: late ones first, oldest first, then
-// by time, no time last. The column comes from the code, never from the input.
-async function findTrips(
-	db: D1Database,
-	direction: Direction,
-	{ trips: { methods, statuses }, window }: { trips: Trips<string>; window: Window }
-): Promise<DispatchRow[]> {
-	const time = `json_extract(${direction}_attributes, '$.time')`;
-	const { results } = await db
-		.prepare(
-			`select id, status, has_incident, client_attributes, ${direction}_date as date,
-			${direction}_attributes as trip,
-			${'pickup' === direction ? EXTENSION_IDS : "'[]'"} as extension_ids
-			from orders
-			where status in (${marks(statuses)}) and ${direction}_date between ? and ?
-			and json_extract(${direction}_attributes, '$.method') in (${marks(methods)})
-			order by ${direction}_date, ${time} is null, ${time}, id`
+// One direction's trips. The column comes from the code, never from the input.
+function selectTrips(direction: Direction, windows: Window[]) {
+	const where = windows
+		.map(
+			(window) => `(status in (${marks(window.statuses)}) and ${direction}_date between ? and ?)`
 		)
-		.bind(...statuses, window.earliest, window.today, ...methods)
-		.all<Row>();
-	return results.map((row) => toDispatchRow(row, direction, window.today));
+		.join(' or ');
+	const sql = `select id, status, has_incident, client_attributes, '${direction}' as direction,
+		${direction}_date as date, ${direction}_attributes as trip,
+		json_extract(${direction}_attributes, '$.time') as time,
+		${'pickup' === direction ? EXTENSION_IDS : "'[]'"} as extension_ids
+		from orders
+		where ${'pickup' === direction ? 'true' : NOT_EXTENSION} and (${where})`;
+	return { sql, params: windows.flatMap((window) => [...window.statuses, window.from, window.to]) };
 }
 
-const listSchema = z.enum(Object.keys(DISPATCH_LISTS) as [DispatchList, ...DispatchList[]]);
+// The day's trips; today, also what's pending from up to MAX_LATE_DAYS before.
+function windowsOf(direction: Direction, date: string, today: string): Window[] {
+	const day = { statuses: ACTIVE, from: date, to: date };
+	if (date !== today) {
+		return [day];
+	}
+	const late = {
+		statuses: PENDING[direction],
+		from: addDays(today, -MAX_LATE_DAYS),
+		to: addDays(today, -1)
+	};
+	return [day, late];
+}
 
-/** Today's deliveries and pickups still to do in one list, open to every role. */
+/** The list on `date`, today when it's missing or malformed. Open to every role. */
 export async function getDispatchDay(
 	db: D1Database,
-	list: unknown,
+	date: unknown,
 	actor: Actor | null
 ): Promise<DispatchDay> {
 	requireRole(actor, ROLES);
-	const spec: ListSpec = DISPATCH_LISTS[listSchema.parse(list)];
 	const today = getTodaysDate();
-	const window = { earliest: addDays(today, -MAX_LATE_DAYS), today };
-	const [deliveries, pickups] = await Promise.all([
-		findTrips(db, 'delivery', { trips: spec.delivery, window }),
-		findTrips(db, 'pickup', { trips: spec.pickup, window })
-	]);
-	return { today, deliveries, pickups };
+	const day = z.iso.date().catch(today).parse(date);
+	const delivery = selectTrips('delivery', windowsOf('delivery', day, today));
+	const pickup = selectTrips('pickup', windowsOf('pickup', day, today));
+	// Oldest first, then by time, no time last; an order's delivery before its pickup.
+	const { results } = await db
+		.prepare(
+			`select * from (${delivery.sql} union all ${pickup.sql})
+			order by date, time is null, time, id, direction`
+		)
+		.bind(...delivery.params, ...pickup.params)
+		.all<Row>();
+	return { today, date: day, rows: results.map((row) => toDispatchRow(row, day)) };
 }
