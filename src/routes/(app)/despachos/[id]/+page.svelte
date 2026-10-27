@@ -1,27 +1,60 @@
 <script lang="ts">
+	import type { SubmitFunction } from '@sveltejs/kit';
+	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import Badge, { ORDER_STATUS_TONES } from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import Field from '$lib/components/Field.svelte';
 	import IconButton from '$lib/components/IconButton.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import { formatClockTime, formatInstant, formatLongDay, formatShortDay } from '$lib/datetime';
 	import { formatBalance, formatPesos } from '$lib/format';
 	import { DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, RETURN_METHOD_LABELS } from '$lib/labels';
+	import { isPickupStatus, nextOperationalStatus, type OperationalStatus } from '$lib/orders';
 	import { formatPhone } from '$lib/phone';
 	import type { Carrier } from '$lib/server/services/orders';
 	import type { PageProps } from './$types';
 
 	// The order as the warehouse and the driver work it: who, where, when, what, and its money.
-	// Read-only: no commercial action lives here. Every control is 48px, for a phone in the street.
-	let { data }: PageProps = $props();
+	// No commercial action lives here: only the status button. Every control is 48px, for a phone in
+	// the street.
+	let { data, form }: PageProps = $props();
 
 	const order = $derived(data.order);
 	const delivery = $derived(order.delivery);
 	const pickup = $derived(order.pickup);
 	const id = $derived(String(order.id));
+
+	// One button, one target; none on a draft, a cancelled or a completed order.
+	const nextStatus = $derived(
+		nextOperationalStatus({
+			from: order.status,
+			deliveryMethod: delivery.method,
+			returnMethod: pickup.method
+		})
+	);
+	let isAdvanceOpen = $state(false);
+	let note = $state('');
+
+	// Pre-filled with the direction's current note: what the field holds replaces it.
+	function startAdvance(to: OperationalStatus) {
+		note = (isPickupStatus(to) ? pickup.notes : delivery.notes) ?? '';
+		isAdvanceOpen = true;
+	}
+
+	// There's no way back, so it asks first; a refusal keeps the dialog open with its message.
+	const closeOnSuccess: SubmitFunction = () => {
+		return async ({ result, update }) => {
+			if ('success' === result.type) {
+				isAdvanceOpen = false;
+			}
+			await update({ reset: false });
+		};
+	};
 
 	// The day the order was opened from (`?fecha=`): «Atrás» goes back to it, through the printout,
 	// the timeline and the orders linked here. Without one, Despachos opens on today.
@@ -243,6 +276,14 @@
 	{/if}
 
 	<div class="actions">
+		{#if nextStatus}
+			{@const to = nextStatus}
+			<div class="actions__primary">
+				<Button size="xl" type="button" onclick={() => startAdvance(to)}>
+					Marcar como {ORDER_STATUS_LABELS[to]}
+				</Button>
+			</div>
+		{/if}
 		<Button
 			variant="secondary"
 			href={keepOrigin(resolve('/(app)/despachos/[id]/impresion', { id }))}
@@ -257,6 +298,39 @@
 		</Button>
 	</div>
 </Screen>
+
+{#if nextStatus}
+	<Modal
+		bind:open={isAdvanceOpen}
+		title="¿Marcar el pedido #{order.id} como {ORDER_STATUS_LABELS[nextStatus]}?"
+		body="No se puede deshacer."
+	>
+		<form id="advance" method="POST" action="?/avanzar" use:enhance={closeOnSuccess}>
+			<input type="hidden" name="status" value={nextStatus} />
+			<Field
+				label="Nota (opcional)"
+				id="advance-note"
+				hint="Reemplaza la nota de {isPickupStatus(nextStatus) ? 'recogida' : 'entrega'}."
+				error={form?.advanceMessage}
+			>
+				<textarea
+					class="note-input"
+					id="advance-note"
+					name="notes"
+					rows="3"
+					placeholder="Ej. Recibió el celador. Cobré $20.000"
+					aria-invalid={form?.advanceMessage ? 'true' : undefined}
+					bind:value={note}></textarea>
+			</Field>
+		</form>
+		{#snippet actions()}
+			<Button type="button" variant="secondary" onclick={() => (isAdvanceOpen = false)}>
+				Cancelar
+			</Button>
+			<Button type="submit" form="advance" size="md">Confirmar</Button>
+		{/snippet}
+	</Modal>
+{/if}
 
 <style>
 	p {
@@ -350,5 +424,27 @@
 		grid-template-columns: 1fr 1fr;
 		gap: var(--space-5);
 		margin-top: var(--space-11);
+	}
+
+	.actions__primary {
+		grid-column: 1 / -1;
+	}
+
+	.note-input {
+		box-sizing: border-box;
+		width: 100%;
+		padding: var(--space-6) var(--space-7);
+		margin: 0;
+		font: var(--type-input);
+		color: var(--text-body);
+		resize: vertical;
+		outline: none;
+		background: var(--surface-card);
+		border: var(--border-w) solid var(--border-default);
+		border-radius: var(--radius-input);
+	}
+
+	.note-input:focus-visible {
+		border-color: var(--border-strong);
 	}
 </style>
