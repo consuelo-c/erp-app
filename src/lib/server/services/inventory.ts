@@ -212,6 +212,9 @@ type CountRow = {
 	review_note: string | null;
 	reviewed_by: string | null;
 	reviewed_at: number | null;
+	reversal_reason: string | null;
+	reversed_by: string | null;
+	reversed_at: number | null;
 	created_at: number;
 	created_by: string;
 };
@@ -519,6 +522,115 @@ export async function reverseCount(
 	}
 	await db.batch(await reversalStatements(db, actor, { row, reason }));
 	return { ok: true, id };
+}
+
+/** A row of «Revisar conteo». The stale items and overlapping counts only for a pending one. */
+export type CountSummary = {
+	id: number;
+	status: InventoryCountStatus;
+	createdAt: number;
+	createdBy: string;
+	productCount: number;
+	staleCount: number;
+	overlapIds: number[];
+};
+
+type ParsedCount = { row: CountRow; items: InventoryItem[] };
+
+// The pending counts' stale items, against the products now, and each one's other pending counts
+// sharing a product.
+async function pendingFlags(
+	db: D1Database,
+	pending: ParsedCount[]
+): Promise<Map<number, Pick<CountSummary, 'staleCount' | 'overlapIds'>>> {
+	const products = await readProducts(
+		db,
+		pending.flatMap(({ items }) => items)
+	);
+	const current = (item: InventoryItem) => products.get(item.product_id)?.total_quantity ?? 0;
+	const shares = (mine: InventoryItem[], theirs: InventoryItem[]) =>
+		mine.some((item) => theirs.some((other) => other.product_id === item.product_id));
+	return new Map(
+		pending.map(({ row, items }) => [
+			row.id,
+			{
+				staleCount: items.filter((item) => isStale(item, current(item))).length,
+				overlapIds: pending
+					.filter((other) => other.row.id !== row.id && shares(items, other.items))
+					.map((other) => other.row.id)
+			}
+		])
+	);
+}
+
+/** «Revisar conteo», `ADMIN` and `MANAGER` only: the pending counts first, then the reviewed ones, each newest first. */
+export async function listCounts(db: D1Database, actor: Actor | null): Promise<CountSummary[]> {
+	requireRole(actor, REVIEWS);
+	const { results } = await db
+		.prepare("select * from inventory_counts order by status = 'PENDING_APPROVAL' desc, id desc")
+		.all<CountRow>();
+	const counts = results.map((row) => ({ row, items: parseItems(row) }));
+	const flags = await pendingFlags(
+		db,
+		counts.filter(({ row }) => 'PENDING_APPROVAL' === row.status)
+	);
+	return counts.map(({ row, items }) => ({
+		id: row.id,
+		status: row.status,
+		createdAt: row.created_at,
+		createdBy: row.created_by,
+		productCount: items.length,
+		...(flags.get(row.id) ?? { staleCount: 0, overlapIds: [] })
+	}));
+}
+
+export type CountDetail = {
+	id: number;
+	status: InventoryCountStatus;
+	items: InventoryItem[];
+	createdAt: number;
+	createdBy: string;
+	reviewNote: string | null;
+	reviewedBy: string | null;
+	reviewedAt: number | null;
+	reversalReason: string | null;
+	reversedBy: string | null;
+	reversedAt: number | null;
+	/** A pending count: what approving it now would apply, skip and overlap. */
+	preview: ApprovalPreview | null;
+	/** An approved count: why it can't be reversed, or null when it can. */
+	reversalBlock: string | null;
+};
+
+/** One count, `ADMIN` and `MANAGER` only, or null when there's none. */
+export async function getCount(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<CountDetail | null> {
+	requireRole(actor, REVIEWS);
+	const parsed = countIdSchema.safeParse(input);
+	const row = parsed.success ? await findReversible(db, parsed.data) : null;
+	if (null === row) {
+		return null;
+	}
+	const items = parseItems(row);
+	const isPending = 'PENDING_APPROVAL' === row.status;
+	return {
+		id: row.id,
+		status: row.status,
+		items,
+		createdAt: row.created_at,
+		createdBy: row.created_by,
+		reviewNote: row.review_note,
+		reviewedBy: row.reviewed_by,
+		reviewedAt: row.reviewed_at,
+		reversalReason: row.reversal_reason,
+		reversedBy: row.reversed_by,
+		reversedAt: row.reversed_at,
+		preview: isPending ? toPreview(await planApproval(db, items, row.id)) : null,
+		reversalBlock: 'APPROVED' === row.status ? await reversalBlock(db, row) : null
+	};
 }
 
 /** A product to count: a recoverable incident no count has verified yet. */

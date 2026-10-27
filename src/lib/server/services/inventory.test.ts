@@ -6,7 +6,9 @@ import { createMemoryD1 } from '../db/memory-d1';
 import { reportIncident, reverseIncident } from './incidents';
 import {
 	approveCount,
+	getCount,
 	inventoryItemsSchema,
+	listCounts,
 	previewApproval,
 	getSuggestedProducts,
 	getUnitsOnRent,
@@ -527,6 +529,53 @@ test('a pending, rejected, reversed or missing count is not reversed', async () 
 	expect(stock(CHAIR)).toBe(800);
 });
 
+test('the review list: pending first, then reviewed, each newest first, with stale items and overlaps', async () => {
+	const reviewed = await approved([TABLECLOTH, 118]);
+	const older = await send([CHAIR, 790]);
+	const newer = await send([CHAIR, 795], [TABLECLOTH, 120]);
+	const latest = await send([TABLECLOTH, 119]);
+	await loseChairs(4);
+	expect(await listCounts(db, manager)).toEqual(
+		[
+			{ id: latest, status: 'PENDING_APPROVAL', staleCount: 0, overlapIds: [newer] },
+			{ id: newer, status: 'PENDING_APPROVAL', staleCount: 1, overlapIds: [latest, older] },
+			{ id: older, status: 'PENDING_APPROVAL', staleCount: 1, overlapIds: [newer] },
+			{ id: reviewed, status: 'APPROVED', staleCount: 0, overlapIds: [] }
+		].map((row) => ({
+			...row,
+			createdAt: expect.any(Number),
+			createdBy: 'bodega',
+			productCount: count(row.id).inventory_items.length
+		}))
+	);
+});
+
+test('a count read: a pending one with what approving would do, an approved one with why it cannot be reversed', async () => {
+	const first = await approved([CHAIR, 790]);
+	expect(await getCount(db, String(first), manager)).toMatchObject({
+		status: 'APPROVED',
+		reviewedBy: 'gerente',
+		preview: null,
+		reversalBlock: null
+	});
+	const pending = await send([CHAIR, 780], [TABLECLOTH, 118]);
+	await approved([CHAIR, 785]);
+	expect(await getCount(db, first, manager)).toMatchObject({ reversalBlock: BLOCKED });
+	expect(await getCount(db, pending, manager)).toMatchObject({
+		status: 'PENDING_APPROVAL',
+		createdBy: 'bodega',
+		reviewedAt: null,
+		reversalBlock: null,
+		preview: {
+			changes: [{ product_id: TABLECLOTH, name: 'Mantel blanco 3×3', from: 120, to: 118 }],
+			stale: [{ product_id: CHAIR, system_qty: 790, current: 785 }],
+			overlaps: []
+		}
+	});
+	expect(await getCount(db, 99, manager)).toBeNull();
+	expect(await getCount(db, 'abc', manager)).toBeNull();
+});
+
 async function suggested(): Promise<number[]> {
 	return (await getSuggestedProducts(db, warehouse)).map((row) => row.product_id);
 }
@@ -612,7 +661,9 @@ test('only ADMIN and MANAGER review: the others get a 403 and save nothing', asy
 			rejectCount(db, { id }, actor),
 			previewApproval(db, { id }, actor),
 			reverseCount(db, { id, reason: 'Error' }, actor),
-			submitAndApproveCount(db, { items }, actor)
+			submitAndApproveCount(db, { items }, actor),
+			listCounts(db, actor),
+			getCount(db, id, actor)
 		]) {
 			expect(isHttpError(await call.catch((error: unknown) => error), 403)).toBe(true);
 		}
