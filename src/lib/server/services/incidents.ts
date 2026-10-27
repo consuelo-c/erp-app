@@ -3,6 +3,7 @@
 // what's fixable stays rentable, and a partial count catches it if the repair fails.
 
 import { z } from 'zod';
+import { isIncidentReportable } from '$lib/orders';
 import { ROLES, requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
 import { orderItemsSchema, type OrderStatus, type SaveResult } from './orders';
@@ -17,9 +18,6 @@ export type IncidentStatus = (typeof INCIDENT_STATUSES)[number];
 
 /** The outcomes that take the product out of inventory. */
 const SUBTRACTING: readonly IncidentOutcome[] = ['LOST', 'UNRECOVERABLE'];
-
-// Damage turns up on the return or later, washing: never before the order reaches the client.
-const REPORTABLE: readonly OrderStatus[] = ['DELIVERED', 'OUT_FOR_PICKUP', 'COMPLETED'];
 
 const idSchema = z.number().int().positive();
 const qtySchema = z.number('Escribe la cantidad').int().min(1, 'La cantidad es al menos 1');
@@ -148,7 +146,7 @@ async function checkReport(db: D1Database, report: ReportInput): Promise<Inciden
 	if (null === order) {
 		return refusal({}, 'Ese pedido no existe');
 	}
-	if (!REPORTABLE.includes(order.status)) {
+	if (!isIncidentReportable(order.status)) {
 		return refusal({}, 'Una novedad se reporta cuando el pedido ya se entregó');
 	}
 	const lines = orderItemsSchema.parse(JSON.parse(order.order_items));
