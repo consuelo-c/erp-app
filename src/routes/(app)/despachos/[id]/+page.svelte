@@ -14,7 +14,12 @@
 	import { formatClockTime, formatInstant, formatLongDay, formatShortDay } from '$lib/datetime';
 	import { formatBalance, formatPesos } from '$lib/format';
 	import { DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, RETURN_METHOD_LABELS } from '$lib/labels';
-	import { isPickupStatus, nextOperationalStatus, type OperationalStatus } from '$lib/orders';
+	import {
+		isIncidentReportable,
+		isPickupStatus,
+		nextOperationalStatus,
+		type OperationalStatus
+	} from '$lib/orders';
 	import { formatPhone } from '$lib/phone';
 	import type { Carrier } from '$lib/server/services/orders';
 	import type { PageProps } from './$types';
@@ -284,6 +289,16 @@
 				</Button>
 			</div>
 		{/if}
+		{#if isIncidentReportable(order.status)}
+			<div class="actions__wide">
+				<Button
+					variant="secondary"
+					href={keepOrigin(resolve('/(app)/despachos/[id]/novedad', { id }))}
+				>
+					Reportar novedad
+				</Button>
+			</div>
+		{/if}
 		<Button
 			variant="secondary"
 			href={keepOrigin(resolve('/(app)/despachos/[id]/impresion', { id }))}
@@ -426,7 +441,8 @@
 		margin-top: var(--space-11);
 	}
 
-	.actions__primary {
+	.actions__primary,
+	.actions__wide {
 		grid-column: 1 / -1;
 	}
 

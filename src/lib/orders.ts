@@ -95,6 +95,14 @@ export function isEditableStatus(status: OrderStatus): boolean {
 	return EDITABLE.includes(status);
 }
 
+// Damage turns up on the return or later, washing: never before the order reaches the client.
+const REPORTABLE: readonly OrderStatus[] = ['DELIVERED', 'OUT_FOR_PICKUP', 'COMPLETED'];
+
+/** Whether an incident can be reported on an order in this state. */
+export function isIncidentReportable(status: OrderStatus): boolean {
+	return REPORTABLE.includes(status);
+}
+
 // Sales records the money in; only the manager pays it out.
 const ORDER_INFLOWS = ['INSTALLMENT', 'SECURITY_DEPOSIT'] as const;
 const ORDER_OUTFLOWS = ['INSTALLMENT_REFUND', 'DEPOSIT_REFUND', 'CARRIER_PAYMENT'] as const;
