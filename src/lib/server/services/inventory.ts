@@ -518,3 +518,77 @@ export async function reverseCount(
 	await db.batch(await reversalStatements(db, actor, { row, reason }));
 	return { ok: true, id };
 }
+
+/** A product to count: a recoverable incident no count has verified yet. */
+export type SuggestedProduct = {
+	product_id: number;
+	name: string;
+	total_quantity: number;
+	/** The recoverable units across those incidents. */
+	recoverable: number;
+	/** Their orders, ascending. */
+	order_ids: number[];
+};
+
+// Each product's latest approval that applied it, not reversed, and the recoverable units reported
+// after it.
+const SUGGESTED_SQL = `with verified as (
+		select json_extract(item.value, '$.product_id') as product_id, max(events.id) as approval
+		from inventory_counts join events on events.entity_type = 'INVENTORY_COUNT' and events.entity_id = inventory_counts.id and events.action = 'APPROVED', json_each(inventory_counts.inventory_items) as item
+		where inventory_counts.status = 'APPROVED' and json_extract(item.value, '$.applied') = 1
+		group by 1
+	), pending as (
+		select json_extract(item.value, '$.product_id') as product_id, json_extract(item.value, '$.qty') as qty, incidents.order_id
+		from incidents join events on events.entity_type = 'INCIDENT' and events.entity_id = incidents.id and events.action = 'CREATED', json_each(incidents.incident_items) as item
+		left join verified on verified.product_id = json_extract(item.value, '$.product_id')
+		where incidents.status = 'ACTIVE' and json_extract(item.value, '$.outcome') = 'RECOVERABLE' and events.id > coalesce(verified.approval, 0)
+	)
+	select products.id as product_id, products.name, products.total_quantity, sum(pending.qty) as recoverable, json_group_array(distinct pending.order_id) as order_ids
+	from pending join products on products.id = pending.product_id
+	group by products.id order by products.name`;
+
+/**
+ * The only rule for the suggested list: each product with an `ACTIVE` incident holding a
+ * `RECOVERABLE` item for it, reported after the last approved, not-reversed count that applied
+ * that product (or any time, if none did), inactive products included. Per product: a count that
+ * skipped it as stale verified nothing. Ordered by the `events` ids, like `reversalBlock`.
+ */
+export async function getSuggestedProducts(
+	db: D1Database,
+	actor: Actor | null
+): Promise<SuggestedProduct[]> {
+	requireRole(actor, COUNTS);
+	const { results } = await db
+		.prepare(SUGGESTED_SQL)
+		.all<Omit<SuggestedProduct, 'order_ids'> & { order_ids: string }>();
+	return results.map((row) => ({
+		...row,
+		order_ids: z
+			.array(z.number())
+			.parse(JSON.parse(row.order_ids))
+			.sort((left, right) => left - right)
+	}));
+}
+
+/**
+ * «En alquiler», by product id: the lines of the orders out at events (`OUT_FOR_DELIVERY` through
+ * `OUT_FOR_PICKUP`; a `PICKED` one is still on the shelf). An extension adds its lines only once
+ * its original has left `DELIVERED` and `OUT_FOR_PICKUP`: until then the original's count them.
+ */
+export async function getUnitsOnRent(
+	db: D1Database,
+	actor: Actor | null
+): Promise<Record<number, number>> {
+	requireRole(actor, COUNTS);
+	const { results } = await db
+		.prepare(
+			`select json_extract(line.value, '$.product_id') as product_id, sum(json_extract(line.value, '$.qty')) as qty
+			from orders, json_each(orders.order_items) as line
+			left join orders as original on original.id = json_extract(orders.attributes, '$.parent_order_id')
+			where orders.status in ('OUT_FOR_DELIVERY', 'DELIVERED', 'OUT_FOR_PICKUP')
+			and (original.id is null or original.status not in ('DELIVERED', 'OUT_FOR_PICKUP'))
+			group by 1`
+		)
+		.all<{ product_id: number; qty: number }>();
+	return Object.fromEntries(results.map((row) => [row.product_id, row.qty]));
+}
