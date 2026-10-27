@@ -1,22 +1,28 @@
 <script lang="ts">
+	import type { SubmitFunction } from '@sveltejs/kit';
+	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import Badge, { ORDER_STATUS_TONES } from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import Field from '$lib/components/Field.svelte';
 	import IconButton from '$lib/components/IconButton.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import { formatClockTime, formatInstant, formatLongDay, formatShortDay } from '$lib/datetime';
 	import { formatBalance, formatPesos } from '$lib/format';
 	import { DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, RETURN_METHOD_LABELS } from '$lib/labels';
+	import { nextOperationalStatus, noteTrip } from '$lib/orders';
 	import { formatPhone } from '$lib/phone';
 	import type { Carrier } from '$lib/server/services/orders';
 	import type { PageProps } from './$types';
 
 	// The order as the warehouse and the driver work it: who, where, when, what, and its money.
-	// Read-only: no commercial action lives here. Every control is 48px, for a phone in the street.
-	let { data }: PageProps = $props();
+	// No commercial action lives here: only the status button, open to every role. Every control
+	// is 48px, for a phone in the street.
+	let { data, form }: PageProps = $props();
 
 	const order = $derived(data.order);
 	const delivery = $derived(order.delivery);
@@ -47,6 +53,34 @@
 		].filter((note) => null !== note.text)
 	);
 	const days = $derived(`${order.rentalDays} ${1 === order.rentalDays ? 'día' : 'días'}`);
+
+	// One button, one target: none on a draft, a cancelled or a completed order.
+	const nextStatus = $derived(
+		nextOperationalStatus({
+			from: order.status,
+			deliveryMethod: delivery.method,
+			returnMethod: pickup.method
+		})
+	);
+
+	let isAdvanceOpen = $state(false);
+	let note = $state('');
+
+	// The note starts as that trip's current one, so what the dialog holds replaces it.
+	function startAdvance(status: NonNullable<typeof nextStatus>) {
+		note = order[noteTrip(status)].notes ?? '';
+		isAdvanceOpen = true;
+	}
+
+	// It closes once saved; a refusal, like someone else having marked it first, keeps it open.
+	const closeOnSuccess: SubmitFunction =
+		() =>
+		async ({ result, update }) => {
+			if ('success' === result.type) {
+				isAdvanceOpen = false;
+			}
+			await update({ reset: false });
+		};
 
 	function tripWhen(date: string, time: string | null): string {
 		return null === time
@@ -255,8 +289,53 @@
 		>
 			Historial
 		</Button>
+		{#if nextStatus}
+			<Button onclick={() => startAdvance(nextStatus)}>
+				Marcar como {ORDER_STATUS_LABELS[nextStatus]}
+			</Button>
+		{/if}
 	</div>
 </Screen>
+
+{#if nextStatus}
+	<Modal
+		bind:open={isAdvanceOpen}
+		title="¿Marcar el pedido #{order.id} como {ORDER_STATUS_LABELS[nextStatus]}?"
+		body="No se puede devolver a un estado anterior."
+	>
+		<form
+			id="advance"
+			class="form-stack"
+			method="POST"
+			action="?/avanzar"
+			use:enhance={closeOnSuccess}
+		>
+			<input type="hidden" name="status" value={nextStatus} />
+			<Field
+				label={'delivery' === noteTrip(nextStatus) ? 'Nota de entrega' : 'Nota de recogida'}
+				id="advance-note"
+				hint="Opcional. Reemplaza la nota que tenía; en blanco, la borra."
+			>
+				<textarea
+					class="note-field"
+					id="advance-note"
+					name="note"
+					rows="3"
+					placeholder="Ej. Lo recibió el vigilante"
+					bind:value={note}></textarea>
+			</Field>
+			{#if form?.advanceMessage}
+				<Notice tone="error">{form.advanceMessage}</Notice>
+			{/if}
+		</form>
+		{#snippet actions()}
+			<Button type="button" variant="secondary" onclick={() => (isAdvanceOpen = false)}>
+				Cancelar
+			</Button>
+			<Button type="submit" form="advance" size="md">Confirmar</Button>
+		{/snippet}
+	</Modal>
+{/if}
 
 <style>
 	p {
@@ -345,9 +424,28 @@
 		margin-top: var(--space-4);
 	}
 
+	.note-field {
+		box-sizing: border-box;
+		width: 100%;
+		padding: var(--space-6) var(--space-7);
+		margin: 0;
+		font: var(--type-input);
+		color: var(--text-body);
+		resize: vertical;
+		outline: none;
+		background: var(--surface-card);
+		border: var(--border-w) solid var(--border-default);
+		border-radius: var(--radius-input);
+	}
+
+	.note-field:focus-visible {
+		border-color: var(--border-strong);
+	}
+
 	.actions {
 		display: grid;
-		grid-template-columns: 1fr 1fr;
+		grid-auto-columns: 1fr;
+		grid-auto-flow: column;
 		gap: var(--space-5);
 		margin-top: var(--space-11);
 	}

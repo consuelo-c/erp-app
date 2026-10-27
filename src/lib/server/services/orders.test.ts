@@ -593,13 +593,15 @@ test('WAREHOUSE marks PICKED: operational transitions are open to every role', a
 	});
 });
 
-test('DRIVER cannot confirm or cancel an order', async () => {
+test('WAREHOUSE and DRIVER cannot confirm or cancel an order', async () => {
 	const id = await create();
-	for (const attempt of [
-		confirmOrder(db, { id }, driver),
-		cancelOrder(db, { id, reason: 'No contesta' }, driver)
-	]) {
-		await expect(attempt).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
+	for (const actor of [warehouse, driver]) {
+		for (const attempt of [
+			confirmOrder(db, { id }, actor),
+			cancelOrder(db, { id, reason: 'No contesta' }, actor)
+		]) {
+			await expect(attempt).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
+		}
 	}
 	expect(await status(id)).toBe('DRAFT');
 });
@@ -684,6 +686,79 @@ test('a client pickup and return goes picked → delivered → completed', async
 		ok: true
 	});
 	expect(await status(id)).toBe('COMPLETED');
+});
+
+test('DRIVER marks DELIVERED with a note: one STATUS_CHANGED event carries both, no EDITED', async () => {
+	const id = await create();
+	setStatus(id, 'OUT_FOR_DELIVERY');
+	const input = { id: String(id), status: 'DELIVERED', note: '  Lo recibió el vigilante ' };
+	expect(await advanceOrder(db, input, driver)).toEqual({ ok: true, id });
+	const order = await read(id);
+	expect(order.status).toBe('DELIVERED');
+	expect(order.delivery.notes).toBe('Lo recibió el vigilante');
+	expect(order.pickup.notes).toBeNull();
+	expect(orderEvents().slice(1)).toEqual([
+		{
+			action: 'STATUS_CHANGED',
+			before: { status: 'OUT_FOR_DELIVERY', 'delivery_attributes.notes': null },
+			after: { status: 'DELIVERED', 'delivery_attributes.notes': 'Lo recibió el vigilante' }
+		}
+	]);
+});
+
+test('SALES marks DELIVERED on an external carrier order', async () => {
+	const external = { ...order1043.delivery_attributes, method: 'EXTERNAL_CARRIER' };
+	const id = await create({
+		...order1043,
+		delivery_attributes: { ...external, carrier_id: WILSON },
+		pickup_attributes: { ...external, carrier_id: ABURRA }
+	});
+	setStatus(id, 'OUT_FOR_DELIVERY');
+	expect(await advanceOrder(db, { id, status: 'DELIVERED', note: '' }, sales)).toEqual({
+		ok: true,
+		id
+	});
+	expect(await status(id)).toBe('DELIVERED');
+});
+
+test("the pickup's transitions write the pickup's note; blank clears it, left out keeps it", async () => {
+	const id = await create();
+	setStatus(id, 'DELIVERED');
+	await advanceOrder(db, { id, status: 'OUT_FOR_PICKUP', note: 'Faltó un mantel' }, driver);
+	expect((await read(id)).pickup.notes).toBe('Faltó un mantel');
+	await advanceOrder(db, { id, status: 'COMPLETED' }, warehouse);
+	expect((await read(id)).pickup.notes).toBe('Faltó un mantel');
+	setStatus(id, 'OUT_FOR_PICKUP');
+	await advanceOrder(db, { id, status: 'COMPLETED', note: '   ' }, warehouse);
+	const order = await read(id);
+	expect(order.pickup.notes).toBeNull();
+	expect(order.delivery.notes).toBeNull();
+	expect(orderEvents().at(-1)).toEqual({
+		action: 'STATUS_CHANGED',
+		before: { status: 'OUT_FOR_PICKUP', 'pickup_attributes.notes': 'Faltó un mantel' },
+		after: { status: 'COMPLETED', 'pickup_attributes.notes': null }
+	});
+});
+
+test('a client pickup skipping to out for delivery is refused, its status and note unchanged', async () => {
+	const atWarehouse = { ...address, time: null, method: 'CLIENT_PICKUP' };
+	const id = await create({ ...order1043, delivery_attributes: atWarehouse });
+	setStatus(id, 'PICKED');
+	const input = { id, status: 'OUT_FOR_DELIVERY', note: 'Salió' };
+	expect(await advanceOrder(db, input, driver)).toMatchObject({ ok: false });
+	const order = await read(id);
+	expect(order.status).toBe('PICKED');
+	expect(order.delivery.notes).toBeNull();
+});
+
+test('two people marking the same transition: the second is refused as illegal', async () => {
+	const id = await create();
+	setStatus(id, 'OUT_FOR_DELIVERY');
+	await advanceOrder(db, { id, status: 'DELIVERED', note: 'Primero' }, driver);
+	const second = await advanceOrder(db, { id, status: 'DELIVERED', note: 'Segundo' }, sales);
+	expect(second).toMatchObject({ ok: false });
+	expect((await read(id)).delivery.notes).toBe('Primero');
+	expect(orderEvents()).toHaveLength(2);
 });
 
 function setAdvancePercentage(percentage: number) {

@@ -59,6 +59,27 @@ export function isLegalTransition(move: OrderMove): boolean {
 	return move.to === forwardStatus(move);
 }
 
+/** The statuses an order moves through on its way out and back: open to every role. */
+export const OPERATIONAL_STATUSES = [
+	'PICKED',
+	'OUT_FOR_DELIVERY',
+	'DELIVERED',
+	'OUT_FOR_PICKUP',
+	'COMPLETED'
+] as const;
+
+export type OperationalStatus = (typeof OPERATIONAL_STATUSES)[number];
+
+/** The order's next operational status from where it is, or null: one button, one target. */
+export function nextOperationalStatus(order: Omit<OrderMove, 'to'>): OperationalStatus | null {
+	return OPERATIONAL_STATUSES.find((to) => isLegalTransition({ ...order, to })) ?? null;
+}
+
+/** Whose note a transition writes: the delivery's up to the delivery, the pickup's after it. */
+export function noteTrip(status: OperationalStatus): 'delivery' | 'pickup' {
+	return 'OUT_FOR_PICKUP' === status || 'COMPLETED' === status ? 'pickup' : 'delivery';
+}
+
 // Once the products are on their way back, or the order was cancelled, it's read-only.
 const EDITABLE: readonly OrderStatus[] = [
 	'DRAFT',

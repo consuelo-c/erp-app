@@ -1,6 +1,12 @@
 import { expect, test } from 'vitest';
 import type { OrderStatus } from '$lib/server/services/orders';
-import { calculateOrderTotals, isLegalTransition, LINES_PER_PAGE, splitIntoPages } from './orders';
+import {
+	calculateOrderTotals,
+	isLegalTransition,
+	LINES_PER_PAGE,
+	nextOperationalStatus,
+	splitIntoPages
+} from './orders';
 
 // The Design Brief's order #1043.
 const order1043 = {
@@ -68,6 +74,19 @@ test('the two axes are independent: client pickup with a company return', () => 
 	const mixed = { deliveryMethod: 'CLIENT_PICKUP', returnMethod: 'COMPANY_PICKUP' } as const;
 	expect(isLegalTransition({ from: 'PICKED', to: 'DELIVERED', ...mixed })).toBe(true);
 	expect(isLegalTransition({ from: 'DELIVERED', to: 'OUT_FOR_PICKUP', ...mixed })).toBe(true);
+});
+
+test('the status button offers one next status, by the methods, and none outside the route', () => {
+	const next = (from: OrderStatus, methods: Methods = company) =>
+		nextOperationalStatus({ from, ...methods });
+	expect(next('CONFIRMED')).toBe('PICKED');
+	expect(next('PICKED')).toBe('OUT_FOR_DELIVERY');
+	expect(next('PICKED', client)).toBe('DELIVERED');
+	expect(next('DELIVERED', external)).toBe('OUT_FOR_PICKUP');
+	expect(next('DELIVERED', client)).toBe('COMPLETED');
+	for (const from of ['DRAFT', 'CANCELLED', 'COMPLETED'] as const) {
+		expect(next(from)).toBeNull();
+	}
 });
 
 test('cancelling is legal until the merchandise reaches the client', () => {

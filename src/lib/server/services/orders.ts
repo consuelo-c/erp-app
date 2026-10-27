@@ -10,6 +10,8 @@ import {
 	isEditableStatus,
 	isLegalTransition,
 	isOrderInflow,
+	noteTrip,
+	OPERATIONAL_STATUSES,
 	ORDER_PAYMENT_CONCEPTS,
 	type OrderTotals,
 	type PricedLine
@@ -907,17 +909,15 @@ const cancellationSchema = transitionSchema.extend({
 });
 
 // Confirming and cancelling commit the company to the client, or release it: they have their
-// own functions, so this one can't be used to skip their role lock.
-const OPERATIONAL_STATUSES = [
-	'PICKED',
-	'OUT_FOR_DELIVERY',
-	'DELIVERED',
-	'OUT_FOR_PICKUP',
-	'COMPLETED'
-] as const;
-
+// own functions, so this one can't be used to skip their role lock. The note is the trip's, as
+// typed: blank clears it, and left out it stays as it is.
 const advanceSchema = transitionSchema.extend({
-	status: z.enum(OPERATIONAL_STATUSES, 'Escoge el estado')
+	status: z.enum(OPERATIONAL_STATUSES, 'Escoge el estado'),
+	note: z
+		.string('Escribe la nota como texto')
+		.trim()
+		.transform((note) => note || null)
+		.optional()
 });
 
 const ILLEGAL_TRANSITION: Refusal = {
@@ -926,7 +926,9 @@ const ILLEGAL_TRANSITION: Refusal = {
 	errors: {}
 };
 
-type Transition = { id: number; to: OrderStatus; action: string; reason?: string };
+type TripNote = { trip: 'delivery' | 'pickup'; text: string | null };
+
+type Transition = { id: number; to: OrderStatus; action: string; reason?: string; note?: TripNote };
 
 function isLegalFrom(row: OrderRow, to: OrderStatus): boolean {
 	const { delivery, pickup } = toOrder(row);
@@ -934,7 +936,24 @@ function isLegalFrom(row: OrderRow, to: OrderStatus): boolean {
 	return isLegalTransition({ from: row.status, to, ...methods });
 }
 
-// Every status change goes through here: the one rule decides, whoever asks.
+// The driver's note goes in its trip's attributes, through the trip's schema like any other write.
+function noteChanges(row: OrderRow, { trip, text }: TripNote): Record<string, string> {
+	const order = toOrder(row);
+	return 'delivery' === trip
+		? {
+				delivery_attributes: JSON.stringify(
+					deliveryAttributesSchema.parse({ ...order.delivery, notes: text })
+				)
+			}
+		: {
+				pickup_attributes: JSON.stringify(
+					pickupAttributesSchema.parse({ ...order.pickup, notes: text })
+				)
+			};
+}
+
+// Every status change goes through here: the one rule decides, whoever asks. A note is written
+// with it, in its STATUS_CHANGED event: it's never an edit, so it doesn't mark the order modified.
 async function applyTransition(
 	db: D1Database,
 	actor: Actor,
@@ -947,9 +966,18 @@ async function applyTransition(
 	if (!isLegalFrom(row, transition.to)) {
 		return ILLEGAL_TRANSITION;
 	}
-	const { id, to, ...event } = transition;
-	const changes = { status: to };
-	const write = { table: 'orders', entityType: 'ORDER', actor, id, current: row, changes };
+	const { id, to, note, ...event } = transition;
+	const changes = { status: to, ...(note && noteChanges(row, note)) };
+	const jsonColumns = ['delivery_attributes', 'pickup_attributes'];
+	const write = {
+		table: 'orders',
+		entityType: 'ORDER',
+		actor,
+		id,
+		current: row,
+		changes,
+		jsonColumns
+	};
 	await db.batch(auditedUpdate(db, { ...write, ...event }));
 	return { ok: true, id };
 }
@@ -1006,7 +1034,8 @@ export async function reopenOrder(
 
 /**
  * Picked, out for delivery, delivered, out for pickup, completed: open to every role. With five
- * employees, locking them to one would stop the warehouse the day its person is out.
+ * employees, locking them to one would stop the warehouse the day its person is out. Whoever marks
+ * it may leave the trip's note: who received it, what was collected, what was missing.
  */
 export async function advanceOrder(
 	db: D1Database,
@@ -1018,8 +1047,9 @@ export async function advanceOrder(
 	if (!parsed.success) {
 		return invalidOrder(parsed.error);
 	}
-	const { id, status } = parsed.data;
-	return applyTransition(db, actor, { id, to: status, action: 'STATUS_CHANGED' });
+	const { id, status, note } = parsed.data;
+	const tripNote = undefined === note ? undefined : { trip: noteTrip(status), text: note };
+	return applyTransition(db, actor, { id, to: status, action: 'STATUS_CHANGED', note: tripNote });
 }
 
 /** A line the order asks more of than its range has left. */
