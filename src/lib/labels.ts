@@ -9,6 +9,7 @@ import type {
 	IncidentStatus,
 	ResponsibleParty
 } from './server/services/incidents';
+import type { InventoryCountStatus } from './server/services/inventory';
 import type {
 	DeliveryMethod,
 	DeliveryPeriod,
@@ -150,4 +151,11 @@ export const INCIDENT_OUTCOME_LABELS: Record<IncidentOutcome, string> = {
 export const INCIDENT_STATUS_LABELS: Record<IncidentStatus, string> = {
 	ACTIVE: 'Activa',
 	REVERSED: 'Revertida'
+};
+
+export const INVENTORY_COUNT_STATUS_LABELS: Record<InventoryCountStatus, string> = {
+	PENDING_APPROVAL: 'Pendiente',
+	APPROVED: 'Aprobado',
+	REJECTED: 'Rechazado',
+	REVERSED: 'Revertido'
 };
