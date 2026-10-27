@@ -9,6 +9,7 @@ import {
 	inventoryItemsSchema,
 	previewApproval,
 	rejectCount,
+	reverseCount,
 	submitAndApproveCount,
 	submitCount
 } from './inventory';
@@ -165,8 +166,8 @@ async function send(...counted: [number, number][]): Promise<number> {
 	return result.id;
 }
 
-// A delivered order with 120 chairs and an incident losing `lost` of them.
-async function loseChairs(lost: number): Promise<number> {
+// A delivered order with 120 chairs and an incident losing `lost` of them, or finding them damaged.
+async function loseChairs(lost: number, outcome = 'LOST'): Promise<number> {
 	const address = { address_1: 'Calle 10 # 43-12, El Poblado', address_2: null };
 	const order = await createOrder(
 		db,
@@ -192,7 +193,7 @@ async function loseChairs(lost: number): Promise<number> {
 		{
 			order_id: order.id,
 			incident_description: 'No volvieron',
-			items: [{ product_id: CHAIR, qty: lost, outcome: 'LOST' }]
+			items: [{ product_id: CHAIR, qty: lost, outcome }]
 		},
 		driver
 	);
@@ -369,6 +370,148 @@ test('«Guardar y aprobar» sends and approves one count, both events on its id'
 	]);
 });
 
+async function approved(...counted: [number, number][]): Promise<number> {
+	const id = await send(...counted);
+	expect(await approveCount(db, { id }, manager)).toMatchObject({ ok: true });
+	return id;
+}
+
+const BLOCKED = 'Silla Tiffany dorada ya tuvo otro movimiento de inventario después de este conteo';
+
+test('reversing sets each applied product back, records who and why, and logs what it restores', async () => {
+	const id = await approved([CHAIR, 792], [TABLECLOTH, 118]);
+	expect(await reverseCount(db, { id, reason: ' ' }, manager)).toMatchObject({
+		ok: false,
+		errors: { reason: 'Escribe el motivo' }
+	});
+	expect(await reverseCount(db, { id, reason: 'Se contó la bodega equivocada' }, manager)).toEqual({
+		ok: true,
+		id
+	});
+	expect([stock(CHAIR), stock(TABLECLOTH)]).toEqual([800, 120]);
+	expect(count(id)).toMatchObject({
+		status: 'REVERSED',
+		reviewed_by: 'gerente',
+		reversal_reason: 'Se contó la bodega equivocada',
+		reversed_by: 'gerente',
+		reversed_at: expect.any(Number)
+	});
+	expect(applied(id)).toEqual([true, true]);
+	expect(events('INVENTORY_COUNT', 'REVERSED')).toEqual([
+		expect.objectContaining({ entity_id: id, reason: 'Se contó la bodega equivocada' })
+	]);
+	expect(events('PRODUCT', 'INVENTORY_ADJUSTED').slice(2)).toEqual([
+		expect.objectContaining({
+			entity_id: CHAIR,
+			before: '{"total_quantity":792}',
+			after: '{"total_quantity":800}'
+		}),
+		expect.objectContaining({
+			entity_id: TABLECLOTH,
+			before: '{"total_quantity":118}',
+			after: '{"total_quantity":120}'
+		})
+	]);
+});
+
+test('a skipped stale item is left as it is: only the applied ones are restored', async () => {
+	const id = await send([CHAIR, 790], [TABLECLOTH, 118]);
+	await loseChairs(4);
+	await approveCount(db, { id }, manager);
+	expect(await reverseCount(db, { id, reason: 'Error' }, manager)).toMatchObject({ ok: true });
+	expect([stock(CHAIR), stock(TABLECLOTH)]).toEqual([796, 120]);
+	const restored = events('PRODUCT', 'INVENTORY_ADJUSTED').filter(
+		(event) => 'gerente' === event.actor_username
+	);
+	expect(restored.map((event) => event.entity_id)).toEqual([TABLECLOTH, TABLECLOTH]);
+});
+
+test('a lost incident on the same product after the approval blocks the reversal', async () => {
+	const id = await approved([CHAIR, 790]);
+	await loseChairs(4);
+	expect(await reverseCount(db, { id, reason: 'Error' }, manager)).toEqual({
+		ok: false,
+		message: BLOCKED,
+		errors: {}
+	});
+	expect(count(id).status).toBe('APPROVED');
+	expect(stock(CHAIR)).toBe(786);
+});
+
+test('a lost incident on another product, or a recoverable one on the same, allows it', async () => {
+	const other = await approved([TABLECLOTH, 118]);
+	await loseChairs(4);
+	expect(await reverseCount(db, { id: other, reason: 'Error' }, manager)).toMatchObject({
+		ok: true
+	});
+	const same = await approved([CHAIR, 790]);
+	await loseChairs(3, 'RECOVERABLE');
+	expect(await reverseCount(db, { id: same, reason: 'Error' }, manager)).toMatchObject({
+		ok: true
+	});
+	expect([stock(CHAIR), stock(TABLECLOTH)]).toEqual([796, 120]);
+});
+
+test('reversing an older incident on the same product after the approval blocks it', async () => {
+	const incident = await loseChairs(4);
+	const id = await approved([CHAIR, 790]);
+	await reverseIncident(db, { id: incident, reason: 'Aparecieron' }, manager);
+	expect(await reverseCount(db, { id, reason: 'Error' }, manager)).toMatchObject({
+		ok: false,
+		message: BLOCKED
+	});
+});
+
+test('another count applying the product blocks it when approved later, even reversed since', async () => {
+	const first = await approved([CHAIR, 790]);
+	const second = await approved([CHAIR, 795], [TABLECLOTH, 118]);
+	expect(await reverseCount(db, { id: first, reason: 'Error' }, manager)).toMatchObject({
+		ok: false,
+		message: BLOCKED
+	});
+	expect(await reverseCount(db, { id: second, reason: 'Error' }, manager)).toMatchObject({
+		ok: true
+	});
+	expect(await reverseCount(db, { id: first, reason: 'Error' }, manager)).toMatchObject({
+		ok: false
+	});
+});
+
+test('another count created later but approved earlier allows it: the order is by approval', async () => {
+	const first = await send([CHAIR, 790]);
+	const second = await send([CHAIR, 800]);
+	await approveCount(db, { id: second }, manager);
+	await approveCount(db, { id: first }, manager);
+	expect(await reverseCount(db, { id: first, reason: 'Error' }, manager)).toMatchObject({
+		ok: true
+	});
+	expect(stock(CHAIR)).toBe(800);
+	expect(await reverseCount(db, { id: second, reason: 'Error' }, manager)).toMatchObject({
+		ok: false,
+		message: BLOCKED
+	});
+});
+
+test('a pending, rejected, reversed or missing count is not reversed', async () => {
+	const pending = await send([CHAIR, 790]);
+	const rejected = await send([CHAIR, 790]);
+	await rejectCount(db, { id: rejected }, manager);
+	const reversed = await approved([TABLECLOTH, 118]);
+	await reverseCount(db, { id: reversed, reason: 'Error' }, manager);
+	for (const id of [pending, rejected, reversed]) {
+		expect(await reverseCount(db, { id, reason: 'Error' }, manager)).toMatchObject({
+			ok: false,
+			message: 'Solo se revierte un conteo aprobado'
+		});
+	}
+	expect(await reverseCount(db, { id: 99, reason: 'Error' }, manager)).toMatchObject({
+		ok: false,
+		message: 'Ese conteo no existe'
+	});
+	expect(events('INVENTORY_COUNT', 'REVERSED')).toHaveLength(1);
+	expect(stock(CHAIR)).toBe(800);
+});
+
 test('only ADMIN and MANAGER review: the others get a 403 and save nothing', async () => {
 	const id = await send([CHAIR, 790]);
 	const items = [{ product_id: CHAIR, counted_qty: 795 }];
@@ -377,6 +520,7 @@ test('only ADMIN and MANAGER review: the others get a 403 and save nothing', asy
 			approveCount(db, { id }, actor),
 			rejectCount(db, { id }, actor),
 			previewApproval(db, { id }, actor),
+			reverseCount(db, { id, reason: 'Error' }, actor),
 			submitAndApproveCount(db, { items }, actor)
 		]) {
 			expect(isHttpError(await call.catch((error: unknown) => error), 403)).toBe(true);

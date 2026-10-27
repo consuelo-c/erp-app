@@ -18,7 +18,7 @@ export type InventoryCountStatus = (typeof INVENTORY_COUNT_STATUSES)[number];
 /** Who counts: everyone but `SALES`. */
 const COUNTS: readonly Role[] = ['ADMIN', 'MANAGER', 'WAREHOUSE', 'DRIVER'];
 
-/** Who reviews: approves, rejects, and counts and approves in one step. */
+/** Who reviews: approves, rejects, reverses, and counts and approves in one step. */
 const REVIEWS: readonly Role[] = ['ADMIN', 'MANAGER'];
 
 const idSchema = z.number().int().positive();
@@ -171,22 +171,25 @@ async function findOverlaps(
 	}));
 }
 
+// Each item's product's `total_quantity` now.
+async function readTotals(db: D1Database, items: InventoryItem[]): Promise<Map<number, number>> {
+	const { results } = await db
+		.prepare('select id, total_quantity from products where id in (select value from json_each(?))')
+		.bind(JSON.stringify(items.map((item) => item.product_id)))
+		.all<{ id: number; total_quantity: number }>();
+	return new Map(results.map((row) => [row.id, row.total_quantity]));
+}
+
 // What approving would do to `items` now: each one applied or skipped against the current totals.
 async function planApproval(
 	db: D1Database,
 	items: InventoryItem[],
 	countId: number | null
 ): Promise<Plan> {
-	const [{ results }, overlaps] = await Promise.all([
-		db
-			.prepare(
-				'select id, total_quantity from products where id in (select value from json_each(?))'
-			)
-			.bind(JSON.stringify(items.map((item) => item.product_id)))
-			.all<{ id: number; total_quantity: number }>(),
+	const [totals, overlaps] = await Promise.all([
+		readTotals(db, items),
 		findOverlaps(db, items, countId)
 	]);
-	const totals = new Map(results.map((row) => [row.id, row.total_quantity]));
 	const current = (item: InventoryItem) => totals.get(item.product_id) ?? 0;
 	const planned = items.map((item) => ({ ...item, applied: !isStale(item, current(item)) }));
 	const pick = (item: InventoryItem) => ({ product_id: item.product_id, name: item.name });
@@ -308,10 +311,14 @@ function reviewStatements(db: D1Database, actor: Actor, review: Review): D1Prepa
 	});
 }
 
-// Each applied item's product set to what was counted: auditedUpdate writes nothing for one that
+// Each applied item's product set to `counted_qty`: auditedUpdate writes nothing for one that
 // already says so.
-function adjustmentStatements(db: D1Database, actor: Actor, plan: Plan): D1PreparedStatement[] {
-	return plan.items
+function adjustmentStatements(
+	db: D1Database,
+	actor: Actor,
+	{ items, totals }: Pick<Plan, 'items' | 'totals'>
+): D1PreparedStatement[] {
+	return items
 		.filter((item) => item.applied)
 		.flatMap((item) =>
 			auditedUpdate(db, {
@@ -320,7 +327,7 @@ function adjustmentStatements(db: D1Database, actor: Actor, plan: Plan): D1Prepa
 				action: 'INVENTORY_ADJUSTED',
 				actor,
 				id: item.product_id,
-				current: { total_quantity: plan.totals.get(item.product_id) ?? 0 },
+				current: { total_quantity: totals.get(item.product_id) ?? 0 },
 				changes: { total_quantity: item.counted_qty }
 			})
 		);
@@ -405,4 +412,109 @@ export async function submitAndApproveCount(
 	}
 	const row = await findPending(db, sent.id);
 	return 'ok' in row ? row : approve(db, { row, note: parsed.data.note }, actor);
+}
+
+type ReversibleRow = CountRow & { approval: number | null };
+
+// The count with its APPROVED event's id: the events log orders approvals and incidents exactly,
+// where `reviewed_at` and `created_at` tie within a second.
+function findReversible(db: D1Database, id: number): Promise<ReversibleRow | null> {
+	return db
+		.prepare(
+			"select inventory_counts.*, (select max(id) from events where entity_type = 'INVENTORY_COUNT' and entity_id = inventory_counts.id and action = 'APPROVED') as approval from inventory_counts where id = ?"
+		)
+		.bind(id)
+		.first<ReversibleRow>();
+}
+
+/**
+ * The only rule for reversing a count's approval: why not, or null when it can. Only an approved
+ * count, and only while its approval is still the last inventory movement of every product it
+ * applied: no incident with that product `LOST` or `UNRECOVERABLE` reported or reversed after it,
+ * no other count applying it approved after it, reversed since or not. Ordered by approval.
+ */
+async function reversalBlock(db: D1Database, row: ReversibleRow): Promise<string | null> {
+	if ('APPROVED' !== row.status || null === row.approval) {
+		return 'Solo se revierte un conteo aprobado';
+	}
+	const applied = parseItems(row).filter((item) => item.applied);
+	const moved = await db
+		.prepare(
+			`select value as product_id from json_each(?1) as mine where exists (
+				select 1 from events join incidents on incidents.id = events.entity_id, json_each(incidents.incident_items) as item
+				where events.id > ?2 and events.entity_type = 'INCIDENT' and events.action in ('CREATED', 'REVERSED')
+				and json_extract(item.value, '$.product_id') = mine.value and json_extract(item.value, '$.outcome') in ('LOST', 'UNRECOVERABLE')
+			) or exists (
+				select 1 from events join inventory_counts on inventory_counts.id = events.entity_id, json_each(inventory_counts.inventory_items) as item
+				where events.id > ?2 and events.entity_type = 'INVENTORY_COUNT' and events.action = 'APPROVED'
+				and json_extract(item.value, '$.product_id') = mine.value and json_extract(item.value, '$.applied') = 1
+			) limit 1`
+		)
+		.bind(JSON.stringify(applied.map((item) => item.product_id)), row.approval)
+		.first<{ product_id: number }>();
+	const name = applied.find((item) => item.product_id === moved?.product_id)?.name;
+	return undefined === name
+		? null
+		: `${name} ya tuvo otro movimiento de inventario después de este conteo`;
+}
+
+const reversalSchema = z.object({
+	id: countIdSchema,
+	reason: z.string('Escribe el motivo').trim().min(1, 'Escribe el motivo')
+});
+
+// The reversal's own columns, apart from the review's so the count keeps who approved it, and each
+// applied item's product back to its `system_qty`.
+async function reversalStatements(
+	db: D1Database,
+	actor: Actor,
+	{ row, reason }: { row: CountRow; reason: string }
+): Promise<D1PreparedStatement[]> {
+	const items = parseItems(row);
+	const restored = items.map((item) => ({ ...item, counted_qty: item.system_qty }));
+	const current = {
+		status: row.status,
+		reversal_reason: null,
+		reversed_by: null,
+		reversed_at: null
+	};
+	const changes = {
+		status: 'REVERSED',
+		reversal_reason: reason,
+		reversed_by: actor.username,
+		reversed_at: nowInSeconds()
+	};
+	const write = { table: 'inventory_counts', entityType: 'INVENTORY_COUNT', action: 'REVERSED' };
+	return [
+		...auditedUpdate(db, { ...write, actor, id: row.id, current, changes, reason }),
+		...adjustmentStatements(db, actor, { items: restored, totals: await readTotals(db, items) })
+	];
+}
+
+/**
+ * Reverses an approved count, `ADMIN` and `MANAGER` only, with a required reason kept in the
+ * event, while `reversalBlock` allows it: each applied item's product back to its `system_qty`,
+ * the skipped ones untouched. The count, its adjustments and their events go in one batch.
+ */
+export async function reverseCount(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<SaveResult> {
+	requireRole(actor, REVIEWS);
+	const parsed = reversalSchema.safeParse(input);
+	if (!parsed.success) {
+		return invalid(parsed.error);
+	}
+	const { id, reason } = parsed.data;
+	const row = await findReversible(db, id);
+	if (null === row) {
+		return { ok: false, message: 'Ese conteo no existe', errors: {} };
+	}
+	const block = await reversalBlock(db, row);
+	if (null !== block) {
+		return { ok: false, message: block, errors: {} };
+	}
+	await db.batch(await reversalStatements(db, actor, { row, reason }));
+	return { ok: true, id };
 }
