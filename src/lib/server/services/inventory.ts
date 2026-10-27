@@ -706,3 +706,20 @@ export async function getUnitsOnRent(
 		.all<{ product_id: number; qty: number }>();
 	return Object.fromEntries(results.map((row) => [row.product_id, row.qty]));
 }
+
+/** A product «Buscar otro producto» offers: an active one, each variant its own. */
+export type CountableProduct = { product_id: number; name: string; total_quantity: number };
+
+/** The active catalog by name, for the count screen's search: everyone who counts. */
+export async function listCountableProducts(
+	db: D1Database,
+	actor: Actor | null
+): Promise<CountableProduct[]> {
+	requireRole(actor, COUNTS);
+	const { results } = await db
+		.prepare(
+			'select id as product_id, name, total_quantity from products where active = 1 order by name collate nocase'
+		)
+		.all<CountableProduct>();
+	return results;
+}

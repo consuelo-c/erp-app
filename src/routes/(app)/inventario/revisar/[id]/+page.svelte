@@ -12,7 +12,8 @@
 	import { formatInstant } from '$lib/datetime';
 	import { formatInteger } from '$lib/format';
 	import { INVENTORY_COUNT_STATUS_LABELS } from '$lib/labels';
-	import type { InventoryItem, Overlap } from '$lib/server/services/inventory';
+	import type { InventoryItem } from '$lib/server/services/inventory';
+	import OverlapNotice from '../../OverlapNotice.svelte';
 	import type { PageProps } from './$types';
 
 	// A pending count is reviewed against the system as it is now: a product that moved since it
@@ -52,11 +53,6 @@
 		return items.map(({ name }) => name).join(', ');
 	}
 
-	function overlapText(overlap: Overlap): string {
-		const who = `${overlap.createdBy} · ${formatInstant(overlap.createdAt)}`;
-		return `El conteo #${overlap.id} (${who}) también cuenta ${overlap.products.join(', ')}.`;
-	}
-
 	function closeOnSuccess(close: () => void): SubmitFunction {
 		return () =>
 			async ({ result, update }) => {
@@ -71,15 +67,6 @@
 <svelte:head>
 	<title>{title} · Banquetes Consuelo C</title>
 </svelte:head>
-
-{#snippet overlaps(list: Overlap[])}
-	<Notice tone="warning">
-		{#each list as overlap (overlap.id)}
-			<span class="block">⚠ {overlapText(overlap)}</span>
-		{/each}
-		<span class="block">Puedes aprobar igual.</span>
-	</Notice>
-{/snippet}
 
 {#snippet itemGroup(
 	groupTitle: string,
@@ -123,7 +110,7 @@
 
 	{#if preview}
 		{#if preview.overlaps.length}
-			<div class="lead">{@render overlaps(preview.overlaps)}</div>
+			<div class="lead"><OverlapNotice overlaps={preview.overlaps} /></div>
 		{/if}
 		<table class="table">
 			<thead>
@@ -265,7 +252,7 @@
 				<p>No se aplica, porque está desactualizado: {names(preview.stale)}.</p>
 			{/if}
 			{#if preview.overlaps.length}
-				{@render overlaps(preview.overlaps)}
+				<OverlapNotice overlaps={preview.overlaps} />
 			{/if}
 			<Field label="Nota (opcional)" id="approve-note">
 				<textarea
@@ -380,14 +367,6 @@
 
 	.lead {
 		margin-bottom: var(--space-7);
-	}
-
-	.block {
-		display: block;
-	}
-
-	.block + .block {
-		margin-top: var(--space-2);
 	}
 
 	.group {

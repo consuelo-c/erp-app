@@ -8,6 +8,7 @@ test('a path belongs to the destination that holds it, Nómina inside Personal y
 	expect(findDestination('/personal/7')?.label).toBe('Personal y Nómina');
 	expect(findDestination('/nomina')?.label).toBe('Personal y Nómina');
 	expect(findDestination('/logins/3/contrasena')?.label).toBe('Sistema');
+	expect(findDestination('/inventario/revisar/3')?.label).toBe('Inventario');
 	expect(findDestination('/loginsx')).toBeUndefined();
 	expect(findDestination('/')).toBeUndefined();
 });

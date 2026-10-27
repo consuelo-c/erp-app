@@ -12,6 +12,7 @@ import {
 	previewApproval,
 	getSuggestedProducts,
 	getUnitsOnRent,
+	listCountableProducts,
 	rejectCount,
 	reverseCount,
 	submitAndApproveCount,
@@ -646,8 +647,18 @@ test('«En alquiler» adds the orders out at events; an extension only once its 
 	expect(await getUnitsOnRent(db, driver)).toEqual({ [CHAIR]: 450 });
 });
 
-test('sales reads neither the suggested list nor «En alquiler»', async () => {
-	for (const call of [getSuggestedProducts(db, sales), getUnitsOnRent(db, sales)]) {
+test('«Buscar otro producto» offers the active products only', async () => {
+	expect(await listCountableProducts(db, driver)).toEqual([
+		{ product_id: CHAIR, name: 'Silla Tiffany dorada', total_quantity: 800 }
+	]);
+});
+
+test('sales reads neither the suggested list, «En alquiler» nor the products to count', async () => {
+	for (const call of [
+		getSuggestedProducts(db, sales),
+		getUnitsOnRent(db, sales),
+		listCountableProducts(db, sales)
+	]) {
 		expect(isHttpError(await call.catch((error: unknown) => error), 403)).toBe(true);
 	}
 });
