@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import Chip from '$lib/components/Chip.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import Input from '$lib/components/Input.svelte';
@@ -256,9 +257,7 @@
 </form>
 
 {#snippet countHint()}
-	<!-- STUB: /inventario doesn't exist until the count screen (#236); then it goes through resolve(). -->
-	<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- the route isn't built yet -->
-	<a href="/inventario">Nuevo conteo para actualizar</a>
+	<a href={resolve('/inventario')}>Nuevo conteo para actualizar</a>
 {/snippet}
 
 <style>

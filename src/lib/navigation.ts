@@ -45,11 +45,11 @@ export const DESTINATIONS: Destination[] = [
 		href: resolve('/productos'),
 		paths: [resolve('/productos')]
 	},
-	// STUB: phase 11 gives it the physical count's href and its screen, and widens its path to /inventario.
 	{
 		label: 'Inventario',
 		icon: 'clipboard',
-		paths: [resolve('/inventario/revisar')]
+		href: resolve('/inventario'),
+		paths: [resolve('/inventario')]
 	},
 	{
 		label: 'Caja',
@@ -103,8 +103,7 @@ export const CASH_TABS = [
 
 /** Inventario's tabs, for the logins that review counts. */
 export const INVENTORY_TABS = [
-	// STUB: phase 11 gives «Conteo físico» its href with its screen.
-	{ label: 'Conteo físico' },
+	{ label: 'Conteo físico', href: resolve('/inventario') },
 	{ label: 'Revisar conteo', href: resolve('/inventario/revisar') }
 ];
 
