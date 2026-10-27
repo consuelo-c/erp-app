@@ -59,6 +59,28 @@ export function isLegalTransition(move: OrderMove): boolean {
 	return move.to === forwardStatus(move);
 }
 
+// Confirming and cancelling commit the company to the client, or release it: they aren't here,
+// so the operational transitions can't be used to skip their role lock.
+export const OPERATIONAL_STATUSES = [
+	'PICKED',
+	'OUT_FOR_DELIVERY',
+	'DELIVERED',
+	'OUT_FOR_PICKUP',
+	'COMPLETED'
+] as const;
+
+export type OperationalStatus = (typeof OPERATIONAL_STATUSES)[number];
+
+/** The status button's one target, or null: a draft, a cancelled or a completed order has none. */
+export function nextOperationalStatus(move: Omit<OrderMove, 'to'>): OperationalStatus | null {
+	return OPERATIONAL_STATUSES.find((to) => isLegalTransition({ ...move, to })) ?? null;
+}
+
+/** Whether a transition belongs to the pickup, and its note with it; otherwise the delivery's. */
+export function isPickupStatus(status: OrderStatus): boolean {
+	return 'OUT_FOR_PICKUP' === status || 'COMPLETED' === status;
+}
+
 // Once the products are on their way back, or the order was cancelled, it's read-only.
 const EDITABLE: readonly OrderStatus[] = [
 	'DRAFT',

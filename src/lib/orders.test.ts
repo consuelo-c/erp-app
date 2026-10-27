@@ -1,6 +1,12 @@
 import { expect, test } from 'vitest';
 import type { OrderStatus } from '$lib/server/services/orders';
-import { calculateOrderTotals, isLegalTransition, LINES_PER_PAGE, splitIntoPages } from './orders';
+import {
+	calculateOrderTotals,
+	isLegalTransition,
+	LINES_PER_PAGE,
+	nextOperationalStatus,
+	splitIntoPages
+} from './orders';
 
 // The Design Brief's order #1043.
 const order1043 = {
@@ -96,6 +102,19 @@ test('skipping a state, going back, leaving COMPLETED and moving into DRAFT are 
 	for (const to of ['DELIVERED', 'OUT_FOR_PICKUP', 'CONFIRMED'] as const) {
 		expect(isLegal('COMPLETED', to)).toBe(false);
 		expect(isLegal('CANCELLED', to)).toBe(false);
+	}
+});
+
+test("the status button's one target follows the methods; draft, cancelled and completed have none", () => {
+	const next = (from: OrderStatus, methods: Methods = company) =>
+		nextOperationalStatus({ from, ...methods });
+	expect(next('CONFIRMED')).toBe('PICKED');
+	expect(next('PICKED')).toBe('OUT_FOR_DELIVERY');
+	expect(next('PICKED', client)).toBe('DELIVERED');
+	expect(next('DELIVERED')).toBe('OUT_FOR_PICKUP');
+	expect(next('DELIVERED', client)).toBe('COMPLETED');
+	for (const from of ['DRAFT', 'CANCELLED', 'COMPLETED'] as const) {
+		expect(next(from)).toBeNull();
 	}
 });
 

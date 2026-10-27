@@ -10,6 +10,8 @@ import {
 	isEditableStatus,
 	isLegalTransition,
 	isOrderInflow,
+	isPickupStatus,
+	OPERATIONAL_STATUSES,
 	ORDER_PAYMENT_CONCEPTS,
 	type OrderTotals,
 	type PricedLine
@@ -906,18 +908,10 @@ const cancellationSchema = transitionSchema.extend({
 	reason: z.string('Escribe el motivo').trim().min(1, 'Escribe el motivo de la cancelación')
 });
 
-// Confirming and cancelling commit the company to the client, or release it: they have their
-// own functions, so this one can't be used to skip their role lock.
-const OPERATIONAL_STATUSES = [
-	'PICKED',
-	'OUT_FOR_DELIVERY',
-	'DELIVERED',
-	'OUT_FOR_PICKUP',
-	'COMPLETED'
-] as const;
-
 const advanceSchema = transitionSchema.extend({
-	status: z.enum(OPERATIONAL_STATUSES, 'Escoge el estado')
+	status: z.enum(OPERATIONAL_STATUSES, 'Escoge el estado'),
+	// The direction's note, replaced whole; blank clears it. Absent leaves it as it is.
+	notes: z.string().trim().optional()
 });
 
 const ILLEGAL_TRANSITION: Refusal = {
@@ -926,7 +920,29 @@ const ILLEGAL_TRANSITION: Refusal = {
 	errors: {}
 };
 
-type Transition = { id: number; to: OrderStatus; action: string; reason?: string };
+type Transition = {
+	id: number;
+	to: OrderStatus;
+	action: string;
+	reason?: string;
+	notes?: string;
+};
+
+// Logged key by key, so the note shows in the event as `delivery_attributes.notes`.
+const TRIP_COLUMNS = ['delivery_attributes', 'pickup_attributes'] as const;
+
+// The driver's note goes to the trip the transition belongs to.
+function noteChange(row: OrderRow, to: OrderStatus, notes: string): Partial<OrderRow> {
+	const { delivery, pickup } = toOrder(row);
+	const note = { notes: notes || null };
+	return isPickupStatus(to)
+		? { pickup_attributes: JSON.stringify(pickupAttributesSchema.parse({ ...pickup, ...note })) }
+		: {
+				delivery_attributes: JSON.stringify(
+					deliveryAttributesSchema.parse({ ...delivery, ...note })
+				)
+			};
+}
 
 function isLegalFrom(row: OrderRow, to: OrderStatus): boolean {
 	const { delivery, pickup } = toOrder(row);
@@ -947,10 +963,11 @@ async function applyTransition(
 	if (!isLegalFrom(row, transition.to)) {
 		return ILLEGAL_TRANSITION;
 	}
-	const { id, to, ...event } = transition;
-	const changes = { status: to };
+	const { id, to, notes, ...event } = transition;
+	const note = undefined === notes ? {} : noteChange(row, to, notes);
+	const changes = { status: to, ...note };
 	const write = { table: 'orders', entityType: 'ORDER', actor, id, current: row, changes };
-	await db.batch(auditedUpdate(db, { ...write, ...event }));
+	await db.batch(auditedUpdate(db, { ...write, ...event, jsonColumns: TRIP_COLUMNS }));
 	return { ok: true, id };
 }
 
@@ -1018,8 +1035,8 @@ export async function advanceOrder(
 	if (!parsed.success) {
 		return invalidOrder(parsed.error);
 	}
-	const { id, status } = parsed.data;
-	return applyTransition(db, actor, { id, to: status, action: 'STATUS_CHANGED' });
+	const { id, status, notes } = parsed.data;
+	return applyTransition(db, actor, { id, to: status, action: 'STATUS_CHANGED', notes });
 }
 
 /** A line the order asks more of than its range has left. */
