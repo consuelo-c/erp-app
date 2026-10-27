@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { resolve } from '$app/paths';
+	import { clearDispatchCache } from '$lib/offline';
 	import Button from './Button.svelte';
 	import Modal from './Modal.svelte';
 
@@ -15,8 +16,15 @@
 {@render trigger(() => (open = true))}
 
 <!-- A form, not a link: logging out is a POST, covered by SvelteKit's checkOrigin. The submit button
-     sits in the dialog and reaches the form through its `form` attribute. -->
-<form id={formId} method="POST" action={resolve('/logout')} hidden></form>
+     sits in the dialog and reaches the form through its `form` attribute. Despachos' offline copy
+     leaves with the session. -->
+<form
+	id={formId}
+	method="POST"
+	action={resolve('/logout')}
+	hidden
+	onsubmit={clearDispatchCache}
+></form>
 
 <Modal bind:open title="Cerrar sesión" body="Vas a salir de tu cuenta en este dispositivo.">
 	{#snippet actions()}

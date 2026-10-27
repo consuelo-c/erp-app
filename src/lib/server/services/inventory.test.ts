@@ -346,7 +346,14 @@ test('a count is reviewed once: approving twice or rejecting after changes nothi
 	expect(stock(CHAIR)).toBe(800);
 	expect(count(id).status).toBe('APPROVED');
 	expect(events('INVENTORY_COUNT', 'APPROVED')).toHaveLength(1);
-	expect(await previewApproval(db, { id }, manager)).toBeNull();
+	expect(await previewApproval(db, { id }, manager)).toMatchObject({
+		ok: false,
+		message: 'Ese conteo ya fue revisado'
+	});
+	expect(await previewApproval(db, { id: 99 }, manager)).toMatchObject({
+		ok: false,
+		message: 'Ese conteo no existe'
+	});
 	expect(await approveCount(db, { id: 99 }, manager)).toMatchObject({ ok: false });
 });
 

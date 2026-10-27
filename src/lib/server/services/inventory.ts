@@ -70,19 +70,29 @@ function invalid(error: z.ZodError): Refusal {
 	return { ok: false, message: 'Revisa los campos marcados', errors };
 }
 
+type ProductNow = { id: number; name: string; total_quantity: number };
+
+// Each item's product as it is now, by id.
+async function readProducts(
+	db: D1Database,
+	items: { product_id: number }[]
+): Promise<Map<number, ProductNow>> {
+	const { results } = await db
+		.prepare(
+			'select id, name, total_quantity from products where id in (select value from json_each(?))'
+		)
+		.bind(JSON.stringify(items.map((item) => item.product_id)))
+		.all<ProductNow>();
+	return new Map(results.map((product) => [product.id, product]));
+}
+
 // Each item's name frozen and `system_qty` snapshotted from the catalog now. An inactive product
 // counts: the suggested list still shows one with a recoverable incident.
 async function resolveItems(
 	db: D1Database,
 	items: z.infer<typeof countSchema>['items']
 ): Promise<InventoryItem[] | Refusal> {
-	const { results } = await db
-		.prepare(
-			'select id, name, total_quantity from products where id in (select value from json_each(?))'
-		)
-		.bind(JSON.stringify(items.map((item) => item.product_id)))
-		.all<{ id: number; name: string; total_quantity: number }>();
-	const products = new Map(results.map((product) => [product.id, product]));
+	const products = await readProducts(db, items);
 	const errors: Record<string, string> = {};
 	const resolved = items.map((item, index) => {
 		const product = products.get(item.product_id);
@@ -145,7 +155,7 @@ export type ApprovalPreview = {
 	overlaps: Overlap[];
 };
 
-type Plan = ApprovalPreview & { items: InventoryItem[]; totals: Map<number, number> };
+type Plan = ApprovalPreview & { items: InventoryItem[]; products: Map<number, ProductNow> };
 
 // The other pending counts (every one when `countId` is null) sharing products with `items`, each
 // naming those products.
@@ -165,19 +175,8 @@ async function findOverlaps(
 		id: row.id,
 		createdAt: row.created_at,
 		createdBy: row.created_by,
-		products: parseItems(row)
-			.filter((item) => names.has(item.product_id))
-			.map((item) => names.get(item.product_id) ?? '')
+		products: parseItems(row).flatMap((item) => names.get(item.product_id) ?? [])
 	}));
-}
-
-// Each item's product's `total_quantity` now.
-async function readTotals(db: D1Database, items: InventoryItem[]): Promise<Map<number, number>> {
-	const { results } = await db
-		.prepare('select id, total_quantity from products where id in (select value from json_each(?))')
-		.bind(JSON.stringify(items.map((item) => item.product_id)))
-		.all<{ id: number; total_quantity: number }>();
-	return new Map(results.map((row) => [row.id, row.total_quantity]));
 }
 
 // What approving would do to `items` now: each one applied or skipped against the current totals.
@@ -186,16 +185,16 @@ async function planApproval(
 	items: InventoryItem[],
 	countId: number | null
 ): Promise<Plan> {
-	const [totals, overlaps] = await Promise.all([
-		readTotals(db, items),
+	const [products, overlaps] = await Promise.all([
+		readProducts(db, items),
 		findOverlaps(db, items, countId)
 	]);
-	const current = (item: InventoryItem) => totals.get(item.product_id) ?? 0;
+	const current = (item: InventoryItem) => products.get(item.product_id)?.total_quantity ?? 0;
 	const planned = items.map((item) => ({ ...item, applied: !isStale(item, current(item)) }));
 	const pick = (item: InventoryItem) => ({ product_id: item.product_id, name: item.name });
 	return {
 		items: planned,
-		totals,
+		products,
 		changes: planned
 			.filter((item) => item.applied && item.counted_qty !== current(item))
 			.map((item) => ({ ...pick(item), from: current(item), to: item.counted_qty })),
@@ -248,18 +247,18 @@ async function findPending(db: D1Database, id: number): Promise<CountRow | Refus
 
 /**
  * What approving would apply, skip and overlap, for its confirmation: a pending count by `id`, or,
- * for «Guardar y aprobar», the `items` about to be sent. Null for a count that isn't pending.
+ * for «Guardar y aprobar», the `items` about to be sent. A missing or reviewed count is refused.
  */
 export async function previewApproval(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<ApprovalPreview | Refusal | null> {
+): Promise<ApprovalPreview | Refusal> {
 	requireRole(actor, REVIEWS);
 	const byId = z.object({ id: countIdSchema }).safeParse(input);
 	if (byId.success) {
 		const row = await findPending(db, byId.data.id);
-		return 'ok' in row ? null : toPreview(await planApproval(db, parseItems(row), row.id));
+		return 'ok' in row ? row : toPreview(await planApproval(db, parseItems(row), row.id));
 	}
 	const parsed = countSchema.safeParse(input);
 	if (!parsed.success) {
@@ -316,7 +315,7 @@ function reviewStatements(db: D1Database, actor: Actor, review: Review): D1Prepa
 function adjustmentStatements(
 	db: D1Database,
 	actor: Actor,
-	{ items, totals }: Pick<Plan, 'items' | 'totals'>
+	{ items, products }: Pick<Plan, 'items' | 'products'>
 ): D1PreparedStatement[] {
 	return items
 		.filter((item) => item.applied)
@@ -327,14 +326,17 @@ function adjustmentStatements(
 				action: 'INVENTORY_ADJUSTED',
 				actor,
 				id: item.product_id,
-				current: { total_quantity: totals.get(item.product_id) ?? 0 },
+				current: { total_quantity: products.get(item.product_id)?.total_quantity ?? 0 },
 				changes: { total_quantity: item.counted_qty }
 			})
 		);
 }
 
-// ponytail: read-then-write, so two approvals racing past the PENDING check both write; each sets
-// absolute totals, so only the events repeat. One manager reviews at a time.
+// ponytail: read-then-write, so whatever moves a product between the read and the batch is lost:
+// two counts sharing a product, approved at once, both pass the stale check and the second one
+// overwrites the first instead of being skipped; an incident reported meanwhile is overwritten too
+// (`reportIncident` also writes an absolute total). The same count approved twice only repeats its
+// events. One manager reviews at a time; a conditional `update` per product if that ever changes.
 async function approve(
 	db: D1Database,
 	{ row, note }: { row: CountRow; note: string | null },
@@ -487,7 +489,7 @@ async function reversalStatements(
 	const write = { table: 'inventory_counts', entityType: 'INVENTORY_COUNT', action: 'REVERSED' };
 	return [
 		...auditedUpdate(db, { ...write, actor, id: row.id, current, changes, reason }),
-		...adjustmentStatements(db, actor, { items: restored, totals: await readTotals(db, items) })
+		...adjustmentStatements(db, actor, { items: restored, products: await readProducts(db, items) })
 	];
 }
 
