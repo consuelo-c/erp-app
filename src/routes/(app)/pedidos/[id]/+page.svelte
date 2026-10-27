@@ -5,6 +5,8 @@
 	import { page } from '$app/state';
 	import Badge, { ORDER_STATUS_TONES } from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import Card from '$lib/components/Card.svelte';
+	import Chip from '$lib/components/Chip.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import IconButton from '$lib/components/IconButton.svelte';
 	import Modal from '$lib/components/Modal.svelte';
@@ -16,12 +18,16 @@
 	import {
 		CASH_CONCEPT_LABELS,
 		DELIVERY_METHOD_LABELS,
+		INCIDENT_OUTCOME_LABELS,
+		INCIDENT_STATUS_LABELS,
 		ORDER_STATUS_LABELS,
 		PAYMENT_METHOD_LABELS,
+		RESPONSIBLE_PARTY_LABELS,
 		RETURN_METHOD_LABELS
 	} from '$lib/labels';
 	import { isEditableStatus, isLegalTransition } from '$lib/orders';
 	import { formatPhone } from '$lib/phone';
+	import type { Incident, ResponsibleParty } from '$lib/server/services/incidents';
 	import type { Carrier, OrderPayment } from '$lib/server/services/orders';
 	import type { PageProps } from './$types';
 
@@ -92,6 +98,29 @@
 	function receiptName(payment: OrderPayment): string {
 		const title = 0 < payment.amount ? 'Recibo de caja' : 'Comprobante de egreso';
 		return `${title} # ${formatReceiptNumber(payment.receiptNumber)}`;
+	}
+
+	// «Novedades»: one incident at a time in each dialog.
+	let selected = $state<Incident | null>(null);
+	let isReverseOpen = $state(false);
+	let isAssignOpen = $state(false);
+	let reversalReason = $state('');
+	let party = $state<ResponsibleParty>('UNDETERMINED');
+	const givenBack = $derived(
+		selected?.items.filter((item) => 'RECOVERABLE' !== item.outcome) ?? []
+	);
+	const parties = Object.entries(RESPONSIBLE_PARTY_LABELS) as [ResponsibleParty, string][];
+
+	function startReverse(incident: Incident) {
+		selected = incident;
+		reversalReason = '';
+		isReverseOpen = true;
+	}
+
+	function startAssign(incident: Incident) {
+		selected = incident;
+		party = incident.responsibleParty;
+		isAssignOpen = true;
 	}
 
 	function startCancel() {
@@ -384,6 +413,58 @@
 		</li>
 	</ul>
 
+	<!-- ADMIN and MANAGER only: the service isn't asked for anyone else's. -->
+	{#if data.incidents?.length}
+		<h2 class="section-title" id="novedades">Novedades ({data.incidents.length})</h2>
+		<p class="meta incidents__money">
+			Depósito recibido {formatBalance(order.depositHeld)} · Saldo {formatBalance(order.balanceDue)}
+		</p>
+		{#each data.incidents as incident (incident.id)}
+			<Card dimmed={null !== incident.reversal}>
+				{#snippet head()}
+					<span>Reportada el {formatInstant(incident.reportedAt)} por {incident.reportedBy}</span>
+					<Badge tone={'ACTIVE' === incident.status ? 'error' : undefined}>
+						{INCIDENT_STATUS_LABELS[incident.status]}
+					</Badge>
+				{/snippet}
+				<ul class="detail-list">
+					{#each incident.items as item (`${item.product_id}:${item.outcome}`)}
+						<li class="detail-list__row--plain">
+							<span>{item.qty} × {item.name}</span>
+							<span>{INCIDENT_OUTCOME_LABELS[item.outcome]}</span>
+						</li>
+					{/each}
+					<li class="detail-list__row--plain">
+						<span>Responsable</span>
+						<span>{RESPONSIBLE_PARTY_LABELS[incident.responsibleParty]}</span>
+					</li>
+				</ul>
+				<p class="incident__description">{incident.description}</p>
+				{#if incident.reversal}
+					<p class="note">
+						Revertida el {formatInstant(incident.reversal.reversedAt)} por {incident.reversal
+							.reversedBy}: {incident.reversal.reason}
+					</p>
+				{:else}
+					<!-- An open item: whose fault it was decides whether the deposit is withheld. -->
+					{#if 'UNDETERMINED' === incident.responsibleParty}
+						<Notice tone="warning">
+							Falta definir el responsable: si no fue el cliente, el depósito no se retiene.
+						</Notice>
+					{/if}
+					<div class="incident__actions">
+						<Button variant="secondary" size="sm" onclick={() => startAssign(incident)}>
+							Cambiar responsable
+						</Button>
+						<Button variant="secondary" size="sm" onclick={() => startReverse(incident)}>
+							Revertir
+						</Button>
+					</div>
+				{/if}
+			</Card>
+		{/each}
+	{/if}
+
 	<h2 class="section-title">Pagos</h2>
 	{#if 0 === order.payments.length}
 		<p class="note">Sin pagos todavía.</p>
@@ -473,6 +554,90 @@
 			<Button type="submit" form="cancel" size="md" disabled={'' === reason.trim()}>
 				Cancelar pedido
 			</Button>
+		{/snippet}
+	</Modal>
+{/if}
+
+{#if selected}
+	{@const incident = selected}
+	<Modal
+		bind:open={isReverseOpen}
+		title="¿Revertir la novedad?"
+		body={0 < givenBack.length
+			? 'Devuelve al inventario:'
+			: 'El inventario no cambia: todo era recuperable.'}
+	>
+		<form
+			id="reverse"
+			class="form-stack"
+			method="POST"
+			action="?/revertir"
+			use:enhance={closeOnSuccess(() => (isReverseOpen = false))}
+		>
+			{#if givenBack.length}
+				<ul class="given-back">
+					{#each givenBack as item (`${item.product_id}:${item.outcome}`)}
+						<li>{item.qty} × {item.name} · {INCIDENT_OUTCOME_LABELS[item.outcome]}</li>
+					{/each}
+				</ul>
+			{/if}
+			<input type="hidden" name="id" value={incident.id} />
+			<Field label="Motivo" id="reverse-reason" error={form?.reverseMessage}>
+				<textarea
+					class="reason"
+					id="reverse-reason"
+					name="reason"
+					rows="3"
+					placeholder="Ej. Las sillas aparecieron en la bodega"
+					aria-invalid={form?.reverseMessage ? 'true' : undefined}
+					required
+					bind:value={reversalReason}></textarea>
+			</Field>
+		</form>
+		{#snippet actions()}
+			<Button type="button" variant="secondary" onclick={() => (isReverseOpen = false)}>
+				Volver
+			</Button>
+			<Button type="submit" form="reverse" size="md" disabled={'' === reversalReason.trim()}>
+				Revertir
+			</Button>
+		{/snippet}
+	</Modal>
+
+	<Modal bind:open={isAssignOpen} title="Responsable de la novedad">
+		{#snippet body()}
+			Depósito recibido <b>{formatBalance(order.depositHeld)}</b> · Saldo
+			<b>{formatBalance(order.balanceDue)}</b>. Si no fue el cliente, el depósito no se retiene.
+		{/snippet}
+		<form
+			id="assign"
+			class="form-stack"
+			method="POST"
+			action="?/responsable"
+			use:enhance={closeOnSuccess(() => (isAssignOpen = false))}
+		>
+			<input type="hidden" name="id" value={incident.id} />
+			<div class="chip-row" role="radiogroup" aria-label="Responsable">
+				{#each parties as [value, label] (value)}
+					<Chip
+						type="radio"
+						name="responsible_party"
+						{value}
+						{label}
+						checked={party === value}
+						onchange={() => (party = value)}
+					/>
+				{/each}
+			</div>
+			{#if form?.assignMessage}
+				<Notice tone="error">{form.assignMessage}</Notice>
+			{/if}
+		</form>
+		{#snippet actions()}
+			<Button type="button" variant="secondary" onclick={() => (isAssignOpen = false)}>
+				Cancelar
+			</Button>
+			<Button type="submit" form="assign" size="md">Guardar</Button>
 		{/snippet}
 	</Modal>
 {/if}
@@ -583,6 +748,28 @@
 		gap: var(--space-6);
 		justify-content: space-between;
 		font-size: var(--text-base);
+	}
+
+	.incidents__money {
+		margin-bottom: var(--space-6);
+	}
+
+	.incident__description {
+		margin: var(--space-4) 0;
+		font-size: var(--text-base);
+		line-height: 1.4;
+	}
+
+	.incident__actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-4);
+		margin-top: var(--space-4);
+	}
+
+	.given-back {
+		padding-left: var(--space-8);
+		margin: 0;
 	}
 
 	.shortage {

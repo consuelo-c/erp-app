@@ -311,6 +311,11 @@
 		>
 			Historial
 		</Button>
+		{#if data.hasIncidents}
+			<Button variant="secondary" href="{resolve('/(app)/pedidos/[id]', { id })}#novedades">
+				Ver novedades
+			</Button>
+		{/if}
 	</div>
 </Screen>
 
