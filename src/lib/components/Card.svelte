@@ -1,18 +1,30 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import Notice from './Notice.svelte';
 
 	// With `href` the whole card is a link. `head` is the title row, e.g. a name and its Badge.
+	// `modified`: an order edited after the warehouse staged it, which has to jump out.
 	interface Props {
 		href?: string;
 		dimmed?: boolean;
+		modified?: boolean;
 		head?: Snippet;
 		children?: Snippet;
 	}
 
-	let { href, dimmed = false, head, children }: Props = $props();
+	let { href, dimmed = false, modified = false, head, children }: Props = $props();
 </script>
 
-<svelte:element this={href ? 'a' : 'div'} {href} class={['card', dimmed && 'card--dimmed']}>
+<svelte:element
+	this={href ? 'a' : 'div'}
+	{href}
+	class={['card', dimmed && 'card--dimmed', modified && 'card--modified']}
+>
+	{#if modified}
+		<div class="card__notice">
+			<Notice tone="warning" strong>⚠ Modificado después de separado</Notice>
+		</div>
+	{/if}
 	{#if head}
 		<div class="card__head">{@render head()}</div>
 	{/if}
@@ -49,6 +61,15 @@
 
 	.card--dimmed {
 		opacity: var(--opacity-dimmed);
+	}
+
+	.card--modified,
+	a.card--modified:hover {
+		border: var(--border-w-strong) solid var(--warning-fg);
+	}
+
+	.card__notice {
+		margin-bottom: var(--space-5);
 	}
 
 	.card__head {

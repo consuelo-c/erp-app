@@ -6,6 +6,7 @@ import { ROLES, requireRole, type Actor } from '../actor';
 import {
 	clientAttributesSchema,
 	deliveryAttributesSchema,
+	MODIFIED_AFTER_STAGING_AT,
 	ORDER_STATUSES,
 	pickupAttributesSchema,
 	type Carrier,
@@ -41,6 +42,7 @@ export type DispatchRow = TripFields & {
 	id: number;
 	status: OrderStatus;
 	hasIncident: boolean;
+	modifiedAfterStaging: boolean;
 	clientName: string;
 	date: string;
 	isLate: boolean;
@@ -60,6 +62,7 @@ type Row = {
 	id: number;
 	status: OrderStatus;
 	has_incident: number;
+	modified_after_staging: number;
 	client_attributes: string;
 	direction: Direction;
 	date: string;
@@ -81,6 +84,7 @@ function toDispatchRow(row: Row, date: string): DispatchRow {
 		id: row.id,
 		status: row.status,
 		hasIncident: 1 === row.has_incident,
+		modifiedAfterStaging: 1 === row.modified_after_staging,
 		clientName: clientAttributesSchema.parse(JSON.parse(row.client_attributes)).name,
 		date: row.date,
 		isLate: row.date < date,
@@ -112,7 +116,9 @@ function selectTrips(direction: Direction, windows: Window[]) {
 			(window) => `(status in (${marks(window.statuses)}) and ${direction}_date between ? and ?)`
 		)
 		.join(' or ');
-	const sql = `select id, status, has_incident, client_attributes, '${direction}' as direction,
+	const sql = `select id, status, has_incident,
+		${MODIFIED_AFTER_STAGING_AT} is not null as modified_after_staging,
+		client_attributes, '${direction}' as direction,
 		${direction}_date as date, ${direction}_attributes as trip,
 		json_extract(${direction}_attributes, '$.time') as time,
 		${'pickup' === direction ? EXTENSION_IDS : "'[]'"} as extension_ids
