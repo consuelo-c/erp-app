@@ -1,4 +1,5 @@
 <script lang="ts" module>
+	import type { InventoryCountStatus } from '$lib/server/services/inventory';
 	import type { OrderStatus } from '$lib/server/services/orders';
 
 	type StatusTone =
@@ -22,15 +23,26 @@
 		COMPLETED: 'completed',
 		CANCELLED: 'cancelled'
 	};
+
+	/** Each count status's color, the same in the list and the detail. */
+	export const INVENTORY_COUNT_STATUS_TONES: Record<
+		InventoryCountStatus,
+		'info' | 'success' | 'error' | 'draft'
+	> = {
+		PENDING_APPROVAL: 'info',
+		APPROVED: 'success',
+		REJECTED: 'error',
+		REVERSED: 'draft'
+	};
 </script>
 
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 
 	// No tone is the neutral grey (Inactivo, Retirado, a contact's services); `info` marks an employee,
-	// `error` an order «Con novedad», and each status tone an order's state.
+	// `error` an order «Con novedad», `warning` a stale count item, and each status tone an order's state.
 	interface Props {
-		tone?: 'success' | 'info' | 'error' | StatusTone;
+		tone?: 'success' | 'info' | 'warning' | 'error' | StatusTone;
 		children: Snippet;
 	}
 
@@ -58,6 +70,11 @@
 	.badge--info {
 		color: var(--info-fg);
 		background: var(--info-bg);
+	}
+
+	.badge--warning {
+		color: var(--warning-fg);
+		background: var(--warning-bg);
 	}
 
 	.badge--error {

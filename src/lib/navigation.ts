@@ -45,8 +45,12 @@ export const DESTINATIONS: Destination[] = [
 		href: resolve('/productos'),
 		paths: [resolve('/productos')]
 	},
-	// STUB: phase 11 gives it the physical count's href and its screen.
-	{ label: 'Inventario', icon: 'clipboard' },
+	// STUB: phase 11 gives it the physical count's href and its screen, and widens its path to /inventario.
+	{
+		label: 'Inventario',
+		icon: 'clipboard',
+		paths: [resolve('/inventario/revisar')]
+	},
 	{
 		label: 'Caja',
 		icon: 'wallet',
@@ -95,6 +99,13 @@ export const HOURS_TABS = [
 export const CASH_TABS = [
 	{ label: 'Libro de caja', href: resolve('/caja') },
 	{ label: 'Registrar movimiento', shortLabel: 'Registrar', href: resolve('/caja/registrar') }
+];
+
+/** Inventario's tabs, for the logins that review counts. */
+export const INVENTORY_TABS = [
+	// STUB: phase 11 gives «Conteo físico» its href with its screen.
+	{ label: 'Conteo físico' },
+	{ label: 'Revisar conteo', href: resolve('/inventario/revisar') }
 ];
 
 /** Sistema's tabs: the system settings, the holidays editor and, for `ADMIN`, the logins. */
