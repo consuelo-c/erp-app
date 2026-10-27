@@ -8,6 +8,8 @@ import {
 	approveCount,
 	inventoryItemsSchema,
 	previewApproval,
+	getSuggestedProducts,
+	getUnitsOnRent,
 	rejectCount,
 	reverseCount,
 	submitAndApproveCount,
@@ -166,8 +168,8 @@ async function send(...counted: [number, number][]): Promise<number> {
 	return result.id;
 }
 
-// A delivered order with 120 chairs and an incident losing `lost` of them, or finding them damaged.
-async function loseChairs(lost: number, outcome = 'LOST'): Promise<number> {
+// An order renting `qty` chairs, in `status`.
+async function rentChairs(qty = 120, status = 'DELIVERED'): Promise<number> {
 	const address = { address_1: 'Calle 10 # 43-12, El Poblado', address_2: null };
 	const order = await createOrder(
 		db,
@@ -180,18 +182,24 @@ async function loseChairs(lost: number, outcome = 'LOST'): Promise<number> {
 			rental_days: 2,
 			delivery_attributes: { method: 'COMPANY_DELIVERY', time: '14:00', ...address },
 			pickup_attributes: { method: 'COMPANY_PICKUP', time: '09:00', ...address },
-			order_items: [{ product_id: CHAIR, qty: 120, unit_price: 2500 }]
+			order_items: [{ product_id: CHAIR, qty, unit_price: 2500 }]
 		},
 		sales
 	);
 	if (!order.ok) {
 		throw new Error(order.message);
 	}
-	database.prepare("update orders set status = 'DELIVERED' where id = ?").run(order.id);
+	database.prepare('update orders set status = ? where id = ?').run(status, order.id);
+	return order.id;
+}
+
+// A delivered order with 120 chairs and an incident losing `lost` of them, or finding them damaged.
+async function loseChairs(lost: number, outcome = 'LOST'): Promise<number> {
+	const order = await rentChairs();
 	const incident = await reportIncident(
 		db,
 		{
-			order_id: order.id,
+			order_id: order,
 			incident_description: 'No volvieron',
 			items: [{ product_id: CHAIR, qty: lost, outcome }]
 		},
@@ -510,6 +518,82 @@ test('a pending, rejected, reversed or missing count is not reversed', async () 
 	});
 	expect(events('INVENTORY_COUNT', 'REVERSED')).toHaveLength(1);
 	expect(stock(CHAIR)).toBe(800);
+});
+
+async function suggested(): Promise<number[]> {
+	return (await getSuggestedProducts(db, warehouse)).map((row) => row.product_id);
+}
+
+test('a recoverable incident suggests its product with its units and orders; reversed or lost-only ones do not', async () => {
+	expect(await getSuggestedProducts(db, driver)).toEqual([]);
+	await loseChairs(4);
+	const reversed = await loseChairs(2, 'RECOVERABLE');
+	await reverseIncident(db, { id: reversed, reason: 'Error' }, manager);
+	expect(await suggested()).toEqual([]);
+	await loseChairs(10, 'RECOVERABLE');
+	await loseChairs(3, 'RECOVERABLE');
+	expect(await getSuggestedProducts(db, warehouse)).toEqual([
+		{
+			product_id: CHAIR,
+			name: 'Silla Tiffany dorada',
+			total_quantity: 796,
+			recoverable: 13,
+			order_ids: [3, 4]
+		}
+	]);
+});
+
+test('a count that applied the product after the incident verifies it; reversing that count does not', async () => {
+	await loseChairs(10, 'RECOVERABLE');
+	const id = await approved([CHAIR, 800]);
+	expect(await suggested()).toEqual([]);
+	await reverseCount(db, { id, reason: 'Error' }, manager);
+	expect(await suggested()).toEqual([CHAIR]);
+	await approved([CHAIR, 800]);
+	await loseChairs(5, 'RECOVERABLE');
+	expect(await getSuggestedProducts(db, warehouse)).toMatchObject([{ recoverable: 5 }]);
+});
+
+test('a count of another product, a stale skip, or a pending or rejected count verify nothing', async () => {
+	await loseChairs(10, 'RECOVERABLE');
+	await approved([TABLECLOTH, 118]);
+	const stale = await send([CHAIR, 790], [TABLECLOTH, 120]);
+	await loseChairs(4);
+	await approveCount(db, { id: stale }, manager);
+	expect(applied(stale)).toEqual([false, true]);
+	await send([CHAIR, 790]);
+	await rejectCount(db, { id: await send([CHAIR, 790]) }, manager);
+	expect(await suggested()).toEqual([CHAIR]);
+});
+
+test('an inactive product with a recoverable incident is still suggested', async () => {
+	await loseChairs(10, 'RECOVERABLE');
+	database.prepare('update products set active = 0 where id = ?').run(CHAIR);
+	expect(await suggested()).toEqual([CHAIR]);
+});
+
+test('«En alquiler» adds the orders out at events; an extension only once its original is back', async () => {
+	await rentChairs(100, 'OUT_FOR_DELIVERY');
+	const original = await rentChairs(200, 'DELIVERED');
+	await rentChairs(300, 'OUT_FOR_PICKUP');
+	for (const status of ['PICKED', 'CONFIRMED', 'COMPLETED']) {
+		await rentChairs(1000, status);
+	}
+	const extension = await rentChairs(50, 'DELIVERED');
+	database
+		.prepare(
+			"update orders set attributes = json_set(attributes, '$.parent_order_id', ?) where id = ?"
+		)
+		.run(original, extension);
+	expect(await getUnitsOnRent(db, warehouse)).toEqual({ [CHAIR]: 600 });
+	database.prepare("update orders set status = 'COMPLETED' where id = ?").run(original);
+	expect(await getUnitsOnRent(db, driver)).toEqual({ [CHAIR]: 450 });
+});
+
+test('sales reads neither the suggested list nor «En alquiler»', async () => {
+	for (const call of [getSuggestedProducts(db, sales), getUnitsOnRent(db, sales)]) {
+		expect(isHttpError(await call.catch((error: unknown) => error), 403)).toBe(true);
+	}
 });
 
 test('only ADMIN and MANAGER review: the others get a 403 and save nothing', async () => {
