@@ -1,19 +1,24 @@
 import { error, fail } from '@sveltejs/kit';
-import { requireRole, ROLES } from '$lib/server/actor';
+import { isAdminOrManager, requireRole, ROLES } from '$lib/server/actor';
+import { listIncidents } from '$lib/server/services/incidents';
 import { advanceOrder, getOrderDetail } from '$lib/server/services/orders';
 import type { Actions, PageServerLoad } from './$types';
 
-// The operational detail: the whole order, prices included, for every role.
+// The operational detail: the whole order, prices included, for every role. ADMIN and MANAGER also
+// learn whether it has incidents, active or reversed, to reach them in the order's «Novedades».
 export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	requireRole(locals.user, ROLES);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
-	const order = await getOrderDetail(platform.env.DB, params.id, locals.user);
+	const db = platform.env.DB;
+	const order = await getOrderDetail(db, params.id, locals.user);
 	if (null === order) {
 		error(404, 'Ese pedido no existe');
 	}
-	return { order };
+	const hasIncidents =
+		isAdminOrManager(locals.user) && 0 < (await listIncidents(db, order.id, locals.user)).length;
+	return { order, hasIncidents };
 };
 
 export const actions: Actions = {

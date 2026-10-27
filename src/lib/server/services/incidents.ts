@@ -4,8 +4,8 @@
 
 import { z } from 'zod';
 import { isIncidentReportable } from '$lib/orders';
-import { ROLES, requireRole, type Actor } from '../actor';
-import { auditedInsert, auditedUpdate } from '../audit';
+import { ROLES, requireRole, type Actor, type Role } from '../actor';
+import { auditedInsert, auditedUpdate, nowInSeconds } from '../audit';
 import { orderItemsSchema, type OrderStatus, type SaveResult } from './orders';
 
 export const INCIDENT_OUTCOMES = ['LOST', 'UNRECOVERABLE', 'RECOVERABLE'] as const;
@@ -15,6 +15,9 @@ export const INCIDENT_STATUSES = ['ACTIVE', 'REVERSED'] as const;
 export type IncidentOutcome = (typeof INCIDENT_OUTCOMES)[number];
 export type ResponsibleParty = (typeof RESPONSIBLE_PARTIES)[number];
 export type IncidentStatus = (typeof INCIDENT_STATUSES)[number];
+
+/** Who reads an order's incidents, reverses them and decides whose fault they were. */
+const MANAGES_INCIDENTS: readonly Role[] = ['ADMIN', 'MANAGER'];
 
 /** The outcomes that take the product out of inventory. */
 const SUBTRACTING: readonly IncidentOutcome[] = ['LOST', 'UNRECOVERABLE'];
@@ -93,11 +96,12 @@ function resolveItems(
 	return 0 < Object.keys(errors).length ? refusal(errors) : resolved;
 }
 
-// How much each product leaves inventory: its LOST and UNRECOVERABLE quantities together.
-function subtractions(items: IncidentItem[]): Map<number, number> {
+// How much each product's inventory moves: its LOST and UNRECOVERABLE quantities together, taken
+// out on a report (`sign` -1) and given back on a reversal (1).
+function adjustments(items: IncidentItem[], sign: -1 | 1): Map<number, number> {
 	const totals = new Map<number, number>();
 	for (const item of items.filter((each) => SUBTRACTING.includes(each.outcome))) {
-		totals.set(item.product_id, (totals.get(item.product_id) ?? 0) + item.qty);
+		totals.set(item.product_id, (totals.get(item.product_id) ?? 0) + sign * item.qty);
 	}
 	return totals;
 }
@@ -107,9 +111,8 @@ function subtractions(items: IncidentItem[]): Map<number, number> {
 async function inventoryStatements(
 	db: D1Database,
 	actor: Actor,
-	items: IncidentItem[]
+	totals: Map<number, number>
 ): Promise<D1PreparedStatement[]> {
-	const totals = subtractions(items);
 	const { results } = await db
 		.prepare('select id, total_quantity from products where id in (select value from json_each(?))')
 		.bind(JSON.stringify([...totals.keys()]))
@@ -122,7 +125,7 @@ async function inventoryStatements(
 			actor,
 			id,
 			current: { total_quantity: current },
-			changes: { total_quantity: current - (totals.get(id) ?? 0) }
+			changes: { total_quantity: current + (totals.get(id) ?? 0) }
 		})
 	);
 }
@@ -187,8 +190,184 @@ export async function reportIncident(
 	};
 	const results = await db.batch([
 		...auditedInsert(db, { table: 'incidents', entityType: 'INCIDENT', actor, values }),
-		...(await inventoryStatements(db, actor, items)),
+		...(await inventoryStatements(db, actor, adjustments(items, -1))),
 		hasIncidentStatement(db, report.order_id)
 	]);
 	return { ok: true, id: results[0].meta.last_row_id };
+}
+
+/** Who reversed an incident, when and why: once set, it never changes. */
+export type Reversal = { reason: string; reversedBy: string; reversedAt: number };
+
+export type Incident = {
+	id: number;
+	items: IncidentItem[];
+	description: string;
+	responsibleParty: ResponsibleParty;
+	status: IncidentStatus;
+	reportedAt: number;
+	reportedBy: string;
+	reversal: Reversal | null;
+};
+
+type IncidentRow = {
+	id: number;
+	order_id: number;
+	incident_items: string;
+	incident_description: string;
+	responsible_party: ResponsibleParty;
+	status: IncidentStatus;
+	reversal_reason: string | null;
+	reversed_by: string | null;
+	reversed_at: number | null;
+	created_at: number;
+	created_by: string;
+};
+
+function toIncident(row: IncidentRow): Incident {
+	const isReversed = 'REVERSED' === row.status;
+	return {
+		id: row.id,
+		items: incidentItemsSchema.parse(JSON.parse(row.incident_items)),
+		description: row.incident_description,
+		responsibleParty: row.responsible_party,
+		status: row.status,
+		reportedAt: row.created_at,
+		reportedBy: row.created_by,
+		reversal: isReversed
+			? {
+					reason: row.reversal_reason ?? '',
+					reversedBy: row.reversed_by ?? '',
+					reversedAt: row.reversed_at ?? 0
+				}
+			: null
+	};
+}
+
+/** An order's incidents, newest first: the order detail's «Novedades», `ADMIN` and `MANAGER` only. */
+export async function listIncidents(
+	db: D1Database,
+	orderId: number,
+	actor: Actor | null
+): Promise<Incident[]> {
+	requireRole(actor, MANAGES_INCIDENTS);
+	const { results } = await db
+		.prepare('select * from incidents where order_id = ? order by id desc')
+		.bind(orderId)
+		.all<IncidentRow>();
+	return results.map(toIncident);
+}
+
+const incidentIdSchema = z.coerce.number().int().positive();
+
+const reversalSchema = z.object({
+	id: incidentIdSchema,
+	reason: z.string('Escribe el motivo').trim().min(1, 'Escribe el motivo')
+});
+
+const responsibleSchema = z.object({
+	id: incidentIdSchema,
+	responsible_party: z.enum(RESPONSIBLE_PARTIES, 'Escoge el responsable')
+});
+
+// Only an ACTIVE incident changes: a reversed one is read-only.
+async function findActive(db: D1Database, id: number): Promise<IncidentRow | Refusal> {
+	const row = await db
+		.prepare('select * from incidents where id = ?')
+		.bind(id)
+		.first<IncidentRow>();
+	if (null === row) {
+		return refusal({}, 'Esa novedad no existe');
+	}
+	return 'ACTIVE' === row.status ? row : refusal({}, 'Esa novedad ya fue revertida');
+}
+
+// Run on an ACTIVE incident only. `reversed_by` apart from `updated_by`: a later write would
+// overwrite who reversed it.
+function reversalStatements(
+	db: D1Database,
+	actor: Actor,
+	{ id, reason }: z.infer<typeof reversalSchema>
+): D1PreparedStatement[] {
+	const reversal = {
+		status: 'REVERSED',
+		reversal_reason: reason,
+		reversed_by: actor.username,
+		reversed_at: nowInSeconds()
+	};
+	const current = {
+		status: 'ACTIVE',
+		reversal_reason: null,
+		reversed_by: null,
+		reversed_at: null
+	};
+	return auditedUpdate(db, {
+		table: 'incidents',
+		entityType: 'INCIDENT',
+		action: 'REVERSED',
+		actor,
+		id,
+		current,
+		changes: reversal,
+		reason
+	});
+}
+
+/**
+ * Voids an incident, `ADMIN` and `MANAGER` only, with a required reason kept in the event. The
+ * lost and unusable go back onto each product's current `total_quantity`, and the order's flag is
+ * worked out again, in one batch. Incidents reverse in any order: their adjustments are subtractions.
+ */
+export async function reverseIncident(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<SaveResult> {
+	requireRole(actor, MANAGES_INCIDENTS);
+	const parsed = reversalSchema.safeParse(input);
+	if (!parsed.success) {
+		return invalid(parsed.error);
+	}
+	const { id } = parsed.data;
+	const row = await findActive(db, id);
+	if ('ok' in row) {
+		return row;
+	}
+	// STUB: phase 11 adds the reversal rule (#282): an incident that adjusted inventory from before
+	// the last approved count can't be reversed. Until counts exist, every ACTIVE one can.
+	await db.batch([
+		...reversalStatements(db, actor, parsed.data),
+		...(await inventoryStatements(db, actor, adjustments(toIncident(row).items, 1))),
+		hasIncidentStatement(db, row.order_id)
+	]);
+	return { ok: true, id };
+}
+
+/**
+ * Whose fault an ACTIVE incident was, once investigated, `ADMIN` and `MANAGER` only. It only
+ * records it: whether the deposit is withheld is decided by whoever handles the return.
+ */
+export async function setResponsibleParty(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<SaveResult> {
+	requireRole(actor, MANAGES_INCIDENTS);
+	const parsed = responsibleSchema.safeParse(input);
+	if (!parsed.success) {
+		return invalid(parsed.error);
+	}
+	const { id, responsible_party: party } = parsed.data;
+	const row = await findActive(db, id);
+	if ('ok' in row) {
+		return row;
+	}
+	const current = { responsible_party: row.responsible_party };
+	const changes = { responsible_party: party };
+	const write = { table: 'incidents', entityType: 'INCIDENT', actor, id, current, changes };
+	const statements = auditedUpdate(db, write);
+	if (0 < statements.length) {
+		await db.batch(statements);
+	}
+	return { ok: true, id };
 }
