@@ -242,6 +242,34 @@ export const orders = sqliteTable(
 	]
 );
 
+// Damage or loss found on a return. Never deleted: a mistake is reversed, which keeps the row.
+// `reversed_by` is apart from `updated_by`, so a later edit doesn't lose who reversed it.
+export const incidents = sqliteTable(
+	'incidents',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		orderId: integer('order_id')
+			.notNull()
+			.references(() => orders.id),
+		incidentItems: text('incident_items').notNull(), // JSON, validated with Zod: each product's outcome
+		incidentDescription: text('incident_description').notNull(),
+		responsibleParty: text('responsible_party').notNull().default('UNDETERMINED'),
+		status: text('status').notNull().default('ACTIVE'),
+		reversalReason: text('reversal_reason'),
+		reversedBy: text('reversed_by'), // username
+		reversedAt: integer('reversed_at'),
+		...auditColumns
+	},
+	(table) => [
+		index('incidents_order_id').on(table.orderId),
+		check(
+			'incidents_responsible_party',
+			sql`${table.responsibleParty} IN ('UNDETERMINED', 'CLIENT', 'CARRIER', 'COMPANY')`
+		),
+		check('incidents_status', sql`${table.status} IN ('ACTIVE', 'REVERSED')`)
+	]
+);
+
 // All the company's money: the sign is the direction (+ in, − out). Immutable by rule, not by
 // schema: no route edits or deletes a movement, a mistake is corrected with an offsetting one.
 // Linked like `events`, by entity_type + entity_id with no foreign key, so a new business line
