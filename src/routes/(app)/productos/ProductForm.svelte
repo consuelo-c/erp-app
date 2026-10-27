@@ -42,7 +42,6 @@
 			variant_name: saved.variantName,
 			description: saved.description,
 			rental_price: formatPesos(saved.rentalPrice),
-			total_quantity: formatInteger(saved.totalQuantity),
 			active: saved.isActive ? 'on' : 'off'
 		};
 	}
@@ -218,16 +217,26 @@
 				required
 			/>
 		</Field>
-		<Field label="Cantidad total" id="total_quantity" error={errorOf('total_quantity')}>
-			<Input
-				id="total_quantity"
-				name="total_quantity"
-				inputmode="numeric"
-				value={fields.totalQuantity}
-				placeholder="Ej. 120"
-				aria-invalid={undefined !== errorOf('total_quantity')}
-				required
-			/>
+		<!-- Typed only on creation; afterwards incidents and counts change it, so it posts nothing. -->
+		<Field
+			label="Cantidad total"
+			id="total_quantity"
+			hint={null === product ? undefined : countHint}
+			error={errorOf('total_quantity')}
+		>
+			{#if null === product}
+				<Input
+					id="total_quantity"
+					name="total_quantity"
+					inputmode="numeric"
+					value={fields.totalQuantity}
+					placeholder="Ej. 120"
+					aria-invalid={undefined !== errorOf('total_quantity')}
+					required
+				/>
+			{:else}
+				<Input id="total_quantity" value={formatInteger(product.totalQuantity)} readonly />
+			{/if}
 		</Field>
 	</div>
 	<fieldset class="choice">
@@ -245,6 +254,12 @@
 		<Notice tone="error">{form.message}</Notice>
 	{/if}
 </form>
+
+{#snippet countHint()}
+	<!-- STUB: /inventario doesn't exist until the count screen (#236); then it goes through resolve(). -->
+	<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- the route isn't built yet -->
+	<a href="/inventario">Nuevo conteo para actualizar</a>
+{/snippet}
 
 <style>
 	.field-row {

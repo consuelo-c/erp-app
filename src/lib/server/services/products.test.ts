@@ -77,6 +77,13 @@ test('editing logs only the changed fields in before/after', async () => {
 	expect(JSON.parse(String(edited.after))).toEqual({ rental_price: 9000 });
 });
 
+test('an edit ignores total_quantity, which stays out of the EDITED event', async () => {
+	const id = await create(chair);
+	await updateProduct(db, { ...chair, id, total_quantity: '80', rental_price: '9.000' }, manager);
+	expect((await getProduct(db, id, manager))?.totalQuantity).toBe(120);
+	expect(JSON.parse(String(events()[1].after))).toEqual({ rental_price: 9000 });
+});
+
 test('Inactivo deactivates the product, which stays in the list', async () => {
 	const id = await create(chair);
 	await updateProduct(db, { ...chair, id, active: 'off' }, manager);
