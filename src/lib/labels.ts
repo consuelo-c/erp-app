@@ -5,6 +5,11 @@ import type { DeductionConcept, EarningConcept } from './payroll';
 import type { CashConcept, PaymentMethod } from './server/services/cash';
 import type { Service } from './server/services/contacts';
 import type {
+	IncidentOutcome,
+	IncidentStatus,
+	ResponsibleParty
+} from './server/services/incidents';
+import type {
 	DeliveryMethod,
 	DeliveryPeriod,
 	OrderStatus,
@@ -68,7 +73,7 @@ export const RETURN_METHOD_LABELS: Record<ReturnMethod, string> = {
 	EXTERNAL_CARRIER: 'Transportador externo'
 };
 
-export const RESPONSIBLE_PARTY_LABELS = {
+export const RESPONSIBLE_PARTY_LABELS: Record<ResponsibleParty, string> = {
 	UNDETERMINED: 'Por determinar',
 	CLIENT: 'Cliente',
 	CARRIER: 'Transportador',
@@ -134,4 +139,15 @@ export const DEDUCTION_LABELS: Record<DeductionConcept, string> = {
 export const PAYROLL_STATUS_LABELS = {
 	DRAFT: 'Borrador',
 	PAID: 'Pagada'
+};
+
+export const INCIDENT_OUTCOME_LABELS: Record<IncidentOutcome, string> = {
+	LOST: 'Perdido',
+	UNRECOVERABLE: 'Inservible',
+	RECOVERABLE: 'Recuperable'
+};
+
+export const INCIDENT_STATUS_LABELS: Record<IncidentStatus, string> = {
+	ACTIVE: 'Activa',
+	REVERSED: 'Revertida'
 };

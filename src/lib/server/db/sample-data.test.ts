@@ -119,6 +119,7 @@ test("loads the Design Brief's #1043 and #1051, #1047 delivered, and enough for 
 	expect(orders).toHaveLength(30);
 	expect(new Set(orders.map((order) => order.status)).size).toBe(8);
 	expect(orders.every((order) => 0 === order.has_incident)).toBe(true);
+	expect(readAll('incidents')).toEqual([]);
 	const byId = (id: number) => orders.find((order) => id === order.id) ?? {};
 	expect([1043, 1047, 1051].map((id) => byId(id).status)).toEqual([
 		'CONFIRMED',
