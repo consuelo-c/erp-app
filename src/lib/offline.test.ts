@@ -1,5 +1,5 @@
-import { expect, test } from 'vitest';
-import { readDispatchCache } from './offline';
+import { expect, test, vi } from 'vitest';
+import { DISPATCH_CACHE_KEY, fetchJson, readDispatchCache } from './offline';
 
 const cache = {
 	date: '2026-10-26',
@@ -24,4 +24,13 @@ test('a missing or malformed copy is nothing', () => {
 	expect(
 		readDispatchCache(JSON.stringify({ ...cache, details: { 1043: null } }), '2026-10-26')
 	).toBeNull();
+});
+
+test("a 401 clears the copy: without a session the phone keeps no clients' data", async () => {
+	const storage = new Map([[DISPATCH_CACHE_KEY, JSON.stringify(cache)]]);
+	vi.stubGlobal('localStorage', { removeItem: (key: string) => storage.delete(key) });
+	const fetch = async () => Response.json({ message: 'Inicia sesión' }, { status: 401 });
+	await expect(fetchJson(fetch, '/sesion')).rejects.toMatchObject({ status: 401 });
+	expect(storage.has(DISPATCH_CACHE_KEY)).toBe(false);
+	vi.unstubAllGlobals();
 });

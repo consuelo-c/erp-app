@@ -77,7 +77,7 @@ Claude runs `test`, `lint` and `typecheck`; the developer runs every other one.
 - `src/lib/server/chosen-employee.ts` — `rememberEmployee`: the employee last picked in Horas › Empleado or Nómina, in a cookie, so moving between the two keeps the same person
 - `src/lib/server/db/memory-d1.ts` — tests only: a D1 stand-in over `node:sqlite` with every migration applied
 - `src/lib/settings.ts` — `SETTINGS`: each key's module, Spanish label, unit, placeholder and Zod schema (parses the stored `value` TEXT); `getSettingInput`: how the screen takes it
-- `src/lib/offline.ts` — `fetchJson`, an endpoint's JSON or null with no network; `readDispatchCache`, the only reader of Despachos' `localStorage` copy, today's or nothing; its load and save
+- `src/lib/offline.ts` — `fetchJson`, an endpoint's JSON or null with no network; `readDispatchCache`, the only reader of Despachos' `localStorage` copy, today's or nothing; its load and save, and `clearDispatchCache`, on logging out and on any 401
 - `src/service-worker.ts` — PWA shell cache: `/` and `/despachos`' data-free shell, served offline to every navigation under it (hence `paths.relative: false`), never a data response; `static/` — app icons, the icon sprite and `manifest.json`
 - `migrations/` — generated SQL; squashed freely until launch, append-only after
 - `scripts/` — `wipe-d1-if-squashed.js`: the deploy's pre-launch production wipe; `settings-defaults.sql`: default `settings`, applied locally by `db:seed` and to production by the deploy; `sample-data.sql`: development-only products, contacts, a login per role, and thirty orders (the Design Brief's #1043, #1047 and #1051, and 27 generated ones, enough for the order list's second page), applied only by `db:seed`

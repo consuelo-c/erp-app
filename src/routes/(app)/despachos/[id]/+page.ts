@@ -18,7 +18,7 @@ export const load: PageLoad = async ({ fetch, params }) => {
 	}
 	const cache = loadDispatchCache(getTodaysDate());
 	const order = cache?.details[params.id];
-	if (undefined === cache || null === cache || undefined === order) {
+	if (null === cache || undefined === order) {
 		error(503, NO_CACHE_MESSAGE);
 	}
 	return { order, hasIncidents: false, capturedAt: cache.capturedAt };

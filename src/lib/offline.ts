@@ -22,6 +22,10 @@ export async function fetchJson<T>(
 		return null;
 	}
 	if (!response.ok) {
+		// An expired or revoked session: the copy goes with it, as on logging out.
+		if (401 === response.status) {
+			clearDispatchCache();
+		}
 		// SvelteKit's own error JSON, `{ message }`; anything else falls back to a generic message.
 		const body = (await response.json().catch(() => null)) as { message?: string } | null;
 		error(response.status, body?.message ?? 'No se pudo cargar');
@@ -77,5 +81,14 @@ export function saveDispatchCache(cache: DispatchCache): void {
 		localStorage.setItem(DISPATCH_CACHE_KEY, JSON.stringify(cache));
 	} catch {
 		// No copy this time: the next load with signal tries again.
+	}
+}
+
+// Without a session the phone keeps no clients' data: offline, nothing else would stop it showing.
+export function clearDispatchCache(): void {
+	try {
+		localStorage.removeItem(DISPATCH_CACHE_KEY);
+	} catch {
+		// Storage blocked or missing: there's no copy to clear.
 	}
 }
