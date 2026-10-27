@@ -80,7 +80,6 @@ const productSchema = z
 		rental_price: wholeNumberSchema('Escribe el precio por día').pipe(
 			z.number().positive('El precio por día debe ser mayor que cero')
 		),
-		total_quantity: wholeNumberSchema('Escribe la cantidad total'),
 		// The Activo and Inactivo radios; nothing posted reads as inactive, like an unchecked box.
 		active: z
 			.enum(['on', 'off'])
@@ -104,6 +103,11 @@ const productSchema = z
 	});
 
 type ParsedProduct = z.output<typeof productSchema>;
+
+// Typed only on creation: after that only incidents, their reversals and counts change it.
+const newProductSchema = productSchema.and(
+	z.object({ total_quantity: wholeNumberSchema('Escribe la cantidad total') })
+);
 
 const idSchema = z.object({ id: z.coerce.number().int().positive() });
 
@@ -255,7 +259,7 @@ export async function createProduct(
 	actor: Actor | null
 ): Promise<Result> {
 	requireRole(actor, MANAGES_PRODUCTS);
-	const parsed = productSchema.safeParse(input);
+	const parsed = newProductSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalid(parsed.error);
 	}
@@ -267,7 +271,7 @@ export async function createProduct(
 		table: 'products',
 		entityType: 'PRODUCT',
 		actor,
-		values: parsed.data.columns
+		values: { ...parsed.data.columns, total_quantity: parsed.data.total_quantity }
 	});
 	const results = await batchUnlessDuplicateVariant(db, statements);
 	if (null === results) {
@@ -299,7 +303,7 @@ async function applyEdit(
 	return null === results ? DUPLICATE_VARIANT : saved;
 }
 
-/** Every field, `active` included: a product is deactivated, never deleted. */
+/** Every field but `total_quantity`, `active` included: a product is deactivated, never deleted. */
 export async function updateProduct(
 	db: D1Database,
 	input: unknown,
