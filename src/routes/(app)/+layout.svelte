@@ -58,7 +58,7 @@
 		<Sidebar
 			items={sidebarItems}
 			footItems={[HELP]}
-			username={data.username}
+			username={data.username ?? ''}
 			bind:isCollapsed={isSidebarCollapsed}
 		/>
 	</div>
@@ -69,7 +69,7 @@
 <BottomSheet bind:open={isMoreOpen} title="Más">
 	<MenuList rows={moreRows}>
 		{#snippet session()}
-			<p class="meta">Sesión: <b>{data.username}</b></p>
+			{#if data.username}<p class="meta">Sesión: <b>{data.username}</b></p>{/if}
 			<LogoutButton>
 				{#snippet trigger(open)}
 					<Button type="button" variant="secondary" size="sm" inline onclick={open}>
