@@ -270,6 +270,30 @@ export const incidents = sqliteTable(
 	]
 );
 
+// A partial physical count. Never edited nor deleted: a mistake is rejected and counted again. The
+// reversal columns are apart from `reviewed_by`/`reviewed_at`, so a reversed count keeps who approved it.
+export const inventoryCounts = sqliteTable(
+	'inventory_counts',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		status: text('status').notNull(),
+		inventoryItems: text('inventory_items').notNull(), // JSON, validated with Zod: each product counted
+		reviewNote: text('review_note'),
+		reviewedBy: text('reviewed_by'), // username
+		reviewedAt: integer('reviewed_at'),
+		reversalReason: text('reversal_reason'),
+		reversedBy: text('reversed_by'), // username
+		reversedAt: integer('reversed_at'),
+		...auditColumns
+	},
+	(table) => [
+		check(
+			'inventory_counts_status',
+			sql`${table.status} IN ('PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'REVERSED')`
+		)
+	]
+);
+
 // All the company's money: the sign is the direction (+ in, − out). Immutable by rule, not by
 // schema: no route edits or deletes a movement, a mistake is corrected with an offsetting one.
 // Linked like `events`, by entity_type + entity_id with no foreign key, so a new business line

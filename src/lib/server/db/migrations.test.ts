@@ -55,6 +55,7 @@ test('creates exactly the tables of the phases built so far', () => {
 		'employees',
 		'events',
 		'incidents',
+		'inventory_counts',
 		'orders',
 		'payroll_runs',
 		'products',
