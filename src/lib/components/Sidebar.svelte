@@ -46,7 +46,8 @@
 		{#each footItems as item (item.label)}
 			{@render sidebarItem(item)}
 		{/each}
-		<div class="sidebar__session">Sesión: {username}</div>
+		<!-- Offline the shell draws with no session to name. -->
+		{#if username}<div class="sidebar__session">Sesión: {username}</div>{/if}
 		<LogoutButton>
 			{#snippet trigger(open)}
 				<button

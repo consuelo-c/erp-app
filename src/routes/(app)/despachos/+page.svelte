@@ -3,9 +3,10 @@
 	import Badge, { ORDER_STATUS_TONES } from '$lib/components/Badge.svelte';
 	import Card from '$lib/components/Card.svelte';
 	import Input from '$lib/components/Input.svelte';
+	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
-	import { formatClockTime, formatLongDay, formatShortDay } from '$lib/datetime';
+	import { formatClockTime, formatInstantTime, formatLongDay, formatShortDay } from '$lib/datetime';
 	import { DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, RETURN_METHOD_LABELS } from '$lib/labels';
 	import { formatPhone } from '$lib/phone';
 	import type { DispatchRow } from '$lib/server/services/dispatch';
@@ -57,6 +58,16 @@
 	{#snippet header()}
 		<ScreenHeader title="Despachos" />
 	{/snippet}
+
+	<!-- No signal: today's copy from the phone, as it was when it was saved. -->
+	{#if null !== data.capturedAt}
+		<div class="offline">
+			<Notice tone="warning">
+				Sin señal · Datos de las {formatInstantTime(data.capturedAt)}. Para marcar un pedido hace
+				falta señal.
+			</Notice>
+		</div>
+	{/if}
 
 	<div class="day">
 		<p class="meta">
@@ -112,6 +123,10 @@
 <style>
 	p {
 		margin: 0;
+	}
+
+	.offline {
+		margin-bottom: var(--space-7);
 	}
 
 	.day {

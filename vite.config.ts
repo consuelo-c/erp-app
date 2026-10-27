@@ -11,6 +11,9 @@ export default defineConfig({
 					filename.split(/[/\\]/).includes('node_modules') ? undefined : true
 			},
 			adapter: adapter(),
+			// Absolute asset paths: offline, the service worker serves `/despachos`' shell for every
+			// URL under it, where relative ones would point one folder too deep.
+			paths: { relative: false },
 			typescript: {
 				config: (config) => {
 					config.include.push('../drizzle.config.ts');

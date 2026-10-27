@@ -3,6 +3,7 @@
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
+	import { online } from 'svelte/reactivity/window';
 	import Badge, { ORDER_STATUS_TONES } from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import Field from '$lib/components/Field.svelte';
@@ -11,7 +12,13 @@
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
-	import { formatClockTime, formatInstant, formatLongDay, formatShortDay } from '$lib/datetime';
+	import {
+		formatClockTime,
+		formatInstant,
+		formatInstantTime,
+		formatLongDay,
+		formatShortDay
+	} from '$lib/datetime';
 	import { formatBalance, formatPesos } from '$lib/format';
 	import { DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, RETURN_METHOD_LABELS } from '$lib/labels';
 	import {
@@ -42,6 +49,14 @@
 			returnMethod: pickup.method
 		})
 	);
+	// A copy from the phone, or signal lost after loading: read-only either way, every write and
+	// every page that needs the server disabled. The browser's own events say so; nothing polls.
+	const isOffline = $derived(null !== data.capturedAt || !online.current);
+
+	function onlineHref(href: string): string | undefined {
+		return isOffline ? undefined : href;
+	}
+
 	let isAdvanceOpen = $state(false);
 	let note = $state('');
 
@@ -139,6 +154,19 @@
 			</span>
 		</ScreenHeader>
 	{/snippet}
+
+	{#if isOffline}
+		<div class="lead-notice">
+			<Notice tone="warning">
+				<strong class="modified__title">
+					Sin señal{null === data.capturedAt
+						? ''
+						: ` · Datos de las ${formatInstantTime(data.capturedAt)}`}
+				</strong>
+				Marcar, reportar una novedad, imprimir y ver el historial necesitan señal.
+			</Notice>
+		</div>
+	{/if}
 
 	{#if null !== order.modifiedAfterStagingAt}
 		<div class="lead-notice">
@@ -284,7 +312,7 @@
 		{#if nextStatus}
 			{@const to = nextStatus}
 			<div class="actions__primary">
-				<Button size="xl" type="button" onclick={() => startAdvance(to)}>
+				<Button size="xl" type="button" disabled={isOffline} onclick={() => startAdvance(to)}>
 					Marcar como {ORDER_STATUS_LABELS[to]}
 				</Button>
 			</div>
@@ -293,7 +321,8 @@
 			<div class="actions__wide">
 				<Button
 					variant="secondary"
-					href={keepOrigin(resolve('/(app)/despachos/[id]/novedad', { id }))}
+					href={onlineHref(keepOrigin(resolve('/(app)/despachos/[id]/novedad', { id })))}
+					disabled={isOffline}
 				>
 					Reportar novedad
 				</Button>
@@ -301,18 +330,24 @@
 		{/if}
 		<Button
 			variant="secondary"
-			href={keepOrigin(resolve('/(app)/despachos/[id]/impresion', { id }))}
+			href={onlineHref(keepOrigin(resolve('/(app)/despachos/[id]/impresion', { id })))}
+			disabled={isOffline}
 		>
 			Imprimir pedido
 		</Button>
 		<Button
 			variant="secondary"
-			href={keepOrigin(resolve('/(app)/despachos/[id]/historial', { id }))}
+			href={onlineHref(keepOrigin(resolve('/(app)/despachos/[id]/historial', { id })))}
+			disabled={isOffline}
 		>
 			Historial
 		</Button>
 		{#if data.hasIncidents}
-			<Button variant="secondary" href="{resolve('/(app)/pedidos/[id]', { id })}#novedades">
+			<Button
+				variant="secondary"
+				href={onlineHref(`${resolve('/(app)/pedidos/[id]', { id })}#novedades`)}
+				disabled={isOffline}
+			>
 				Ver novedades
 			</Button>
 		{/if}

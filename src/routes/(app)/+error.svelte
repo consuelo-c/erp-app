@@ -8,10 +8,15 @@
 
 	// An error inside the shell, its navigation still usable. A 403 is a section outside the login's
 	// roles: the header names the section, the body says why.
+	// A 503 is Despachos with no signal and no copy of today's: nothing broke, there's no data yet.
 	const isForbidden = $derived(403 === page.status);
-	const title = $derived(
-		isForbidden ? (findDestination(page.url.pathname)?.label ?? 'Acceso restringido') : 'Error'
-	);
+	const isOffline = $derived(503 === page.status);
+	const title = $derived.by(() => {
+		if (isForbidden) {
+			return findDestination(page.url.pathname)?.label ?? 'Acceso restringido';
+		}
+		return isOffline ? 'Sin señal' : 'Error';
+	});
 </script>
 
 <svelte:head>
@@ -25,6 +30,8 @@
 
 	{#if isForbidden}
 		<Notice tone="info">No tienes permiso para esta sección</Notice>
+	{:else if isOffline}
+		<Notice tone="info">{page.error?.message}</Notice>
 	{:else}
 		<Notice tone="error">{page.error?.message}</Notice>
 	{/if}
