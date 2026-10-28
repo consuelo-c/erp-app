@@ -18,6 +18,15 @@ declare global {
 		// interface PageState {}
 	}
 
+	// Cloudflare Turnstile's script, loaded only by the landing's lookup.
+	interface Window {
+		turnstile?: {
+			render(container: HTMLElement, options: { sitekey: string; language: string }): string;
+			reset(widgetId: string): void;
+			remove(widgetId: string): void;
+		};
+	}
+
 	// A Workers extension, missing under `vite dev` (Node). The DOM types SvelteKit loads shadow the
 	// Workers declaration of SubtleCrypto.
 	interface SubtleCrypto {
