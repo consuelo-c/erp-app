@@ -12,7 +12,7 @@
 	<title>Editar pedido #{data.order.id} · Banquetes Consuelo C</title>
 </svelte:head>
 
-<Screen wide>
+<Screen>
 	{#snippet header()}
 		<ScreenHeader
 			title="Editar pedido #{data.order.id}"

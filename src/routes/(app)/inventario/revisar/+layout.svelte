@@ -152,9 +152,13 @@
 			display: block;
 		}
 
+		/* List and panel share the screens' column, under the tabs. */
 		.review__body {
 			display: grid;
-			grid-template-columns: minmax(0, 1fr) 440px;
+			grid-template-columns: minmax(0, 1fr) max(440px, 40%);
+			width: 100%;
+			max-width: var(--content-max-w);
+			margin-inline: auto;
 		}
 
 		/* Ink marks the count whose detail is open. */

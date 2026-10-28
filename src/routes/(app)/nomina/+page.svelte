@@ -157,7 +157,7 @@
 </svelte:head>
 
 <!-- Only a draft has the side column. -->
-<Screen wide={null !== draft && null === draft.payment}>
+<Screen>
 	{#snippet header()}
 		<ScreenHeader title="Nómina" />
 	{/snippet}

@@ -145,7 +145,7 @@
 	</div>
 {/snippet}
 
-<Screen wide>
+<Screen>
 	{#snippet header()}
 		<ScreenHeader title="Pedidos" />
 	{/snippet}

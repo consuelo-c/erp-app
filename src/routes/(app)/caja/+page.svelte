@@ -391,7 +391,7 @@
 
 	<div class="book__body">
 		<div class="book__list">
-			<Screen wide>
+			<Screen>
 				<div class="book__layout">
 					<div class="book__intro">
 						<div class="desktop-only">

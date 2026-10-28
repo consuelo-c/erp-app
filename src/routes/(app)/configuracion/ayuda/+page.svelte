@@ -76,10 +76,6 @@
 </Screen>
 
 <style>
-	.help-editor {
-		max-width: 760px;
-	}
-
 	.help-editor__text {
 		box-sizing: border-box;
 		width: 100%;
@@ -151,7 +147,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-5);
-		max-width: 760px;
 	}
 
 	.help-editor__link {

@@ -337,11 +337,6 @@
 		gap: var(--control-gap);
 	}
 
-	.payment {
-		max-width: 560px;
-		margin-inline: auto;
-	}
-
 	.payment__notice {
 		margin-top: var(--space-8);
 	}

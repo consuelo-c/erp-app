@@ -271,11 +271,6 @@
 {/snippet}
 
 <style>
-	.movement {
-		max-width: 560px;
-		margin-inline: auto;
-	}
-
 	.choice {
 		min-width: 0;
 		padding: 0;
