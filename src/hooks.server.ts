@@ -3,7 +3,7 @@ import type { Actor } from '$lib/server/actor';
 import { validateSession } from '$lib/server/services/auth';
 import { deleteSessionCookie, SESSION_COOKIE, setSessionCookie } from '$lib/server/session-cookie';
 
-const CLIENT_ROUTES = new Set(['/mi-pedido/[token]']);
+const CLIENT_ROUTES = new Set(['/', '/mi-pedido/[token]']);
 
 async function resolveUser(event: RequestEvent): Promise<Actor | null> {
 	const token = event.cookies.get(SESSION_COOKIE);
