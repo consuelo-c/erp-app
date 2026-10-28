@@ -123,6 +123,22 @@
 		isAssignOpen = true;
 	}
 
+	// «Copiar enlace del cliente»: the link is copied, never shown; the notice clears itself.
+	let copyNotice = $state<string | null>(null);
+	let copyTimer: ReturnType<typeof setTimeout> | undefined;
+
+	async function copyClientLink(token: string) {
+		const link = new URL(resolve('/mi-pedido/[token]', { token }), page.url.origin);
+		try {
+			await navigator.clipboard.writeText(link.href);
+			copyNotice = 'Enlace copiado';
+		} catch {
+			copyNotice = 'No se pudo copiar el enlace';
+		}
+		clearTimeout(copyTimer);
+		copyTimer = setTimeout(() => (copyNotice = null), 3000);
+	}
+
 	function startCancel() {
 		reason = '';
 		isCancelOpen = true;
@@ -453,6 +469,12 @@
 		>
 			Historial
 		</Button>
+		{#if data.publicToken}
+			{@const token = data.publicToken}
+			<Button variant="secondary" onclick={() => copyClientLink(token)}>
+				Copiar enlace del cliente
+			</Button>
+		{/if}
 		<!-- A cancelled order is never delivered: Despachos has nothing to do with it. -->
 		{#if 'CANCELLED' !== order.status}
 			<Button variant="secondary" href={resolve('/(app)/despachos/[id]', { id: String(order.id) })}>
@@ -483,6 +505,10 @@
 			</form>
 		{/if}
 	</div>
+
+	{#if copyNotice}
+		<p class="copy-notice" role="status">{copyNotice}</p>
+	{/if}
 </Screen>
 
 {#if isDraft && data.confirmation}
@@ -694,6 +720,20 @@
 
 	.actions__cancel :global(.btn) {
 		color: var(--error-fg);
+	}
+
+	/* Sticks to the bottom of the scrolling body, above the bottom bar, wherever it's scrolled. */
+	.copy-notice {
+		position: sticky;
+		bottom: 0;
+		padding: var(--space-6) var(--space-7);
+		margin-top: var(--space-8);
+		font: var(--weight-semibold) var(--text-base) / 1.3 var(--font-sans);
+		color: var(--surface-card);
+		text-align: center;
+		background: var(--text-body);
+		border-radius: var(--radius-input);
+		box-shadow: var(--shadow-dialog);
 	}
 
 	.notes {
