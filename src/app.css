@@ -284,6 +284,114 @@ a:hover {
 	margin-top: var(--space-9);
 }
 
+/* Long text rendered from Markdown (Ayuda): global, since it's `{@html}` output. */
+.prose {
+	font: var(--type-body);
+	color: var(--text-body);
+	text-wrap: pretty;
+	overflow-wrap: break-word;
+}
+
+.prose > * {
+	margin: 0;
+}
+
+.prose > * + * {
+	margin-top: var(--space-6);
+}
+
+.prose > * + h2,
+.prose > * + h3 {
+	margin-top: var(--space-10);
+}
+
+.prose h2 {
+	font: var(--type-section-title);
+}
+
+.prose h3 {
+	font: var(--type-section-title);
+	font-size: var(--text-base);
+}
+
+.prose strong {
+	font-weight: var(--weight-bold);
+}
+
+.prose a {
+	font-weight: var(--weight-semibold);
+}
+
+.prose ul,
+.prose ol {
+	padding-left: var(--space-11);
+}
+
+.prose li + li {
+	margin-top: var(--space-2);
+}
+
+.prose blockquote {
+	padding: var(--space-5) var(--space-7);
+	background: var(--surface-subtle);
+	border-radius: var(--radius-md);
+}
+
+.prose blockquote > * {
+	margin: 0;
+}
+
+.prose table {
+	width: 100%;
+	font-size: var(--text-md);
+	border-collapse: collapse;
+}
+
+.prose th {
+	padding: 0 var(--space-4) var(--space-3) 0;
+	font: var(--type-label);
+	vertical-align: bottom;
+	color: var(--text-secondary);
+	text-align: left;
+	border-bottom: var(--border-w-strong) solid var(--border-strong);
+}
+
+.prose td {
+	padding: var(--space-4) var(--space-4) var(--space-4) 0;
+	vertical-align: top;
+	border-bottom: var(--border-w-hair) solid var(--border-default);
+}
+
+.prose img {
+	display: block;
+	max-width: 100%;
+	height: auto;
+	border-radius: var(--radius-input);
+}
+
+.prose code {
+	padding: 1px 5px;
+	font-family: var(--font-mono);
+	font-size: 0.9em;
+	background: var(--surface-subtle);
+	border-radius: var(--radius-sm);
+}
+
+/* An image that doesn't load: its alt text in its place, on the photo slot's dashed frame. */
+.prose__img-missing {
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 96px;
+	padding: var(--space-8);
+	font-size: var(--text-sm);
+	color: var(--text-secondary);
+	text-align: center;
+	border: var(--border-w) dashed var(--border-default);
+	border-radius: var(--radius-input);
+}
+
 /* The primary action, last in the body on screens with the bottom navigation (a fixed footer
    would cover it). On a wide screen it sits at the column's right edge. */
 .screen__action {
