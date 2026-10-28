@@ -1164,7 +1164,7 @@ function listClauses(filters: OrderFilters): Clause[] {
 }
 
 /** What the client still owes: the total less its installments and their refunds. */
-const BALANCE_DUE_SQL = `order_total - coalesce((select sum(amount) from cash_movements
+export const BALANCE_DUE_SQL = `order_total - coalesce((select sum(amount) from cash_movements
 	where entity_type = 'ORDER' and entity_id = orders.id
 	and concept in ('INSTALLMENT', 'INSTALLMENT_REFUND')), 0)`;
 

@@ -61,6 +61,19 @@ export const DELIVERY_METHOD_LABELS: Record<DeliveryMethod, string> = {
 	EXTERNAL_CARRIER: 'Transportador externo'
 };
 
+// The methods as the client reads them on their page: whoever moves it, it comes to their door.
+export const CLIENT_DELIVERY_METHOD_LABELS: Record<DeliveryMethod, string> = {
+	COMPANY_DELIVERY: 'Entrega a domicilio',
+	CLIENT_PICKUP: 'Recoge en la bodega',
+	EXTERNAL_CARRIER: 'Entrega a domicilio'
+};
+
+export const CLIENT_RETURN_METHOD_LABELS: Record<ReturnMethod, string> = {
+	COMPANY_PICKUP: 'Recogida en su evento',
+	CLIENT_RETURN: 'Devuelve en la bodega',
+	EXTERNAL_CARRIER: 'Recogida en su evento'
+};
+
 export const DELIVERY_PERIOD_LABELS: Record<DeliveryPeriod, string> = {
 	TODAY: 'Hoy',
 	THIS_WEEK: 'Esta semana',
