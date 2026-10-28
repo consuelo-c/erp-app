@@ -107,10 +107,11 @@ export const INVENTORY_TABS = [
 	{ label: 'Revisar conteo', href: resolve('/inventario/revisar') }
 ];
 
-/** Sistema's tabs: the system settings, the holidays editor and, for `ADMIN`, the logins. */
+/** Sistema's tabs: the system settings, the holidays and help editors and, for `ADMIN`, the logins. */
 export const SETTINGS_TABS = [
 	{ label: 'Configuración', href: resolve('/configuracion') },
-	{ label: 'Festivos', href: resolve('/configuracion/festivos') }
+	{ label: 'Festivos', href: resolve('/configuracion/festivos') },
+	{ label: 'Ayuda', href: resolve('/configuracion/ayuda') }
 ];
 export const ADMIN_SETTINGS_TABS = [
 	...SETTINGS_TABS,

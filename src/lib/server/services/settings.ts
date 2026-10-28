@@ -288,7 +288,11 @@ export type Help = {
 
 export type HelpResult = { ok: true } | { ok: false; message: string };
 
-const helpFormSchema = z.object({ text: z.string() });
+// A textarea posts its line breaks as CRLF: back to LF, so the editor's counter and an unchanged
+// save match what's stored.
+const helpFormSchema = z.object({
+	text: z.string().transform((text) => text.replaceAll('\r\n', '\n'))
+});
 
 /** The help's Markdown, open to every login. */
 export async function getHelp(db: D1Database, actor: Actor | null): Promise<Help> {
