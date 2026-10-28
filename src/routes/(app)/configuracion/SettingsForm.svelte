@@ -90,7 +90,7 @@
 								placeholder="Ej. {format(key, SETTINGS[key].placeholder)}"
 								inputmode={'number' === input ? 'numeric' : undefined}
 								aria-invalid={undefined !== error}
-								required
+								required={!SETTINGS[key].schema.safeParse('').success}
 							/>
 							{#if unit}
 								<span class="settings__unit">{unit}</span>
