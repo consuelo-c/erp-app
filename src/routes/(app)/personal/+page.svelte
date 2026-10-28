@@ -7,10 +7,8 @@
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
-	import Tabs from '$lib/components/Tabs.svelte';
 	import { formatCivilDate } from '$lib/datetime';
 	import { formatIdNumber } from '$lib/format';
-	import { PERSONAL_TABS } from '$lib/navigation';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -22,7 +20,7 @@
 
 <Screen>
 	{#snippet header()}
-		<ScreenHeader><Tabs tabs={PERSONAL_TABS} current="Personal" /></ScreenHeader>
+		<ScreenHeader title="Personal" />
 	{/snippet}
 
 	<!-- Set by Nuevo empleado's redirect after a save. -->

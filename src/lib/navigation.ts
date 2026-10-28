@@ -54,14 +54,20 @@ export const DESTINATIONS: Destination[] = [
 	{
 		label: 'Caja',
 		icon: 'wallet',
-		href: resolve('/caja'),
+		href: resolve('/caja/registrar'),
 		paths: [resolve('/caja')]
 	},
 	{
-		label: 'Personal y Nómina',
+		label: 'Personal',
 		icon: 'users',
 		href: resolve('/personal'),
-		paths: [resolve('/personal'), resolve('/nomina')]
+		paths: [resolve('/personal')]
+	},
+	{
+		label: 'Nómina',
+		icon: 'banknote',
+		href: resolve('/nomina'),
+		paths: [resolve('/nomina')]
 	},
 	{
 		label: 'Logins',
@@ -83,12 +89,6 @@ export const BAR_SLOTS = 3;
 /** Not a destination: it lives in «Más» and at the sidebar's foot. */
 export const HELP: Destination = { label: 'Ayuda', icon: 'help', href: resolve('/ayuda') };
 
-/** Personal y Nómina's tabs: the employees and their weekly settlement. */
-export const PERSONAL_TABS = [
-	{ label: 'Personal', href: resolve('/personal') },
-	{ label: 'Nómina', href: resolve('/nomina') }
-];
-
 export function findDestination(pathname: string): Destination | undefined {
 	return DESTINATIONS.find(({ paths = [] }) =>
 		paths.some((path) => pathname === path || pathname.startsWith(`${path}/`))
@@ -101,10 +101,10 @@ export const HOURS_TABS = [
 	{ label: 'Equipo', href: resolve('/horas/equipo') }
 ];
 
-/** Caja's tabs: the book and the entry of a movement no other module records. */
+/** Caja's tabs: the entry of a movement no other module records, and the book. */
 export const CASH_TABS = [
-	{ label: 'Libro de caja', href: resolve('/caja') },
-	{ label: 'Registrar movimiento', shortLabel: 'Registrar', href: resolve('/caja/registrar') }
+	{ label: 'Registrar movimiento', shortLabel: 'Registrar', href: resolve('/caja/registrar') },
+	{ label: 'Libro de caja', href: resolve('/caja') }
 ];
 
 /** Inventario's tabs, for the logins that review counts. */
