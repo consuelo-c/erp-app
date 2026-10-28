@@ -5,7 +5,7 @@
 	import { formatInstantDate } from '$lib/datetime';
 	import type { PageProps } from './$types';
 
-	// No edit button: the editor is in Sistema. Every question starts closed, several open at once.
+	// No edit button: the editor is in Configuración. Every question starts closed, several open at once.
 	let { data }: PageProps = $props();
 
 	// Not every browser opens a closed <details> for the URL's fragment: it's opened here, on arrival

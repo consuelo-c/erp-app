@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import { toDialTime } from '$lib/datetime';
-import { getSettingInput } from '$lib/settings';
+import { getSettingInput, type SettingModule } from '$lib/settings';
 import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
 import {
@@ -30,6 +30,9 @@ const warehouse: Actor = {
 };
 const driver: Actor = { username: 'conductor', employeeId: null, roles: ['DRIVER'], kind: 'user' };
 
+// Both tabs' modules: General's and Nómina's.
+const modules: SettingModule[] = ['COMPANY', 'ORDERS', 'PAYROLL'];
+
 let db: D1Database;
 let database: DatabaseSync;
 
@@ -39,9 +42,9 @@ beforeEach(() => {
 });
 
 // The form as the screen posts it: a clock time as hour, minutes and a.m. or p.m.
-function toForm(values: SystemSettings): Record<string, string> {
+function toForm(values: Partial<SystemSettings>): Record<string, string> {
 	return Object.fromEntries(
-		Object.entries(values).flatMap(([key, value]) => {
+		Object.entries(values).flatMap(([key, value = '']) => {
 			if ('clock' !== getSettingInput(key as SystemSettingKey)) {
 				return [[key, value]];
 			}
@@ -62,8 +65,8 @@ function readEvents() {
 
 test('only ADMIN and MANAGER read or edit the settings', async () => {
 	const refusals = [
-		getSystemSettings(db, sales).catch((caught) => caught),
-		updateSystemSettings(db, {}, sales).catch((caught) => caught)
+		getSystemSettings(db, modules, sales).catch((caught) => caught),
+		updateSystemSettings(db, { modules, values: {} }, sales).catch((caught) => caught)
 	];
 	for (const refusal of await Promise.all(refusals)) {
 		expect(isHttpError(refusal, 403)).toBe(true);
@@ -71,7 +74,7 @@ test('only ADMIN and MANAGER read or edit the settings', async () => {
 });
 
 test('the settings come in the screen order, without the holidays, left to their own editor', async () => {
-	const values = await getSystemSettings(db, manager);
+	const values = await getSystemSettings(db, modules, manager);
 	expect(values).not.toHaveProperty('PAYROLL_HOLIDAYS');
 	// The screen's order, not the query's: the night shift starts before it ends.
 	const keys = Object.keys(values);
@@ -80,20 +83,20 @@ test('the settings come in the screen order, without the holidays, left to their
 });
 
 test('saving the settings unchanged writes nothing', async () => {
-	const form = toForm(await getSystemSettings(db, manager));
-	expect(await updateSystemSettings(db, form, manager)).toEqual({ ok: true });
+	const form = toForm(await getSystemSettings(db, modules, manager));
+	expect(await updateSystemSettings(db, { modules, values: form }, manager)).toEqual({ ok: true });
 	expect(readEvents()).toEqual([]);
 });
 
 test('each changed key is saved as typed and logs its own SETTINGS event by key', async () => {
 	const form = {
-		...toForm(await getSystemSettings(db, manager)),
+		...toForm(await getSystemSettings(db, modules, manager)),
 		PAYROLL_MINIMUM_WAGE: '1.800.000',
 		'PAYROLL_NIGHT_START.hour': '9',
 		'PAYROLL_NIGHT_START.minute': '30',
 		'PAYROLL_NIGHT_START.period': 'pm'
 	};
-	expect(await updateSystemSettings(db, form, manager)).toEqual({ ok: true });
+	expect(await updateSystemSettings(db, { modules, values: form }, manager)).toEqual({ ok: true });
 	expect(readValue('PAYROLL_MINIMUM_WAGE')).toEqual({ value: '1800000', updated_by: 'gerente' });
 	expect(readValue('PAYROLL_NIGHT_START')).toMatchObject({ value: '21:30' });
 	expect(readEvents()).toEqual([
@@ -111,19 +114,31 @@ test('each changed key is saved as typed and logs its own SETTINGS event by key'
 
 test('an invalid field saves nothing and comes back with its message', async () => {
 	const form = {
-		...toForm(await getSystemSettings(db, manager)),
+		...toForm(await getSystemSettings(db, modules, manager)),
 		COMPANY_NAME: 'Banquetes C',
 		PAYROLL_HOURS_PER_MONTH: '',
 		ORDERS_SUGGESTED_ADVANCE_PCT: '120',
 		'PAYROLL_NIGHT_END.hour': '13'
 	};
-	expect(await updateSystemSettings(db, form, manager)).toEqual({
+	expect(await updateSystemSettings(db, { modules, values: form }, manager)).toEqual({
 		ok: false,
 		errors: {
 			PAYROLL_HOURS_PER_MONTH: 'Escribe un número entero mayor que cero',
 			ORDERS_SUGGESTED_ADVANCE_PCT: 'Escribe un porcentaje de 0 a 100',
 			PAYROLL_NIGHT_END: 'Escribe la hora, de 1 a 12'
 		}
+	});
+	expect(readValue('COMPANY_NAME')).toMatchObject({ value: 'Banquetes Consuelo C' });
+	expect(readEvents()).toEqual([]);
+});
+
+test('each tab reads and saves only its own modules: Nómina ignores a general field', async () => {
+	const values = await getSystemSettings(db, ['PAYROLL'], manager);
+	expect(values).not.toHaveProperty('COMPANY_NAME');
+	expect(values).toHaveProperty('PAYROLL_MINIMUM_WAGE');
+	const form = { ...toForm(values), COMPANY_NAME: '' };
+	expect(await updateSystemSettings(db, { modules: ['PAYROLL'], values: form }, manager)).toEqual({
+		ok: true
 	});
 	expect(readValue('COMPANY_NAME')).toMatchObject({ value: 'Banquetes Consuelo C' });
 	expect(readEvents()).toEqual([]);
@@ -344,11 +359,11 @@ test('an empty or too-long help saves nothing and comes back with its message', 
 });
 
 test('the generic settings leave the help out and ignore a HELP_FAQ field', async () => {
-	const values = await getSystemSettings(db, manager);
+	const values = await getSystemSettings(db, modules, manager);
 	expect(values).not.toHaveProperty('HELP_FAQ');
 	const { text } = await getHelp(db, manager);
 	const form = { ...toForm(values), HELP_FAQ: '## Otra' };
-	expect(await updateSystemSettings(db, form, manager)).toEqual({ ok: true });
+	expect(await updateSystemSettings(db, { modules, values: form }, manager)).toEqual({ ok: true });
 	expect(readValue('HELP_FAQ')).toMatchObject({ value: text });
 	expect(readEvents()).toEqual([]);
 });

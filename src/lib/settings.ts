@@ -1,7 +1,9 @@
 import { z } from 'zod';
 
+export type SettingModule = 'COMPANY' | 'HELP' | 'ORDERS' | 'PAYROLL';
+
 type SettingDefinition = {
-	module: 'COMPANY' | 'HELP' | 'ORDERS' | 'PAYROLL';
+	module: SettingModule;
 	label: string;
 	unit: string | null;
 	// An example in the stored format, shown in the empty field so it says what goes there.

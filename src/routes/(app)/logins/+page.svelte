@@ -7,9 +7,7 @@
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
-	import Tabs from '$lib/components/Tabs.svelte';
 	import { ROLE_LABELS } from '$lib/labels';
-	import { ADMIN_SETTINGS_TABS } from '$lib/navigation';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -35,7 +33,7 @@
 
 <Screen>
 	{#snippet header()}
-		<ScreenHeader><Tabs tabs={ADMIN_SETTINGS_TABS} current="Logins" /></ScreenHeader>
+		<ScreenHeader title="Logins" />
 	{/snippet}
 
 	{#if notice}

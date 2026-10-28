@@ -9,7 +9,7 @@
 	import Tabs from '$lib/components/Tabs.svelte';
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import { formatInteger } from '$lib/format';
-	import { ADMIN_SETTINGS_TABS, SETTINGS_TABS } from '$lib/navigation';
+	import { SETTINGS_TABS } from '$lib/navigation';
 	import { HELP_MAX_LENGTH } from '$lib/settings';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import type { PageProps } from './$types';
@@ -31,12 +31,7 @@
 
 <Screen>
 	{#snippet header()}
-		<ScreenHeader
-			><Tabs
-				tabs={data.canManageLogins ? ADMIN_SETTINGS_TABS : SETTINGS_TABS}
-				current="Ayuda"
-			/></ScreenHeader
-		>
+		<ScreenHeader><Tabs tabs={SETTINGS_TABS} current="Ayuda" /></ScreenHeader>
 	{/snippet}
 
 	<UnsavedChangesGuard form="help" />

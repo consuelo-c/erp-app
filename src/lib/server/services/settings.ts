@@ -4,7 +4,13 @@
 import { z } from 'zod';
 import { dialTimeShape, formatLongDay, toClockTime } from '$lib/datetime';
 import { getExtraHoursRange } from '$lib/payroll';
-import { getSettingInput, holidaysSchema, SETTINGS, type SettingKey } from '$lib/settings';
+import {
+	getSettingInput,
+	holidaysSchema,
+	SETTINGS,
+	type SettingKey,
+	type SettingModule
+} from '$lib/settings';
 import { isAdmin, requireRole, ROLES, type Actor } from '../actor';
 import { auditedUpdate } from '../audit';
 
@@ -28,23 +34,35 @@ const formSchema = z.record(z.string(), z.string());
 
 type ParsedField = { value: string } | { message: string };
 
-export async function getSystemSettings(db: D1Database, actor: Actor | null) {
+// Each Configuración tab edits its own modules' keys.
+function keysOf(modules: SettingModule[]) {
+	return SYSTEM_SETTING_KEYS.filter((key) => modules.includes(SETTINGS[key].module));
+}
+
+/** The keys of `modules`, in SETTINGS' order. */
+export async function getSystemSettings(
+	db: D1Database,
+	modules: SettingModule[],
+	actor: Actor | null
+): Promise<Partial<SystemSettings>> {
 	requireRole(actor, EDITS_SETTINGS);
-	return findSystemSettings(db);
+	const current = await findSystemSettings(db);
+	return Object.fromEntries(keysOf(modules).map((key) => [key, current[key]]));
 }
 
 /**
- * Validates every field with its key's schema and saves the ones that changed, with their events,
- * in one batch. Any invalid field saves nothing and comes back with its message.
+ * Validates every field of `modules` (the tab's, never the client's) with its key's schema and
+ * saves the ones that changed, with their events, in one batch; the other modules' fields are
+ * ignored. Any invalid field saves nothing and comes back with its message.
  */
 export async function updateSystemSettings(
 	db: D1Database,
-	input: unknown,
+	{ modules, values }: { modules: SettingModule[]; values: unknown },
 	actor: Actor | null
 ): Promise<SaveResult> {
 	requireRole(actor, EDITS_SETTINGS);
-	const form = formSchema.parse(input);
-	const fields = SYSTEM_SETTING_KEYS.map((key) => ({ key, parsed: parseField(key, form) }));
+	const form = formSchema.parse(values);
+	const fields = keysOf(modules).map((key) => ({ key, parsed: parseField(key, form) }));
 	const errors = collectErrors(fields);
 	if (Object.keys(errors).length > 0) {
 		return { ok: false, errors };

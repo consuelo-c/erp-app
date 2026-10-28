@@ -12,7 +12,7 @@
 	import Tabs from '$lib/components/Tabs.svelte';
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import { addDays, formatLongDay, getTodaysDate } from '$lib/datetime';
-	import { ADMIN_SETTINGS_TABS, SETTINGS_TABS } from '$lib/navigation';
+	import { SETTINGS_TABS } from '$lib/navigation';
 	import type { Holiday } from '$lib/server/services/settings';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import type { PageProps } from './$types';
@@ -177,12 +177,7 @@
 
 <Screen>
 	{#snippet header()}
-		<ScreenHeader
-			><Tabs
-				tabs={data.canManageLogins ? ADMIN_SETTINGS_TABS : SETTINGS_TABS}
-				current="Festivos"
-			/></ScreenHeader
-		>
+		<ScreenHeader><Tabs tabs={SETTINGS_TABS} current="Festivos" /></ScreenHeader>
 	{/snippet}
 
 	<UnsavedChangesGuard form="holidays" />
