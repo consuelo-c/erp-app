@@ -456,10 +456,15 @@
 						<Button variant="secondary" size="sm" onclick={() => startAssign(incident)}>
 							Cambiar responsable
 						</Button>
-						<Button variant="secondary" size="sm" onclick={() => startReverse(incident)}>
-							Revertir
-						</Button>
+						{#if null === incident.reversalBlock}
+							<Button variant="secondary" size="sm" onclick={() => startReverse(incident)}>
+								Revertir
+							</Button>
+						{/if}
 					</div>
+					{#if incident.reversalBlock}
+						<p class="note">No se puede revertir: {incident.reversalBlock}.</p>
+					{/if}
 				{/if}
 			</Card>
 		{/each}
