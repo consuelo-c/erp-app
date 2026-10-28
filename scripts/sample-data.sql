@@ -1,10 +1,10 @@
 -- Sample data, development only: the Design Brief's products, a few contacts, five employees, a login
--- per role on four of them, their punches from 10 to 18 October 2026, and thirty orders: the
--- brief's three and twenty-seven generated ones.
+-- per role on four of them, their punches from 10 to 18 October 2026, thirty orders (the brief's
+-- three and twenty-seven generated ones), three counts, and the orders' and standalone cash movements.
 -- `npm run db:seed` loads it into the local D1 after settings-defaults.sql; deploy.yml never applies
 -- it. Idempotent: a product whose name exists, a contact whose document exists, an employee whose
--- contact exists, a login whose username exists, a punch whose employee and day exist, or an order
--- whose id exists, is skipped, so a password admin set survives.
+-- contact exists, a login whose username exists, a punch whose employee and day exist, or an order,
+-- count or movement whose id exists, is skipped, so a password admin set survives.
 -- Writes no events row.
 -- Every JSON must pass its Zod schema in the services; sample-data.test.ts checks it.
 INSERT INTO products (name, category, variant_group, variant_name, rental_price, total_quantity, created_at, created_by, updated_at, updated_by)
@@ -123,7 +123,7 @@ ON CONFLICT (employee_id, work_date) DO NOTHING;
 -- The Design Brief's #1043 and #1051, and #1047 to try editing and an extension: explicit ids, so they
 -- read as in the brief, and fixed tokens, so a second run finds them. Clients, carriers and products
 -- are looked up by document and name, never by a rowid another seed run may have moved. The totals
--- follow the formula; no payments: `cash_movements` is only written by the cash service.
+-- follow the formula; their payments are the cash movements at the end.
 INSERT INTO orders (id, public_token, client_id, status, event_date, delivery_date, pickup_date, rental_days, client_attributes, delivery_attributes, pickup_attributes, order_items, items_total, discount, transport_cost, order_total, deposit_amount, attributes, created_at, created_by, updated_at, updated_by)
 VALUES
 	(1043, '3f1c2b7a-8d4e-4c1a-9b2f-0a1d5e7c1043', (SELECT id FROM contacts WHERE document_id = '1036452118'), 'CONFIRMED',
@@ -215,3 +215,61 @@ SELECT
 FROM priced JOIN contacts ON contacts.document_id = priced.document_id
 WHERE true -- SQLite reads ON CONFLICT after a SELECT only past a WHERE
 ON CONFLICT (id) DO NOTHING;
+
+-- Counts only pending or rejected: an approved or reversed one needs the events rows reversalBlock
+-- and the suggested list are ordered by, so one is approved in the app to try them. #1 and #2 share
+-- the Tiffany chair, so each warns of the other; #2's glasses were counted against 905, no longer
+-- their 900, so the item reads «Desactualizado». Explicit ids, so a second run finds them.
+INSERT INTO inventory_counts (id, status, inventory_items, review_note, reviewed_by, reviewed_at, created_at, created_by, updated_at, updated_by)
+VALUES
+	(1, 'PENDING_APPROVAL',
+		json_array(
+			json_object('product_id', (SELECT id FROM products WHERE name = 'Silla Tiffany dorada'), 'name', 'Silla Tiffany dorada', 'system_qty', 800, 'counted_qty', 796),
+			json_object('product_id', (SELECT id FROM products WHERE name = 'Mantel blanco 3×3'), 'name', 'Mantel blanco 3×3', 'system_qty', 120, 'counted_qty', 118)
+		),
+		NULL, NULL, NULL, unixepoch(), 'system', unixepoch(), 'system'),
+	(2, 'PENDING_APPROVAL',
+		json_array(
+			json_object('product_id', (SELECT id FROM products WHERE name = 'Silla Tiffany dorada'), 'name', 'Silla Tiffany dorada', 'system_qty', 800, 'counted_qty', 795),
+			json_object('product_id', (SELECT id FROM products WHERE name = 'Copa para vino tinto'), 'name', 'Copa para vino tinto', 'system_qty', 905, 'counted_qty', 897)
+		),
+		NULL, NULL, NULL, unixepoch(), 'system', unixepoch(), 'system'),
+	(3, 'REJECTED',
+		json_array(
+			json_object('product_id', (SELECT id FROM products WHERE name = 'Samovar rectangular'), 'name', 'Samovar rectangular', 'system_qty', 18, 'counted_qty', 15)
+		),
+		'Faltó contar los de la bodega 2: hay que contar otra vez.', 'gerente', unixepoch(), unixepoch(), 'system', unixepoch(), 'system')
+ON CONFLICT (id) DO NOTHING;
+
+-- Every concept but PAYROLL: no settlement is paid. #1043 reads as in the brief (paid $500.000, owes
+-- $680.000, holds a $200.000 deposit); #1051 pays its carrier; four generated orders: an advance on
+-- #1011, #1014 paid in two, #1016 paid with its deposit given back, #1017 cancelled and refunded.
+-- October's standalone ones include an expense typed as $850.000, its offset and the right one.
+-- `receipt_number` per sign as the cash service's INSERT works it out, each sign's highest plus one,
+-- here in id order; explicit ids, so a second run finds them and `reverses_id` can name its original.
+INSERT INTO cash_movements (id, concept, payment_method, amount, movement_date, entity_type, entity_id, payee, attributes, reverses_id, receipt_number, created_at, created_by, updated_at, updated_by)
+SELECT column1, column2, column3, column4, column5, column6, column7, column8, column9, column10,
+	(SELECT coalesce(max(receipt_number), 0) FROM cash_movements WHERE (amount > 0) = (sample.column4 > 0))
+		+ row_number() OVER (PARTITION BY column4 > 0 ORDER BY column1),
+	unixepoch(), 'system', unixepoch(), 'system'
+FROM (VALUES
+	(1, 'INSTALLMENT', 'TRANSFER', 300000, '2026-07-20', 'ORDER', 1043, 'Luz Marina Restrepo', '{"bank_account":"Bancolombia"}', NULL),
+	(2, 'INSTALLMENT', 'CASH', 200000, '2026-08-14', 'ORDER', 1043, 'Luz Marina Restrepo', '{}', NULL),
+	(3, 'SECURITY_DEPOSIT', 'CASH', 200000, '2026-08-14', 'ORDER', 1043, 'Luz Marina Restrepo', '{}', NULL),
+	(4, 'CARRIER_PAYMENT', 'TRANSFER', -50000, '2026-08-24', 'ORDER', 1051, 'Wilson Muñoz', '{"bank_account":"Nequi 311 908 5512"}', NULL),
+	(5, 'INSTALLMENT', 'CASH', 100000, '2026-06-28', 'ORDER', 1011, 'Jorge Iván Betancur', '{}', NULL),
+	(6, 'INSTALLMENT', 'TRANSFER', 150000, '2026-07-05', 'ORDER', 1014, 'Luz Marina Restrepo', '{"bank_account":"Davivienda"}', NULL),
+	(7, 'INSTALLMENT', 'CASH', 170000, '2026-07-08', 'ORDER', 1014, 'Luz Marina Restrepo', '{}', NULL),
+	(8, 'INSTALLMENT', 'CASH', 170000, '2026-07-12', 'ORDER', 1016, 'Diana Zuluaga', '{}', NULL),
+	(9, 'SECURITY_DEPOSIT', 'CASH', 50000, '2026-07-12', 'ORDER', 1016, 'Diana Zuluaga', '{}', NULL),
+	(10, 'DEPOSIT_REFUND', 'CASH', -50000, '2026-07-14', 'ORDER', 1016, 'Diana Zuluaga', '{}', NULL),
+	(11, 'INSTALLMENT', 'TRANSFER', 100000, '2026-07-08', 'ORDER', 1017, 'Emily Carter', '{"bank_account":"Bancolombia"}', NULL),
+	(12, 'INSTALLMENT_REFUND', 'TRANSFER', -100000, '2026-07-10', 'ORDER', 1017, 'Emily Carter', '{"bank_account":"Bancolombia ahorros 031-552210-88"}', NULL),
+	(13, 'OTHER_INCOME', 'CASH', 120000, '2026-10-05', NULL, NULL, 'Chatarrería El Progreso', '{"description":"Venta de sillas plásticas dadas de baja"}', NULL),
+	(14, 'OTHER_EXPENSE', 'CASH', -850000, '2026-10-08', NULL, NULL, 'Ferretería Laureles', '{"description":"Bombillos y extensiones para la bodega"}', NULL),
+	(15, 'OTHER_EXPENSE', 'CASH', 850000, '2026-10-08', NULL, NULL, 'Ferretería Laureles', '{"description":"Bombillos y extensiones para la bodega","notes":"El valor era $85.000"}', 14),
+	(16, 'OTHER_EXPENSE', 'CASH', -85000, '2026-10-08', NULL, NULL, 'Ferretería Laureles', '{"description":"Bombillos y extensiones para la bodega"}', NULL),
+	(17, 'OTHER_EXPENSE', 'TRANSFER', -320000, '2026-10-20', NULL, NULL, 'EPM', '{"description":"Servicios públicos de la bodega, septiembre","bank_account":"Convenio EPM 0045821"}', NULL)
+) AS sample
+WHERE NOT EXISTS (SELECT 1 FROM cash_movements WHERE cash_movements.id = sample.column1)
+ORDER BY column1;

@@ -6,13 +6,16 @@ import { verifyPassword } from '../password';
 import { calculateOrderTotals } from '$lib/orders';
 import { createMemoryD1 } from './memory-d1';
 import { openWeek } from '../services/payroll';
+import { movementSchema } from '../services/cash';
 import { contactAttributesSchema, isAutoDocument, servicesSchema } from '../services/contacts';
 import { employeeAttributesSchema } from '../services/employees';
+import { inventoryItemsSchema, listCounts } from '../services/inventory';
 import {
 	clientAttributesSchema,
 	deliveryAttributesSchema,
 	orderAttributesSchema,
 	orderItemsSchema,
+	getOrderDetail,
 	pickupAttributesSchema
 } from '../services/orders';
 
@@ -114,7 +117,16 @@ test('loads a login per role, each on its employee, with no password', async () 
 });
 
 test('every row is created by system and writes no events', () => {
-	const tables = ['products', 'contacts', 'employees', 'users', 'timesheets', 'orders'];
+	const tables = [
+		'products',
+		'contacts',
+		'employees',
+		'users',
+		'timesheets',
+		'orders',
+		'inventory_counts',
+		'cash_movements'
+	];
 	for (const row of tables.flatMap(readAll)) {
 		expect([row.created_by, row.updated_by]).toEqual(['system', 'system']);
 	}
@@ -222,7 +234,6 @@ test("loads the Design Brief's #1043 and #1051, #1047 delivered, and enough for 
 		method: 'EXTERNAL_CARRIER',
 		carrier: { name: 'Wilson Muñoz', phone: '573119085512' }
 	});
-	expect(readAll('cash_movements')).toEqual([]);
 });
 
 test('every order passes the Zod schemas, points to real rows and follows the totals formula', () => {
@@ -254,4 +265,62 @@ test('every order passes the Zod schemas, points to real rows and follows the to
 			expect(product).toEqual({ name: item.name, rental_price: item.list_price });
 		}
 	}
+});
+
+function openSeededD1() {
+	const { db, database: memory } = createMemoryD1();
+	memory.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
+	memory.exec(sampleData);
+	return db;
+}
+
+test('loads two pending counts sharing a product, one stale, and a rejected one', async () => {
+	for (const count of readAll('inventory_counts')) {
+		expect(inventoryItemsSchema.safeParse(JSON.parse(String(count.inventory_items))).success).toBe(
+			true
+		);
+	}
+	const counts = await listCounts(openSeededD1(), manager);
+	expect(
+		counts.map(({ id, status, staleCount, overlapIds }) => [id, status, staleCount, overlapIds])
+	).toEqual([
+		[2, 'PENDING_APPROVAL', 1, [1]],
+		[1, 'PENDING_APPROVAL', 0, [2]],
+		[3, 'REJECTED', 0, []]
+	]);
+	const rejected = readAll('inventory_counts').find((count) => 'REJECTED' === count.status);
+	expect([rejected?.reviewed_by, rejected?.reviewed_at, rejected?.review_note].every(Boolean)).toBe(
+		true
+	);
+	expect(readAll('payroll_runs')).toEqual([]);
+});
+
+test("#1043 reads the Design Brief's paid, balance and deposit", async () => {
+	const order = await getOrderDetail(openSeededD1(), 1043, manager);
+	expect([order?.paid, order?.balanceDue, order?.depositHeld]).toEqual([500000, 680000, 200000]);
+});
+
+test('every movement passes its Zod schema, each sign numbered 1, 2, 3… with one offset', () => {
+	const movements = readAll('cash_movements');
+	for (const movement of movements) {
+		const parsed = movementSchema.safeParse({
+			...movement,
+			attributes: JSON.parse(String(movement.attributes))
+		});
+		expect(parsed.success, String(movement.id)).toBe(true);
+	}
+	for (const isInflow of [true, false]) {
+		const numbers = movements
+			.filter((movement) => isInflow === Number(movement.amount) > 0)
+			.map((movement) => movement.receipt_number);
+		expect(numbers).toEqual(numbers.map((_, index) => index + 1));
+	}
+	const concepts = new Set(movements.map((movement) => movement.concept));
+	expect(concepts.has('PAYROLL')).toBe(false);
+	expect(concepts.size).toBe(7);
+	const offset = movements.find((movement) => null !== movement.reverses_id);
+	const original = movements.find((movement) => offset?.reverses_id === movement.id);
+	expect([original?.concept, original?.amount]).toEqual([offset?.concept, -Number(offset?.amount)]);
+	const carrier = movements.find((movement) => 'CARRIER_PAYMENT' === movement.concept);
+	expect(carrier?.entity_id).toBe(1051);
 });
