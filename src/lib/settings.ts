@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { normalizePhone } from './phone';
 
 export type SettingModule = 'COMPANY' | 'HELP' | 'ORDERS' | 'PAYROLL';
 
@@ -65,6 +66,24 @@ export const SETTINGS = {
 		unit: null,
 		placeholder: '604 411 44 29',
 		schema: textSchema
+	},
+	// What `wa.me` takes, so stored normalized; empty hides the public pages' WhatsApp icon.
+	COMPANY_WHATSAPP: {
+		module: 'COMPANY',
+		label: 'WhatsApp',
+		unit: null,
+		placeholder: '573105550142',
+		schema: z
+			.string()
+			.trim()
+			.transform((typed, context) => {
+				const phone = '' === typed ? '' : normalizePhone(typed);
+				if (null === phone) {
+					context.addIssue({ code: 'custom', message: 'Escriba un número válido o déjelo vacío' });
+					return z.NEVER;
+				}
+				return phone;
+			})
 	},
 	ORDERS_SUGGESTED_ADVANCE_PCT: {
 		module: 'ORDERS',
