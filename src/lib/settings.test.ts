@@ -50,3 +50,11 @@ test('numeric settings parse the stored text into integers', () => {
 	expect(SETTINGS.PAYROLL_NIGHT_START.schema.safeParse('19:00').success).toBe(true);
 	expect(SETTINGS.PAYROLL_NIGHT_START.schema.safeParse('25:00').success).toBe(false);
 });
+
+test('HELP_FAQ takes a non-empty text of at most 50,000 characters', () => {
+	const help = SETTINGS.HELP_FAQ.schema;
+	expect(help.safeParse('').success).toBe(false);
+	expect(help.safeParse('   ').success).toBe(false);
+	expect(help.safeParse('a'.repeat(50_000)).success).toBe(true);
+	expect(help.safeParse('a'.repeat(50_001)).success).toBe(false);
+});

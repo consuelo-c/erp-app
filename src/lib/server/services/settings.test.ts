@@ -7,9 +7,11 @@ import { getSettingInput } from '$lib/settings';
 import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
 import {
+	getHelp,
 	getHolidays,
 	getSystemSettings,
 	overrideFrozenHoliday,
+	updateHelp,
 	updateHolidays,
 	updateSystemSettings,
 	type Holiday,
@@ -20,6 +22,13 @@ import {
 const admin: Actor = { username: 'admin', employeeId: null, roles: ['ADMIN'], kind: 'user' };
 const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
 const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
+const warehouse: Actor = {
+	username: 'bodega',
+	employeeId: null,
+	roles: ['WAREHOUSE'],
+	kind: 'user'
+};
+const driver: Actor = { username: 'conductor', employeeId: null, roles: ['DRIVER'], kind: 'user' };
 
 let db: D1Database;
 let database: DatabaseSync;
@@ -268,4 +277,74 @@ test('ADMIN removes a closed holiday with a reason; an open date is not an overr
 		ok: false,
 		message: 'Esa fecha no está en una nómina pagada'
 	});
+});
+
+test('every login reads the help; with no session it is a 401', async () => {
+	for (const actor of [warehouse, driver, sales]) {
+		const help = await getHelp(db, actor);
+		expect(help.text).toMatch(/^Bienvenido/);
+		// The default isn't a save in the app: no «Actualizado» line yet.
+		expect(help.updatedAt).toBeNull();
+	}
+	expect(isHttpError(await getHelp(db, null).catch((caught) => caught), 401)).toBe(true);
+});
+
+test('only ADMIN and MANAGER save the help; anyone else gets a 403 and changes nothing', async () => {
+	const { text } = await getHelp(db, manager);
+	for (const actor of [sales, warehouse, driver]) {
+		const refusal = await updateHelp(db, { text: '## Otra' }, actor).catch((caught) => caught);
+		expect(isHttpError(refusal, 403)).toBe(true);
+	}
+	expect(readValue('HELP_FAQ')).toEqual({ value: text, updated_by: 'system' });
+	expect(readEvents()).toEqual([]);
+});
+
+test('saving the help writes the text and its EDITED event, which dates «Actualizado»', async () => {
+	const { text } = await getHelp(db, manager);
+	expect(await updateHelp(db, { text: '## ¿Qué hago al llegar?\n\nMarca.' }, manager)).toEqual({
+		ok: true
+	});
+	expect(readValue('HELP_FAQ')).toEqual({
+		value: '## ¿Qué hago al llegar?\n\nMarca.',
+		updated_by: 'gerente'
+	});
+	expect(readEvents()).toEqual([
+		{
+			entity_type: 'SETTINGS',
+			entity_id: null,
+			entity_key: 'HELP_FAQ',
+			action: 'EDITED',
+			before: JSON.stringify({ value: text }),
+			after: JSON.stringify({ value: '## ¿Qué hago al llegar?\n\nMarca.' })
+		}
+	]);
+	expect((await getHelp(db, warehouse)).updatedAt).toEqual(expect.any(Number));
+});
+
+test('saving the help unchanged writes nothing', async () => {
+	const { text } = await getHelp(db, admin);
+	expect(await updateHelp(db, { text }, admin)).toEqual({ ok: true });
+	expect(readEvents()).toEqual([]);
+});
+
+test('an empty or too-long help saves nothing and comes back with its message', async () => {
+	expect(await updateHelp(db, { text: '  \n ' }, manager)).toEqual({
+		ok: false,
+		message: 'Escribe el texto de la ayuda'
+	});
+	expect(await updateHelp(db, { text: 'a'.repeat(50_001) }, manager)).toEqual({
+		ok: false,
+		message: 'La ayuda no puede pasar de 50.000 caracteres'
+	});
+	expect(readEvents()).toEqual([]);
+});
+
+test('the generic settings leave the help out and ignore a HELP_FAQ field', async () => {
+	const values = await getSystemSettings(db, manager);
+	expect(values).not.toHaveProperty('HELP_FAQ');
+	const { text } = await getHelp(db, manager);
+	const form = { ...toForm(values), HELP_FAQ: '## Otra' };
+	expect(await updateSystemSettings(db, form, manager)).toEqual({ ok: true });
+	expect(readValue('HELP_FAQ')).toMatchObject({ value: text });
+	expect(readEvents()).toEqual([]);
 });

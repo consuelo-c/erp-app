@@ -40,6 +40,16 @@ test('loads the 2026 and 2027 holidays', () => {
 	expect(holidays.filter((holiday) => holiday.date.startsWith('2027'))).toHaveLength(18);
 });
 
+test('the help is a first draft: an intro, at least ten questions and no images', () => {
+	const { value } = database.prepare("select value from settings where key = 'HELP_FAQ'").get() as {
+		value: string;
+	};
+	const [intro, ...questions] = value.split(/^## /m);
+	expect(intro.trim()).not.toBe('');
+	expect(questions.length).toBeGreaterThanOrEqual(10);
+	expect(value).not.toContain('![');
+});
+
 test('a second run duplicates and overwrites nothing', () => {
 	database.exec("update settings set value = '99' where key = 'PAYROLL_PENSION_RATE'");
 	const before = readSettings();

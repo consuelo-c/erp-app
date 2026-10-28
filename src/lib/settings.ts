@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 type SettingDefinition = {
-	module: 'COMPANY' | 'ORDERS' | 'PAYROLL';
+	module: 'COMPANY' | 'HELP' | 'ORDERS' | 'PAYROLL';
 	label: string;
 	unit: string | null;
 	// An example in the stored format, shown in the empty field so it says what goes there.
@@ -176,6 +176,17 @@ export const SETTINGS = {
 		label: 'Festivos',
 		unit: null,
 		schema: jsonTextSchema.pipe(holidaysSchema)
+	},
+	// One Markdown text, each `##` a question; its own editor, like PAYROLL_HOLIDAYS.
+	HELP_FAQ: {
+		module: 'HELP',
+		label: 'Ayuda',
+		unit: null,
+		schema: z
+			.string()
+			.trim()
+			.min(1, 'Escribe el texto de la ayuda')
+			.max(50_000, 'La ayuda no puede pasar de 50.000 caracteres')
 	}
 } as const satisfies Record<string, SettingDefinition>;
 
