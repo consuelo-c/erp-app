@@ -1,17 +1,18 @@
 import { error, fail } from '@sveltejs/kit';
-import { isAdmin, requireRole } from '$lib/server/actor';
+import { requireRole } from '$lib/server/actor';
 import { getSystemSettings, updateSystemSettings } from '$lib/server/services/settings';
+import type { SettingModule } from '$lib/settings';
 import type { Actions, PageServerLoad } from './$types';
+
+// General's modules; payroll's are Nómina's tab.
+const MODULES: SettingModule[] = ['COMPANY', 'ORDERS'];
 
 export const load: PageServerLoad = async ({ locals, platform }) => {
 	requireRole(locals.user, ['ADMIN', 'MANAGER']);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
-	return {
-		settings: await getSystemSettings(platform.env.DB, locals.user),
-		canManageLogins: isAdmin(locals.user)
-	};
+	return { settings: await getSystemSettings(platform.env.DB, MODULES, locals.user) };
 };
 
 export const actions: Actions = {
@@ -21,7 +22,11 @@ export const actions: Actions = {
 			error(500, 'Sin acceso a la base de datos');
 		}
 		const values = Object.fromEntries(await request.formData());
-		const result = await updateSystemSettings(platform.env.DB, values, locals.user);
+		const result = await updateSystemSettings(
+			platform.env.DB,
+			{ modules: MODULES, values },
+			locals.user
+		);
 		return result.ok ? { saved: true } : fail(400, { errors: result.errors, values });
 	}
 };

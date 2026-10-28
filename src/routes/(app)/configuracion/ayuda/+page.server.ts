@@ -1,5 +1,5 @@
 import { error, fail } from '@sveltejs/kit';
-import { isAdmin, requireRole } from '$lib/server/actor';
+import { requireRole } from '$lib/server/actor';
 import { getHelp, updateHelp } from '$lib/server/services/settings';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -9,7 +9,7 @@ export const load: PageServerLoad = async ({ locals, platform }) => {
 		error(500, 'Sin acceso a la base de datos');
 	}
 	const { text } = await getHelp(platform.env.DB, locals.user);
-	return { text, canManageLogins: isAdmin(locals.user) };
+	return { text };
 };
 
 export const actions: Actions = {

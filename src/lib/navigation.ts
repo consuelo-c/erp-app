@@ -64,10 +64,16 @@ export const DESTINATIONS: Destination[] = [
 		paths: [resolve('/personal'), resolve('/nomina')]
 	},
 	{
-		label: 'Sistema',
+		label: 'Logins',
+		icon: 'lock',
+		href: resolve('/logins'),
+		paths: [resolve('/logins')]
+	},
+	{
+		label: 'Configuración',
 		icon: 'settings',
 		href: resolve('/configuracion'),
-		paths: [resolve('/configuracion'), resolve('/logins')]
+		paths: [resolve('/configuracion')]
 	}
 ];
 
@@ -107,15 +113,12 @@ export const INVENTORY_TABS = [
 	{ label: 'Revisar conteo', href: resolve('/inventario/revisar') }
 ];
 
-/** Sistema's tabs: the system settings, the holidays and help editors and, for `ADMIN`, the logins. */
+/** Configuración's tabs: the general and payroll settings, and the holidays and help editors. */
 export const SETTINGS_TABS = [
-	{ label: 'Configuración', href: resolve('/configuracion') },
+	{ label: 'General', href: resolve('/configuracion') },
+	{ label: 'Nómina', href: resolve('/configuracion/nomina') },
 	{ label: 'Festivos', href: resolve('/configuracion/festivos') },
 	{ label: 'Ayuda', href: resolve('/configuracion/ayuda') }
-];
-export const ADMIN_SETTINGS_TABS = [
-	...SETTINGS_TABS,
-	{ label: 'Logins', href: resolve('/logins') }
 ];
 
 /** Productos, or with a group one group's variants; `query` adds the rest, like `guardado`. */
