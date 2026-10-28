@@ -1,8 +1,9 @@
-// The client's side of an order, with no session: its page through `public_token`, never the
-// order's id. No actor and no writes: a client isn't a login, and reads aren't logged.
+// The client's side of an order, with no session: the lookup by phone and event date, and its page
+// through `public_token`, never the order's id. No actor and no writes: a client isn't a login, and reads aren't logged.
 
 import { z } from 'zod';
 import { addDays, getTodaysDate } from '$lib/datetime';
+import { normalizePhone } from '$lib/phone';
 import {
 	BALANCE_DUE_SQL,
 	clientAttributesSchema,
@@ -18,6 +19,11 @@ import { readSettings } from './settings';
 
 /** How many days after its event a client still sees the order. A constant, not a setting. */
 export const LOOKUP_WINDOW_DAYS = 7;
+
+/** The earliest event a client still finds: Bogotá's today less the window. */
+export function getLookupWindowStart(): string {
+	return addDays(getTodaysDate(), -LOOKUP_WINDOW_DAYS);
+}
 
 // Every token is a `crypto.randomUUID()`: anything else, an order's id included, is no order.
 const tokenSchema = z.guid();
@@ -118,7 +124,7 @@ export async function getPublicOrder(db: D1Database, token: unknown): Promise<Pu
 			order_total, deposit_amount, ${BALANCE_DUE_SQL} as balance_due
 			from orders where public_token = ? and status <> 'DRAFT' and event_date >= ?`
 		)
-		.bind(parsed.data, addDays(getTodaysDate(), -LOOKUP_WINDOW_DAYS))
+		.bind(parsed.data, getLookupWindowStart())
 		.first<PublicOrderRow>();
 	return null === row ? null : toPublicOrder(row);
 }
@@ -143,4 +149,50 @@ export async function findOrderIdByToken(db: D1Database, token: unknown): Promis
 export async function getWhatsAppHref(db: D1Database, text: string): Promise<string | null> {
 	const { COMPANY_WHATSAPP: number } = await readSettings(db, ['COMPANY_WHATSAPP']);
 	return '' === number ? null : `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
+}
+
+const lookupSchema = z.object({
+	phone: z.string().transform((typed, context) => {
+		const phone = normalizePhone(typed);
+		if (null === phone) {
+			context.addIssue({
+				code: 'custom',
+				message: 'Escriba el teléfono con el que hizo el pedido'
+			});
+			return z.NEVER;
+		}
+		return phone;
+	}),
+	event_date: z.iso.date('Escoja la fecha del evento')
+});
+
+/** One of the lookup's matches, as its list names it and links to its page. */
+export type LookupMatch = { id: number; status: OrderStatus; token: string };
+
+export type LookupResult =
+	| { ok: true; matches: LookupMatch[] }
+	| { ok: false; errors: Partial<Record<'phone' | 'event_date', string>> };
+
+/**
+ * The orders of a phone and an event date, by `id`: the phone compared whole against the order's
+ * own snapshot, never `contacts.phone`; every status but a draft; an event no older than the
+ * window. No match is the one miss, whatever failed; a field the client mistyped runs no query.
+ */
+export async function lookupOrders(db: D1Database, input: unknown): Promise<LookupResult> {
+	const parsed = lookupSchema.safeParse(input);
+	if (!parsed.success) {
+		const errors = Object.fromEntries(
+			parsed.error.issues.map((issue) => [String(issue.path[0]), issue.message])
+		);
+		return { ok: false, errors };
+	}
+	const { results } = await db
+		.prepare(
+			`select id, status, public_token as token from orders
+			where status <> 'DRAFT' and event_date = ? and event_date >= ?
+			and json_extract(client_attributes, '$.phone') = ? order by id`
+		)
+		.bind(parsed.data.event_date, getLookupWindowStart(), parsed.data.phone)
+		.all<LookupMatch>();
+	return { ok: true, matches: results };
 }
