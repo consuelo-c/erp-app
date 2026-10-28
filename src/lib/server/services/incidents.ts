@@ -208,6 +208,8 @@ export type Incident = {
 	reportedAt: number;
 	reportedBy: string;
 	reversal: Reversal | null;
+	/** Why an `ACTIVE` incident can't be reversed, or null when it can (and once reversed). */
+	reversalBlock: string | null;
 };
 
 type IncidentRow = {
@@ -224,7 +226,7 @@ type IncidentRow = {
 	created_by: string;
 };
 
-function toIncident(row: IncidentRow): Incident {
+function toIncident(row: IncidentRow): Omit<Incident, 'reversalBlock'> {
 	const isReversed = 'REVERSED' === row.status;
 	return {
 		id: row.id,
@@ -255,7 +257,38 @@ export async function listIncidents(
 		.prepare('select * from incidents where order_id = ? order by id desc')
 		.bind(orderId)
 		.all<IncidentRow>();
-	return results.map(toIncident);
+	return Promise.all(
+		results.map(async (row) => ({
+			...toIncident(row),
+			reversalBlock: 'ACTIVE' === row.status ? await reversalBlock(db, row) : null
+		}))
+	);
+}
+
+/**
+ * The only rule for reversing an incident: why not, or null when it can. One with a `LOST` or
+ * `UNRECOVERABLE` item can't once a count that applied any of those products was approved after
+ * it, unless that count was reversed since; an all-`RECOVERABLE` one never touched inventory.
+ * Ordered by the `events` ids, like the count's `reversalBlock`.
+ */
+async function reversalBlock(db: D1Database, row: IncidentRow): Promise<string | null> {
+	const subtracted = toIncident(row).items.filter((item) => SUBTRACTING.includes(item.outcome));
+	if (0 === subtracted.length) {
+		return null;
+	}
+	const fixed = await db
+		.prepare(
+			`select json_extract(item.value, '$.product_id') as product_id
+			from inventory_counts join events on events.entity_type = 'INVENTORY_COUNT' and events.entity_id = inventory_counts.id and events.action = 'APPROVED', json_each(inventory_counts.inventory_items) as item
+			where inventory_counts.status = 'APPROVED' and json_extract(item.value, '$.applied') = 1
+			and json_extract(item.value, '$.product_id') in (select value from json_each(?1))
+			and events.id > (select id from events where entity_type = 'INCIDENT' and entity_id = ?2 and action = 'CREATED')
+			limit 1`
+		)
+		.bind(JSON.stringify(subtracted.map((item) => item.product_id)), row.id)
+		.first<{ product_id: number }>();
+	const name = subtracted.find((item) => item.product_id === fixed?.product_id)?.name;
+	return undefined === name ? null : `Un conteo aprobado después ya fijó ${name}`;
 }
 
 const incidentIdSchema = z.coerce.number().int().positive();
@@ -316,7 +349,8 @@ function reversalStatements(
 /**
  * Voids an incident, `ADMIN` and `MANAGER` only, with a required reason kept in the event. The
  * lost and unusable go back onto each product's current `total_quantity`, and the order's flag is
- * worked out again, in one batch. Incidents reverse in any order: their adjustments are subtractions.
+ * worked out again, in one batch, while `reversalBlock` allows it. Incidents reverse in any order
+ * among themselves: their adjustments are subtractions.
  */
 export async function reverseIncident(
 	db: D1Database,
@@ -333,8 +367,10 @@ export async function reverseIncident(
 	if ('ok' in row) {
 		return row;
 	}
-	// STUB: phase 11 adds the reversal rule (#282): an incident that adjusted inventory from before
-	// the last approved count can't be reversed. Until counts exist, every ACTIVE one can.
+	const block = await reversalBlock(db, row);
+	if (null !== block) {
+		return refusal({}, block);
+	}
 	await db.batch([
 		...reversalStatements(db, actor, parsed.data),
 		...(await inventoryStatements(db, actor, adjustments(toIncident(row).items, 1))),

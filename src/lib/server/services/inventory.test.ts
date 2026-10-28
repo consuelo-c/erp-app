@@ -473,7 +473,15 @@ test('a lost incident on another product, or a recoverable one on the same, allo
 test('reversing an older incident on the same product after the approval blocks it', async () => {
 	const incident = await loseChairs(4);
 	const id = await approved([CHAIR, 790]);
-	await reverseIncident(db, { id: incident, reason: 'Aparecieron' }, manager);
+	expect(await reverseIncident(db, { id: incident, reason: 'Aparecieron' }, manager)).toMatchObject(
+		{ ok: false }
+	);
+	// Nothing locks: a reversal checked just before the approval can still land after it.
+	database
+		.prepare(
+			"insert into events (entity_type, entity_id, action, actor_username, actor_kind, created_at) values ('INCIDENT', ?, 'REVERSED', 'gerente', 'user', 0)"
+		)
+		.run(incident);
 	expect(await reverseCount(db, { id, reason: 'Error' }, manager)).toMatchObject({
 		ok: false,
 		message: BLOCKED

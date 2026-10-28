@@ -10,6 +10,7 @@ import {
 	reverseIncident,
 	setResponsibleParty
 } from './incidents';
+import { approveCount, reverseCount, submitCount } from './inventory';
 import { advanceOrder, confirmOrder, createOrder, getOrderDetail } from './orders';
 
 const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
@@ -320,6 +321,87 @@ test('incidents reverse in any order; the flag stays while one is active; twice 
 	expect(await reverse(2)).toMatchObject({ ok: true });
 	expect(hasIncident(id)).toBe(0);
 	expect((await listIncidents(db, id, manager)).map((incident) => incident.id)).toEqual([2, 1]);
+});
+
+// Sends a count of `[product, counted]` pairs; `approve` approves it too.
+async function count(counted: [number, number][], approve = true): Promise<number> {
+	const items = counted.map(([product, qty]) => ({ product_id: product, counted_qty: qty }));
+	const result = await submitCount(db, { items }, warehouse);
+	if (!result.ok) {
+		throw new Error(result.message);
+	}
+	if (approve) {
+		expect(await approveCount(db, { id: result.id }, manager)).toMatchObject({ ok: true });
+	}
+	return result.id;
+}
+
+const FIXED = 'Un conteo aprobado después ya fijó Silla Tiffany dorada';
+
+async function reversalBlock(orderId: number): Promise<string | null> {
+	const [incident] = await listIncidents(db, orderId, manager);
+	return incident.reversalBlock;
+}
+
+test('a count that applied the lost product, approved after the incident, blocks its reversal', async () => {
+	const id = await createOrderIn('COMPLETED');
+	await report(id, [
+		{ product_id: CHAIR, qty: 4, outcome: 'LOST' },
+		{ product_id: TABLE, qty: 1, outcome: 'RECOVERABLE' }
+	]);
+	await count([[CHAIR, 490]]);
+	expect(await reversalBlock(id)).toBe(FIXED);
+	expect(await reverse(1)).toEqual({ ok: false, message: FIXED, errors: {} });
+	expect(stock(CHAIR)).toBe(490);
+	expect(hasIncident(id)).toBe(1);
+});
+
+test('the same count, reversed since, allows it', async () => {
+	const id = await createOrderIn('COMPLETED');
+	await report(id, [{ product_id: CHAIR, qty: 4, outcome: 'LOST' }]);
+	const counted = await count([[CHAIR, 490]]);
+	await reverseCount(db, { id: counted, reason: 'Mal contado' }, manager);
+	expect(await reversalBlock(id)).toBeNull();
+	expect(await reverse(1)).toMatchObject({ ok: true });
+	expect(stock(CHAIR)).toBe(500);
+});
+
+test('a count approved after it that applied only another product, or a stale skip, allows it', async () => {
+	const id = await createOrderIn('COMPLETED');
+	const stale = await count(
+		[
+			[CHAIR, 480],
+			[TABLECLOTH, 497]
+		],
+		false
+	);
+	await report(id, [{ product_id: CHAIR, qty: 4, outcome: 'LOST' }]);
+	expect(await approveCount(db, { id: stale }, manager)).toMatchObject({ ok: true });
+	expect(await reversalBlock(id)).toBeNull();
+	expect(await reverse(1)).toMatchObject({ ok: true });
+	expect([stock(CHAIR), stock(TABLECLOTH)]).toEqual([500, 497]);
+});
+
+test('a count created after the incident but approved before it allows it: the order is by approval', async () => {
+	const id = await createOrderIn('COMPLETED');
+	const counted = await count([[CHAIR, 490]]);
+	await report(id, [{ product_id: CHAIR, qty: 4, outcome: 'LOST' }]);
+	database
+		.prepare(
+			'update inventory_counts set created_at = 9999999999, reviewed_at = 9999999999 where id = ?'
+		)
+		.run(counted);
+	expect(await reversalBlock(id)).toBeNull();
+	expect(await reverse(1)).toMatchObject({ ok: true });
+	expect(stock(CHAIR)).toBe(490);
+});
+
+test('an all-recoverable incident reverses with a count of its product approved after it', async () => {
+	const id = await createOrderIn('COMPLETED');
+	await report(id, [{ product_id: CHAIR, qty: 4, outcome: 'RECOVERABLE' }]);
+	await count([[CHAIR, 496]]);
+	expect(await reversalBlock(id)).toBeNull();
+	expect(await reverse(1)).toMatchObject({ ok: true });
 });
 
 test('a reversal needs a reason', async () => {
