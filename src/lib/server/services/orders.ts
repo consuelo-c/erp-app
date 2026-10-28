@@ -1408,6 +1408,24 @@ export async function getOrderDetail(
 	return { ...order, ...balances, paid, ...linked };
 }
 
+/**
+ * The token of the client's page, for «Copiar enlace del cliente»: null for a draft, which the page
+ * doesn't open. Kept out of `getOrderDetail`, which Despachos reads too: warehouse and the driver
+ * don't send links.
+ */
+export async function getPublicToken(
+	db: D1Database,
+	id: number,
+	actor: Actor | null
+): Promise<string | null> {
+	requireRole(actor, TAKES_ORDERS);
+	const row = await db
+		.prepare(`select public_token from orders where id = ? and status <> 'DRAFT'`)
+		.bind(id)
+		.first<{ public_token: string }>();
+	return row?.public_token ?? null;
+}
+
 /** A trip as the printout carries it: the client signs that paper and never sees the carrier. */
 type PrintedTrip<Trip extends DeliveryAttributes | PickupAttributes> = Pick<
 	Trip,

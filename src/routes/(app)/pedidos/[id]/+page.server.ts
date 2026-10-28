@@ -9,6 +9,7 @@ import {
 	cancelOrder,
 	confirmOrder,
 	getOrderDetail,
+	getPublicToken,
 	previewConfirmation,
 	reopenOrder
 } from '$lib/server/services/orders';
@@ -19,6 +20,7 @@ const MANAGES_INCIDENTS = ['ADMIN', 'MANAGER'] as const;
 
 // A draft brings what its «Confirmar» dialog shows: the suggested advance and any shortage.
 // «Novedades» only for ADMIN and MANAGER: null hides the section for everyone else.
+// The client's page token is null for a draft, which hides «Copiar enlace del cliente».
 export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	requireRole(locals.user, TAKES_ORDERS);
 	if (undefined === platform) {
@@ -36,7 +38,8 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	const incidents = isAdminOrManager(locals.user)
 		? await listIncidents(db, order.id, locals.user)
 		: null;
-	return { order, confirmation, incidents };
+	const publicToken = await getPublicToken(db, order.id, locals.user);
+	return { order, confirmation, incidents, publicToken };
 };
 
 export const actions: Actions = {

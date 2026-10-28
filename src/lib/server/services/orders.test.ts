@@ -20,6 +20,7 @@ import {
 	getOrderTimeline,
 	getOrderWarnings,
 	getPaymentOptions,
+	getPublicToken,
 	listOrders,
 	ORDERS_PAGE_SIZE,
 	orderItemsSchema,
@@ -169,6 +170,19 @@ test('the public token is a UUID kept out of the CREATED event', async () => {
 	expect(created.after).not.toHaveProperty('public_token');
 	expect(created.after).not.toHaveProperty('has_incident');
 	expect((await read(id)).hasIncident).toBe(false);
+});
+
+test("the client's link token: none for a draft, never for WAREHOUSE or DRIVER", async () => {
+	const id = await create();
+	expect(await getPublicToken(db, id, sales)).toBeNull();
+	setStatus(id, 'CANCELLED');
+	const { public_token } = database.prepare('select public_token from orders').get() ?? {};
+	expect(await getPublicToken(db, id, sales)).toBe(public_token);
+	for (const role of ['WAREHOUSE', 'DRIVER'] satisfies Role[]) {
+		await expect(getPublicToken(db, id, { ...sales, roles: [role] })).rejects.toSatisfy((thrown) =>
+			isHttpError(thrown, 403)
+		);
+	}
 });
 
 test('renaming the client or a product, or repricing it, changes no saved order, an edit included', async () => {
