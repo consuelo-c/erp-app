@@ -158,7 +158,7 @@
 				nuevo.
 			</p>
 		{/if}
-		<div class="actions actions--row">
+		<div class="screen__action actions">
 			<Button type="button" variant="secondary" onclick={() => (isRejectOpen = true)}>
 				Rechazar
 			</Button>
@@ -213,7 +213,7 @@
 
 		{#if 'APPROVED' === count.status}
 			{#if null === count.reversalBlock}
-				<div class="actions">
+				<div class="screen__action actions">
 					<Button type="button" variant="secondary" onclick={() => (isReverseOpen = true)}>
 						Revertir
 					</Button>
@@ -384,11 +384,6 @@
 
 	.actions {
 		margin: var(--space-10) 0 var(--space-4);
-	}
-
-	.actions--row {
-		display: flex;
-		gap: var(--control-gap);
 	}
 
 	.stale {

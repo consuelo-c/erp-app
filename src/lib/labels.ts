@@ -3,7 +3,7 @@
 import type { Role } from './server/actor';
 import type { DeductionConcept, EarningConcept } from './payroll';
 import type { CashConcept, PaymentMethod } from './server/services/cash';
-import type { Service } from './server/services/contacts';
+import type { ContactKind, Service } from './server/services/contacts';
 import type {
 	IncidentOutcome,
 	IncidentStatus,
@@ -97,11 +97,18 @@ export const SERVICE_LABELS: Record<Service, string> = {
 	CHEF: 'Chef'
 };
 
+/** The Contactos chips: each service, then the contacts an employee points to. */
+export const CONTACT_KIND_LABELS: Record<ContactKind, string> = {
+	...SERVICE_LABELS,
+	EMPLOYEE: 'Empleado'
+};
+
 /** «Nadie coincide … entre los transportadores». */
-export const SERVICE_PLURAL_LABELS: Record<Service, string> = {
+export const CONTACT_KIND_PLURAL_LABELS: Record<ContactKind, string> = {
 	TRANSPORTER: 'transportadores',
 	DECORATOR: 'decoradores',
-	CHEF: 'chefs'
+	CHEF: 'chefs',
+	EMPLOYEE: 'empleados'
 };
 
 export const PUNCH_LABELS: Record<Punch, string> = {

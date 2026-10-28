@@ -308,25 +308,15 @@
 		<p class="note balance-note">Saldo pendiente. No impide entregar.</p>
 	{/if}
 
-	<div class="actions">
-		{#if nextStatus}
-			{@const to = nextStatus}
-			<div class="actions__primary">
-				<Button size="xl" type="button" disabled={isOffline} onclick={() => startAdvance(to)}>
-					Marcar como {ORDER_STATUS_LABELS[to]}
-				</Button>
-			</div>
-		{/if}
+	<div class="screen__action">
 		{#if isIncidentReportable(order.status)}
-			<div class="actions__wide">
-				<Button
-					variant="secondary"
-					href={onlineHref(keepOrigin(resolve('/(app)/despachos/[id]/novedad', { id })))}
-					disabled={isOffline}
-				>
-					Reportar novedad
-				</Button>
-			</div>
+			<Button
+				variant="secondary"
+				href={onlineHref(keepOrigin(resolve('/(app)/despachos/[id]/novedad', { id })))}
+				disabled={isOffline}
+			>
+				Reportar novedad
+			</Button>
 		{/if}
 		<Button
 			variant="secondary"
@@ -349,6 +339,12 @@
 				disabled={isOffline}
 			>
 				Ver novedades
+			</Button>
+		{/if}
+		{#if nextStatus}
+			{@const to = nextStatus}
+			<Button size="xl" type="button" disabled={isOffline} onclick={() => startAdvance(to)}>
+				Marcar como {ORDER_STATUS_LABELS[to]}
 			</Button>
 		{/if}
 	</div>
@@ -425,6 +421,11 @@
 		color: var(--text-body);
 	}
 
+	/* 24px apart: each icon's 48px hit area overhangs its glyph by 11px on either side. */
+	.reach {
+		gap: var(--space-12);
+	}
+
 	.reach > span {
 		font-size: var(--text-base);
 	}
@@ -472,18 +473,6 @@
 
 	.balance-note {
 		margin-top: var(--space-4);
-	}
-
-	.actions {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: var(--space-5);
-		margin-top: var(--space-11);
-	}
-
-	.actions__primary,
-	.actions__wide {
-		grid-column: 1 / -1;
 	}
 
 	.note-input {

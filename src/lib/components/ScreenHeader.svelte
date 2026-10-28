@@ -24,12 +24,15 @@
 </header>
 
 <style>
+	/* The same side padding as the screen's body, so the title starts where its column does. */
 	.screen-header {
 		display: flex;
 		flex: none;
 		gap: var(--space-6);
 		align-items: center;
-		padding: var(--screen-header-top) var(--screen-pad-x) var(--space-6);
+		padding: var(--screen-header-top)
+			max(var(--screen-pad-x), calc((100% - var(--content-max-w)) / 2 + var(--screen-pad-x)))
+			var(--space-6);
 	}
 
 	.screen-header__back {

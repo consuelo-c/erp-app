@@ -260,7 +260,11 @@
 	<form method="GET" data-sveltekit-noscroll onsubmit={() => (isSheetOpen = false)}>
 		{@render fields('phone-')}
 		<div class="sheet__actions">
-			<Button variant="secondary" href={resolve('/pedidos')} onclick={() => (isSheetOpen = false)}>
+			<Button
+				variant="secondary"
+				href="{resolve('/pedidos')}?limpiar"
+				onclick={() => (isSheetOpen = false)}
+			>
 				Limpiar
 			</Button>
 			<Button type="submit">Ver pedidos</Button>

@@ -148,7 +148,7 @@
 		{#if 0 === sections.length}
 			<div class="none">
 				<p class="meta">{noneText}</p>
-				<Button href={resolve('/productos')} variant="secondary" inline>Ver todos</Button>
+				<Button href="{resolve('/productos')}?limpiar" variant="secondary" inline>Ver todos</Button>
 			</div>
 		{/if}
 

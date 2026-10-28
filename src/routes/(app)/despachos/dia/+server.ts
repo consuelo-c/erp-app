@@ -1,5 +1,6 @@
 import { error, json } from '@sveltejs/kit';
 import { requireRole, ROLES } from '$lib/server/actor';
+import { rememberDispatchDay } from '$lib/server/list-filters';
 import { getDispatchDay } from '$lib/server/services/dispatch';
 import { getOrderDetail } from '$lib/server/services/orders';
 import type { RequestHandler } from './$types';
@@ -8,13 +9,13 @@ import type { RequestHandler } from './$types';
 // operational detail: the copy the phone keeps for when there's no signal.
 // ponytail: one getOrderDetail per order, a handful of queries each; a joined query if a day ever
 // holds more than a few dozen orders.
-export const GET: RequestHandler = async ({ locals, platform, url }) => {
+export const GET: RequestHandler = async ({ cookies, locals, platform, url }) => {
 	requireRole(locals.user, ROLES);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
 	const db = platform.env.DB;
-	const day = await getDispatchDay(db, url.searchParams.get('fecha'), locals.user);
+	const day = await getDispatchDay(db, rememberDispatchDay(url, cookies), locals.user);
 	if (day.date !== day.today) {
 		return json({ day, details: null });
 	}

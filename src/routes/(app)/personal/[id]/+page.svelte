@@ -137,16 +137,6 @@
 				</li>
 			{/each}
 		</ul>
-
-		{#if employee.isEmployed}
-			<Button type="button" variant="secondary" onclick={() => (endOpen = true)}>
-				Terminar contrato
-			</Button>
-		{:else}
-			<Button type="button" variant="secondary" onclick={() => (rehireOpen = true)}>
-				Reingresar
-			</Button>
-		{/if}
 	</section>
 
 	<form id="end" method="POST" action="?/end" use:enhance={closeDialogs} hidden></form>
@@ -182,6 +172,15 @@
 	</Modal>
 
 	<div class="screen__action">
+		{#if employee.isEmployed}
+			<Button type="button" variant="secondary" onclick={() => (endOpen = true)}>
+				Terminar contrato
+			</Button>
+		{:else}
+			<Button type="button" variant="secondary" onclick={() => (rehireOpen = true)}>
+				Reingresar
+			</Button>
+		{/if}
 		<Button type="submit" form="save">Guardar cambios</Button>
 	</div>
 </Screen>

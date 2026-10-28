@@ -498,23 +498,12 @@
 		margin: var(--space-12) 0 var(--space-6);
 	}
 
-	.payroll__actions {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-5);
-	}
-
 	.payroll__amount-due {
 		margin: 0 0 var(--space-5);
 		font: var(--type-net);
 	}
 
 	@container (width >= 1024px) {
-		.payroll__actions {
-			flex-direction: row;
-			justify-content: flex-end;
-		}
-
 		.payroll__note {
 			text-align: right;
 		}
