@@ -392,17 +392,40 @@ a:hover {
 	border-radius: var(--radius-input);
 }
 
-/* The primary action, last in the body on screens with the bottom navigation (a fixed footer
-   would cover it). On a wide screen it sits at the column's right edge. */
+/* The screen's actions, last in the body (a fixed footer would cover them on screens with the
+   bottom navigation), the primary always last. On a phone the secondary ones go two to a row and
+   the rest full width; on a wide screen they share one row at the column's right edge. A wrapping
+   form or span is transparent, so its button is the row's item. */
 .screen__action {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-5);
 	width: 100%;
 	padding-bottom: var(--space-5);
 	margin-top: var(--space-5);
 }
 
+.screen__action > :not(.btn--secondary) {
+	flex: 1 1 100%;
+}
+
+.screen__action > .btn--secondary {
+	flex: 1 1 calc(50% - var(--space-5) / 2);
+}
+
+.screen__action > form,
+.screen__action > span {
+	display: contents;
+}
+
 @container (width >= 1024px) {
 	.screen__action {
-		display: flex;
+		flex-wrap: nowrap;
 		justify-content: flex-end;
+	}
+
+	.screen__action > :not(.btn--secondary),
+	.screen__action > .btn--secondary {
+		flex: 0 1 auto;
 	}
 }

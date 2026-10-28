@@ -177,22 +177,18 @@ test('search by name or by three digits of the phone, with the service filter, a
 	expect(await names({ search: '44' })).toHaveLength(3);
 	expect(await names({ service: 'TRANSPORTER' })).toEqual(['Wilson Muñoz']);
 	expect(await names({ service: 'TRANSPORTER', search: 'luz' })).toEqual([]);
-	expect(await names({ service: 'BOGUS', pages: 'x' })).toHaveLength(3);
+	expect(await names({ service: 'BOGUS', page: 'x' })).toHaveLength(3);
 
-	for (let i = 0; i < 9; i++) {
+	for (let i = 0; i < 19; i++) {
 		await create({ phone: `320 000 00${10 + i}`, full_name: `Zoila ${i}` });
 	}
 	const first = await listContacts(db, {}, sales);
-	expect(first).toMatchObject({ hasMore: true });
-	expect(first.contacts).toHaveLength(10);
-	const more = await listContacts(db, { pages: '2' }, sales);
-	expect(more.contacts.slice(10).map((contact) => contact.fullName)).toEqual([
-		'Zoila 7',
-		'Zoila 8'
-	]);
-	expect(more.hasMore).toBe(false);
-	// Past the cap, a typed URL gets the first page, never the whole table.
-	expect((await listContacts(db, { pages: '1000' }, sales)).contacts).toHaveLength(10);
+	expect(first).toMatchObject({ total: 22, pageCount: 2, filters: { page: 1 } });
+	expect(first.contacts).toHaveLength(20);
+	const second = await listContacts(db, { page: '2' }, sales);
+	expect(second.contacts.map((contact) => contact.fullName)).toEqual(['Zoila 8', 'Zoila 9']);
+	// Past the last page, a typed URL gets the last one.
+	expect((await listContacts(db, { page: '1000' }, sales)).filters.page).toBe(2);
 });
 
 const withAccount = {
@@ -251,6 +247,10 @@ test("an employee's document is Manager's and Admin's, and never left empty", as
 	const id = 1;
 	expect(await getContact(db, id, sales)).toMatchObject({ isEmployee: true });
 	expect((await listContacts(db, {}, sales)).contacts).toMatchObject([{ isEmployee: true }]);
+	await create({ phone: '300 771 2043', full_name: 'Jorge Iván Betancur' });
+	expect((await listContacts(db, { service: 'EMPLOYEE' }, sales)).contacts).toMatchObject([
+		{ fullName: 'Ana Pérez' }
+	]);
 	expect(await rejection(updateContact(db, { ...ana, document_id: '1', id }, sales))).toBe(403);
 	expect(await updateContact(db, { ...ana, full_name: 'Ana P.', id }, sales)).toEqual({
 		ok: true,

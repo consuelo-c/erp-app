@@ -55,24 +55,6 @@
 		<RolesField chosen={form?.roles ?? login.roles} />
 	</form>
 
-	<section class="login-actions">
-		<Button variant="secondary" href={resolve('/(app)/logins/[id]/contrasena', { id })}>
-			Cambiar contraseña
-		</Button>
-		<Button variant="secondary" href={resolve('/(app)/logins/[id]/reasignar', { id })}>
-			Reasignar a otro empleado
-		</Button>
-		{#if login.isActive}
-			<Button type="button" variant="secondary" onclick={() => (deactivateOpen = true)}>
-				Desactivar
-			</Button>
-		{:else}
-			<!-- Nothing is lost by reactivating, so it doesn't ask first. -->
-			<Button type="submit" variant="secondary" form="reactivate">Reactivar</Button>
-		{/if}
-		<p class="note">Los logins no se eliminan. Desactívalo para bloquear la entrada.</p>
-	</section>
-
 	<form id="deactivate" method="POST" action="?/deactivate" use:enhance={closeDialog} hidden></form>
 	<form id="reactivate" method="POST" action="?/reactivate" use:enhance hidden></form>
 	<Modal
@@ -89,15 +71,21 @@
 	</Modal>
 
 	<div class="screen__action">
+		<Button variant="secondary" href={resolve('/(app)/logins/[id]/contrasena', { id })}>
+			Cambiar contraseña
+		</Button>
+		<Button variant="secondary" href={resolve('/(app)/logins/[id]/reasignar', { id })}>
+			Reasignar a otro empleado
+		</Button>
+		{#if login.isActive}
+			<Button type="button" variant="secondary" onclick={() => (deactivateOpen = true)}>
+				Desactivar
+			</Button>
+		{:else}
+			<!-- Nothing is lost by reactivating, so it doesn't ask first. -->
+			<Button type="submit" variant="secondary" form="reactivate">Reactivar</Button>
+		{/if}
 		<Button type="submit" form="roles">Guardar cambios</Button>
 	</div>
+	<p class="note">Los logins no se eliminan. Desactívalo para bloquear la entrada.</p>
 </Screen>
-
-<style>
-	.login-actions {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-4);
-		margin-top: var(--section-gap);
-	}
-</style>

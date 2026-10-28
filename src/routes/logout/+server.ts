@@ -1,6 +1,7 @@
 import { error, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { requireRole, ROLES } from '$lib/server/actor';
+import { forgetFilters } from '$lib/server/list-filters';
 import { logOut } from '$lib/server/services/auth';
 import { deleteSessionCookie, SESSION_COOKIE } from '$lib/server/session-cookie';
 import type { RequestHandler } from './$types';
@@ -23,5 +24,6 @@ export const POST: RequestHandler = async ({
 		userAgent: request.headers.get('user-agent')
 	});
 	deleteSessionCookie(cookies);
+	forgetFilters(cookies);
 	redirect(303, resolve('/login'));
 };

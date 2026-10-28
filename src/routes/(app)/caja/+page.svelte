@@ -285,7 +285,8 @@
 {/snippet}
 
 {#snippet clearFilters()}
-	<Button variant="secondary" size="sm" inline href={resolve('/(app)/caja')}>Limpiar filtros</Button
+	<Button variant="secondary" size="sm" inline href="{resolve('/(app)/caja')}?limpiar"
+		>Limpiar filtros</Button
 	>
 {/snippet}
 
@@ -338,15 +339,7 @@
 			<span>Valor</span><span>{formatSignedPesos(detail.amount)}</span>
 		</li>
 	</ul>
-	<div class="detail__actions">
-		<Button
-			variant={isJustRecorded ? 'primary' : 'secondary'}
-			href="{resolve('/(app)/caja/comprobante')}?{new URLSearchParams({
-				movimiento: String(detail.id)
-			})}"
-		>
-			{0 < detail.amount ? 'Imprimir recibo de caja' : 'Imprimir comprobante de egreso'}
-		</Button>
+	<div class="screen__action detail__actions">
 		<!-- Where the money came from or went to: its order, or the settlement it paid. -->
 		{#if null !== detail.orderId}
 			<Button variant="secondary" href={orderHref(detail.orderId)}>Ver origen</Button>
@@ -372,6 +365,15 @@
 				Registrar movimiento contrario
 			</Button>
 		{/if}
+		<!-- The receipt is the primary right after recording it, so it stays last. -->
+		<Button
+			variant={isJustRecorded ? 'primary' : 'secondary'}
+			href="{resolve('/(app)/caja/comprobante')}?{new URLSearchParams({
+				movimiento: String(detail.id)
+			})}"
+		>
+			{0 < detail.amount ? 'Imprimir recibo de caja' : 'Imprimir comprobante de egreso'}
+		</Button>
 	</div>
 	{#if isReversible(detail)}
 		<p class="note">
@@ -615,7 +617,7 @@
 		<div class="sheet__actions">
 			<Button
 				variant="secondary"
-				href={resolve('/(app)/caja')}
+				href="{resolve('/(app)/caja')}?limpiar"
 				onclick={() => (isSheetOpen = false)}
 			>
 				Limpiar
@@ -668,10 +670,7 @@
 	}
 
 	.detail__actions {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-5);
-		margin: var(--space-10) 0 var(--space-5);
+		margin-top: var(--space-10);
 	}
 
 	/* The concept is the row's link, and its hit area covers the whole row. */
@@ -884,6 +883,11 @@
 		/* The panel is narrower than a button's cap: its buttons take its width. */
 		.book__panel :global(.btn) {
 			max-width: none;
+		}
+
+		/* The panel is too narrow for one row: its actions stack. */
+		.book__panel .screen__action {
+			flex-direction: column;
 		}
 
 		.table.desktop-only {

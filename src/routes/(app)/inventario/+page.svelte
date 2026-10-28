@@ -355,11 +355,11 @@
 		<div class="error"><Notice tone="error">{errorMessage}</Notice></div>
 	{/if}
 
-	<div class="screen__action actions">
-		<Button type="button" onclick={askToSend}>Enviar para aprobación</Button>
+	<div class="screen__action">
 		{#if data.canReview}
 			<Button type="button" variant="secondary" onclick={askToApprove}>Guardar y aprobar</Button>
 		{/if}
+		<Button type="button" onclick={askToSend}>Enviar para aprobación</Button>
 	</div>
 </Screen>
 
@@ -565,12 +565,6 @@
 		margin-top: var(--space-5);
 	}
 
-	.actions {
-		display: flex;
-		flex-direction: column;
-		gap: var(--control-gap);
-	}
-
 	.changes {
 		padding-left: var(--space-8);
 		margin: 0;
@@ -593,15 +587,5 @@
 
 	.textarea:focus-visible {
 		border-color: var(--border-strong);
-	}
-
-	@container (width >= 1024px) {
-		.actions {
-			flex-direction: row;
-		}
-
-		.actions > :global(.btn) {
-			width: auto;
-		}
 	}
 </style>

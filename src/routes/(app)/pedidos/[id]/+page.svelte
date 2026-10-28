@@ -162,6 +162,7 @@
 		</span>
 		<IconButton
 			icon="pin"
+			size="lg"
 			label="Abrir en Google Maps"
 			href={mapsHref(line1)}
 			target="_blank"
@@ -233,11 +234,13 @@
 		<span>{formatPhone(order.client.phone)}</span>
 		<IconButton
 			icon="phone"
+			size="lg"
 			label="Llamar a {order.client.name}"
 			href="tel:+{order.client.phone}"
 		/>
 		<IconButton
 			icon="whatsapp"
+			size="lg"
 			label="Escribir por WhatsApp a {order.client.name}"
 			href="https://wa.me/{order.client.phone}"
 			target="_blank"
@@ -245,74 +248,6 @@
 		/>
 	</div>
 	<div class="delivery-address">{@render address(delivery.address_1, delivery.address_2)}</div>
-
-	<!-- Payments are recorded in any state, a cancelled order's refunds included. -->
-	<div class="actions">
-		{#if isDraft}
-			<Button size="sm" onclick={() => (isConfirmOpen = true)}>Confirmar</Button>
-		{/if}
-		<!-- Back to a draft, often for another date: confirming it again holds the products. -->
-		{#if canReopen}
-			<form method="POST" action="?/reabrir" use:enhance>
-				<Button type="submit" size="sm">Reabrir pedido</Button>
-			</form>
-		{/if}
-		<!-- Products already at the client's, kept for more days: a new order. -->
-		{#if 'DELIVERED' === order.status}
-			<Button
-				variant="secondary"
-				size="sm"
-				href={resolve('/(app)/pedidos/[id]/extension', { id: String(order.id) })}
-			>
-				Crear extensión
-			</Button>
-		{/if}
-		{#if canEdit}
-			<Button
-				variant="secondary"
-				size="sm"
-				href={resolve('/(app)/pedidos/[id]/editar', { id: String(order.id) })}
-			>
-				Editar
-			</Button>
-		{/if}
-		<Button
-			variant="secondary"
-			size="sm"
-			href={resolve('/(app)/pedidos/[id]/pago', { id: String(order.id) })}
-		>
-			Registrar pago
-		</Button>
-		<Button
-			variant="secondary"
-			size="sm"
-			href={resolve('/(app)/pedidos/[id]/impresion', { id: String(order.id) })}
-		>
-			Imprimir
-		</Button>
-		<Button
-			variant="secondary"
-			size="sm"
-			href={resolve('/(app)/pedidos/[id]/historial', { id: String(order.id) })}
-		>
-			Historial
-		</Button>
-		<!-- A cancelled order is never delivered: Despachos has nothing to do with it. -->
-		{#if 'CANCELLED' !== order.status}
-			<Button
-				variant="secondary"
-				size="sm"
-				href={resolve('/(app)/despachos/[id]', { id: String(order.id) })}
-			>
-				Ver en Despachos
-			</Button>
-		{/if}
-		{#if canCancel}
-			<span class="actions__cancel">
-				<Button variant="secondary" size="sm" onclick={startCancel}>Cancelar pedido</Button>
-			</span>
-		{/if}
-	</div>
 
 	{#if order.extensions.length}
 		<h2 class="section-title">Extensiones</h2>
@@ -489,6 +424,65 @@
 			{/each}
 		</ul>
 	{/if}
+
+	<!-- Payments are recorded in any state, a cancelled order's refunds included. -->
+	<div class="screen__action">
+		{#if canEdit}
+			<Button
+				variant="secondary"
+				href={resolve('/(app)/pedidos/[id]/editar', { id: String(order.id) })}
+			>
+				Editar
+			</Button>
+		{/if}
+		<Button
+			variant="secondary"
+			href={resolve('/(app)/pedidos/[id]/pago', { id: String(order.id) })}
+		>
+			Registrar pago
+		</Button>
+		<Button
+			variant="secondary"
+			href={resolve('/(app)/pedidos/[id]/impresion', { id: String(order.id) })}
+		>
+			Imprimir
+		</Button>
+		<Button
+			variant="secondary"
+			href={resolve('/(app)/pedidos/[id]/historial', { id: String(order.id) })}
+		>
+			Historial
+		</Button>
+		<!-- A cancelled order is never delivered: Despachos has nothing to do with it. -->
+		{#if 'CANCELLED' !== order.status}
+			<Button variant="secondary" href={resolve('/(app)/despachos/[id]', { id: String(order.id) })}>
+				Ver en Despachos
+			</Button>
+		{/if}
+		<!-- Products already at the client's, kept for more days: a new order. -->
+		{#if 'DELIVERED' === order.status}
+			<Button
+				variant="secondary"
+				href={resolve('/(app)/pedidos/[id]/extension', { id: String(order.id) })}
+			>
+				Crear extensión
+			</Button>
+		{/if}
+		{#if canCancel}
+			<span class="actions__cancel">
+				<Button variant="secondary" onclick={startCancel}>Cancelar pedido</Button>
+			</span>
+		{/if}
+		{#if isDraft}
+			<Button onclick={() => (isConfirmOpen = true)}>Confirmar</Button>
+		{/if}
+		<!-- Back to a draft, often for another date: confirming it again holds the products. -->
+		{#if canReopen}
+			<form method="POST" action="?/reabrir" use:enhance>
+				<Button type="submit">Reabrir pedido</Button>
+			</form>
+		{/if}
+	</div>
 </Screen>
 
 {#if isDraft && data.confirmation}
@@ -679,6 +673,11 @@
 		color: var(--text-body);
 	}
 
+	/* 24px apart: each icon's 48px hit area overhangs its glyph by 11px on either side. */
+	.reach {
+		gap: var(--space-12);
+	}
+
 	.address {
 		line-height: 1.35;
 		text-align: left;
@@ -690,29 +689,11 @@
 	}
 
 	.delivery-address {
-		margin: var(--space-3) 0 var(--space-8);
-	}
-
-	.actions {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-4);
-		margin-bottom: var(--space-11);
+		margin: var(--space-3) 0 var(--space-11);
 	}
 
 	.actions__cancel :global(.btn) {
 		color: var(--error-fg);
-	}
-
-	/* A desktop: every action side by side, sharing the row. */
-	@container (width >= 1024px) {
-		.actions {
-			flex-direction: row;
-		}
-
-		.actions > :global(*) {
-			flex: 1;
-		}
 	}
 
 	.notes {

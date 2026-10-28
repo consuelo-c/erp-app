@@ -8,9 +8,10 @@
 	import IconButton from '$lib/components/IconButton.svelte';
 	import Input from '$lib/components/Input.svelte';
 	import Notice from '$lib/components/Notice.svelte';
+	import Pagination from '$lib/components/Pagination.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
-	import { SERVICE_LABELS, SERVICE_PLURAL_LABELS } from '$lib/labels';
+	import { CONTACT_KIND_LABELS, CONTACT_KIND_PLURAL_LABELS, SERVICE_LABELS } from '$lib/labels';
 	import { formatPhone } from '$lib/phone';
 	import type { PageProps } from './$types';
 
@@ -24,17 +25,22 @@
 	const noneText = $derived.by(() => {
 		const { search, service } = filters;
 		if ('' === search) {
-			return `Aún no hay ningún ${service ? SERVICE_LABELS[service].toLowerCase() : 'contacto'}.`;
+			return `Aún no hay ningún ${service ? CONTACT_KIND_LABELS[service].toLowerCase() : 'contacto'}.`;
 		}
-		const among = service ? ` entre los ${SERVICE_PLURAL_LABELS[service]}` : '';
+		const among = service ? ` entre los ${CONTACT_KIND_PLURAL_LABELS[service]}` : '';
 		return `Nadie coincide con «${search}»${among}.`;
 	});
-
-	// «Cargar más» asks for one page more of the same filters.
-	const moreHref = $derived.by(() => {
-		const kept = [...page.url.searchParams].filter(([name]) => 'paginas' !== name);
-		return `?${new URLSearchParams([...kept, ['paginas', String(filters.pages + 1)]])}`;
+	const countLabel = $derived.by(() => {
+		const count = `${data.total} ${1 === data.total ? 'contacto' : 'contactos'}`;
+		return 1 < data.pageCount ? `${count} · página ${filters.page} de ${data.pageCount}` : count;
 	});
+
+	// Another page of the same filters, as in Pedidos.
+	function pageHref(pageNumber: number): string {
+		const kept = [...page.url.searchParams].filter(([name]) => 'pagina' !== name);
+		const turned = 1 === pageNumber ? [] : [['pagina', String(pageNumber)]];
+		return `?${new URLSearchParams([...kept, ...turned])}`;
+	}
 
 	let typing: ReturnType<typeof setTimeout> | undefined;
 
@@ -100,7 +106,7 @@
 					checked={undefined === filters.service}
 					onchange={apply}
 				/>
-				{#each Object.entries(SERVICE_LABELS) as [service, label] (service)}
+				{#each Object.entries(CONTACT_KIND_LABELS) as [service, label] (service)}
 					<Chip
 						type="radio"
 						name="servicio"
@@ -116,7 +122,7 @@
 		{#if 0 === data.contacts.length}
 			<div class="none">
 				<p class="meta">{noneText}</p>
-				<Button href={resolve('/contactos')} variant="secondary" inline>Ver todos</Button>
+				<Button href="{resolve('/contactos')}?limpiar" variant="secondary" inline>Ver todos</Button>
 			</div>
 		{:else}
 			<ul class="contacts">
@@ -143,11 +149,13 @@
 							<span class="contact__phone">{formatPhone(contact.phone)}</span>
 							<IconButton
 								icon="phone"
+								size="lg"
 								label="Llamar a {contact.fullName}"
 								href="tel:+{contact.phone}"
 							/>
 							<IconButton
 								icon="whatsapp"
+								size="lg"
 								label="Escribir por WhatsApp a {contact.fullName}"
 								href="https://wa.me/{contact.phone}"
 								target="_blank"
@@ -157,23 +165,10 @@
 					</li>
 				{/each}
 			</ul>
-			{#if data.hasMore}
-				<div class="more">
-					<Button
-						href={moreHref}
-						variant="secondary"
-						data-sveltekit-noscroll
-						data-sveltekit-replacestate
-					>
-						Cargar más
-					</Button>
-				</div>
-			{:else if isFiltered}
-				<p class="note">
-					{data.contacts.length}
-					{1 === data.contacts.length ? 'resultado' : 'resultados'}.
-				</p>
-			{/if}
+			<p class="note">{countLabel}</p>
+			<div class="pages">
+				<Pagination current={filters.page} count={data.pageCount} href={pageHref} />
+			</div>
 		{/if}
 
 		<div class="screen__action">{@render newContact()}</div>
@@ -277,7 +272,7 @@
 		gap: var(--space-3);
 	}
 
-	/* 24px apart: each icon's 44px hit area overhangs its glyph by 12px on either side. */
+	/* 24px apart: each icon's 48px hit area overhangs its glyph by 11px on either side. */
 	.contact__reach {
 		display: flex;
 		flex: none;
@@ -294,7 +289,7 @@
 		white-space: nowrap;
 	}
 
-	.more {
+	.pages {
 		margin-top: var(--space-8);
 	}
 

@@ -366,15 +366,20 @@ export async function updateContact(
 	return applyEdit(db, actor, { row, columns: { ...columns, document_id: documentId } });
 }
 
-/** «Cargar más» brings this many at a time; the list never loads the whole table. */
-export const CONTACTS_PAGE_SIZE = 10;
+/** One page of the list; it never loads the whole table. */
+export const CONTACTS_PAGE_SIZE = 20;
 
-// Filters come from the URL: an empty or tampered value is ignored, not an error. `pages` is how
-// many «Cargar más» have been pressed plus one, capped so a typed URL can't ask for the whole table.
+/** The list's chips: a service, or `EMPLOYEE`, the contacts an employee points to. */
+export const CONTACT_KINDS = [...SERVICES, 'EMPLOYEE'] as const;
+
+export type ContactKind = (typeof CONTACT_KINDS)[number];
+
+// Filters come from the URL: an empty or tampered value is ignored, not an error. `page` past the
+// last one shows the last, as in Pedidos.
 const listSchema = z.object({
 	search: z.string().trim().catch(''),
-	service: z.enum(SERVICES).optional().catch(undefined),
-	pages: z.coerce.number().int().min(1).max(100).catch(1)
+	service: z.enum(CONTACT_KINDS).optional().catch(undefined),
+	page: z.coerce.number().int().min(1).catch(1)
 });
 
 export type ContactSummary = {
@@ -387,8 +392,13 @@ export type ContactSummary = {
 
 export type ContactFilters = z.output<typeof listSchema>;
 
-/** The filters come back parsed: what the screen shows as chosen is what was applied. */
-export type ContactPage = { contacts: ContactSummary[]; hasMore: boolean; filters: ContactFilters };
+/** The filters come back parsed, `page` clamped: what the screen shows as chosen is what was applied. */
+export type ContactPage = {
+	contacts: ContactSummary[];
+	total: number;
+	pageCount: number;
+	filters: ContactFilters;
+};
 
 type Clause = { sql: string; params: string[] };
 
@@ -412,9 +422,12 @@ export function searchClause(
 }
 
 // In SQL: this table holds every client, so it can reach thousands of rows.
-function serviceClause(service: Service | undefined): Clause | null {
+function serviceClause(service: ContactKind | undefined): Clause | null {
 	if (undefined === service) {
 		return null;
+	}
+	if ('EMPLOYEE' === service) {
+		return { sql: 'employees.id is not null', params: [] };
 	}
 	return {
 		sql: 'exists (select 1 from json_each(contacts.services) where value = ?)',
@@ -430,38 +443,47 @@ type SummaryRow = {
 	is_employee: number;
 };
 
-/** The first `pages` pages of contacts sorted by name, narrowed by name or phone and by service. */
+function toSummary(row: SummaryRow): ContactSummary {
+	return {
+		id: row.id,
+		fullName: row.full_name,
+		phone: row.phone,
+		services: servicesSchema.parse(JSON.parse(row.services)),
+		isEmployee: 1 === row.is_employee
+	};
+}
+
+/** One page of contacts sorted by name, narrowed by name or phone and by service or employee. */
 export async function listContacts(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
 ): Promise<ContactPage> {
 	requireRole(actor, EDITS_CONTACTS);
-	const filters = listSchema.parse(input ?? {});
-	const { search, service, pages } = filters;
-	const shown = pages * CONTACTS_PAGE_SIZE;
-	const clauses = [searchClause(search), serviceClause(service)].filter(
+	const parsed = listSchema.parse(input ?? {});
+	const clauses = [searchClause(parsed.search), serviceClause(parsed.service)].filter(
 		(clause) => null !== clause
 	);
 	const where = clauses.map((clause) => `(${clause.sql})`).join(' and ') || '1';
+	const params = clauses.flatMap((clause) => clause.params);
+	const from = 'from contacts left join employees on employees.contact_id = contacts.id';
+	const count = await db
+		.prepare(`select count(*) as total ${from} where ${where}`)
+		.bind(...params)
+		.first<{ total: number }>();
+	const total = count?.total ?? 0;
+	const pageCount = Math.max(1, Math.ceil(total / CONTACTS_PAGE_SIZE));
+	const filters = { ...parsed, page: Math.min(parsed.page, pageCount) };
 	// ponytail: nocase folds ASCII only, so «Ángela» sorts after Z; a sort key column if it bothers.
-	// One row past the pages says whether «Cargar más» has more to bring.
 	const { results } = await db
 		.prepare(
 			`select contacts.id, full_name, phone, services, employees.id is not null as is_employee
-			from contacts left join employees on employees.contact_id = contacts.id where ${where}
-			order by full_name collate nocase, contacts.id limit ?`
+			${from} where ${where}
+			order by full_name collate nocase, contacts.id limit ? offset ?`
 		)
-		.bind(...clauses.flatMap((clause) => clause.params), shown + 1)
+		.bind(...params, CONTACTS_PAGE_SIZE, (filters.page - 1) * CONTACTS_PAGE_SIZE)
 		.all<SummaryRow>();
-	const contacts = results.slice(0, shown).map((row) => ({
-		id: row.id,
-		fullName: row.full_name,
-		phone: row.phone,
-		services: servicesSchema.parse(JSON.parse(row.services)),
-		isEmployee: 1 === row.is_employee
-	}));
-	return { contacts, hasMore: shown < results.length, filters };
+	return { contacts: results.map(toSummary), total, pageCount, filters };
 }
 
 /** A client added from the order form: the phone and the name typed, and an automatic document. */
@@ -505,8 +527,11 @@ const CLIENT_TEXT_SQL = foldedSql(
 	coalesce(json_extract(attributes, '$.address_2'), '')`
 );
 
+/** The order form's client search lists at most this many. */
+const CLIENT_MATCHES = 10;
+
 /**
- * The first page of contacts by name whose name or address has every word typed, or whose phone
+ * The first contacts by name whose name or address has every word typed, or whose phone
  * has the digits typed. None is picked for the salesperson: several may share a phone.
  */
 export async function searchClients(
@@ -524,7 +549,7 @@ export async function searchClients(
 			`select id, phone, full_name, document_id, services, attributes, 0 as is_employee
 			from contacts where ${clause.sql} order by full_name collate nocase, id limit ?`
 		)
-		.bind(...clause.params, CONTACTS_PAGE_SIZE)
+		.bind(...clause.params, CLIENT_MATCHES)
 		.all<ContactRow>();
 	return results.map(toContact).map(({ id, fullName, phone, address1, address2 }) => ({
 		id,

@@ -74,7 +74,10 @@
 			{isToday ? `Hoy · ${formatLongDay(day.today)}` : formatLongDay(day.date)}
 		</p>
 		{#if !isToday}
-			<a class="day__today" href={resolve('/despachos')}>Volver a hoy</a>
+			<a
+				class="day__today"
+				href="{resolve('/despachos')}?{new URLSearchParams({ fecha: day.today })}">Volver a hoy</a
+			>
 		{/if}
 		<form class="day__picker" method="get">
 			<Input type="date" name="fecha" value={day.date} aria-label="Día" onchange={pick} />
