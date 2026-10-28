@@ -1,20 +1,20 @@
-// System settings, and PAYROLL_HOLIDAYS through its own editor. One current value per key; each
-// changed key is an `EDITED` event carrying the key in `entity_key`.
+// System settings, and PAYROLL_HOLIDAYS and HELP_FAQ through their own editors. One current value
+// per key; each changed key is an `EDITED` event carrying the key in `entity_key`.
 
 import { z } from 'zod';
 import { dialTimeShape, formatLongDay, toClockTime } from '$lib/datetime';
 import { getExtraHoursRange } from '$lib/payroll';
 import { getSettingInput, holidaysSchema, SETTINGS, type SettingKey } from '$lib/settings';
-import { isAdmin, requireRole, type Actor } from '../actor';
+import { isAdmin, requireRole, ROLES, type Actor } from '../actor';
 import { auditedUpdate } from '../audit';
 
 // A mistake here throws off all of payroll: only the ones who settle it edit settings.
 const EDITS_SETTINGS = ['ADMIN', 'MANAGER'] as const;
 
-export type SystemSettingKey = Exclude<SettingKey, 'PAYROLL_HOLIDAYS'>;
+export type SystemSettingKey = Exclude<SettingKey, 'PAYROLL_HOLIDAYS' | 'HELP_FAQ'>;
 
 const SYSTEM_SETTING_KEYS = (Object.keys(SETTINGS) as SettingKey[]).filter(
-	(key): key is SystemSettingKey => 'PAYROLL_HOLIDAYS' !== key
+	(key): key is SystemSettingKey => 'PAYROLL_HOLIDAYS' !== key && 'HELP_FAQ' !== key
 );
 
 /** Each key's stored text. */
@@ -278,6 +278,58 @@ async function findFreezeLine(db: D1Database): Promise<string | null> {
 		.prepare(`select max(period_start) as periodStart from payroll_runs where status = 'PAID'`)
 		.first<{ periodStart: string | null }>();
 	return row?.periodStart ? getExtraHoursRange(row.periodStart).end : null;
+}
+
+export type Help = {
+	text: string;
+	// When it was last saved in the app (epoch seconds), or null while it's still the default.
+	updatedAt: number | null;
+};
+
+export type HelpResult = { ok: true } | { ok: false; message: string };
+
+const helpFormSchema = z.object({ text: z.string() });
+
+/** The help's Markdown, open to every login. */
+export async function getHelp(db: D1Database, actor: Actor | null): Promise<Help> {
+	requireRole(actor, ROLES);
+	const [{ HELP_FAQ: text }, row] = await Promise.all([
+		readSettings(db, ['HELP_FAQ']),
+		db
+			.prepare(
+				`select max(created_at) as updatedAt from events
+				where entity_type = 'SETTINGS' and entity_key = 'HELP_FAQ'`
+			)
+			.first<{ updatedAt: number | null }>()
+	]);
+	return { text, updatedAt: row?.updatedAt ?? null };
+}
+
+/** The last save wins: no lock and no version check; an overwritten text is still in its event. */
+export async function updateHelp(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<HelpResult> {
+	requireRole(actor, EDITS_SETTINGS);
+	const parsed = SETTINGS.HELP_FAQ.schema.safeParse(helpFormSchema.parse(input).text);
+	if (!parsed.success) {
+		return { ok: false, message: parsed.error.issues[0].message };
+	}
+	const { HELP_FAQ: current } = await readSettings(db, ['HELP_FAQ']);
+	const statements = auditedUpdate(db, {
+		table: 'settings',
+		entityType: 'SETTINGS',
+		actor,
+		idColumn: 'key',
+		id: 'HELP_FAQ',
+		current: { value: current },
+		changes: { value: parsed.data }
+	});
+	if (statements.length > 0) {
+		await db.batch(statements);
+	}
+	return { ok: true };
 }
 
 // The printed formats' header.
