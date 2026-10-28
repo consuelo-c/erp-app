@@ -51,7 +51,7 @@ test("loads the Design Brief's eight products and the four colors of one variant
 	]);
 });
 
-test('loads three clients, a transporter, a decorator and a client with a US number', () => {
+test('loads clients, two transporters, a decorator and a client with a US number', () => {
 	const contacts = database
 		.prepare(
 			'select * from contacts where id not in (select contact_id from employees) order by id'
@@ -63,7 +63,14 @@ test('loads three clients, a transporter, a decorator and a client with a US num
 		['Wilson Muñoz', '573119085512', '["TRANSPORTER"]'],
 		['Paula Andrea Ríos', '573125557788', '["DECORATOR"]'],
 		['Emily Carter', '13055550142', '[]'],
-		['Diana Zuluaga', '573006152290', '[]']
+		['Diana Zuluaga', '573006152290', '[]'],
+		['Carolina Gómez Vélez', '573128904417', '[]'],
+		['Salón de Eventos Villa Fernanda', '573046671230', '[]'],
+		['Andrés Felipe Cano', '573215508842', '[]'],
+		['Colegio Monte Verde', '573017733905', '[]'],
+		['Beatriz Elena Ochoa', '573164420981', '[]'],
+		['Juan Camilo Arbeláez', '573105549217', '[]'],
+		['Hernán Darío Zapata', '573122268804', '["TRANSPORTER"]']
 	]);
 	for (const contact of contacts) {
 		expect(servicesSchema.safeParse(JSON.parse(String(contact.services))).success).toBe(true);
@@ -210,9 +217,9 @@ function parseOrder(order: Record<string, unknown>) {
 	};
 }
 
-test("loads the Design Brief's #1043 and #1051, #1047 delivered, and enough for a second page", () => {
+test("loads the Design Brief's #1043 and #1051, #1047 delivered, and enough for a third page", () => {
 	const orders = readAll('orders');
-	expect(orders).toHaveLength(30);
+	expect(orders).toHaveLength(45);
 	expect(new Set(orders.map((order) => order.status)).size).toBe(8);
 	expect(orders.every((order) => 0 === order.has_incident)).toBe(true);
 	expect(readAll('incidents')).toEqual([]);
@@ -267,6 +274,29 @@ test('every order passes the Zod schemas, points to real rows and follows the to
 	}
 });
 
+test('every trip falls from 1 to 18 October, each status as if today were Wednesday 14', () => {
+	const today = '2026-10-14';
+	for (const order of readAll('orders')) {
+		const [delivery, pickup] = [String(order.delivery_date), String(order.pickup_date)];
+		expect(['2026-10-01' <= delivery, delivery <= pickup, pickup <= '2026-10-18']).toEqual([
+			true,
+			true,
+			true
+		]);
+		const fits = {
+			DRAFT: today < delivery,
+			CONFIRMED: today <= delivery,
+			PICKED: today <= delivery,
+			OUT_FOR_DELIVERY: today === delivery,
+			DELIVERED: delivery <= today && today <= pickup,
+			OUT_FOR_PICKUP: today === pickup,
+			COMPLETED: pickup <= today,
+			CANCELLED: true
+		}[String(order.status)];
+		expect(fits, String(order.id)).toBe(true);
+	}
+});
+
 function openSeededD1() {
 	const { db, database: memory } = createMemoryD1();
 	memory.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
@@ -298,6 +328,14 @@ test('loads two pending counts sharing a product, one stale, and a rejected one'
 test("#1043 reads the Design Brief's paid, balance and deposit", async () => {
 	const order = await getOrderDetail(openSeededD1(), 1043, manager);
 	expect([order?.paid, order?.balanceDue, order?.depositHeld]).toEqual([500000, 680000, 200000]);
+});
+
+test('#1009, paid in two, and #1012, its deposit given back, owe and hold nothing', async () => {
+	const db = openSeededD1();
+	for (const id of [1009, 1012]) {
+		const order = await getOrderDetail(db, id, manager);
+		expect([order?.balanceDue, order?.depositHeld], String(id)).toEqual([0, 0]);
+	}
 });
 
 test('every movement passes its Zod schema, each sign numbered 1, 2, 3… with one offset', () => {
