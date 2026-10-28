@@ -492,7 +492,6 @@
 	.search {
 		position: relative;
 		display: block;
-		max-width: 480px;
 	}
 
 	.search :global(.icon) {
@@ -510,7 +509,6 @@
 	}
 
 	.results {
-		max-width: 480px;
 		margin-top: var(--space-4);
 		overflow: hidden;
 		border: var(--border-w-strong) solid var(--border-strong);

@@ -12,7 +12,7 @@
 	<title>Extensión del pedido #{data.original.id} · Banquetes Consuelo C</title>
 </svelte:head>
 
-<Screen wide>
+<Screen>
 	{#snippet header()}
 		<ScreenHeader
 			title="Extensión del pedido #{data.original.id}"

@@ -12,7 +12,7 @@
 	<title>Nuevo pedido · Banquetes Consuelo C</title>
 </svelte:head>
 
-<Screen wide>
+<Screen>
 	{#snippet header()}
 		<ScreenHeader title="Nuevo pedido" backHref={resolve('/pedidos')} />
 	{/snippet}

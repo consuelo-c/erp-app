@@ -176,8 +176,7 @@
 	--print-sheet-w: 528px;
 	--print-sheet-h: 816px;
 	--dialog-max-w: 360px;
-	--content-max-w: 800px;
-	--content-max-w-wide: 1120px;
+	--content-max-w: 1120px;
 	--button-max-w: 260px;
 
 	/* Component padding */

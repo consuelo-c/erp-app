@@ -275,11 +275,6 @@
 		margin: 0;
 	}
 
-	.incident {
-		max-width: 560px;
-		margin-inline: auto;
-	}
-
 	.incident__lead {
 		margin-bottom: var(--space-6);
 	}
