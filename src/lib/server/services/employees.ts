@@ -40,14 +40,14 @@ export const employmentSchema = z
 
 // SQLite validates nothing: the JSON is checked on write and on read, salary included.
 // `salary_bank_account` is where payroll goes, not the contact's `bank_account`, which Sales may fill in.
-const attributesSchema = z.object({
+export const employeeAttributesSchema = z.object({
 	monthly_salary: z.number().int().nonnegative(),
 	position: z.string(),
 	salary_bank_account: z.string().min(1).optional(),
 	employment: employmentSchema
 });
 
-type Attributes = z.infer<typeof attributesSchema>;
+type Attributes = z.infer<typeof employeeAttributesSchema>;
 type Period = z.infer<typeof periodSchema>;
 
 export type Employee = {
@@ -125,12 +125,12 @@ function invalid(error: z.ZodError): Result {
 // Always the same key order, so an edit that changes nothing produces the same text and logs nothing.
 function attributesJson(attributes: Attributes): string {
 	const { monthly_salary, position, salary_bank_account, employment } =
-		attributesSchema.parse(attributes);
+		employeeAttributesSchema.parse(attributes);
 	return JSON.stringify({ monthly_salary, position, salary_bank_account, employment });
 }
 
 function toEmployee(row: EmployeeRow): Employee {
-	const attributes = attributesSchema.parse(JSON.parse(row.attributes));
+	const attributes = employeeAttributesSchema.parse(JSON.parse(row.attributes));
 	return {
 		id: row.id,
 		phone: row.phone,
@@ -414,7 +414,7 @@ async function changeEmployment(
 	if ('string' === typeof employment) {
 		return { ok: false, message: employment };
 	}
-	const attributes = { ...attributesSchema.parse(JSON.parse(row.attributes)), employment };
+	const attributes = { ...employeeAttributesSchema.parse(JSON.parse(row.attributes)), employment };
 	return run(db, attributesUpdate(db, actor, { row, attributes }), id);
 }
 

@@ -1,10 +1,13 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
-import { rolesSchema } from '../actor';
+import { rolesSchema, type Actor } from '../actor';
 import { verifyPassword } from '../password';
 import { calculateOrderTotals } from '$lib/orders';
-import { contactAttributesSchema, servicesSchema } from '../services/contacts';
+import { createMemoryD1 } from './memory-d1';
+import { openWeek } from '../services/payroll';
+import { contactAttributesSchema, isAutoDocument, servicesSchema } from '../services/contacts';
+import { employeeAttributesSchema } from '../services/employees';
 import {
 	clientAttributesSchema,
 	deliveryAttributesSchema,
@@ -14,6 +17,7 @@ import {
 } from '../services/orders';
 
 const sampleData = readFileSync('scripts/sample-data.sql', 'utf8');
+const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
 
 let database: DatabaseSync;
 
@@ -45,7 +49,11 @@ test("loads the Design Brief's eight products and the four colors of one variant
 });
 
 test('loads three clients, a transporter, a decorator and a client with a US number', () => {
-	const contacts = readAll('contacts');
+	const contacts = database
+		.prepare(
+			'select * from contacts where id not in (select contact_id from employees) order by id'
+		)
+		.all();
 	expect(contacts.map((contact) => [contact.full_name, contact.phone, contact.services])).toEqual([
 		['Luz Marina Restrepo', '573104428890', '[]'],
 		['Jorge Iván Betancur', '573007712043', '[]'],
@@ -70,7 +78,9 @@ test('a second run duplicates nothing and keeps an edit', () => {
 	const tables = () => [
 		readAll('products'),
 		readAll('contacts'),
+		readAll('employees'),
 		readAll('users'),
+		readAll('timesheets'),
 		readAll('orders')
 	];
 	const before = tables();
@@ -78,12 +88,19 @@ test('a second run duplicates nothing and keeps an edit', () => {
 	expect(tables()).toEqual(before);
 });
 
-test('loads a login per role, with no employee and no password', async () => {
-	const logins = readAll('users');
-	expect(logins.map((login) => [login.username, login.roles, login.employee_id])).toEqual([
-		['gerente', '["MANAGER"]', null],
-		['representante', '["SALES"]', null],
-		['bodega', '["WAREHOUSE"]', null]
+test('loads a login per role, each on its employee, with no password', async () => {
+	const logins = database
+		.prepare(
+			`select users.*, contacts.full_name from users
+			join employees on employees.id = users.employee_id
+			join contacts on contacts.id = employees.contact_id order by users.id`
+		)
+		.all();
+	expect(logins.map((login) => [login.username, login.roles, login.full_name])).toEqual([
+		['gerente', '["MANAGER"]', 'Gloria Patricia Arango'],
+		['representante', '["SALES"]', 'Natalia Cardona'],
+		['bodega', '["WAREHOUSE"]', 'Jhon Fredy Osorio'],
+		['conductor', '["DRIVER"]', 'Luis Alberto Mejía']
 	]);
 	for (const login of logins) {
 		expect(rolesSchema.safeParse(JSON.parse(String(login.roles))).success).toBe(true);
@@ -97,11 +114,78 @@ test('loads a login per role, with no employee and no password', async () => {
 });
 
 test('every row is created by system and writes no events', () => {
-	const tables = ['products', 'contacts', 'users', 'orders'];
+	const tables = ['products', 'contacts', 'employees', 'users', 'timesheets', 'orders'];
 	for (const row of tables.flatMap(readAll)) {
 		expect([row.created_by, row.updated_by]).toEqual(['system', 'system']);
 	}
 	expect(database.prepare('select count(*) as count from events').get()).toEqual({ count: 0 });
+});
+
+test('loads five employees on their own contacts: four employed with a login, one who left', () => {
+	const employees = database
+		.prepare(
+			`select employees.attributes, contacts.document_id, users.username from employees
+			join contacts on contacts.id = employees.contact_id
+			left join users on users.employee_id = employees.id order by employees.id`
+		)
+		.all();
+	expect(employees).toHaveLength(5);
+	const isEmployed = employees.map((employee) => {
+		const attributes = employeeAttributesSchema.parse(JSON.parse(String(employee.attributes)));
+		expect(isAutoDocument(String(employee.document_id))).toBe(false);
+		return null === attributes.employment.at(-1)?.end;
+	});
+	expect(isEmployed).toEqual([true, true, true, true, false]);
+	expect(employees.map((employee) => employee.username)).toEqual([
+		'gerente',
+		'representante',
+		'bodega',
+		'conductor',
+		null
+	]);
+});
+
+test('punches the four from Saturday 10 to Sunday 18 October 2026 but Thursday 15', () => {
+	const days = database
+		.prepare(
+			'select work_date, count(distinct employee_id) as employees from timesheets group by work_date order by work_date'
+		)
+		.all();
+	expect(days.map((day) => day.work_date)).toEqual([
+		'2026-10-10',
+		'2026-10-11',
+		'2026-10-12',
+		'2026-10-13',
+		'2026-10-14',
+		'2026-10-16',
+		'2026-10-17',
+		'2026-10-18'
+	]);
+	const punched = database.prepare('select count(distinct employee_id) as count from timesheets');
+	expect(punched.get()).toEqual({ count: 4 });
+	expect(readAll('payroll_runs')).toEqual([]);
+});
+
+test("the week of 12 October's settlement fills each of the five overtime rows", async () => {
+	const { db, database: memory } = createMemoryD1();
+	memory.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
+	memory.exec(sampleData);
+	const { employees } = await openWeek(db, { employeeId: null, week: '2026-10-12' }, manager);
+	expect(employees).toHaveLength(4);
+	const weeks = await Promise.all(
+		employees.map(({ id }) => openWeek(db, { employeeId: id, week: '2026-10-12' }, manager))
+	);
+	const filled = weeks
+		.flatMap(({ draft }) => draft?.earnings ?? [])
+		.filter((earning) => (earning.derivedQty ?? 0) > 0)
+		.map((earning) => earning.concept);
+	expect([...new Set(filled)].sort()).toEqual([
+		'HOLIDAY_OVERTIME_DAY',
+		'HOLIDAY_OVERTIME_NIGHT',
+		'NIGHT_SURCHARGE',
+		'OVERTIME_DAY',
+		'OVERTIME_NIGHT'
+	]);
 });
 
 function parseOrder(order: Record<string, unknown>) {
