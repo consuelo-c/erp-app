@@ -22,6 +22,7 @@
 	});
 
 	const current = $derived(findDestination(page.url.pathname));
+	const isHelpCurrent = $derived(HELP.href === page.url.pathname);
 	const barDestinations = DESTINATIONS.slice(0, BAR_SLOTS);
 	const moreDestinations = DESTINATIONS.slice(BAR_SLOTS);
 
@@ -35,7 +36,10 @@
 			label: 'Más',
 			icon: 'more' as const,
 			onclick: () => (isMoreOpen = true),
-			isCurrent: isMoreOpen || moreDestinations.some((destination) => destination === current)
+			isCurrent:
+				isMoreOpen ||
+				isHelpCurrent ||
+				moreDestinations.some((destination) => destination === current)
 		}
 	]);
 
@@ -44,7 +48,7 @@
 			...destination,
 			isCurrent: destination === current
 		})),
-		HELP
+		{ ...HELP, isCurrent: isHelpCurrent }
 	]);
 
 	const sidebarItems = $derived(
@@ -57,7 +61,7 @@
 	<div class="shell__sidebar">
 		<Sidebar
 			items={sidebarItems}
-			footItems={[HELP]}
+			footItems={[{ ...HELP, isCurrent: isHelpCurrent }]}
 			username={data.username ?? ''}
 			bind:isCollapsed={isSidebarCollapsed}
 		/>

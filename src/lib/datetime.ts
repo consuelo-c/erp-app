@@ -42,11 +42,15 @@ export function getTodaysDate(): string {
 
 /** A UTC instant (epoch seconds) formatted in Bogotá time, for display. */
 export function formatInstant(epochSeconds: number): string {
+	return `${formatInstantDate(epochSeconds)}, ${formatInstantTime(epochSeconds)}`;
+}
+
+/** The Bogotá date of a UTC instant (epoch seconds): `3 de octubre de 2026`. */
+export function formatInstantDate(epochSeconds: number): string {
 	const parts = instantPartsFormat.formatToParts(new Date(epochSeconds * 1000));
 	const part = (type: Intl.DateTimeFormatPartTypes) =>
 		Number(parts.find((candidate) => type === candidate.type)?.value);
-	const date = `${part('day')} de ${MONTH_NAMES[part('month') - 1]} de ${part('year')}`;
-	return `${date}, ${formatTime(part('hour'), part('minute'))}`;
+	return `${part('day')} de ${MONTH_NAMES[part('month') - 1]} de ${part('year')}`;
 }
 
 /** The Bogotá time of a UTC instant (epoch seconds): `3:30 p.m.`. */

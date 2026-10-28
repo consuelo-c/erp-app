@@ -7,6 +7,7 @@ import {
 	formatCivilDate,
 	formatClockTime,
 	formatInstant,
+	formatInstantDate,
 	formatLongDay,
 	formatShortClockTime,
 	formatShortDay,
@@ -38,6 +39,10 @@ test('getTodaysDate rolls over at midnight in Bogotá', () => {
 
 test('formatInstant shows the instant in Bogotá time', () => {
 	expect(formatInstant(BOGOTA_10PM.getTime() / 1000)).toBe('14 de agosto de 2026, 10:00 p.m.');
+});
+
+test("formatInstantDate gives Bogotá's date when UTC is already on the next day", () => {
+	expect(formatInstantDate(BOGOTA_10PM.getTime() / 1000)).toBe('14 de agosto de 2026');
 });
 
 test('formatInstant writes midnight and noon as 12', () => {

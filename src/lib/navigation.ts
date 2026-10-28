@@ -75,7 +75,7 @@ export const DESTINATIONS: Destination[] = [
 export const BAR_SLOTS = 3;
 
 /** Not a destination: it lives in «Más» and at the sidebar's foot. */
-export const HELP: Destination = { label: 'Ayuda', icon: 'help' };
+export const HELP: Destination = { label: 'Ayuda', icon: 'help', href: resolve('/ayuda') };
 
 /** Personal y Nómina's tabs: the employees and their weekly settlement. */
 export const PERSONAL_TABS = [
