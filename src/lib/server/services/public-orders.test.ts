@@ -4,7 +4,7 @@ import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
 import { movementStatements } from './cash';
 import { createOrder } from './orders';
-import { findOrderIdByToken, getPublicOrder, getWhatsAppHref } from './public-orders';
+import { findOrderIdByToken, getPublicOrder, getWhatsAppHref, lookupOrders } from './public-orders';
 
 const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
 
@@ -189,4 +189,74 @@ test('the WhatsApp link: none while COMPANY_WHATSAPP is empty, its text encoded 
 	expect(`${href.origin}${href.pathname}`).toBe('https://wa.me/573105550142');
 	expect(href.searchParams.get('text')).toBe('Hola. ¿Y mi pedido #1043?');
 	expect(href.search).toBe(`?text=${encodeURIComponent('Hola. ¿Y mi pedido #1043?')}`);
+});
+
+/** The tokens the lookup finds, on Wednesday 28 October 2026 in Bogotá. */
+async function lookup(phone: string, eventDate: string): Promise<string[]> {
+	vi.setSystemTime(new Date('2026-10-28T15:00:00Z'));
+	const result = await lookupOrders(db, { phone, event_date: eventDate });
+	if (!result.ok) {
+		throw new Error(JSON.stringify(result.errors));
+	}
+	return result.matches.map(({ token }) => token);
+}
+
+test('the phone however it is typed, compared whole against the order, on its event date', async () => {
+	const token = await create('CONFIRMED', { event_date: '2026-10-31' });
+	for (const phone of ['310 442 8890', '3104428890', '+57 310 442 8890']) {
+		expect(await lookup(phone, '2026-10-31')).toEqual([token]);
+	}
+	expect(await lookup('310 442 8890', '2026-10-30')).toEqual([]);
+	expect(await lookup('310 442 8891', '2026-10-31')).toEqual([]);
+});
+
+test("the order's own phone, never the contact's", async () => {
+	await create('CONFIRMED', { event_date: '2026-10-31' });
+	database
+		.prepare("update orders set client_attributes = json_set(client_attributes, '$.phone', ?)")
+		.run('573007712043');
+	expect(await lookup('310 442 8890', '2026-10-31')).toEqual([]);
+	expect((await lookup('300 771 2043', '2026-10-31')).length).toBe(1);
+});
+
+test('events from 7 days past on, with no upper limit', async () => {
+	const lastWeek = await create('COMPLETED', { event_date: '2026-10-21' });
+	await create('COMPLETED', { event_date: '2026-10-20' });
+	const nextYear = await create('CONFIRMED', { event_date: '2027-06-12' });
+	expect(await lookup('3104428890', '2026-10-21')).toEqual([lastWeek]);
+	expect(await lookup('3104428890', '2026-10-20')).toEqual([]);
+	expect(await lookup('3104428890', '2027-06-12')).toEqual([nextYear]);
+});
+
+test('every status but a draft: a cancelled order is found', async () => {
+	await create('DRAFT', { event_date: '2026-10-31' });
+	expect(await lookup('3104428890', '2026-10-31')).toEqual([]);
+	const cancelled = await create('CANCELLED', { event_date: '2026-11-07' });
+	expect(await lookup('3104428890', '2026-11-07')).toEqual([cancelled]);
+});
+
+test('two orders on the same phone and event date, both by id', async () => {
+	const first = await create('DELIVERED', { event_date: '2026-10-31' });
+	const second = await create('CONFIRMED', { event_date: '2026-10-31' });
+	const result = await lookupOrders(db, { phone: '3104428890', event_date: '2026-10-31' });
+	expect(result).toEqual({
+		ok: true,
+		matches: [
+			{ id: 1, status: 'DELIVERED', token: first },
+			{ id: 2, status: 'CONFIRMED', token: second }
+		]
+	});
+});
+
+test('a phone the helper rejects is a field error and runs no query', async () => {
+	const prepare = vi.spyOn(db, 'prepare');
+	expect(await lookupOrders(db, { phone: '310 44', event_date: '2026-10-31' })).toEqual({
+		ok: false,
+		errors: { phone: 'Escriba el teléfono con el que hizo el pedido' }
+	});
+	expect(await lookupOrders(db, { phone: '3104428890', event_date: '' })).toEqual({
+		ok: false,
+		errors: { event_date: 'Escoja la fecha del evento' }
+	});
+	expect(prepare).not.toHaveBeenCalled();
 });
