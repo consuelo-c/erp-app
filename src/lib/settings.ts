@@ -14,6 +14,9 @@ type SettingDefinition = {
 const POSITIVE_INTEGER_MESSAGE = 'Escribe un número entero mayor que cero';
 const PERCENTAGE_MESSAGE = 'Escribe un porcentaje de 0 a 100';
 
+/** The help's limit, which its editor counts against. */
+export const HELP_MAX_LENGTH = 50_000;
+
 const textSchema = z.string().trim().min(1, 'Escribe un valor');
 const positiveIntegerSchema = z.coerce
 	.number(POSITIVE_INTEGER_MESSAGE)
@@ -186,7 +189,7 @@ export const SETTINGS = {
 			.string()
 			.trim()
 			.min(1, 'Escribe el texto de la ayuda')
-			.max(50_000, 'La ayuda no puede pasar de 50.000 caracteres')
+			.max(HELP_MAX_LENGTH, 'La ayuda no puede pasar de 50.000 caracteres')
 	}
 } as const satisfies Record<string, SettingDefinition>;
 

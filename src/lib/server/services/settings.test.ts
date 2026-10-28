@@ -324,6 +324,10 @@ test('saving the help writes the text and its EDITED event, which dates «Actual
 test('saving the help unchanged writes nothing', async () => {
 	const { text } = await getHelp(db, admin);
 	expect(await updateHelp(db, { text }, admin)).toEqual({ ok: true });
+	// As the textarea posts it.
+	expect(await updateHelp(db, { text: text.replaceAll('\n', '\r\n') }, admin)).toEqual({
+		ok: true
+	});
 	expect(readEvents()).toEqual([]);
 });
 
