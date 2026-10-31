@@ -51,7 +51,7 @@ test("loads the Design Brief's eight products and the four colors of one variant
 	]);
 });
 
-test('loads clients, two transporters, a decorator and a client with a US number', () => {
+test('loads clients, two transporters, a decorator, one of each newer service and a client with a US number', () => {
 	const contacts = database
 		.prepare(
 			'select * from contacts where id not in (select contact_id from employees) order by id'
@@ -70,7 +70,11 @@ test('loads clients, two transporters, a decorator and a client with a US number
 		['Colegio Monte Verde', '573017733905', '[]'],
 		['Beatriz Elena Ochoa', '573164420981', '[]'],
 		['Juan Camilo Arbeláez', '573105549217', '[]'],
-		['Hernán Darío Zapata', '573122268804', '["TRANSPORTER"]']
+		['Hernán Darío Zapata', '573122268804', '["TRANSPORTER"]'],
+		['Sebastián Mejía', '573137724518', '["WAITER"]'],
+		['Valentina Arango', '573158841203', '["WEDDING_PLANNER"]'],
+		['Mateo Londoño', '573176630492', '["BARTENDER","BARISTA"]'],
+		['Natalia Cardona', '573189952074', '["BARISTA"]']
 	]);
 	for (const contact of contacts) {
 		expect(servicesSchema.safeParse(JSON.parse(String(contact.services))).success).toBe(true);

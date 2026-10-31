@@ -42,7 +42,11 @@ FROM (VALUES
 	('573017733905', 'Colegio Monte Verde', '8909041236', '[]', '{"address_1":"Calle 2 Sur #25-40, El Poblado","address_2":"Entrada por el coliseo"}'),
 	('573164420981', 'Beatriz Elena Ochoa', '42889016', '[]', '{"address_1":"Vereda El Chuscal km 3, Envigado","address_2":"Finca Villa Carmen, portón blanco después del puente"}'),
 	('573105549217', 'Juan Camilo Arbeláez', '@2RXF6HMB', '[]', '{"address_1":"Cra 45 #75 Sur-30, Sabaneta","address_2":"Casa 14, conjunto Cañaveral"}'),
-	('573122268804', 'Hernán Darío Zapata', '15387620', '["TRANSPORTER"]', '{"bank_account":"Bancolombia ahorros 245-118903-41"}')
+	('573122268804', 'Hernán Darío Zapata', '15387620', '["TRANSPORTER"]', '{"bank_account":"Bancolombia ahorros 245-118903-41"}'),
+	('573137724518', 'Sebastián Mejía', '1017234590', '["WAITER"]', '{"bank_account":"Nequi 313 772 4518","notes":"Trae su propio uniforme"}'),
+	('573158841203', 'Valentina Arango', '1037619844', '["WEDDING_PLANNER"]', '{"email":"valentina@arangoeventos.co"}'),
+	('573176630492', 'Mateo Londoño', '1020456781', '["BARTENDER","BARISTA"]', '{"notes":"Coctelería y estación de café"}'),
+	('573189952074', 'Natalia Cardona', '43987125', '["BARISTA"]', '{}')
 ) AS sample
 WHERE true -- SQLite reads ON CONFLICT after a SELECT only past a WHERE
 ON CONFLICT (document_id) DO NOTHING;
