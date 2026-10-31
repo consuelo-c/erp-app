@@ -1,6 +1,6 @@
 # services
 
-All business logic lives here, one file per module (`orders.ts`, `payroll.ts`, …). None is implemented yet: each phase adds its own.
+All business logic lives here, one file per module (`orders.ts`, `payroll.ts`, …).
 
 The rule, from [../planning/foundations.md](https://github.com/consuelo-c/erp-planning/blob/main/foundations.md#architecture-service-layer-and-resolved-actor):
 
