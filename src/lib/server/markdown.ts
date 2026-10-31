@@ -1,5 +1,6 @@
-// The help's Markdown to HTML: the only output that reaches `{@html}`. The text is written by
-// `MANAGER`, not only `ADMIN`, and read with every role's session, so it's a trust boundary.
+// The help's and the terms' Markdown to HTML: the only output that reaches `{@html}`. The text is
+// written by `MANAGER`, not only `ADMIN`, and read with every role's session or by any client, so
+// it's a trust boundary.
 
 import { Marked, type Token, type Tokens, type TokensList } from 'marked';
 import { fold } from '$lib/format';
@@ -96,4 +97,9 @@ export function renderHelp(text: string): RenderedHelp {
 			body: renderTokens(body, tokens.links)
 		}))
 	};
+}
+
+/** The terms as one block: `##` a plain heading, no questions. */
+export function renderTerms(text: string): string {
+	return markdown.parse(text, { async: false });
 }

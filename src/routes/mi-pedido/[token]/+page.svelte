@@ -1,6 +1,6 @@
 <script lang="ts">
 	import Badge, { ORDER_STATUS_TONES } from '$lib/components/Badge.svelte';
-	import { formatLongDay, formatShortDay } from '$lib/datetime';
+	import { formatLongDay } from '$lib/datetime';
 	import { formatBalance, formatPesos } from '$lib/format';
 	import {
 		CLIENT_DELIVERY_METHOD_LABELS,
@@ -9,8 +9,9 @@
 	} from '$lib/labels';
 	import type { PageProps } from './$types';
 
-	// «Su pedido»: the order as the client holds it on paper, read-only. Dates, never times; the
-	// method as the client sees it, never who carries it; the printout's figures.
+	// «Su pedido»: the order as the client holds it on paper, read-only. The event's date only,
+	// never the trips' or times; the method as the client sees it, never who carries it; the
+	// printout's figures; the terms and conditions last.
 	let { data }: PageProps = $props();
 
 	const order = $derived(data.order);
@@ -36,7 +37,6 @@
 	<div>
 		<h2 class="section-title">Entrega</h2>
 		<ul class="detail-list">
-			<li><span>Fecha</span><span>{formatShortDay(order.deliveryDate)}</span></li>
 			<li class="detail-list__row--plain">
 				<span>Dirección</span>
 				<span>
@@ -53,7 +53,6 @@
 	<div>
 		<h2 class="section-title">Recogida</h2>
 		<ul class="detail-list">
-			<li><span>Fecha</span><span>{formatShortDay(order.pickupDate)}</span></li>
 			<li class="detail-list__row--plain">
 				<span>Forma de recogida</span>
 				<span>{CLIENT_RETURN_METHOD_LABELS[order.pickup.method]}</span>
@@ -115,6 +114,12 @@
 	<p class="note credit-note">Pagó {formatPesos(credit)} más del total del pedido.</p>
 {/if}
 
+{#if data.terms}
+	<h2 class="section-title terms-title">Términos y condiciones</h2>
+	<!-- eslint-disable-next-line svelte/no-at-html-tags -- renderTerms' output: raw HTML escaped, links and images filtered -->
+	<div class="prose terms">{@html data.terms}</div>
+{/if}
+
 <style>
 	.order-head {
 		display: flex;
@@ -155,6 +160,25 @@
 
 	.credit-note {
 		margin-top: var(--space-4);
+	}
+
+	.terms-title {
+		margin-top: var(--space-9);
+	}
+
+	/* The rule under the section title, like a detail list's; the fine print a step smaller. */
+	.terms {
+		padding-top: var(--space-6);
+		font-size: var(--text-sm);
+		border-top: var(--border-w-strong) solid var(--border-strong);
+	}
+
+	.terms :global(h2) {
+		font-size: var(--text-md);
+	}
+
+	.terms :global(h3) {
+		font-size: var(--text-sm);
 	}
 
 	@container (width >= 1024px) {

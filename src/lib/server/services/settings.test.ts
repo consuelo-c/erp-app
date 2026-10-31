@@ -10,10 +10,12 @@ import {
 	getHelp,
 	getHolidays,
 	getSystemSettings,
+	getTerms,
 	overrideFrozenHoliday,
 	updateHelp,
 	updateHolidays,
 	updateSystemSettings,
+	updateTerms,
 	type Holiday,
 	type SystemSettingKey,
 	type SystemSettings
@@ -365,5 +367,54 @@ test('the generic settings leave the help out and ignore a HELP_FAQ field', asyn
 	const form = { ...toForm(values), HELP_FAQ: '## Otra' };
 	expect(await updateSystemSettings(db, { modules, values: form }, manager)).toEqual({ ok: true });
 	expect(readValue('HELP_FAQ')).toMatchObject({ value: text });
+	expect(readEvents()).toEqual([]);
+});
+
+test('the terms start empty; only ADMIN and MANAGER read or save them', async () => {
+	expect(await getTerms(db, manager)).toBe('');
+	for (const actor of [sales, warehouse, driver]) {
+		expect(isHttpError(await getTerms(db, actor).catch((caught) => caught), 403)).toBe(true);
+		const refusal = await updateTerms(db, { text: '## Depósito' }, actor).catch((caught) => caught);
+		expect(isHttpError(refusal, 403)).toBe(true);
+	}
+	expect(readValue('TERMS_CONDITIONS')).toEqual({ value: '', updated_by: 'system' });
+	expect(readEvents()).toEqual([]);
+});
+
+test('saving the terms writes the text and its EDITED event; emptying them is a save too', async () => {
+	expect(await updateTerms(db, { text: '## Depósito\r\n\r\nSe devuelve.' }, admin)).toEqual({
+		ok: true
+	});
+	expect(readValue('TERMS_CONDITIONS')).toEqual({
+		value: '## Depósito\n\nSe devuelve.',
+		updated_by: 'admin'
+	});
+	expect(await updateTerms(db, { text: '  \n ' }, admin)).toEqual({ ok: true });
+	expect(readValue('TERMS_CONDITIONS')).toMatchObject({ value: '' });
+	expect(readEvents()).toEqual([
+		expect.objectContaining({
+			entity_key: 'TERMS_CONDITIONS',
+			action: 'EDITED',
+			before: JSON.stringify({ value: '' }),
+			after: JSON.stringify({ value: '## Depósito\n\nSe devuelve.' })
+		}),
+		expect.objectContaining({
+			entity_key: 'TERMS_CONDITIONS',
+			before: JSON.stringify({ value: '## Depósito\n\nSe devuelve.' }),
+			after: JSON.stringify({ value: '' })
+		})
+	]);
+});
+
+test('too-long terms save nothing; the generic settings ignore a TERMS_CONDITIONS field', async () => {
+	expect(await updateTerms(db, { text: 'a'.repeat(10_001) }, manager)).toEqual({
+		ok: false,
+		message: 'Los términos no pueden pasar de 10.000 caracteres'
+	});
+	const values = await getSystemSettings(db, modules, manager);
+	expect(values).not.toHaveProperty('TERMS_CONDITIONS');
+	const form = { ...toForm(values), TERMS_CONDITIONS: '## Otra' };
+	expect(await updateSystemSettings(db, { modules, values: form }, manager)).toEqual({ ok: true });
+	expect(readValue('TERMS_CONDITIONS')).toMatchObject({ value: '' });
 	expect(readEvents()).toEqual([]);
 });

@@ -18,7 +18,7 @@ import {
 import { readSettings } from './settings';
 
 /** How many days after its event a client still sees the order. A constant, not a setting. */
-export const LOOKUP_WINDOW_DAYS = 7;
+export const LOOKUP_WINDOW_DAYS = 30;
 
 /** The earliest event a client still finds: Bogotá's today less the window. */
 export function getLookupWindowStart(): string {
@@ -30,14 +30,15 @@ const tokenSchema = z.guid();
 
 type PublicItem = Pick<OrderItem, 'name' | 'qty' | 'unit_price' | 'line_total'>;
 
-/** Exactly what the client's page shows: no carrier, times, notes, list prices, phone or payments. */
+/**
+ * Exactly what the client's page shows: no carrier, delivery or pickup dates, times, notes, list
+ * prices, phone or payments.
+ */
 export type PublicOrder = {
 	id: number;
 	status: OrderStatus;
 	clientName: string;
 	eventDate: string;
-	deliveryDate: string;
-	pickupDate: string;
 	rentalDays: number;
 	delivery: { method: DeliveryMethod; address_1: string; address_2: string | null };
 	pickup: { method: ReturnMethod };
@@ -55,8 +56,6 @@ type PublicOrderRow = {
 	id: number;
 	status: OrderStatus;
 	event_date: string;
-	delivery_date: string;
-	pickup_date: string;
 	rental_days: number;
 	client_attributes: string;
 	delivery_attributes: string;
@@ -88,8 +87,6 @@ function toPublicOrder(row: PublicOrderRow): PublicOrder {
 		status: row.status,
 		clientName: clientAttributesSchema.parse(JSON.parse(row.client_attributes)).name,
 		eventDate: row.event_date,
-		deliveryDate: row.delivery_date,
-		pickupDate: row.pickup_date,
 		rentalDays: row.rental_days,
 		delivery: {
 			method: delivery.method,
@@ -110,7 +107,7 @@ function toPublicOrder(row: PublicOrderRow): PublicOrder {
 
 /**
  * The client's page: null for an unknown token, a draft, or an event more than
- * `LOOKUP_WINDOW_DAYS` past, so a saved link stops showing the order a week after it.
+ * `LOOKUP_WINDOW_DAYS` past, so a saved link stops showing the order a month after it.
  */
 export async function getPublicOrder(db: D1Database, token: unknown): Promise<PublicOrder | null> {
 	const parsed = tokenSchema.safeParse(token);
@@ -119,9 +116,9 @@ export async function getPublicOrder(db: D1Database, token: unknown): Promise<Pu
 	}
 	const row = await db
 		.prepare(
-			`select id, status, event_date, delivery_date, pickup_date, rental_days, client_attributes,
-			delivery_attributes, pickup_attributes, order_items, items_total, discount, transport_cost,
-			order_total, deposit_amount, ${BALANCE_DUE_SQL} as balance_due
+			`select id, status, event_date, rental_days, client_attributes, delivery_attributes,
+			pickup_attributes, order_items, items_total, discount, transport_cost, order_total,
+			deposit_amount, ${BALANCE_DUE_SQL} as balance_due
 			from orders where public_token = ? and status <> 'DRAFT' and event_date >= ?`
 		)
 		.bind(parsed.data, getLookupWindowStart())
@@ -143,6 +140,12 @@ export async function findOrderIdByToken(db: D1Database, token: unknown): Promis
 		.bind(parsed.data)
 		.first<{ id: number }>();
 	return row?.id ?? null;
+}
+
+/** The terms and conditions under the order, as Markdown; empty while there are none. */
+export async function getClientTerms(db: D1Database): Promise<string> {
+	const { TERMS_CONDITIONS: text } = await readSettings(db, ['TERMS_CONDITIONS']);
+	return text;
 }
 
 /** The public pages' only contact: `wa.me` with `text` pre-filled, or null while it's empty. */

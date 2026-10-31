@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { normalizePhone } from './phone';
 
-export type SettingModule = 'COMPANY' | 'HELP' | 'ORDERS' | 'PAYROLL';
+export type SettingModule = 'COMPANY' | 'HELP' | 'ORDERS' | 'PAYROLL' | 'TERMS';
 
 type SettingDefinition = {
 	module: SettingModule;
@@ -19,6 +19,9 @@ const PERCENTAGE_MESSAGE = 'Escribe un porcentaje de 0 a 100';
 
 /** The help's limit, which its editor counts against. */
 export const HELP_MAX_LENGTH = 50_000;
+
+/** The terms' limit, which their editor counts against. */
+export const TERMS_MAX_LENGTH = 10_000;
 
 const textSchema = z.string().trim().min(1, 'Escribe un valor');
 const positiveIntegerSchema = z.coerce
@@ -211,6 +214,16 @@ export const SETTINGS = {
 			.trim()
 			.min(1, 'Escribe el texto de la ayuda')
 			.max(HELP_MAX_LENGTH, 'La ayuda no puede pasar de 50.000 caracteres')
+	},
+	// The client's page shows it as plain Markdown, `##` a heading, no accordion; empty hides it.
+	TERMS_CONDITIONS: {
+		module: 'TERMS',
+		label: 'Términos y condiciones',
+		unit: null,
+		schema: z
+			.string()
+			.trim()
+			.max(TERMS_MAX_LENGTH, 'Los términos no pueden pasar de 10.000 caracteres')
 	}
 } as const satisfies Record<string, SettingDefinition>;
 
