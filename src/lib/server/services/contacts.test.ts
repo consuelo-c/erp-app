@@ -58,7 +58,7 @@ test('attributes take only their five keys: {} is valid, an unknown key is rejec
 
 test('services: no duplicates, only the fixed list, [] is valid', () => {
 	expect(servicesSchema.safeParse([]).success).toBe(true);
-	expect(servicesSchema.safeParse(['TRANSPORTER', 'CHEF']).success).toBe(true);
+	expect(servicesSchema.safeParse(['TRANSPORTER', 'WEDDING_PLANNER']).success).toBe(true);
 	expect(servicesSchema.safeParse(['CHEF', 'CHEF']).success).toBe(false);
 	expect(servicesSchema.safeParse(['PHOTOGRAPHER']).success).toBe(false);
 });

@@ -107,7 +107,11 @@ export const CATEGORY_LABELS: Record<Category, string> = {
 export const SERVICE_LABELS: Record<Service, string> = {
 	TRANSPORTER: 'Transportador',
 	DECORATOR: 'Decorador',
-	CHEF: 'Chef'
+	CHEF: 'Chef',
+	WAITER: 'Mesero',
+	WEDDING_PLANNER: 'Wedding planner',
+	BARTENDER: 'Bartender',
+	BARISTA: 'Barista'
 };
 
 /** The Contactos chips: each service, then the contacts an employee points to. */
@@ -121,6 +125,10 @@ export const CONTACT_KIND_PLURAL_LABELS: Record<ContactKind, string> = {
 	TRANSPORTER: 'transportadores',
 	DECORATOR: 'decoradores',
 	CHEF: 'chefs',
+	WAITER: 'meseros',
+	WEDDING_PLANNER: 'wedding planners',
+	BARTENDER: 'bartenders',
+	BARISTA: 'baristas',
 	EMPLOYEE: 'empleados'
 };
 

@@ -13,7 +13,15 @@ import { containing, foldedSql } from './cash';
 const EDITS_CONTACTS = ['ADMIN', 'MANAGER', 'SALES'] as const;
 
 /** What a provider does; empty means the contact isn't one. A new kind of provider is a code change. */
-export const SERVICES = ['TRANSPORTER', 'DECORATOR', 'CHEF'] as const;
+export const SERVICES = [
+	'TRANSPORTER',
+	'DECORATOR',
+	'CHEF',
+	'WAITER',
+	'WEDDING_PLANNER',
+	'BARTENDER',
+	'BARISTA'
+] as const;
 
 export type Service = (typeof SERVICES)[number];
 
