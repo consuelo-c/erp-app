@@ -18,7 +18,7 @@ beforeEach(() => {
 	database.exec(
 		`insert into contacts (phone, full_name, document_id, services, created_at, created_by, updated_at, updated_by) values ('573104428890', 'Luz Marina Restrepo', '@luz', '[]', ${AUDIT});
 		insert into products (name, category, rental_price, total_quantity, active, created_at, created_by, updated_at, updated_by) values ('Silla Tiffany dorada', 'CHAIRS_TABLES', 2500, 500, 1, ${AUDIT});
-		insert into settings (key, value, created_at, created_by, updated_at, updated_by) values ('COMPANY_WHATSAPP', '573105550142', ${AUDIT})`
+		insert into settings (key, value, created_at, created_by, updated_at, updated_by) values ('COMPANY_WHATSAPP', '573105550142', ${AUDIT}), ('TERMS_CONDITIONS', '', ${AUDIT})`
 	);
 	// Wednesday 28 October 2026 in Bogotá.
 	vi.useFakeTimers({ toFake: ['Date'] });
@@ -89,9 +89,9 @@ test('an employee goes to the order in the dashboard: sales to Pedidos, the rest
 	}
 });
 
-test("a draft or an event 8 days past: the employee still goes to it, the client doesn't see it", async () => {
+test("a draft or an event 31 days past: the employee still goes to it, the client doesn't see it", async () => {
 	const draft = await create('DRAFT');
-	const old = await create('COMPLETED', '2026-10-20');
+	const old = await create('COMPLETED', '2026-09-27');
 	expect(await redirectOf(draft, actor('SALES'))).toBe('/pedidos/1');
 	expect(await redirectOf(old, actor('SALES'))).toBe('/pedidos/2');
 	await expect(open(draft)).rejects.toSatisfy(isUnavailable);
@@ -113,6 +113,18 @@ test('with no session, the page, writing nothing: events and sessions unchanged'
 	const before = [count('events'), count('sessions')];
 	expect(await open(token)).toMatchObject({ order: { id: 1, status: 'CONFIRMED' } });
 	expect([count('events'), count('sessions')]).toEqual(before);
+});
+
+test("the terms under the order: rendered by renderTerms' rules, empty while there are none", async () => {
+	const token = await create('CONFIRMED');
+	expect(await open(token)).toMatchObject({ terms: '' });
+	database
+		.prepare("update settings set value = ? where key = 'TERMS_CONDITIONS'")
+		.run('## Depósito\n\nSe devuelve **al recoger**. <script>alert(1)</script>');
+	expect(await open(token)).toMatchObject({
+		terms:
+			'<h2>Depósito</h2>\n<p>Se devuelve <strong>al recoger</strong>. &lt;script&gt;alert(1)&lt;/script&gt;</p>\n'
+	});
 });
 
 test("the WhatsApp message carries the page's own URL, from the request's origin", async () => {

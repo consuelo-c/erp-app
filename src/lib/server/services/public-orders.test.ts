@@ -4,7 +4,13 @@ import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
 import { movementStatements } from './cash';
 import { createOrder } from './orders';
-import { findOrderIdByToken, getPublicOrder, getWhatsAppHref, lookupOrders } from './public-orders';
+import {
+	findOrderIdByToken,
+	getClientTerms,
+	getPublicOrder,
+	getWhatsAppHref,
+	lookupOrders
+} from './public-orders';
 
 const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
 
@@ -87,8 +93,6 @@ test("#1043's page: the printout's figures, and exactly the fields the client se
 		status: 'CONFIRMED',
 		clientName: 'Luz Marina Restrepo',
 		eventDate: '2026-10-17',
-		deliveryDate: '2026-10-16',
-		pickupDate: '2026-10-18',
 		rentalDays: 2,
 		delivery: { method: 'COMPANY_DELIVERY', ...address },
 		pickup: { method: 'COMPANY_PICKUP' },
@@ -107,7 +111,7 @@ test("#1043's page: the printout's figures, and exactly the fields the client se
 	});
 });
 
-test('never the carrier, times, notes, list prices, phone, incident or payments', async () => {
+test('never the carrier, trip dates, times, notes, list prices, phone, incident or payments', async () => {
 	const external = { method: 'EXTERNAL_CARRIER', carrier_id: WILSON, time: '14:00', ...address };
 	const token = await create('DELIVERED', {
 		delivery_attributes: external,
@@ -131,7 +135,11 @@ test('never the carrier, times, notes, list prices, phone, incident or payments'
 		'has_incident',
 		'hasIncident',
 		'time',
-		'payments'
+		'payments',
+		'deliveryDate',
+		'delivery_date',
+		'pickupDate',
+		'pickup_date'
 	]) {
 		expect(keys).not.toContain(`"${forbidden}":`);
 	}
@@ -149,18 +157,18 @@ test('never the carrier, times, notes, list prices, phone, incident or payments'
 	}
 });
 
-test('an unknown token, a draft, an event 8 days past or an id: no page', async () => {
+test('an unknown token, a draft, an event 31 days past or an id: no page', async () => {
 	expect(await getPublicOrder(db, crypto.randomUUID())).toBeNull();
 	expect(await getPublicOrder(db, await create('DRAFT'))).toBeNull();
-	const eightDaysAgo = await create('COMPLETED', { event_date: '2026-10-09' });
-	expect(await getPublicOrder(db, eightDaysAgo)).toBeNull();
+	const thirtyOneDaysAgo = await create('COMPLETED', { event_date: '2026-09-16' });
+	expect(await getPublicOrder(db, thirtyOneDaysAgo)).toBeNull();
 	expect(await getPublicOrder(db, '1')).toBeNull();
 	expect(await getPublicOrder(db, 1)).toBeNull();
 });
 
-test('an event 7 days past and a cancelled order still open', async () => {
-	const sevenDaysAgo = await create('COMPLETED', { event_date: '2026-10-10' });
-	expect(await getPublicOrder(db, sevenDaysAgo)).toMatchObject({ status: 'COMPLETED' });
+test('an event 30 days past and a cancelled order still open', async () => {
+	const thirtyDaysAgo = await create('COMPLETED', { event_date: '2026-09-17' });
+	expect(await getPublicOrder(db, thirtyDaysAgo)).toMatchObject({ status: 'COMPLETED' });
 	expect(await getPublicOrder(db, await create('CANCELLED'))).toMatchObject({
 		status: 'CANCELLED'
 	});
@@ -191,6 +199,19 @@ test('the WhatsApp link: none while COMPANY_WHATSAPP is empty, its text encoded 
 	expect(href.search).toBe(`?text=${encodeURIComponent('Hola. ¿Y mi pedido #1043?')}`);
 });
 
+test('the terms as stored, empty while there are none', async () => {
+	const setTerms = (value: string) =>
+		database
+			.prepare(
+				`insert or replace into settings (key, value, created_at, created_by, updated_at, updated_by) values ('TERMS_CONDITIONS', ?, ${AUDIT})`
+			)
+			.run(value);
+	setTerms('');
+	expect(await getClientTerms(db)).toBe('');
+	setTerms('## Depósito\n\nSe devuelve al recoger.');
+	expect(await getClientTerms(db)).toBe('## Depósito\n\nSe devuelve al recoger.');
+});
+
 /** The tokens the lookup finds, on Wednesday 28 October 2026 in Bogotá. */
 async function lookup(phone: string, eventDate: string): Promise<string[]> {
 	vi.setSystemTime(new Date('2026-10-28T15:00:00Z'));
@@ -219,12 +240,12 @@ test("the order's own phone, never the contact's", async () => {
 	expect((await lookup('300 771 2043', '2026-10-31')).length).toBe(1);
 });
 
-test('events from 7 days past on, with no upper limit', async () => {
-	const lastWeek = await create('COMPLETED', { event_date: '2026-10-21' });
-	await create('COMPLETED', { event_date: '2026-10-20' });
+test('events from 30 days past on, with no upper limit', async () => {
+	const lastMonth = await create('COMPLETED', { event_date: '2026-09-28' });
+	await create('COMPLETED', { event_date: '2026-09-27' });
 	const nextYear = await create('CONFIRMED', { event_date: '2027-06-12' });
-	expect(await lookup('3104428890', '2026-10-21')).toEqual([lastWeek]);
-	expect(await lookup('3104428890', '2026-10-20')).toEqual([]);
+	expect(await lookup('3104428890', '2026-09-28')).toEqual([lastMonth]);
+	expect(await lookup('3104428890', '2026-09-27')).toEqual([]);
 	expect(await lookup('3104428890', '2027-06-12')).toEqual([nextYear]);
 });
 

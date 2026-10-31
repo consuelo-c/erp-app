@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { renderHelp } from './markdown';
+import { renderHelp, renderTerms } from './markdown';
 
 function introOf(text: string): string {
 	return renderHelp(text).intro;
@@ -111,4 +111,11 @@ test('the same heading again gets -2, then -3', () => {
 test('a reference link defined in another section still resolves', () => {
 	const help = renderHelp('Ver [la guía][guia].\n\n## Pregunta\n\n[guia]: https://example.com');
 	expect(help.intro).toContain('href="https://example.com"');
+});
+
+test('the terms render whole: ## a plain heading, raw HTML escaped, links filtered', () => {
+	expect(renderTerms('Intro\n\n## Depósito\n\n<b>x</b> [y](javascript:alert(1))')).toBe(
+		'<p>Intro</p>\n<h2>Depósito</h2>\n<p>&lt;b&gt;x&lt;/b&gt; y</p>\n'
+	);
+	expect(renderTerms('')).toBe('');
 });

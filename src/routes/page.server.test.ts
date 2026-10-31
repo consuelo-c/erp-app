@@ -24,7 +24,7 @@ beforeEach(() => {
 	database.exec(
 		`insert into contacts (phone, full_name, document_id, services, created_at, created_by, updated_at, updated_by) values ('573104428890', 'Luz Marina Restrepo', '@luz', '[]', ${AUDIT});
 		insert into products (name, category, rental_price, total_quantity, active, created_at, created_by, updated_at, updated_by) values ('Silla Tiffany dorada', 'CHAIRS_TABLES', 2500, 500, 1, ${AUDIT});
-		insert into settings (key, value, created_at, created_by, updated_at, updated_by) values ('COMPANY_WHATSAPP', '573105550142', ${AUDIT})`
+		insert into settings (key, value, created_at, created_by, updated_at, updated_by) values ('COMPANY_WHATSAPP', '573105550142', ${AUDIT}), ('TERMS_CONDITIONS', '', ${AUDIT})`
 	);
 	limit = vi.fn(async () => ({ success: true }));
 	siteverify = vi.fn(async () => Response.json({ success: true }));
@@ -152,12 +152,12 @@ test('one match opens its page; two or more list, by id', async () => {
 test('every miss is the same answer: wrong phone, wrong date, a draft, an event too old', async () => {
 	await create('CONFIRMED');
 	await create('DRAFT', '2026-11-07');
-	await create('COMPLETED', '2026-10-20');
+	await create('COMPLETED', '2026-09-27');
 	const misses = await Promise.all([
 		lookup('310 442 8891', '2026-10-31'),
 		lookup('310 442 8890', '2026-11-01'),
 		lookup('310 442 8890', '2026-11-07'),
-		lookup('310 442 8890', '2026-10-20')
+		lookup('310 442 8890', '2026-09-27')
 	]);
 	for (const miss of misses) {
 		expect(miss).toMatchObject({
@@ -178,9 +178,9 @@ test('a lookup and a page write nothing: events and sessions unchanged', async (
 	expect([count('events'), count('sessions')]).toEqual(before);
 });
 
-test("the landing's date starts 7 days back, and its WhatsApp carries no order", async () => {
+test("the landing's date starts 30 days back, and its WhatsApp carries no order", async () => {
 	const data = await load({ platform: platform() } as never);
-	expect(data?.minDate).toBe('2026-10-21');
+	expect(data?.minDate).toBe('2026-09-28');
 	const href = new URL(String(data?.whatsAppHref));
 	expect(href.searchParams.get('text')).toBe('Hola. Tengo una duda con mi pedido.');
 });

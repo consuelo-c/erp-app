@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 
-	// An unknown token, a draft, or an event more than a week past: one page for every case, the
+	// An unknown token, a draft, or an event more than 30 days past: one page for every case, the
 	// contact beside it in the layout.
 </script>
 

@@ -1,7 +1,12 @@
 import { error, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { hasAnyRole } from '$lib/server/actor';
-import { findOrderIdByToken, getPublicOrder } from '$lib/server/services/public-orders';
+import { renderTerms } from '$lib/server/markdown';
+import {
+	findOrderIdByToken,
+	getClientTerms,
+	getPublicOrder
+} from '$lib/server/services/public-orders';
 import type { PageServerLoad } from './$types';
 
 // Public: no `requireRole`. An employee, who opens it from the client's WhatsApp, goes to the
@@ -26,5 +31,5 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	if (null === order) {
 		error(404, 'Este pedido ya no está disponible');
 	}
-	return { order };
+	return { order, terms: renderTerms(await getClientTerms(db)) };
 };

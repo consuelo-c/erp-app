@@ -113,12 +113,13 @@ export const INVENTORY_TABS = [
 	{ label: 'Revisar conteo', href: resolve('/inventario/revisar') }
 ];
 
-/** Configuración's tabs: the general and payroll settings, and the holidays and help editors. */
+/** Configuración's tabs: the general and payroll settings, and the holidays, help and terms editors. */
 export const SETTINGS_TABS = [
 	{ label: 'General', href: resolve('/configuracion') },
 	{ label: 'Nómina', href: resolve('/configuracion/nomina') },
 	{ label: 'Festivos', href: resolve('/configuracion/festivos') },
-	{ label: 'Ayuda', href: resolve('/configuracion/ayuda') }
+	{ label: 'Ayuda', href: resolve('/configuracion/ayuda') },
+	{ label: 'Términos', href: resolve('/configuracion/terminos') }
 ];
 
 /** Productos, or with a group one group's variants; `query` adds the rest, like `guardado`. */

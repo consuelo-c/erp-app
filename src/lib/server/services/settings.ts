@@ -1,5 +1,5 @@
-// System settings, and PAYROLL_HOLIDAYS and HELP_FAQ through their own editors. One current value
-// per key; each changed key is an `EDITED` event carrying the key in `entity_key`.
+// System settings, and PAYROLL_HOLIDAYS, HELP_FAQ and TERMS_CONDITIONS through their own editors.
+// One current value per key; each changed key is an `EDITED` event carrying the key in `entity_key`.
 
 import { z } from 'zod';
 import { dialTimeShape, formatLongDay, toClockTime } from '$lib/datetime';
@@ -17,10 +17,12 @@ import { auditedUpdate } from '../audit';
 // A mistake here throws off all of payroll: only the ones who settle it edit settings.
 const EDITS_SETTINGS = ['ADMIN', 'MANAGER'] as const;
 
-export type SystemSettingKey = Exclude<SettingKey, 'PAYROLL_HOLIDAYS' | 'HELP_FAQ'>;
+const OWN_EDITOR_KEYS = ['PAYROLL_HOLIDAYS', 'HELP_FAQ', 'TERMS_CONDITIONS'] as const;
+
+export type SystemSettingKey = Exclude<SettingKey, (typeof OWN_EDITOR_KEYS)[number]>;
 
 const SYSTEM_SETTING_KEYS = (Object.keys(SETTINGS) as SettingKey[]).filter(
-	(key): key is SystemSettingKey => 'PAYROLL_HOLIDAYS' !== key && 'HELP_FAQ' !== key
+	(key): key is SystemSettingKey => !(OWN_EDITOR_KEYS as readonly SettingKey[]).includes(key)
 );
 
 /** Each key's stored text. */
@@ -304,11 +306,14 @@ export type Help = {
 	updatedAt: number | null;
 };
 
-export type HelpResult = { ok: true } | { ok: false; message: string };
+export type TextResult = { ok: true } | { ok: false; message: string };
+
+// The keys with their own Markdown editor.
+type TextKey = 'HELP_FAQ' | 'TERMS_CONDITIONS';
 
 // A textarea posts its line breaks as CRLF: back to LF, so the editor's counter and an unchanged
 // save match what's stored.
-const helpFormSchema = z.object({
+const textFormSchema = z.object({
 	text: z.string().transform((text) => text.replaceAll('\r\n', '\n'))
 });
 
@@ -327,24 +332,31 @@ export async function getHelp(db: D1Database, actor: Actor | null): Promise<Help
 	return { text, updatedAt: row?.updatedAt ?? null };
 }
 
-/** The last save wins: no lock and no version check; an overwritten text is still in its event. */
-export async function updateHelp(
-	db: D1Database,
-	input: unknown,
-	actor: Actor | null
-): Promise<HelpResult> {
+/** The client's terms and conditions as stored, for their editor. */
+export async function getTerms(db: D1Database, actor: Actor | null): Promise<string> {
 	requireRole(actor, EDITS_SETTINGS);
-	const parsed = SETTINGS.HELP_FAQ.schema.safeParse(helpFormSchema.parse(input).text);
+	const { TERMS_CONDITIONS: text } = await readSettings(db, ['TERMS_CONDITIONS']);
+	return text;
+}
+
+// The last save wins: no lock and no version check; an overwritten text is still in its event.
+async function updateText(
+	db: D1Database,
+	{ key, input }: { key: TextKey; input: unknown },
+	actor: Actor | null
+): Promise<TextResult> {
+	requireRole(actor, EDITS_SETTINGS);
+	const parsed = SETTINGS[key].schema.safeParse(textFormSchema.parse(input).text);
 	if (!parsed.success) {
 		return { ok: false, message: parsed.error.issues[0].message };
 	}
-	const { HELP_FAQ: current } = await readSettings(db, ['HELP_FAQ']);
+	const { [key]: current } = await readSettings(db, [key]);
 	const statements = auditedUpdate(db, {
 		table: 'settings',
 		entityType: 'SETTINGS',
 		actor,
 		idColumn: 'key',
-		id: 'HELP_FAQ',
+		id: key,
 		current: { value: current },
 		changes: { value: parsed.data }
 	});
@@ -352,6 +364,22 @@ export async function updateHelp(
 		await db.batch(statements);
 	}
 	return { ok: true };
+}
+
+export async function updateHelp(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<TextResult> {
+	return updateText(db, { key: 'HELP_FAQ', input }, actor);
+}
+
+export async function updateTerms(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<TextResult> {
+	return updateText(db, { key: 'TERMS_CONDITIONS', input }, actor);
 }
 
 // The printed formats' header.
