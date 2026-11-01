@@ -3,6 +3,7 @@
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import Button from '$lib/components/Button.svelte';
 	import Chip from '$lib/components/Chip.svelte';
+	import Choice from '$lib/components/Choice.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import Input from '$lib/components/Input.svelte';
 	import Modal from '$lib/components/Modal.svelte';
@@ -117,24 +118,21 @@
 			</div>
 		{/if}
 		<div class="form-stack">
-			<fieldset class="choice">
-				<legend class="choice__legend">Tipo</legend>
-				<div class="choice__options">
-					{#each DIRECTION_OPTIONS as [value, label] (value)}
-						<Chip
-							type="radio"
-							name="direction"
-							{value}
-							{label}
-							checked={value === (isInflow ? 'IN' : 'OUT')}
-							disabled={null !== lockedDirection && value !== lockedDirection}
-						/>
-					{/each}
-				</div>
-				<p class="choice__hint">
-					Concepto: {concept}{original ? ' · el tipo es el contrario del original' : ''}
-				</p>
-			</fieldset>
+			<Choice
+				legend="Tipo"
+				hint="Concepto: {concept}{original ? ' · el tipo es el contrario del original' : ''}"
+			>
+				{#each DIRECTION_OPTIONS as [value, label] (value)}
+					<Chip
+						type="radio"
+						name="direction"
+						{value}
+						{label}
+						checked={value === (isInflow ? 'IN' : 'OUT')}
+						disabled={null !== lockedDirection && value !== lockedDirection}
+					/>
+				{/each}
+			</Choice>
 
 			{#if isStandalone}
 				<Field
@@ -167,14 +165,11 @@
 				</Field>
 			{/if}
 
-			<fieldset class="choice">
-				<legend class="choice__legend">Método</legend>
-				<div class="choice__options">
-					{#each METHOD_OPTIONS as [value, label] (value)}
-						<Chip type="radio" name="payment_method" {value} {label} checked={value === method} />
-					{/each}
-				</div>
-			</fieldset>
+			<Choice legend="Método">
+				{#each METHOD_OPTIONS as [value, label] (value)}
+					<Chip type="radio" name="payment_method" {value} {label} checked={value === method} />
+				{/each}
+			</Choice>
 
 			{#if 'OTHER' === method}
 				<Field label="¿Cuál medio de pago?" id="other_method" error={errorOf('other_method')}>
@@ -271,47 +266,6 @@
 {/snippet}
 
 <style>
-	.choice {
-		min-width: 0;
-		padding: 0;
-		margin: 0;
-		border: 0;
-	}
-
-	/* The same look as a Field's label and hint. */
-	.choice__legend {
-		padding: 0;
-		margin-bottom: var(--space-3);
-		font: var(--type-label);
-		color: var(--text-secondary);
-	}
-
-	.choice__hint {
-		margin: var(--space-3) 0 0;
-		font-size: var(--text-label);
-		font-style: italic;
-		color: var(--text-secondary);
-	}
-
-	/* The options share the row, each a full tap target. */
-	.choice__options {
-		display: grid;
-		grid-auto-columns: 1fr;
-		grid-auto-flow: column;
-		gap: var(--space-4);
-	}
-
-	.choice__options > :global(.chip) {
-		justify-content: center;
-		min-height: var(--tap-min);
-	}
-
-	/* A correction's Tipo is locked: the other option reads as unavailable. */
-	.choice__options > :global(.chip:has(input:disabled)) {
-		color: var(--text-disabled);
-		cursor: default;
-	}
-
 	.movement__correction {
 		margin-bottom: var(--field-gap);
 	}

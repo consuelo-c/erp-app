@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import Chip from '$lib/components/Chip.svelte';
+	import Choice from '$lib/components/Choice.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import Input from '$lib/components/Input.svelte';
 	import Notice from '$lib/components/Notice.svelte';
@@ -240,16 +241,13 @@
 			{/if}
 		</Field>
 	</div>
-	<fieldset class="choice">
-		<legend class="choice__legend">Estado</legend>
-		<div class="choice__options">
-			<Chip type="radio" name="active" value="on" label="Activo" checked={fields.isActive} />
-			<Chip type="radio" name="active" value="off" label="Inactivo" checked={!fields.isActive} />
-		</div>
-		<p class="choice__hint">
-			Los productos no se eliminan. Un producto inactivo no se ofrece en pedidos nuevos.
-		</p>
-	</fieldset>
+	<Choice
+		legend="Estado"
+		hint="Los productos no se eliminan. Un producto inactivo no se ofrece en pedidos nuevos."
+	>
+		<Chip type="radio" name="active" value="on" label="Activo" checked={fields.isActive} />
+		<Chip type="radio" name="active" value="off" label="Inactivo" checked={!fields.isActive} />
+	</Choice>
 
 	{#if form && undefined === form.field}
 		<Notice tone="error">{form.message}</Notice>
@@ -264,41 +262,6 @@
 	.field-row {
 		display: flex;
 		gap: var(--control-gap);
-	}
-
-	.choice {
-		min-width: 0;
-		padding: 0;
-		margin: 0;
-		border: 0;
-	}
-
-	/* The same look as a Field's label. */
-	.choice__legend {
-		padding: 0;
-		margin-bottom: var(--space-3);
-		font: var(--type-label);
-		color: var(--text-secondary);
-	}
-
-	/* The chips share the row, each a full tap target. */
-	.choice__options {
-		display: grid;
-		grid-auto-columns: 1fr;
-		grid-auto-flow: column;
-		gap: var(--space-4);
-	}
-
-	.choice__options > :global(.chip) {
-		justify-content: center;
-		min-height: var(--tap-min);
-	}
-
-	.choice__hint {
-		margin: var(--space-3) 0 0;
-		font-size: var(--text-label);
-		font-style: italic;
-		color: var(--text-secondary);
 	}
 
 	textarea {
