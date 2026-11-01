@@ -85,10 +85,61 @@ export function saveDispatchCache(cache: DispatchCache): void {
 }
 
 // Without a session the phone keeps no clients' data: offline, nothing else would stop it showing.
+// The checklists go with it: they're the same phone's notes on the same orders.
 export function clearDispatchCache(): void {
 	try {
 		localStorage.removeItem(DISPATCH_CACHE_KEY);
+		localStorage.removeItem(CHECKLIST_KEY);
 	} catch {
 		// Storage blocked or missing: there's no copy to clear.
+	}
+}
+
+// The lines the warehouse or the driver has ticked on this phone: a visual aid, never sent to the
+// server, kept only so a reload doesn't lose the count. One list per order, for its current status.
+export const CHECKLIST_KEY = 'despachos-marcas';
+
+const checklistsSchema = z.record(
+	z.string(),
+	z.object({ status: z.string(), lines: z.array(z.string()) })
+);
+
+type Checklists = z.infer<typeof checklistsSchema>;
+
+/** A line's tick carries its quantity: a line Ventas changes after it was ticked comes back unticked. */
+export function lineMark(item: { product_id: number; qty: number }): string {
+	return `${item.product_id}:${item.qty}`;
+}
+
+function parseChecklists(raw: string | null): Checklists {
+	try {
+		const checklists = checklistsSchema.safeParse(JSON.parse(raw ?? '{}'));
+		return checklists.success ? checklists.data : {};
+	} catch {
+		return {};
+	}
+}
+
+/** The order's ticked lines; another status's list is a finished stage's, so it starts empty. */
+export function readChecklist(raw: string | null, orderId: string, status: string): string[] {
+	const checklist = parseChecklists(raw)[orderId];
+	return status === checklist?.status ? checklist.lines : [];
+}
+
+export function loadChecklist(orderId: string, status: string): string[] {
+	try {
+		return readChecklist(localStorage.getItem(CHECKLIST_KEY), orderId, status);
+	} catch {
+		return [];
+	}
+}
+
+export function saveChecklist(orderId: string, status: string, lines: string[]): void {
+	try {
+		const checklists = parseChecklists(localStorage.getItem(CHECKLIST_KEY));
+		checklists[orderId] = { status, lines };
+		localStorage.setItem(CHECKLIST_KEY, JSON.stringify(checklists));
+	} catch {
+		// Not kept this time: the ticks on screen still work until a reload.
 	}
 }
