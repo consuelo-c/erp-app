@@ -4,6 +4,7 @@
 	import { resolve } from '$app/paths';
 	import Button from '$lib/components/Button.svelte';
 	import Chip from '$lib/components/Chip.svelte';
+	import Choice from '$lib/components/Choice.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import IconButton from '$lib/components/IconButton.svelte';
 	import Input from '$lib/components/Input.svelte';
@@ -140,46 +141,38 @@
 	>
 		<p class="meta payment__lead">Pedido #{order.id} · Saldo {formatBalance(order.balanceDue)}</p>
 		<div class="form-stack">
-			<fieldset class="choice">
-				<legend class="choice__legend">Concepto</legend>
-				<div class="chip-row">
-					{#each concepts as option (option)}
-						<Chip
-							type="radio"
-							name="concept"
-							value={option}
-							label={CASH_CONCEPT_LABELS[option]}
-							checked={option === concept}
-						/>
-					{/each}
-				</div>
-			</fieldset>
+			<Choice legend="Concepto" layout="scroll">
+				{#each concepts as option (option)}
+					<Chip
+						type="radio"
+						name="concept"
+						value={option}
+						label={CASH_CONCEPT_LABELS[option]}
+						checked={option === concept}
+					/>
+				{/each}
+			</Choice>
 
 			{#if isCarrierPayment && 1 < carriers.length}
-				<fieldset class="choice">
-					<legend class="choice__legend">¿A cuál transportador?</legend>
-					<div class="choice__stack">
-						{#each carriers as option (option.trip)}
-							<Chip
-								type="radio"
-								name="trip"
-								value={option.trip}
-								label="{TRIP_LABELS[option.trip]} · {option.name}"
-								checked={option.trip === trip}
-							/>
-						{/each}
-					</div>
-				</fieldset>
+				<!-- Each carrier on its own line: its trip and its name. -->
+				<Choice legend="¿A cuál transportador?" layout="stack">
+					{#each carriers as option (option.trip)}
+						<Chip
+							type="radio"
+							name="trip"
+							value={option.trip}
+							label="{TRIP_LABELS[option.trip]} · {option.name}"
+							checked={option.trip === trip}
+						/>
+					{/each}
+				</Choice>
 			{/if}
 
-			<fieldset class="choice">
-				<legend class="choice__legend">Método</legend>
-				<div class="choice__options">
-					{#each METHOD_OPTIONS as [value, label] (value)}
-						<Chip type="radio" name="payment_method" {value} {label} checked={value === method} />
-					{/each}
-				</div>
-			</fieldset>
+			<Choice legend="Método">
+				{#each METHOD_OPTIONS as [value, label] (value)}
+					<Chip type="radio" name="payment_method" {value} {label} checked={value === method} />
+				{/each}
+			</Choice>
 
 			{#if 'OTHER' === method}
 				<Field label="¿Cuál medio de pago?" id="other_method" error={errorOf('other_method')}>
@@ -291,45 +284,6 @@
 <style>
 	.payment__lead {
 		margin: 0 0 var(--space-8);
-	}
-
-	.choice {
-		min-width: 0;
-		padding: 0;
-		margin: 0;
-		border: 0;
-	}
-
-	/* The same look as a Field's label. */
-	.choice__legend {
-		padding: 0;
-		margin-bottom: var(--space-3);
-		font: var(--type-label);
-		color: var(--text-secondary);
-	}
-
-	/* The methods share the row, each a full tap target. */
-	.choice__options {
-		display: grid;
-		grid-auto-columns: 1fr;
-		grid-auto-flow: column;
-		gap: var(--space-4);
-	}
-
-	.choice__options > :global(.chip) {
-		justify-content: center;
-		min-height: var(--tap-min);
-	}
-
-	/* Each carrier on its own line: its trip and its name. */
-	.choice__stack {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-3);
-	}
-
-	.choice__stack > :global(.chip) {
-		min-height: var(--tap-min);
 	}
 
 	.field-row {

@@ -3,6 +3,7 @@
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import Button from '$lib/components/Button.svelte';
+	import Choice from '$lib/components/Choice.svelte';
 	import ClockField from '$lib/components/ClockField.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import Input from '$lib/components/Input.svelte';
@@ -66,7 +67,7 @@
 		address2: `Bodega ${options.company.name}`
 	});
 
-	type Choice = number | 'new' | null;
+	type ClientChoice = number | 'new' | null;
 	type Trip = { carrierId: string; address1: string; address2: string };
 
 	type DialTime = { hour: string; minute: string; period: 'am' | 'pm' };
@@ -98,7 +99,7 @@
 	type Fields = {
 		phone: string;
 		eventDate: string;
-		choice: Choice;
+		choice: ClientChoice;
 		picked: ClientCandidate | null;
 		clientName: string;
 		deliveryDate: string;
@@ -532,7 +533,7 @@
 		</Field>
 
 		<!-- With nothing searched, only the client picked, if any, and «Cliente nuevo». -->
-		<fieldset class="choice clients" aria-label="Escoge el cliente">
+		<Choice aria-label="Escoge el cliente" layout="none">
 			<div class="clients__list" bind:this={clientList}>
 				{#each clientOptions as candidate (candidate.id)}
 					<label class="client">
@@ -569,7 +570,7 @@
 			{#if errorOf('client_id')}
 				<p class="field-error">{errorOf('client_id')}</p>
 			{/if}
-		</fieldset>
+		</Choice>
 
 		<div class="field-row">
 			<Field label="Teléfono" id="phone" error={errorOf('client_phone')} hint={phoneNote}>
@@ -896,13 +897,6 @@
 		margin-top: var(--space-3);
 		font-size: var(--text-xs);
 		color: var(--error-fg);
-	}
-
-	.choice {
-		min-width: 0;
-		padding: 0;
-		margin: 0;
-		border: 0;
 	}
 
 	.clients__list {

@@ -5,6 +5,7 @@
 	import BottomSheet from '$lib/components/BottomSheet.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import Chip from '$lib/components/Chip.svelte';
+	import Choice from '$lib/components/Choice.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import IconButton from '$lib/components/IconButton.svelte';
@@ -61,7 +62,7 @@
 	let isSheetOpen = $state(false);
 	let areFiltersShown = $state(false);
 
-	type Choice = {
+	type FilterChoice = {
 		name: string;
 		label: string;
 		current: string;
@@ -69,23 +70,23 @@
 	};
 
 	// '' is «no filter»: the chips call it «Todos».
-	const DIRECTION_OPTIONS: Choice['options'] = [
+	const DIRECTION_OPTIONS: FilterChoice['options'] = [
 		['', 'Entradas y salidas'],
 		['IN', 'Entradas'],
 		['OUT', 'Salidas']
 	];
-	const METHOD_OPTIONS: Choice['options'] = [
+	const METHOD_OPTIONS: FilterChoice['options'] = [
 		['', 'Todos'],
 		...Object.entries(PAYMENT_METHOD_LABELS)
 	];
 
-	const directionChoice = $derived<Choice>({
+	const directionChoice = $derived<FilterChoice>({
 		name: 'tipo',
 		label: 'Tipo',
 		options: DIRECTION_OPTIONS,
 		current: filters.direction ?? ''
 	});
-	const methodChoice = $derived<Choice>({
+	const methodChoice = $derived<FilterChoice>({
 		name: 'metodo',
 		label: 'Método',
 		options: METHOD_OPTIONS,
@@ -180,24 +181,21 @@
 </svelte:head>
 
 <!-- Tipo and Método: chips in the phone's sheet, a select on a desktop. -->
-{#snippet chips(choice: Choice)}
-	<fieldset class="choice">
-		<legend class="choice__legend">{choice.label}</legend>
-		<div class="chip-row">
-			{#each choice.options as [value, label] (value)}
-				<Chip
-					type="radio"
-					name={choice.name}
-					{value}
-					label={'' === value ? 'Todos' : label}
-					checked={value === choice.current}
-				/>
-			{/each}
-		</div>
-	</fieldset>
+{#snippet chips(choice: FilterChoice)}
+	<Choice legend={choice.label} layout="scroll">
+		{#each choice.options as [value, label] (value)}
+			<Chip
+				type="radio"
+				name={choice.name}
+				{value}
+				label={'' === value ? 'Todos' : label}
+				checked={value === choice.current}
+			/>
+		{/each}
+	</Choice>
 {/snippet}
 
-{#snippet select(choice: Choice, prefix: string)}
+{#snippet select(choice: FilterChoice, prefix: string)}
 	<Field label={choice.label} id="{prefix}{choice.name}">
 		<Select id="{prefix}{choice.name}" name={choice.name} value={choice.current}>
 			{#each choice.options as [value, label] (value)}
@@ -207,7 +205,7 @@
 	</Field>
 {/snippet}
 
-{#snippet fields(prefix: string, choice: Snippet<[Choice, string]>)}
+{#snippet fields(prefix: string, choice: Snippet<[FilterChoice, string]>)}
 	<div class="filters">
 		<div class="field-row">
 			<Field label="Desde" id="{prefix}desde">
@@ -791,21 +789,6 @@
 	.field-row {
 		display: flex;
 		gap: var(--control-gap);
-	}
-
-	.choice {
-		min-width: 0;
-		padding: 0;
-		margin: 0;
-		border: 0;
-	}
-
-	/* The same look as a Field's label. */
-	.choice__legend {
-		padding: 0;
-		margin-bottom: var(--space-3);
-		font: var(--type-label);
-		color: var(--text-secondary);
 	}
 
 	.search {

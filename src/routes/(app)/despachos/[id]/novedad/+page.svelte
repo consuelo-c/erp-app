@@ -7,6 +7,7 @@
 	import Button from '$lib/components/Button.svelte';
 	import Card from '$lib/components/Card.svelte';
 	import Chip from '$lib/components/Chip.svelte';
+	import Choice from '$lib/components/Choice.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import IconButton from '$lib/components/IconButton.svelte';
@@ -53,12 +54,25 @@
 		return row.line.qty - others.reduce((sum, each) => sum + (each.qty ?? 0), 0);
 	}
 
+	function isSubtracting(row: Row): boolean {
+		return SUBTRACTING.includes(row.outcome!);
+	}
+
+	function outcomeHint(row: Row): string | undefined {
+		if (null === row.outcome) {
+			return undefined;
+		}
+		return isSubtracting(row)
+			? `Descuenta ${row.qty ?? 0} del inventario`
+			: 'No descuenta del inventario';
+	}
+
 	const payload = $derived(
 		JSON.stringify(
 			rows.map((row) => ({ product_id: row.line.product_id, qty: row.qty, outcome: row.outcome }))
 		)
 	);
-	const subtracting = $derived(rows.filter((row) => SUBTRACTING.includes(row.outcome!)));
+	const subtracting = $derived(rows.filter(isSubtracting));
 	const recoverable = $derived(rows.filter((row) => 'RECOVERABLE' === row.outcome));
 
 	// The fields are checked before asking, since the dialog covers them. With no product there's
@@ -145,31 +159,19 @@
 					>
 					<span class="meta">de {row.line.qty} en el pedido</span>
 				</div>
-				<fieldset class="choice">
-					<legend class="choice__legend">Resultado</legend>
-					<div class="choice__options">
-						{#each OUTCOMES as outcome (outcome)}
-							<Chip
-								type="radio"
-								name="outcome-{row.key}"
-								value={outcome}
-								label={INCIDENT_OUTCOME_LABELS[outcome]}
-								checked={outcome === row.outcome}
-								required
-								onchange={() => (row.outcome = outcome)}
-							/>
-						{/each}
-					</div>
-					{#if row.outcome}
-						<p
-							class={['choice__hint', SUBTRACTING.includes(row.outcome) && 'choice__hint--strong']}
-						>
-							{SUBTRACTING.includes(row.outcome)
-								? `Descuenta ${row.qty ?? 0} del inventario`
-								: 'No descuenta del inventario'}
-						</p>
-					{/if}
-				</fieldset>
+				<Choice legend="Resultado" hint={outcomeHint(row)} strongHint={isSubtracting(row)}>
+					{#each OUTCOMES as outcome (outcome)}
+						<Chip
+							type="radio"
+							name="outcome-{row.key}"
+							value={outcome}
+							label={INCIDENT_OUTCOME_LABELS[outcome]}
+							checked={outcome === row.outcome}
+							required
+							onchange={() => (row.outcome = outcome)}
+						/>
+					{/each}
+				</Choice>
 				{#each ['product_id', 'qty', 'outcome'] as key (key)}
 					{@const message = errorOf(`items.${index}.${key}`)}
 					{#if message}
@@ -307,7 +309,7 @@
 		display: flex;
 		gap: var(--space-4);
 		align-items: center;
-		margin-top: var(--space-3);
+		margin: var(--space-3) 0 var(--space-6);
 	}
 
 	.stepper > :global(.btn) {
@@ -343,46 +345,6 @@
 
 	.stepper__qty[aria-invalid='true'] {
 		border-color: var(--error-fg);
-	}
-
-	.choice {
-		min-width: 0;
-		padding: 0;
-		margin: var(--space-6) 0 0;
-		border: 0;
-	}
-
-	/* The same look as a Field's label. */
-	.choice__legend {
-		padding: 0;
-		margin-bottom: var(--space-3);
-		font: var(--type-label);
-		color: var(--text-secondary);
-	}
-
-	/* The three outcomes share the row, each a full tap target. */
-	.choice__options {
-		display: grid;
-		grid-auto-columns: 1fr;
-		grid-auto-flow: column;
-		gap: var(--space-4);
-	}
-
-	.choice__options > :global(.chip) {
-		justify-content: center;
-		min-height: var(--tap-min);
-	}
-
-	.choice__hint {
-		margin-top: var(--space-3);
-		font-size: var(--text-label);
-		color: var(--text-secondary);
-	}
-
-	/* What leaves inventory reads louder than what doesn't. */
-	.choice__hint--strong {
-		font-weight: var(--weight-semibold);
-		color: var(--text-body);
 	}
 
 	.description {
