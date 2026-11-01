@@ -21,6 +21,7 @@
 	} from '$lib/datetime';
 	import { formatBalance, formatPesos } from '$lib/format';
 	import { DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, RETURN_METHOD_LABELS } from '$lib/labels';
+	import { lineMark, loadChecklist, saveChecklist } from '$lib/offline';
 	import {
 		isIncidentReportable,
 		isPickupStatus,
@@ -28,7 +29,7 @@
 		type OperationalStatus
 	} from '$lib/orders';
 	import { formatPhone } from '$lib/phone';
-	import type { Carrier } from '$lib/server/services/orders';
+	import type { Carrier, OrderDetail } from '$lib/server/services/orders';
 	import type { PageProps } from './$types';
 
 	// The order as the warehouse and the driver work it: who, where, when, what, and its money.
@@ -55,6 +56,28 @@
 
 	function onlineHref(href: string): string | undefined {
 		return isOffline ? undefined : href;
+	}
+
+	// Ticking lines while picking, loading or picking up: only while there's a next step, kept on this
+	// phone. A new status re-reads an empty list, so each stage counts from zero.
+	type Item = OrderDetail['items'][number];
+	const hasChecklist = $derived(null !== nextStatus);
+	let ticked = $derived(loadChecklist(id, order.status));
+	const tickedCount = $derived(order.items.filter(isTicked).length);
+	const productsCount = $derived(
+		hasChecklist ? `${tickedCount} de ${order.items.length} listos` : String(order.items.length)
+	);
+
+	function isTicked(item: Item): boolean {
+		return ticked.includes(lineMark(item));
+	}
+
+	// Rebuilt from the current lines, so a line Ventas changed leaves no tick behind.
+	function toggleLine(toggled: Item) {
+		ticked = order.items
+			.filter((item) => (item === toggled ? !isTicked(item) : isTicked(item)))
+			.map(lineMark);
+		saveChecklist(id, order.status, ticked);
 	}
 
 	let isAdvanceOpen = $state(false);
@@ -124,6 +147,13 @@
 			<a href="https://wa.me/{carrier.phone}">{formatPhone(carrier.phone)}</a></span
 		>
 	</li>
+{/snippet}
+
+{#snippet lineName(item: Item)}
+	<span>
+		{item.qty} × {item.name}
+		<span class="meta">{formatPesos(item.unit_price)} c/u · {days}</span>
+	</span>
 {/snippet}
 
 {#snippet address(line1: string, line2: string | null)}
@@ -262,14 +292,18 @@
 		</div>
 	{/if}
 
-	<h2 class="section-title">Productos ({order.items.length})</h2>
+	<h2 class="section-title">Productos ({productsCount})</h2>
 	<ul class="detail-list">
 		{#each order.items as item (item.product_id)}
-			<li>
-				<span>
-					{item.qty} × {item.name}
-					<span class="meta">{formatPesos(item.unit_price)} c/u · {days}</span>
-				</span>
+			<li class={{ 'line--ticked': isTicked(item) }}>
+				{#if hasChecklist}
+					<label class="line__check">
+						<input type="checkbox" checked={isTicked(item)} onchange={() => toggleLine(item)} />
+						{@render lineName(item)}
+					</label>
+				{:else}
+					{@render lineName(item)}
+				{/if}
 				<span>{formatPesos(item.line_total)}</span>
 			</li>
 		{/each}
@@ -469,6 +503,29 @@
 
 	.detail-list .meta {
 		display: block;
+	}
+
+	/* The whole name is the hit area, 48px tall like every control here. */
+	.line__check {
+		display: flex;
+		flex: 1;
+		gap: var(--space-6);
+		align-items: center;
+		align-self: stretch;
+		cursor: pointer;
+	}
+
+	.line__check input {
+		flex: none;
+		width: 20px;
+		height: 20px;
+		margin: 0;
+		accent-color: var(--neutral-800);
+	}
+
+	/* Done lines step back, so what's left to count stands out. */
+	.line--ticked {
+		color: var(--text-secondary);
 	}
 
 	.balance-note {
