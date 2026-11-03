@@ -8,6 +8,13 @@ export type QuoteState = (typeof QUOTE_STATES)[number];
 
 export type QuoteValidity = { orderId: number | null; validUntil: string };
 
+/**
+ * The same rule in SQL, over `quotes`, for the list's filter: its one parameter is today, Bogotá's.
+ * Kept beside getQuoteState, and tested against it.
+ */
+export const QUOTE_STATE_SQL = `case when order_id is not null then 'CONVERTED'
+	when valid_until >= ? then 'VALID' else 'EXPIRED' end`;
+
 /** The only rule for a quote's state. `today` is Bogotá's, from getTodaysDate(): valid through it. */
 export function getQuoteState(quote: QuoteValidity, today: string): QuoteState {
 	if (null !== quote.orderId) {

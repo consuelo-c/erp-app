@@ -34,6 +34,12 @@ export const DESTINATIONS: Destination[] = [
 		paths: [resolve('/pedidos')]
 	},
 	{
+		label: 'Cotizaciones',
+		icon: 'file',
+		href: resolve('/cotizaciones'),
+		paths: [resolve('/cotizaciones')]
+	},
+	{
 		label: 'Contactos',
 		icon: 'contact',
 		href: resolve('/contactos'),

@@ -17,6 +17,7 @@ import type {
 	ReturnMethod
 } from './server/services/orders';
 import type { Category } from './server/services/products';
+import type { QuoteStateFilter } from './server/services/quotes';
 import type { QuoteState } from './quotes';
 import type { Punch } from './server/services/timesheets';
 
@@ -43,6 +44,14 @@ export const QUOTE_STATE_LABELS: Record<QuoteState, string> = {
 	VALID: 'Vigente',
 	EXPIRED: 'Vencida',
 	CONVERTED: 'Convertida'
+};
+
+/** The quote list's state filter: «Vigentes» by default. */
+export const QUOTE_STATE_FILTER_LABELS: Record<QuoteStateFilter, string> = {
+	VALID: 'Vigentes',
+	EXPIRED: 'Vencidas',
+	CONVERTED: 'Convertidas',
+	ALL: 'Todas'
 };
 
 export const CASH_CONCEPT_LABELS: Record<CashConcept, string> = {
