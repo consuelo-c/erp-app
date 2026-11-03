@@ -13,6 +13,10 @@
 		itemsTotal: number;
 		total: number;
 		errorOf: (path: string) => string | undefined;
+		/** A quote's empty transport is «por acordar»: «Total sin transporte». */
+		totalLabel?: string;
+		transportPlaceholder?: string;
+		transportHint?: string;
 	}
 
 	let {
@@ -20,7 +24,10 @@
 		transport = $bindable(),
 		itemsTotal,
 		total,
-		errorOf
+		errorOf,
+		totalLabel = 'Total',
+		transportPlaceholder = '$0',
+		transportHint
 	}: Props = $props();
 
 	// For reference only: the discount is stored in pesos.
@@ -43,18 +50,18 @@
 			<span class="discount__share">{discountShare}</span>
 		</div>
 	</Field>
-	<Field label="Transporte" id="transport" error={errorOf('transport_cost')}>
+	<Field label="Transporte" id="transport" error={errorOf('transport_cost')} hint={transportHint}>
 		<Input
 			id="transport"
 			inputmode="numeric"
-			placeholder="$0"
+			placeholder={transportPlaceholder}
 			aria-invalid={undefined !== errorOf('transport_cost')}
 			bind:value={transport}
 		/>
 	</Field>
 </div>
 <div class="summary-row summary-row--total">
-	<span>Total</span><span>{formatPesos(total)}</span>
+	<span>{totalLabel}</span><span>{formatPesos(total)}</span>
 </div>
 
 <style>

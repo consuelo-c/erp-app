@@ -43,10 +43,15 @@
 	interface Props {
 		lines: FormLine[];
 		products: CatalogProduct[];
-		/** Each product's availability for the order's range; null until both dates are typed. */
-		availability: Map<number, number> | null;
+		/**
+		 * Each product's availability for the order's range; null until both dates are typed. Left out
+		 * on a quote, which reserves nothing: no line shows any.
+		 */
+		availability?: Map<number, number> | null;
 		/** The range it was counted for, as `14 ago – 16 ago`. */
-		rangeLabel: string;
+		rangeLabel?: string;
+		/** The lines' field in the posted record, which its errors are named after. */
+		field?: 'order_items' | 'quote_items';
 		rentalDays: number;
 		errorOf: (path: string) => string | undefined;
 		/** An extension's original: its lines are picked from there, no search, each up to its quantity. */
@@ -57,11 +62,14 @@
 		lines = $bindable(),
 		products,
 		availability,
-		rangeLabel,
+		rangeLabel = '',
 		rentalDays,
 		errorOf,
-		original = null
+		original = null,
+		field = 'order_items'
 	}: Props = $props();
+
+	const showsAvailability = $derived(undefined !== availability);
 
 	const SEARCH_ID = 'product-search';
 
@@ -218,8 +226,8 @@
 	<span class="meta">{countLabel}</span>
 </div>
 
-{#if errorOf('order_items')}
-	<p class="field-error">{errorOf('order_items')}</p>
+{#if errorOf(field)}
+	<p class="field-error">{errorOf(field)}</p>
 {/if}
 
 {#if original}
@@ -256,7 +264,7 @@
 							id="line-{line.productId}-qty"
 							data-qty={line.productId}
 							inputmode="numeric"
-							aria-invalid={undefined !== errorOf(`order_items.${index}.qty`)}
+							aria-invalid={undefined !== errorOf(`${field}.${index}.qty`)}
 							bind:value={line.qty}
 						/>
 					</div>
@@ -265,14 +273,14 @@
 						<Input
 							id="line-{line.productId}-price"
 							inputmode="numeric"
-							aria-invalid={undefined !== errorOf(`order_items.${index}.unit_price`)}
+							aria-invalid={undefined !== errorOf(`${field}.${index}.unit_price`)}
 							bind:value={line.unitPrice}
 						/>
 					</div>
 				</div>
 				{#each ['qty', 'unit_price', 'product_id'] as key (key)}
-					{#if errorOf(`order_items.${index}.${key}`)}
-						<p class="field-error">{errorOf(`order_items.${index}.${key}`)}</p>
+					{#if errorOf(`${field}.${index}.${key}`)}
+						<p class="field-error">{errorOf(`${field}.${index}.${key}`)}</p>
 					{/if}
 				{/each}
 				{#if original}
@@ -289,7 +297,9 @@
 						onclick={() => remove(line.productId)}
 					/>
 				</div>
-				<p class="meta">{availabilityText(line.productId)}</p>
+				{#if showsAvailability}
+					<p class="meta">{availabilityText(line.productId)}</p>
+				{/if}
 			</div>
 		</details>
 	{/each}
@@ -309,10 +319,12 @@
 		</thead>
 		<tbody>
 			{#each lines as line, index (line.productId)}
-				<tr class={{ 'row--noted': isOver(line) || errorOf(`order_items.${index}.qty`) }}>
+				<tr class={{ 'row--noted': isOver(line) || errorOf(`${field}.${index}.qty`) }}>
 					<td>
 						{line.name}
-						<span class="meta">{availabilityText(line.productId)}</span>
+						{#if showsAvailability}
+							<span class="meta">{availabilityText(line.productId)}</span>
+						{/if}
 						{#if original}<span class="meta">{maxNote(line.productId)}</span>{/if}
 					</td>
 					<td class="num">
@@ -320,7 +332,7 @@
 							data-qty={line.productId}
 							inputmode="numeric"
 							aria-label="Cantidad de {line.name}"
-							aria-invalid={undefined !== errorOf(`order_items.${index}.qty`)}
+							aria-invalid={undefined !== errorOf(`${field}.${index}.qty`)}
 							bind:value={line.qty}
 						/>
 					</td>
@@ -329,7 +341,7 @@
 						<Input
 							inputmode="numeric"
 							aria-label="Precio a cobrar de {line.name}"
-							aria-invalid={undefined !== errorOf(`order_items.${index}.unit_price`)}
+							aria-invalid={undefined !== errorOf(`${field}.${index}.unit_price`)}
 							bind:value={line.unitPrice}
 						/>
 					</td>
@@ -342,13 +354,13 @@
 						/>
 					</td>
 				</tr>
-				{#if isOver(line) || errorOf(`order_items.${index}.qty`) || errorOf(`order_items.${index}.unit_price`)}
+				{#if isOver(line) || errorOf(`${field}.${index}.qty`) || errorOf(`${field}.${index}.unit_price`)}
 					<tr>
 						<td colspan="6" class="row__note">
 							{#if isOver(line)}{@render overNotice(line)}{/if}
 							{#each ['qty', 'unit_price', 'product_id'] as key (key)}
-								{#if errorOf(`order_items.${index}.${key}`)}
-									<p class="field-error">{errorOf(`order_items.${index}.${key}`)}</p>
+								{#if errorOf(`${field}.${index}.${key}`)}
+									<p class="field-error">{errorOf(`${field}.${index}.${key}`)}</p>
 								{/if}
 							{/each}
 						</td>
@@ -397,7 +409,9 @@
 					>
 						<span class="result__text">
 							<span>{product.name}</span>
-							<span class="meta">{availabilityText(product.id)}</span>
+							{#if showsAvailability}
+								<span class="meta">{availabilityText(product.id)}</span>
+							{/if}
 						</span>
 						<span class="result__price">{formatPesos(product.rentalPrice)}</span>
 						<Icon name="plus" size="sm" />

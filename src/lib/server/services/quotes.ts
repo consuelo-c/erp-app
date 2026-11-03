@@ -19,12 +19,14 @@ import {
 	invalidOrder,
 	jsonColumn,
 	linesInputSchema,
+	listCatalogProducts,
 	orderItemsSchema,
 	pesosInputSchema,
 	refusal,
 	resolveClient,
 	resolveItems,
 	searchTextSchema,
+	type CatalogProduct,
 	type ClientAttributes,
 	type OrderItem,
 	type Refusal,
@@ -195,11 +197,25 @@ export async function getQuote(
 	return null === row ? null : toQuote(row);
 }
 
-/** A new quote's «Válida hasta»: today plus `QUOTES_VALIDITY_DAYS`. */
-export async function getNewQuoteValidUntil(db: D1Database, actor: Actor | null): Promise<string> {
+/** What the quote form picks from, read once when it opens. */
+export type QuoteFormOptions = {
+	products: CatalogProduct[];
+	/** A new quote's «Válida hasta», today plus `QUOTES_VALIDITY_DAYS`, and those days for its note. */
+	validUntil: string;
+	validityDays: number;
+};
+
+export async function getQuoteFormOptions(
+	db: D1Database,
+	actor: Actor | null
+): Promise<QuoteFormOptions> {
 	requireRole(actor, TAKES_QUOTES);
-	const { QUOTES_VALIDITY_DAYS } = await readSettings(db, ['QUOTES_VALIDITY_DAYS']);
-	return addDays(getTodaysDate(), QUOTES_VALIDITY_DAYS);
+	const [products, settings] = await Promise.all([
+		listCatalogProducts(db, actor),
+		readSettings(db, ['QUOTES_VALIDITY_DAYS'])
+	]);
+	const validityDays = settings.QUOTES_VALIDITY_DAYS;
+	return { products, validUntil: addDays(getTodaysDate(), validityDays), validityDays };
 }
 
 // A quote can't expire before the day it was made: today for a new one.

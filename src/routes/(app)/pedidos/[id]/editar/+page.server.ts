@@ -3,7 +3,7 @@ import { resolve } from '$app/paths';
 import { isEditableStatus } from '$lib/orders';
 import { requireRole } from '$lib/server/actor';
 import { getOrderDetail, getOrderFormOptions, updateOrder } from '$lib/server/services/orders';
-import { readPostedOrder } from '../../order-form';
+import { readPostedJson } from '../../order-form';
 import type { Actions, PageServerLoad } from './$types';
 
 const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
@@ -34,7 +34,7 @@ export const actions: Actions = {
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}
-		const posted = readPostedOrder(await request.formData());
+		const posted = readPostedJson(await request.formData(), 'order');
 		const order = { ...(posted as object), id: params.id };
 		const result = await updateOrder(platform.env.DB, order, locals.user);
 		if (!result.ok) {

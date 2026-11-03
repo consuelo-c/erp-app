@@ -7,7 +7,7 @@ import { createMemoryD1 } from '../db/memory-d1';
 import { getQuoteState, QUOTE_STATE_SQL } from '$lib/quotes';
 import {
 	createQuote,
-	getNewQuoteValidUntil,
+	getQuoteFormOptions,
 	getQuote,
 	getQuoteChange,
 	getQuoteDetail,
@@ -231,9 +231,12 @@ test('the event date and «Lugar del evento» are optional; a second line needs 
 });
 
 test('with the clock on 1 November 2026 and the key at 30, a new quote is valid until 1 December', async () => {
-	expect(await getNewQuoteValidUntil(db, sales)).toBe('2026-12-01');
+	expect(await getQuoteFormOptions(db, sales)).toMatchObject({
+		validUntil: '2026-12-01',
+		validityDays: 30
+	});
 	database.exec("update settings set value = '15' where key = 'QUOTES_VALIDITY_DAYS'");
-	expect(await getNewQuoteValidUntil(db, sales)).toBe('2026-11-16');
+	expect((await getQuoteFormOptions(db, sales)).validUntil).toBe('2026-11-16');
 });
 
 test('«Válida hasta» is required and never before the creation day, on create and on edit', async () => {
@@ -369,7 +372,7 @@ test('WAREHOUSE and DRIVER get a 403 creating, editing or reading a quote', asyn
 		createQuote(db, quote1043, actor),
 		updateQuote(db, { ...quote1043, id }, actor),
 		getQuote(db, id, actor),
-		getNewQuoteValidUntil(db, actor)
+		getQuoteFormOptions(db, actor)
 	]);
 	for (const attempt of attempts) {
 		expect(isHttpError(await attempt.catch((caught) => caught), 403)).toBe(true);
@@ -556,4 +559,13 @@ test('WAREHOUSE and DRIVER get a 403 on the detail, the timeline and an edit’s
 			expect(isHttpError(await attempt.catch((caught) => caught), 403)).toBe(true);
 		}
 	}
+});
+
+test('the form adds lines from the active catalog only: «Silla Rimax» is out', async () => {
+	const { products } = await getQuoteFormOptions(db, sales);
+	expect(products.map((product) => product.name)).toEqual([
+		'Copa para vino tinto',
+		'Mesa redonda 10 puestos',
+		'Silla Tiffany dorada'
+	]);
 });

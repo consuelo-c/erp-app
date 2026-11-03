@@ -1605,18 +1605,14 @@ export type OrderFormOptions = {
 	company: { name: string; address: string };
 };
 
-export async function getOrderFormOptions(
+/** The active catalog the order and quote forms add lines from; a line holding an inactive one keeps it, frozen. */
+export async function listCatalogProducts(
 	db: D1Database,
 	actor: Actor | null
-): Promise<OrderFormOptions> {
+): Promise<CatalogProduct[]> {
 	requireRole(actor, TAKES_ORDERS);
-	const [catalog, transporters, settings] = await Promise.all([
-		listProducts(db, {}, actor),
-		listTransporters(db, actor),
-		readSettings(db, ['COMPANY_NAME', 'COMPANY_ADDRESS'])
-	]);
-	// An inactive product can't be added; a line that holds one keeps it, frozen.
-	const products = catalog.products
+	const catalog = await listProducts(db, {}, actor);
+	return catalog.products
 		.filter((product) => product.isActive)
 		.map(({ id, name, category, variantGroup, variantName, rentalPrice, totalQuantity }) => ({
 			id,
@@ -1627,6 +1623,18 @@ export async function getOrderFormOptions(
 			rentalPrice,
 			totalQuantity
 		}));
+}
+
+export async function getOrderFormOptions(
+	db: D1Database,
+	actor: Actor | null
+): Promise<OrderFormOptions> {
+	requireRole(actor, TAKES_ORDERS);
+	const [products, transporters, settings] = await Promise.all([
+		listCatalogProducts(db, actor),
+		listTransporters(db, actor),
+		readSettings(db, ['COMPANY_NAME', 'COMPANY_ADDRESS'])
+	]);
 	const company = { name: settings.COMPANY_NAME, address: settings.COMPANY_ADDRESS };
 	return { products, transporters, company };
 }

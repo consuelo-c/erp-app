@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
+	import QuoteForm from '../QuoteForm.svelte';
+	import type { PageProps } from './$types';
 
-	// STUB: Phase 13's #399 replaces this with the quote form.
+	let { data, form }: PageProps = $props();
 </script>
 
 <svelte:head>
@@ -15,5 +16,5 @@
 	{#snippet header()}
 		<ScreenHeader title="Nueva cotización" backHref={resolve('/cotizaciones')} />
 	{/snippet}
-	<Notice tone="info">Esta pantalla todavía no está lista.</Notice>
+	<QuoteForm options={data.options} quote={null} {form} />
 </Screen>

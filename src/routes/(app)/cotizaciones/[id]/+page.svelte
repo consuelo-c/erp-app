@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import Badge, { QUOTE_STATE_TONES } from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import IconButton from '$lib/components/IconButton.svelte';
@@ -31,6 +32,11 @@
 			<Badge tone={QUOTE_STATE_TONES[quote.state]}>{QUOTE_STATE_LABELS[quote.state]}</Badge>
 		</ScreenHeader>
 	{/snippet}
+
+	<!-- Set by the quote form's redirect after a save. -->
+	{#if page.url.searchParams.has('guardado')}
+		<div class="lead-notice"><Notice tone="success">Cotización guardada con éxito</Notice></div>
+	{/if}
 
 	{#if null !== quote.orderId}
 		<div class="lead-notice">
