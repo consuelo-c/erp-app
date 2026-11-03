@@ -17,6 +17,7 @@ import type {
 	ReturnMethod
 } from './server/services/orders';
 import type { Category } from './server/services/products';
+import type { QuoteState } from './quotes';
 import type { Punch } from './server/services/timesheets';
 
 export const ROLE_LABELS: Record<Role, string> = {
@@ -36,6 +37,12 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
 	OUT_FOR_PICKUP: 'En ruta de recogida',
 	COMPLETED: 'Completado',
 	CANCELLED: 'Cancelado'
+};
+
+export const QUOTE_STATE_LABELS: Record<QuoteState, string> = {
+	VALID: 'Vigente',
+	EXPIRED: 'Vencida',
+	CONVERTED: 'Convertida'
 };
 
 export const CASH_CONCEPT_LABELS: Record<CashConcept, string> = {
@@ -143,6 +150,7 @@ export const PUNCH_LABELS: Record<Punch, string> = {
 export const SETTING_MODULE_LABELS = {
 	COMPANY: 'Empresa',
 	ORDERS: 'Pedidos',
+	QUOTES: 'Cotizaciones',
 	PAYROLL: 'Nómina'
 };
 

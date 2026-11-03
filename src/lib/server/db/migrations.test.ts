@@ -59,6 +59,7 @@ test('creates exactly the tables of the phases built so far', () => {
 		'orders',
 		'payroll_runs',
 		'products',
+		'quotes',
 		'sessions',
 		'settings',
 		'timesheets',
@@ -188,6 +189,60 @@ test('orders are indexed by its three dates, status and client_id', () => {
 	expect(indexedColumns).not.toContain('order_items');
 });
 
+function insertQuote(transportCost: number | null, orderId: number | null = null) {
+	const columns =
+		'client_id, order_id, valid_until, rental_days, client_attributes, quote_items, items_total, transport_cost, quote_total, created_at, created_by, updated_at, updated_by';
+	return database
+		.prepare(
+			`insert into quotes (${columns}) values (1, ?, '2026-12-01', 1, '{}', '[]', 0, ?, 0, ${AUDIT})`
+		)
+		.run(orderId, transportCost);
+}
+
+test('quotes: numbered from 1, transport NULL is «por acordar» and 0 stays 0', () => {
+	insertContact('8909039395');
+	expect(insertQuote(null).lastInsertRowid).toBe(1);
+	insertQuote(0);
+	const rows = database.prepare('select transport_cost, discount, attributes from quotes').all();
+	expect(rows).toEqual([
+		{ transport_cost: null, discount: 0, attributes: '{}' },
+		{ transport_cost: 0, discount: 0, attributes: '{}' }
+	]);
+});
+
+test('quotes: order_id is optional, a real order, and comes from one quote at most', () => {
+	insertContact('8909039395');
+	insertOrder({});
+	insertQuote(null, 1);
+	expect(() => insertQuote(null, 1)).toThrow(/UNIQUE/);
+	expect(() => insertQuote(null, 99)).toThrow(/FOREIGN KEY/);
+	expect(() =>
+		database.exec(
+			`insert into quotes (client_id, valid_until, rental_days, client_attributes, quote_items, items_total, quote_total, created_at, created_by, updated_at, updated_by) values (99, '2026-12-01', 1, '{}', '[]', 0, 0, ${AUDIT})`
+		)
+	).toThrow(/FOREIGN KEY/);
+});
+
+test("quotes has no status, token, incident, deposit or trip: it isn't an order", () => {
+	const columns = listColumns('quotes');
+	const forbidden = ['status', 'public_token', 'has_incident', 'deposit_amount'];
+	expect(columns.filter((column) => forbidden.includes(column))).toEqual([]);
+	expect(columns.filter((column) => /delivery|pickup/.test(column))).toEqual([]);
+	expect(columns).toEqual(
+		expect.arrayContaining(['client_id', 'order_id', 'event_date', 'valid_until', 'quote_items'])
+	);
+});
+
+test('quotes are indexed by client_id, valid_until and the unique order_id', () => {
+	const indexedColumns = database
+		.prepare(
+			"select info.name from pragma_index_list('quotes') as list, pragma_index_info(list.name) as info"
+		)
+		.all()
+		.map((row) => row.name);
+	expect(indexedColumns).toEqual(expect.arrayContaining(['client_id', 'valid_until', 'order_id']));
+});
+
 type MovementInsert = {
 	concept: string;
 	amount: number;
@@ -272,7 +327,7 @@ test('receipt_number is required and unique per sign', () => {
 
 test('users, employees, sessions, products and orders carry the audit columns', () => {
 	const audit = ['created_at', 'created_by', 'updated_at', 'updated_by'];
-	for (const table of ['users', 'employees', 'sessions', 'products', 'orders']) {
+	for (const table of ['users', 'employees', 'sessions', 'products', 'orders', 'quotes']) {
 		expect(listColumns(table)).toEqual(expect.arrayContaining(audit));
 	}
 });

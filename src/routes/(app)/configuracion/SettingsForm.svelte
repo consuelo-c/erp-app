@@ -10,7 +10,7 @@
 	import { formatInteger } from '$lib/format';
 	import { SETTING_MODULE_LABELS } from '$lib/labels';
 	import type { SystemSettingKey, SystemSettings } from '$lib/server/services/settings';
-	import { getSettingInput, SETTINGS } from '$lib/settings';
+	import { getSettingHint, getSettingInput, SETTINGS } from '$lib/settings';
 	import type { Snippet } from 'svelte';
 	import type { SubmitFunction } from '@sveltejs/kit';
 
@@ -81,7 +81,7 @@
 				{#if 'clock' === input}
 					<ClockField legend={label} prefix="{key}." {...dial(key)} {error} />
 				{:else}
-					<Field {label} id={key} {error}>
+					<Field {label} id={key} hint={getSettingHint(key)} {error}>
 						<div class="settings__value">
 							<Input
 								id={key}

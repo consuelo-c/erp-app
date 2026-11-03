@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { normalizePhone } from './phone';
 
-export type SettingModule = 'COMPANY' | 'HELP' | 'ORDERS' | 'PAYROLL' | 'TERMS';
+export type SettingModule = 'COMPANY' | 'HELP' | 'ORDERS' | 'PAYROLL' | 'QUOTES' | 'TERMS';
 
 type SettingDefinition = {
 	module: SettingModule;
@@ -9,6 +9,8 @@ type SettingDefinition = {
 	unit: string | null;
 	// An example in the stored format, shown in the empty field so it says what goes there.
 	placeholder?: string;
+	// Under the field, when the label and unit don't say enough.
+	hint?: string;
 	// Parses the stored `settings.value` TEXT into the key's real type.
 	schema: z.ZodType;
 };
@@ -16,6 +18,7 @@ type SettingDefinition = {
 // The messages reach the settings screen, next to the field.
 const POSITIVE_INTEGER_MESSAGE = 'Escribe un número entero mayor que cero';
 const PERCENTAGE_MESSAGE = 'Escribe un porcentaje de 0 a 100';
+const VALIDITY_DAYS_MESSAGE = 'Escribe un número entero de 1 a 365';
 
 /** The help's limit, which its editor counts against. */
 export const HELP_MAX_LENGTH = 50_000;
@@ -98,6 +101,19 @@ export const SETTINGS = {
 			.int(PERCENTAGE_MESSAGE)
 			.min(0, PERCENTAGE_MESSAGE)
 			.max(100, PERCENTAGE_MESSAGE)
+	},
+	// Only a new quote's default: changing it moves no existing quote's «Válida hasta».
+	QUOTES_VALIDITY_DAYS: {
+		module: 'QUOTES',
+		label: 'Vigencia de las cotizaciones',
+		unit: 'días',
+		placeholder: '30',
+		hint: 'De 1 a 365. «Válida hasta» de una cotización nueva empieza en hoy más estos días.',
+		schema: z.coerce
+			.number(VALIDITY_DAYS_MESSAGE)
+			.int(VALIDITY_DAYS_MESSAGE)
+			.min(1, VALIDITY_DAYS_MESSAGE)
+			.max(365, VALIDITY_DAYS_MESSAGE)
 	},
 	PAYROLL_MINIMUM_WAGE: {
 		module: 'PAYROLL',
@@ -236,4 +252,10 @@ export function getSettingInput(key: SettingKey): 'clock' | 'number' | 'text' {
 		return 'clock';
 	}
 	return null === unit ? 'text' : 'number';
+}
+
+/** The note under a key's field, if it has one. */
+export function getSettingHint(key: SettingKey): string | undefined {
+	const definition: SettingDefinition = SETTINGS[key];
+	return definition.hint;
 }
