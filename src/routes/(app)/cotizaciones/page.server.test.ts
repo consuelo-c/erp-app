@@ -2,9 +2,9 @@ import { isHttpError } from '@sveltejs/kit';
 import { expect, test } from 'vitest';
 import type { Actor, Role } from '$lib/server/actor';
 import { load as loadList } from './+page.server';
-import { load as loadNew } from './nueva/+page.server';
+import { actions as newActions, load as loadNew } from './nueva/+page.server';
 import { load as loadDetail } from './[id]/+page.server';
-import { load as loadEdit } from './[id]/editar/+page.server';
+import { actions as editActions, load as loadEdit } from './[id]/editar/+page.server';
 import { load as loadTimeline } from './[id]/historial/+page.server';
 import { GET as getChange } from './[id]/historial/[evento]/+server';
 import { load as loadPrintout } from './[id]/impresion/+page.server';
@@ -25,7 +25,9 @@ test('WAREHOUSE and DRIVER get the no-permission screen on every route under /co
 			loadEdit,
 			loadTimeline,
 			loadPrintout,
-			getChange
+			getChange,
+			newActions.default,
+			editActions.default
 		];
 		for (const handler of handlers) {
 			await expect(

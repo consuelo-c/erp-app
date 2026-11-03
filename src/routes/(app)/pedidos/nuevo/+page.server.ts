@@ -2,7 +2,7 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { requireRole } from '$lib/server/actor';
 import { createOrder, getOrderFormOptions } from '$lib/server/services/orders';
-import { readPostedOrder } from '../order-form';
+import { readPostedJson } from '../order-form';
 import type { Actions, PageServerLoad } from './$types';
 
 const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
@@ -21,7 +21,7 @@ export const actions: Actions = {
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}
-		const order = readPostedOrder(await request.formData());
+		const order = readPostedJson(await request.formData(), 'order');
 		const result = await createOrder(platform.env.DB, order, locals.user);
 		if (!result.ok) {
 			return fail(400, result);

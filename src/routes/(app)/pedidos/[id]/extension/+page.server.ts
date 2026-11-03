@@ -2,7 +2,7 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { requireRole } from '$lib/server/actor';
 import { createExtension, getOrderDetail, getOrderFormOptions } from '$lib/server/services/orders';
-import { readPostedOrder } from '../../order-form';
+import { readPostedJson } from '../../order-form';
 import type { Actions, PageServerLoad } from './$types';
 
 const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
@@ -33,7 +33,7 @@ export const actions: Actions = {
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}
-		const posted = readPostedOrder(await request.formData());
+		const posted = readPostedJson(await request.formData(), 'order');
 		const extension = { ...(posted as object), parent_order_id: params.id };
 		const result = await createExtension(platform.env.DB, extension, locals.user);
 		if (!result.ok) {
