@@ -1,6 +1,7 @@
 <script lang="ts" module>
 	import type { InventoryCountStatus } from '$lib/server/services/inventory';
 	import type { OrderStatus } from '$lib/server/services/orders';
+	import type { QuoteState } from '$lib/quotes';
 
 	type StatusTone =
 		| 'draft'
@@ -22,6 +23,13 @@
 		OUT_FOR_PICKUP: 'out-pickup',
 		COMPLETED: 'completed',
 		CANCELLED: 'cancelled'
+	};
+
+	/** Each quote state's color, the same in the list and the detail. */
+	export const QUOTE_STATE_TONES: Record<QuoteState, 'success' | 'warning' | 'info'> = {
+		VALID: 'success',
+		EXPIRED: 'warning',
+		CONVERTED: 'info'
 	};
 
 	/** Each count status's color, the same in the list and the detail. */

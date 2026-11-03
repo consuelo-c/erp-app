@@ -1,6 +1,7 @@
 <script lang="ts">
 	type IconName =
 		| 'list'
+		| 'file'
 		| 'truck'
 		| 'clock'
 		| 'settings'

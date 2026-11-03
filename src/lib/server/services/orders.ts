@@ -1109,7 +1109,7 @@ export const DELIVERY_PERIODS = ['TODAY', 'THIS_WEEK', 'NEXT_WEEK', 'ALL'] as co
 export type DeliveryPeriod = (typeof DELIVERY_PERIODS)[number];
 
 // The text as typed, its runs of spaces collapsed: «ivan     betancur» is two words.
-const searchTextSchema = z
+export const searchTextSchema = z
 	.string()
 	.transform((typed) => typed.trim().replace(/\s+/g, ' '))
 	.pipe(z.string().min(1));

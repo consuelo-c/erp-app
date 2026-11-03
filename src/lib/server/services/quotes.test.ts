@@ -4,10 +4,13 @@ import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
+import { getQuoteState, QUOTE_STATE_SQL } from '$lib/quotes';
 import {
 	createQuote,
 	getNewQuoteValidUntil,
 	getQuote,
+	listQuotes,
+	QUOTES_PAGE_SIZE,
 	quoteAttributesSchema,
 	updateQuote
 } from './quotes';
@@ -369,4 +372,118 @@ test('WAREHOUSE and DRIVER get a 403 creating, editing or reading a quote', asyn
 		expect(isHttpError(await attempt.catch((caught) => caught), 403)).toBe(true);
 	}
 	expect(database.prepare('select count(*) as count from quotes').get()).toEqual({ count: 1 });
+});
+
+// A row as the list reads it, straight into the table: only what the filters look at varies.
+function insertQuote(
+	name: string,
+	phone: string,
+	validity: { validUntil: string; orderId?: number }
+) {
+	database
+		.prepare(
+			`insert into quotes (client_id, order_id, valid_until, rental_days, client_attributes, quote_items, items_total, quote_total, created_at, created_by, updated_at, updated_by)
+			values (1, ?, ?, 1, ?, '[]', 0, 0, ${AUDIT})`
+		)
+		.run(validity.orderId ?? null, validity.validUntil, JSON.stringify({ name, phone }));
+}
+
+function insertOrder(id: number) {
+	database.exec(
+		`insert into orders (id, public_token, client_id, status, event_date, delivery_date, pickup_date, rental_days, client_attributes, delivery_attributes, pickup_attributes, order_items, items_total, order_total, created_at, created_by, updated_at, updated_by)
+		values (${id}, 'token-${id}', 1, 'DRAFT', '2026-12-12', '2026-12-11', '2026-12-13', 1, '{}', '{"method":"COMPANY_DELIVERY"}', '{"method":"COMPANY_PICKUP"}', '[]', 0, 0, ${AUDIT})`
+	);
+}
+
+// Today is 1 November: #1 valid through today, #2 expired yesterday, #3 converted.
+function insertThreeStates() {
+	insertQuote('Postobón S.A.', '576045765100', { validUntil: '2026-11-01' });
+	insertQuote('Luz Marina Restrepo', '573104428890', { validUntil: '2026-10-31' });
+	insertOrder(1060);
+	insertQuote('Jorge Iván Betancur', '573007712043', { validUntil: '2026-10-31', orderId: 1060 });
+}
+
+async function listIds(input: object) {
+	return (await listQuotes(db, input, sales)).quotes.map((quote) => quote.id);
+}
+
+test('the state filter: valid by default, expired, converted, all, and a tampered value is the default', async () => {
+	insertThreeStates();
+	expect(await listIds({})).toEqual([1]);
+	expect(await listIds({ state: 'VALID' })).toEqual([1]);
+	expect(await listIds({ state: 'EXPIRED' })).toEqual([2]);
+	expect(await listIds({ state: 'CONVERTED' })).toEqual([3]);
+	expect(await listIds({ state: 'ALL' })).toEqual([3, 2, 1]);
+	const tampered = await listQuotes(db, { state: 'REJECTED' }, sales);
+	expect([tampered.filters.state, tampered.quotes.map((quote) => quote.id)]).toEqual([
+		'VALID',
+		[1]
+	]);
+});
+
+test("the SQL state is the state function's, for every row, with Bogotá's today", async () => {
+	insertThreeStates();
+	vi.setSystemTime(new Date('2026-11-01T04:30:00Z')); // 11:30 p.m. on 31 October in Bogotá
+	const today = '2026-10-31';
+	const rows = database
+		.prepare(`select order_id, valid_until, ${QUOTE_STATE_SQL} as state from quotes order by id`)
+		.all(today);
+	for (const row of rows) {
+		const validity = {
+			orderId: row.order_id as number | null,
+			validUntil: String(row.valid_until)
+		};
+		expect(row.state).toBe(getQuoteState(validity, today));
+	}
+	expect(await listIds({ state: 'VALID' })).toEqual([2, 1]);
+	expect(await listIds({ state: 'EXPIRED' })).toEqual([]);
+});
+
+test("the text filter is the order list's: a name in another word order, or three digits of the phone", async () => {
+	insertThreeStates();
+	expect(await listIds({ state: 'ALL', text: 'restrepo  LUZ' })).toEqual([2]);
+	expect(await listIds({ state: 'ALL', text: '576 5' })).toEqual([1]);
+	expect(await listIds({ state: 'ALL', text: 'betancur', page: '1' })).toEqual([3]);
+	expect(await listIds({ state: 'VALID', text: 'restrepo' })).toEqual([]);
+});
+
+test('each row carries what the list shows: the state, the event date or none, and a pending transport', async () => {
+	await create({ ...quote1043, transport_cost: null, event_date: '' });
+	const [quote] = (await listQuotes(db, {}, sales)).quotes;
+	expect(quote).toEqual({
+		id: 1,
+		clientName: 'Luz Marina Restrepo',
+		eventDate: null,
+		validUntil: '2026-12-01',
+		state: 'VALID',
+		quoteTotal: 1000000,
+		isTransportPending: true
+	});
+});
+
+test('newest first, 20 a page; a page past the last shows the last; no quote at all is told apart', async () => {
+	const empty = await listQuotes(db, {}, sales);
+	expect([empty.hasQuotes, empty.total, empty.pageCount]).toEqual([false, 0, 1]);
+	for (let i = 0; i < 23; i += 1) {
+		insertQuote('Postobón S.A.', '576045765100', { validUntil: '2026-12-01' });
+	}
+	const first = await listQuotes(db, {}, sales);
+	expect(first.quotes).toHaveLength(QUOTES_PAGE_SIZE);
+	expect([first.quotes[0].id, first.total, first.pageCount, first.hasQuotes]).toEqual([
+		23,
+		23,
+		2,
+		true
+	]);
+	const last = await listQuotes(db, { page: '9' }, sales);
+	expect([last.filters.page, last.quotes.map((quote) => quote.id)]).toEqual([2, [3, 2, 1]]);
+	const none = await listQuotes(db, { state: 'EXPIRED' }, sales);
+	expect([none.total, none.hasQuotes]).toEqual([0, true]);
+});
+
+test('WAREHOUSE and DRIVER get a 403 on the list', async () => {
+	for (const actor of [warehouse, driver]) {
+		const refusal = await listQuotes(db, {}, actor).catch((caught) => caught);
+		expect(isHttpError(refusal, 403)).toBe(true);
+	}
 });

@@ -7,7 +7,7 @@
 import { z } from 'zod';
 import { addDays, getInstantDate, getTodaysDate } from '$lib/datetime';
 import { calculateOrderTotals, type OrderTotals, type PricedLine } from '$lib/orders';
-import { getQuoteState, type QuoteState } from '$lib/quotes';
+import { getQuoteState, QUOTE_STATE_SQL, QUOTE_STATES, type QuoteState } from '$lib/quotes';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
 import {
@@ -22,12 +22,14 @@ import {
 	refusal,
 	resolveClient,
 	resolveItems,
+	searchTextSchema,
 	type ClientAttributes,
 	type OrderItem,
 	type Refusal,
 	type SaveResult
 } from './orders';
-import type { NewClient } from './contacts';
+import { foldedSql, optional } from './cash';
+import { searchClause, type NewClient } from './contacts';
 import { readSettings } from './settings';
 
 // The same three who take orders: converting a quote creates one.
@@ -350,4 +352,118 @@ export async function updateQuote(
 	}
 	const resolved = await resolveColumns(db, parsed.data, toQuote(row));
 	return 'ok' in resolved ? resolved : applyEdit(db, actor, { row, resolved });
+}
+
+/** A page of the quote list: it never loads the whole table. */
+export const QUOTES_PAGE_SIZE = 20;
+
+/** The list's state filter: a state, or all of them. */
+export const QUOTE_STATE_FILTERS = [...QUOTE_STATES, 'ALL'] as const;
+
+export type QuoteStateFilter = (typeof QUOTE_STATE_FILTERS)[number];
+
+// The open ones still valid by default; a tampered value is the default too. `page` past the last
+// one shows the last.
+const listSchema = z.object({
+	text: optional(searchTextSchema),
+	state: z.enum(QUOTE_STATE_FILTERS).catch('VALID'),
+	page: z.coerce.number().int().min(1).catch(1)
+});
+
+export type QuoteFilters = z.output<typeof listSchema>;
+
+export type QuoteSummary = {
+	id: number;
+	clientName: string;
+	eventDate: string | null;
+	validUntil: string;
+	state: QuoteState;
+	quoteTotal: number;
+	/** Transport «por acordar»: the total leaves it out. */
+	isTransportPending: boolean;
+};
+
+/** The filters come back parsed, `page` clamped. `hasQuotes` tells an empty table from no match. */
+export type QuotePage = {
+	quotes: QuoteSummary[];
+	total: number;
+	pageCount: number;
+	filters: QuoteFilters;
+	hasQuotes: boolean;
+};
+
+type Clause = { sql: string; params: (string | number)[] };
+
+// The order list's rules, over the quote's own snapshot: never the contact's current name or phone.
+function listClauses(filters: QuoteFilters, today: string): Clause[] {
+	const name = foldedSql("json_extract(client_attributes, '$.name')");
+	const phone = "json_extract(client_attributes, '$.phone')";
+	const search = undefined === filters.text ? null : searchClause(filters.text, name, phone);
+	const state =
+		'ALL' === filters.state
+			? null
+			: { sql: `(${QUOTE_STATE_SQL}) = ?`, params: [today, filters.state] };
+	return [search, state].filter((clause) => null !== clause);
+}
+
+type SummaryRow = {
+	id: number;
+	client_name: string;
+	event_date: string | null;
+	valid_until: string;
+	order_id: number | null;
+	quote_total: number;
+	transport_cost: number | null;
+};
+
+function toSummary(row: SummaryRow, today: string): QuoteSummary {
+	return {
+		id: row.id,
+		clientName: row.client_name,
+		eventDate: row.event_date,
+		validUntil: row.valid_until,
+		state: getQuoteState({ orderId: row.order_id, validUntil: row.valid_until }, today),
+		quoteTotal: row.quote_total,
+		isTransportPending: null === row.transport_cost
+	};
+}
+
+async function countQuotes(
+	db: D1Database,
+	{ where, params }: { where: string; params: Clause['params'] }
+) {
+	const count = await db
+		.prepare(
+			`select count(*) as total, (select count(*) from quotes) as everyone from quotes where ${where}`
+		)
+		.bind(...params)
+		.first<{ total: number; everyone: number }>();
+	return { total: count?.total ?? 0, hasQuotes: 0 < (count?.everyone ?? 0) };
+}
+
+/** One page of quotes, newest first, narrowed by every filter at once, in SQL. */
+export async function listQuotes(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<QuotePage> {
+	requireRole(actor, TAKES_QUOTES);
+	const today = getTodaysDate();
+	const parsed = listSchema.parse(input ?? {});
+	const clauses = listClauses(parsed, today);
+	const where = clauses.map((clause) => `(${clause.sql})`).join(' and ') || '1';
+	const params = clauses.flatMap((clause) => clause.params);
+	const { total, hasQuotes } = await countQuotes(db, { where, params });
+	const pageCount = Math.max(1, Math.ceil(total / QUOTES_PAGE_SIZE));
+	const filters = { ...parsed, page: Math.min(parsed.page, pageCount) };
+	const { results } = await db
+		.prepare(
+			`select id, json_extract(client_attributes, '$.name') as client_name, event_date,
+			valid_until, order_id, quote_total, transport_cost
+			from quotes where ${where} order by id desc limit ? offset ?`
+		)
+		.bind(...params, QUOTES_PAGE_SIZE, (filters.page - 1) * QUOTES_PAGE_SIZE)
+		.all<SummaryRow>();
+	const quotes = results.map((row) => toSummary(row, today));
+	return { quotes, total, pageCount, filters, hasQuotes };
 }

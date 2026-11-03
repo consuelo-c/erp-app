@@ -4,7 +4,7 @@ import { getTodaysDate } from '$lib/datetime';
 // Each list's filters and page, remembered from its last visit, so coming back to it (the back
 // arrow, the menu, a tab) shows the same list. Until the browser closes or the login logs out; the
 // values are the URL's, so its Zod schemas still check every one.
-const LISTS = ['pedidos', 'contactos', 'productos', 'caja'] as const;
+const LISTS = ['pedidos', 'cotizaciones', 'contactos', 'productos', 'caja'] as const;
 
 // A notice, an open movement or a variant group: where the list was opened, not how it's filtered.
 const TRANSIENT = new Set(['guardado', 'aviso', 'movimiento', 'grupo']);

@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { findDestination, getPageNumbers } from './navigation';
+import { BAR_SLOTS, DESTINATIONS, findDestination, getPageNumbers } from './navigation';
 
 test('a path belongs to the destination that holds it, Personal and Nómina apart', () => {
 	expect(findDestination('/despachos')?.label).toBe('Despachos');
@@ -9,6 +9,16 @@ test('a path belongs to the destination that holds it, Personal and Nómina apar
 	expect(findDestination('/nomina/comprobante')?.label).toBe('Nómina');
 	expect(findDestination('/inventario/revisar/3')?.label).toBe('Inventario');
 	expect(findDestination('/')).toBeUndefined();
+});
+
+test('Cotizaciones follows Pedidos: the first in «Más», after Pedidos in the sidebar', () => {
+	const labels = DESTINATIONS.map((destination) => destination.label);
+	expect(labels.slice(BAR_SLOTS - 1, BAR_SLOTS + 2)).toEqual([
+		'Pedidos',
+		'Cotizaciones',
+		'Contactos'
+	]);
+	expect(findDestination('/cotizaciones/12/editar')).toMatchObject({ icon: 'file' });
 });
 
 test('Logins is its own destination, outside Configuración, whose tabs keep Nómina', () => {
