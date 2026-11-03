@@ -1,8 +1,37 @@
 // Cotizaciones: an order without its trips or its money. What it shares with the order is code,
 // not rows: its lines are validated with `orderItemsSchema` and its client's snapshot with
-// `clientAttributesSchema`, both imported from the order service, never redefined here.
+// `clientAttributesSchema`, and the «Cliente» and the lines are resolved by the order's own
+// helpers, all imported from the order service, never redefined here. Nothing here reaches
+// `orders`' readers or `cash_movements`, and no quote is ever deleted.
 
 import { z } from 'zod';
+import { addDays, getInstantDate, getTodaysDate } from '$lib/datetime';
+import { calculateOrderTotals, type OrderTotals, type PricedLine } from '$lib/orders';
+import { getQuoteState, type QuoteState } from '$lib/quotes';
+import { requireRole, type Actor } from '../actor';
+import { auditedInsert, auditedUpdate } from '../audit';
+import {
+	blankable,
+	clientAttributesSchema,
+	clientInputShape,
+	clientWrite,
+	invalidOrder,
+	linesInputSchema,
+	orderItemsSchema,
+	pesosInputSchema,
+	refusal,
+	resolveClient,
+	resolveItems,
+	type ClientAttributes,
+	type OrderItem,
+	type Refusal,
+	type SaveResult
+} from './orders';
+import type { NewClient } from './contacts';
+import { readSettings } from './settings';
+
+// The same three who take orders: converting a quote creates one.
+const TAKES_QUOTES = ['ADMIN', 'MANAGER', 'SALES'] as const;
 
 const textSchema = z.string().min(1);
 
@@ -21,3 +50,304 @@ export const quoteAttributesSchema = z
 	.refine(hasFirstAddressLine, 'The second address line needs the first');
 
 export type QuoteAttributes = z.infer<typeof quoteAttributesSchema>;
+
+type PricedQuote = {
+	quote_items: PricedLine[];
+	rental_days: number;
+	discount: number;
+	transport_cost: number | null;
+};
+
+const transportInputSchema = z
+	.number('Escribe el transporte en pesos')
+	.int('Escribe el transporte en pesos')
+	.min(0, 'No puede ser negativo');
+
+// Any total sent along is ignored: the service works them out. An empty transport is «por
+// acordar», stored NULL; 0 is a real price, for a client who picks up.
+const quoteInputSchema = z
+	.object({
+		...clientInputShape,
+		event_date: blankable.pipe(z.iso.date('Escoge la fecha del evento').nullable()),
+		valid_until: z.iso.date('Escoge hasta cuándo es válida'),
+		rental_days: z.number('Escribe los días cobrados').int().min(1, 'Se cobra al menos un día'),
+		quote_items: linesInputSchema,
+		discount: pesosInputSchema('Escribe el descuento en pesos'),
+		transport_cost: transportInputSchema.nullable().default(null),
+		address_1: blankable,
+		address_2: blankable,
+		notes: blankable
+	})
+	.refine((quote) => null === quote.address_2 || null !== quote.address_1, {
+		message: 'Escribe la primera línea de la dirección',
+		path: ['address_1']
+	})
+	// The discount comes off the items only, never off transport.
+	.refine((quote) => quote.discount <= totalsOf(quote).itemsTotal, {
+		message: 'El descuento no puede ser mayor que el subtotal',
+		path: ['discount']
+	});
+
+type QuoteInput = z.output<typeof quoteInputSchema>;
+
+// «Por acordar» goes into the order's function as 0: the total reads «Total sin transporte».
+function totalsOf(quote: PricedQuote): OrderTotals {
+	return calculateOrderTotals({
+		lines: quote.quote_items,
+		rentalDays: quote.rental_days,
+		discount: quote.discount,
+		transportCost: quote.transport_cost ?? 0
+	});
+}
+
+export type Quote = {
+	id: number;
+	state: QuoteState;
+	clientId: number;
+	orderId: number | null;
+	client: ClientAttributes;
+	eventDate: string | null;
+	validUntil: string;
+	rentalDays: number;
+	items: OrderItem[];
+	itemsTotal: number;
+	discount: number;
+	/** Null is «por acordar». */
+	transportCost: number | null;
+	quoteTotal: number;
+	address1: string | null;
+	address2: string | null;
+	notes: string | null;
+	createdAt: number;
+};
+
+type Columns = {
+	client_id: number | null; // null until «Cliente nuevo»'s contact exists, in the same batch
+	event_date: string | null;
+	valid_until: string;
+	rental_days: number;
+	client_attributes: string;
+	quote_items: string;
+	items_total: number;
+	discount: number;
+	transport_cost: number | null;
+	quote_total: number;
+	attributes: string;
+};
+
+type QuoteRow = Omit<Columns, 'client_id'> & {
+	id: number;
+	client_id: number;
+	order_id: number | null;
+	created_at: number;
+};
+
+const SELECT_QUOTE = `select id, client_id, order_id, event_date, valid_until, rental_days,
+	client_attributes, quote_items, items_total, discount, transport_cost, quote_total, attributes,
+	created_at from quotes`;
+
+function toQuote(row: QuoteRow): Quote {
+	const attributes = quoteAttributesSchema.parse(JSON.parse(row.attributes));
+	const validity = { orderId: row.order_id, validUntil: row.valid_until };
+	return {
+		id: row.id,
+		state: getQuoteState(validity, getTodaysDate()),
+		clientId: row.client_id,
+		orderId: row.order_id,
+		client: clientAttributesSchema.parse(JSON.parse(row.client_attributes)),
+		eventDate: row.event_date,
+		validUntil: row.valid_until,
+		rentalDays: row.rental_days,
+		items: orderItemsSchema.parse(JSON.parse(row.quote_items)),
+		itemsTotal: row.items_total,
+		discount: row.discount,
+		transportCost: row.transport_cost,
+		quoteTotal: row.quote_total,
+		address1: attributes.address_1 ?? null,
+		address2: attributes.address_2 ?? null,
+		notes: attributes.notes ?? null,
+		createdAt: row.created_at
+	};
+}
+
+const quoteIdSchema = z.coerce.number().int().positive();
+
+async function findRow(db: D1Database, id: number): Promise<QuoteRow | null> {
+	return db.prepare(`${SELECT_QUOTE} where id = ?`).bind(id).first<QuoteRow>();
+}
+
+/** The quote, with its state as of today in Bogotá, or null when there's no such quote. */
+export async function getQuote(
+	db: D1Database,
+	id: unknown,
+	actor: Actor | null
+): Promise<Quote | null> {
+	requireRole(actor, TAKES_QUOTES);
+	const parsedId = quoteIdSchema.safeParse(id);
+	if (!parsedId.success) {
+		return null;
+	}
+	const row = await findRow(db, parsedId.data);
+	return null === row ? null : toQuote(row);
+}
+
+/** A new quote's «Válida hasta»: today plus `QUOTES_VALIDITY_DAYS`. */
+export async function getNewQuoteValidUntil(db: D1Database, actor: Actor | null): Promise<string> {
+	requireRole(actor, TAKES_QUOTES);
+	const { QUOTES_VALIDITY_DAYS } = await readSettings(db, ['QUOTES_VALIDITY_DAYS']);
+	return addDays(getTodaysDate(), QUOTES_VALIDITY_DAYS);
+}
+
+// A quote can't expire before the day it was made: today for a new one.
+function expiresTooSoon(quote: QuoteInput, createdOn: string): Refusal | null {
+	if (quote.valid_until >= createdOn) {
+		return null;
+	}
+	return refusal('valid_until', 'No puede ser antes del día en que se hizo la cotización');
+}
+
+// Through the schemas, so the JSON always has the same keys in the same order: an edit that
+// changes nothing produces the same text and logs nothing.
+function toColumns(quote: QuoteInput, resolved: { client: ClientAttributes; items: OrderItem[] }) {
+	const { itemsTotal, orderTotal } = totalsOf(quote);
+	const attributes = {
+		address_1: quote.address_1 ?? undefined,
+		address_2: quote.address_2 ?? undefined,
+		notes: quote.notes ?? undefined
+	};
+	return {
+		client_id: quote.client_id,
+		event_date: quote.event_date,
+		valid_until: quote.valid_until,
+		rental_days: quote.rental_days,
+		client_attributes: JSON.stringify(clientAttributesSchema.parse(resolved.client)),
+		quote_items: JSON.stringify(orderItemsSchema.parse(resolved.items)),
+		items_total: itemsTotal,
+		discount: quote.discount,
+		transport_cost: quote.transport_cost,
+		quote_total: orderTotal,
+		attributes: JSON.stringify(quoteAttributesSchema.parse(attributes))
+	} satisfies Columns;
+}
+
+type ResolvedQuote = { columns: Columns; newClient: NewClient | null };
+
+/** The columns to store for `quote`, or why it can't be saved. `current` is the quote being edited. */
+async function resolveColumns(
+	db: D1Database,
+	quote: QuoteInput,
+	current: Quote | null
+): Promise<ResolvedQuote | Refusal> {
+	const client = await resolveClient(db, quote, current);
+	if ('ok' in client) {
+		return client;
+	}
+	const lines = { field: 'quote_items', lines: quote.quote_items, rentalDays: quote.rental_days };
+	const items = await resolveItems(db, lines, current?.items ?? []);
+	if ('ok' in items) {
+		return items;
+	}
+	const columns = toColumns(quote, { client: client.snapshot, items });
+	return { columns, newClient: client.newClient };
+}
+
+async function insertQuote(
+	db: D1Database,
+	actor: Actor,
+	resolved: ResolvedQuote
+): Promise<SaveResult> {
+	const { values, computed, clientStatements } = clientWrite(db, actor, resolved);
+	const statements = auditedInsert(db, {
+		table: 'quotes',
+		entityType: 'QUOTE',
+		actor,
+		values,
+		computed
+	});
+	const results = await db.batch([...clientStatements, ...statements]);
+	return { ok: true, id: results[clientStatements.length].meta.last_row_id };
+}
+
+/** A new quote, on a client picked or a new one, valid from today. */
+export async function createQuote(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<SaveResult> {
+	requireRole(actor, TAKES_QUOTES);
+	const parsed = quoteInputSchema.safeParse(input);
+	if (!parsed.success) {
+		return invalidOrder(parsed.error);
+	}
+	const tooSoon = expiresTooSoon(parsed.data, getTodaysDate());
+	if (null !== tooSoon) {
+		return tooSoon;
+	}
+	const resolved = await resolveColumns(db, parsed.data, null);
+	return 'ok' in resolved ? resolved : insertQuote(db, actor, resolved);
+}
+
+const NOT_FOUND: Refusal = { ok: false, message: 'Esa cotización no existe', errors: {} };
+
+const NOT_EDITABLE: Refusal = {
+	ok: false,
+	message: 'Esta cotización ya se convirtió en pedido: no se puede editar',
+	errors: {}
+};
+
+// `quote_items` and each JSON column are logged whole when anything in them changed.
+async function applyEdit(
+	db: D1Database,
+	actor: Actor,
+	{ row, resolved }: { row: QuoteRow; resolved: ResolvedQuote }
+): Promise<SaveResult> {
+	const { values, computed, clientStatements } = clientWrite(db, actor, resolved);
+	const statements = auditedUpdate(db, {
+		table: 'quotes',
+		entityType: 'QUOTE',
+		actor,
+		id: row.id,
+		current: row,
+		changes: values,
+		computed
+	});
+	if (0 < statements.length) {
+		await db.batch([...clientStatements, ...statements]);
+	}
+	return { ok: true, id: row.id };
+}
+
+const editInputSchema = z.object({ id: quoteIdSchema });
+
+/**
+ * The whole form, valid or expired: editing is how an expired quote is renewed. A converted one is
+ * read-only. Lines already on it keep their frozen name and price.
+ */
+export async function updateQuote(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<SaveResult> {
+	requireRole(actor, TAKES_QUOTES);
+	const parsedId = editInputSchema.safeParse(input);
+	const parsed = quoteInputSchema.safeParse(input);
+	if (!parsedId.success) {
+		return invalidOrder(parsedId.error);
+	}
+	if (!parsed.success) {
+		return invalidOrder(parsed.error);
+	}
+	const row = await findRow(db, parsedId.data.id);
+	if (null === row) {
+		return NOT_FOUND;
+	}
+	if (null !== row.order_id) {
+		return NOT_EDITABLE;
+	}
+	const tooSoon = expiresTooSoon(parsed.data, getInstantDate(row.created_at));
+	if (null !== tooSoon) {
+		return tooSoon;
+	}
+	const resolved = await resolveColumns(db, parsed.data, toQuote(row));
+	return 'ok' in resolved ? resolved : applyEdit(db, actor, { row, resolved });
+}

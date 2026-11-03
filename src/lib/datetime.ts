@@ -40,6 +40,11 @@ export function getTodaysDate(): string {
 	return civilDateFormat.format(new Date());
 }
 
+/** The Bogotá date (YYYY-MM-DD) of a UTC instant (epoch seconds), as a row's `created_at`. */
+export function getInstantDate(epochSeconds: number): string {
+	return civilDateFormat.format(new Date(epochSeconds * 1000));
+}
+
 /** A UTC instant (epoch seconds) formatted in Bogotá time, for display. */
 export function formatInstant(epochSeconds: number): string {
 	return `${formatInstantDate(epochSeconds)}, ${formatInstantTime(epochSeconds)}`;
