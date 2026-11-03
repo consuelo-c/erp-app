@@ -26,6 +26,12 @@ export function formatIdNumber(documentId: string): string {
 	return /^\d+$/.test(documentId) ? formatInteger(Number(documentId)) : documentId;
 }
 
+/** What share of `whole` `part` is, one decimal at most: `10 %`, `9,4 %`. */
+export function formatShare(part: number, whole: number): string {
+	const percentage = (part / whole) * 100;
+	return `${percentage.toFixed(1).replace(/\.0$/, '').replace('.', ',')} %`;
+}
+
 /** Worked minutes as hours with one decimal, a dot as the separator: `8.1 h`. */
 export function formatHours(minutes: number): string {
 	return `${(minutes / 60).toFixed(1)} h`;

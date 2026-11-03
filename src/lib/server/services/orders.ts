@@ -1670,7 +1670,7 @@ export async function getOrderTimeline(
 
 // What an edit logs, read back through each column's schema. The client shows as its name, and the
 // totals the lines and the discount work out aren't changes of their own: z.object drops them.
-function jsonColumn<T extends z.ZodType>(schema: T) {
+export function jsonColumn<T extends z.ZodType>(schema: T) {
 	return z
 		.string()
 		.transform((json): unknown => JSON.parse(json))

@@ -9,6 +9,9 @@ import {
 	createQuote,
 	getNewQuoteValidUntil,
 	getQuote,
+	getQuoteChange,
+	getQuoteDetail,
+	getQuoteTimeline,
 	listQuotes,
 	QUOTES_PAGE_SIZE,
 	quoteAttributesSchema,
@@ -485,5 +488,72 @@ test('WAREHOUSE and DRIVER get a 403 on the list', async () => {
 	for (const actor of [warehouse, driver]) {
 		const refusal = await listQuotes(db, {}, actor).catch((caught) => caught);
 		expect(isHttpError(refusal, 403)).toBe(true);
+	}
+});
+
+test('the detail names the lines whose product was deactivated since: they stay on the quote', async () => {
+	const id = await create();
+	expect((await getQuoteDetail(db, id, sales))?.inactiveProductIds).toEqual([]);
+	database.exec('update products set active = 0 where id = 2');
+	const quote = await getQuoteDetail(db, id, sales);
+	expect([quote?.inactiveProductIds, quote?.items.length]).toEqual([[2], 3]);
+	expect(await getQuoteDetail(db, 99, sales)).toBeNull();
+});
+
+test('the timeline lists created, edited and converted, newest first, without before or after', async () => {
+	const id = await create();
+	await updateQuote(db, { ...quote1043, id, discount: 0 }, sales);
+	database.exec(
+		`insert into events (entity_type, entity_id, action, actor_username, actor_kind, after, created_at)
+		values ('QUOTE', ${id}, 'CONVERTED', 'gerente', 'user', '{"order_id":1060}', 9999999999)`
+	);
+	const entries = await getQuoteTimeline(db, id, sales);
+	expect(
+		entries?.map(({ action, orderId, actorUsername }) => [action, orderId, actorUsername])
+	).toEqual([
+		['CONVERTED', 1060, 'gerente'],
+		['EDITED', null, 'ventas'],
+		['CREATED', null, 'ventas']
+	]);
+	expect(Object.keys(entries?.[0] ?? {}).sort()).toEqual([
+		'action',
+		'actorUsername',
+		'createdAt',
+		'id',
+		'orderId'
+	]);
+	expect(await getQuoteTimeline(db, 99, sales)).toBeNull();
+});
+
+test('an edit opens into its changes: Spanish labels, «Sin fecha», «Por acordar», lines per product', async () => {
+	const id = await create();
+	const items = [quote1043.quote_items[0], { ...quote1043.quote_items[1], qty: 15 }];
+	const edit = { ...quote1043, id, event_date: '', transport_cost: null, quote_items: items };
+	await updateQuote(db, { ...edit, notes: 'Llamar antes' }, sales);
+	const [edited] = database.prepare("select id from events where action = 'EDITED'").all();
+	const changes = await getQuoteChange(db, { quote: id, event: edited.id }, sales);
+	expect(changes).toEqual([
+		{ label: 'Fecha del evento', change: '12 dic 2026 → Sin fecha' },
+		{ label: 'Mesa redonda 10 puestos', change: 'Cantidad 12 → 15' },
+		{ label: 'Copa para vino tinto', change: 'Quitada: 120 × $900' },
+		{ label: 'Transporte', change: '$180.000 → Por acordar' },
+		{ label: 'Notas', change: 'Precios incluyen montaje y desmontaje → Llamar antes' }
+	]);
+	const [created] = database.prepare("select id from events where action = 'CREATED'").all();
+	expect(await getQuoteChange(db, { quote: id, event: created.id }, sales)).toBeNull();
+	expect(await getQuoteChange(db, { quote: 99, event: edited.id }, sales)).toBeNull();
+});
+
+test('WAREHOUSE and DRIVER get a 403 on the detail, the timeline and an edit’s changes', async () => {
+	const id = await create();
+	for (const actor of [warehouse, driver]) {
+		const attempts = [
+			getQuoteDetail(db, id, actor),
+			getQuoteTimeline(db, id, actor),
+			getQuoteChange(db, { quote: id, event: 1 }, actor)
+		];
+		for (const attempt of attempts) {
+			expect(isHttpError(await attempt.catch((caught) => caught), 403)).toBe(true);
+		}
 	}
 });

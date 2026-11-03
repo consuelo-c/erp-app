@@ -5,19 +5,31 @@ import { load as loadList } from './+page.server';
 import { load as loadNew } from './nueva/+page.server';
 import { load as loadDetail } from './[id]/+page.server';
 import { load as loadEdit } from './[id]/editar/+page.server';
+import { load as loadTimeline } from './[id]/historial/+page.server';
+import { GET as getChange } from './[id]/historial/[evento]/+server';
+import { load as loadPrintout } from './[id]/impresion/+page.server';
 
 test('WAREHOUSE and DRIVER get the no-permission screen on every route under /cotizaciones', async () => {
 	for (const role of ['WAREHOUSE', 'DRIVER'] satisfies Role[]) {
 		const user: Actor = { username: 'bodega', employeeId: null, roles: [role], kind: 'user' };
 		const event = {
 			locals: { user },
-			params: { id: '1' },
+			params: { id: '1', evento: '1' },
 			url: new URL('https://erp.test/cotizaciones'),
 			platform: undefined
 		};
-		for (const load of [loadList, loadNew, loadDetail, loadEdit]) {
+		const handlers = [
+			loadList,
+			loadNew,
+			loadDetail,
+			loadEdit,
+			loadTimeline,
+			loadPrintout,
+			getChange
+		];
+		for (const handler of handlers) {
 			await expect(
-				(async () => (load as (event: never) => unknown)(event as never))()
+				(async () => (handler as (event: never) => unknown)(event as never))()
 			).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
 		}
 	}

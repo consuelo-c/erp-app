@@ -5,6 +5,7 @@ import {
 	formatPesos,
 	formatPesosInWords,
 	formatReceiptNumber,
+	formatShare,
 	formatSignedPesos
 } from './format';
 
@@ -46,4 +47,10 @@ test.each([
 	[-417954, 'Cuatrocientos diecisiete mil novecientos cincuenta y cuatro pesos m/cte']
 ])('%i pesos read «%s»', (pesos, words) => {
 	expect(formatPesosInWords(pesos)).toBe(words);
+});
+
+test('formatShare: one decimal with a comma, none when it is whole', () => {
+	expect(formatShare(122000, 1220000)).toBe('10 %');
+	expect(formatShare(104000, 1104000)).toBe('9,4 %');
+	expect(formatShare(1, 3)).toBe('33,3 %');
 });
