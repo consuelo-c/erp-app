@@ -17,7 +17,7 @@ import {
 	type PricedLine
 } from '$lib/orders';
 import { ROLES, requireRole, type Actor } from '../actor';
-import { auditedInsert, auditedUpdate, eventFieldsSchema } from '../audit';
+import { auditedInsert, auditedUpdate, eventFieldsSchema, type Row } from '../audit';
 import { describeOrderEdit, type OrderChange } from '../order-changes';
 import { filterTimelineForActor } from '../timeline';
 import {
@@ -136,11 +136,11 @@ export type PickupAttributes = z.infer<typeof pickupAttributesSchema>;
 export type OrderItem = z.infer<typeof orderItemSchema>;
 export type OrderAttributes = z.infer<typeof orderAttributesSchema>;
 
-function pesosInputSchema(message: string) {
+export function pesosInputSchema(message: string) {
 	return z.number(message).int(message).min(0, 'No puede ser negativo').default(0);
 }
 
-const blankable = z
+export const blankable = z
 	.string()
 	.trim()
 	.nullish()
@@ -174,27 +174,35 @@ const lineInputSchema = z.strictObject({
 	unit_price: z.number('Escribe el precio').int().min(0, 'El precio no puede ser negativo')
 });
 
+/** The lines as typed: the service fills each one's frozen name and list price. */
+export const linesInputSchema = z
+	.array(lineInputSchema)
+	.min(1, AT_LEAST_ONE_LINE)
+	.refine(hasDistinctProducts, ONE_LINE_PER_PRODUCT);
+
+/** The «Cliente» fields an order and a quote share. */
+export const clientInputShape = {
+	// Null is «Cliente nuevo»: a contact made from the phone and the name typed.
+	client_id: z.number('Escoge el cliente').int().positive('Escoge el cliente').nullable(),
+	// The order's own snapshot of the name: it may say more than the contact does.
+	client_name: z
+		.string('Escribe el nombre del cliente')
+		.trim()
+		.min(1, 'Escribe el nombre del cliente'),
+	client_phone: z.string().optional()
+};
+
 // Any total sent along is ignored: the service works them out.
 const orderInputSchema = z
 	.object({
-		// Null is «Cliente nuevo»: a contact made from the phone and the name typed.
-		client_id: z.number('Escoge el cliente').int().positive('Escoge el cliente').nullable(),
-		// The order's own snapshot of the name: it may say more than the contact does.
-		client_name: z
-			.string('Escribe el nombre del cliente')
-			.trim()
-			.min(1, 'Escribe el nombre del cliente'),
-		client_phone: z.string().optional(),
+		...clientInputShape,
 		event_date: z.iso.date('Escoge la fecha del evento'),
 		delivery_date: z.iso.date('Escoge la fecha de entrega'),
 		pickup_date: z.iso.date('Escoge la fecha de recogida'),
 		rental_days: z.number('Escribe los días cobrados').int().min(1, 'Se cobra al menos un día'),
 		delivery_attributes: tripInputSchema(DELIVERY_METHODS, 'Escoge cómo se entrega'),
 		pickup_attributes: tripInputSchema(RETURN_METHODS, 'Escoge cómo se recoge'),
-		order_items: z
-			.array(lineInputSchema)
-			.min(1, AT_LEAST_ONE_LINE)
-			.refine(hasDistinctProducts, ONE_LINE_PER_PRODUCT),
+		order_items: linesInputSchema,
 		discount: pesosInputSchema('Escribe el descuento en pesos'),
 		transport_cost: pesosInputSchema('Escribe el transporte en pesos'),
 		deposit_amount: pesosInputSchema('Escribe el depósito en pesos'),
@@ -259,7 +267,7 @@ export type Order = {
 export type SaveResult =
 	{ ok: true; id: number } | { ok: false; message: string; errors: Record<string, string> };
 
-type Refusal = Extract<SaveResult, { ok: false }>;
+export type Refusal = Extract<SaveResult, { ok: false }>;
 
 type Columns = {
 	client_id: number | null; // null until «Cliente nuevo»'s contact exists, in the same batch
@@ -293,12 +301,12 @@ const SELECT_ORDER = `select id, status, has_incident, client_id, event_date, de
 const CHECK_FIELDS = 'Revisa los campos marcados en rojo antes de guardar.';
 const NOT_A_CARRIER = 'Escoge un transportador de la lista';
 
-function refusal(field: string, message: string): Refusal {
+export function refusal(field: string, message: string): Refusal {
 	return { ok: false, message: CHECK_FIELDS, errors: { [field]: message } };
 }
 
 /** Each field's message under its whole path, as `order_items.2.qty` or `delivery_attributes.carrier_id`. */
-function invalidOrder(zodError: z.ZodError): Refusal {
+export function invalidOrder(zodError: z.ZodError): Refusal {
 	const errors = Object.fromEntries(
 		zodError.issues.map((issue) => [issue.path.join('.'), issue.message])
 	);
@@ -336,8 +344,10 @@ async function findRow(db: D1Database, id: number): Promise<OrderRow | null> {
 
 type ResolvedClient = { snapshot: ClientAttributes; newClient: NewClient | null };
 
+type ClientInput = Pick<OrderInput, 'client_id' | 'client_name' | 'client_phone'>;
+
 // «Cliente nuevo» is made from the phone typed, normalized, and the name typed.
-function newClient(order: OrderInput): ResolvedClient | Refusal {
+function newClient(order: ClientInput): ResolvedClient | Refusal {
 	const phone = normalizePhone(order.client_phone ?? '');
 	if (null === phone) {
 		return refusal('client_phone', INVALID_PHONE);
@@ -348,10 +358,11 @@ function newClient(order: OrderInput): ResolvedClient | Refusal {
 
 // The order keeps the name typed and the phone it was taken with: renaming the contact, or
 // changing its phone, later changes nothing. No existing contact is ever written from here.
-async function resolveClient(
+// A quote takes its client the same way.
+export async function resolveClient(
 	db: D1Database,
-	order: OrderInput,
-	current: Order | null
+	order: ClientInput,
+	current: { clientId: number; client: ClientAttributes } | null
 ): Promise<ResolvedClient | Refusal> {
 	if (null === order.client_id) {
 		return newClient(order);
@@ -434,18 +445,21 @@ async function freezeLines(
 	return new Map([...frozen, ...(await readCatalog(db, added))]);
 }
 
-async function resolveItems(
+type LinesToResolve = { field: string; lines: LineInput[]; rentalDays: number };
+
+/** The lines to store, frozen, or why not; `field` names them in the refusal. A quote's too. */
+export async function resolveItems(
 	db: D1Database,
-	order: OrderInput,
+	{ field, lines, rentalDays }: LinesToResolve,
 	currentItems: OrderItem[]
 ): Promise<OrderItem[] | Refusal> {
-	const frozen = await freezeLines(db, order.order_items, currentItems);
-	const missing = order.order_items.findIndex((line) => !frozen.has(line.product_id));
+	const frozen = await freezeLines(db, lines, currentItems);
+	const missing = lines.findIndex((line) => !frozen.has(line.product_id));
 	if (-1 !== missing) {
-		return refusal(`order_items.${missing}.product_id`, 'Ese producto no existe o está inactivo');
+		return refusal(`${field}.${missing}.product_id`, 'Ese producto no existe o está inactivo');
 	}
-	const { lineTotals } = totalsOf(order);
-	return order.order_items.map((line, index) => {
+	const { lineTotals } = calculateOrderTotals({ lines, rentalDays, discount: 0, transportCost: 0 });
+	return lines.map((line, index) => {
 		const { name, list_price } = frozen.get(line.product_id) as FrozenLine;
 		const { product_id, qty, unit_price } = line;
 		return { product_id, name, qty, list_price, unit_price, line_total: lineTotals[index] };
@@ -519,7 +533,8 @@ async function resolveColumns(
 	if ('ok' in trips) {
 		return trips;
 	}
-	const items = await resolveItems(db, order, current?.items ?? []);
+	const lines = { field: 'order_items', lines: order.order_items, rentalDays: order.rental_days };
+	const items = await resolveItems(db, lines, current?.items ?? []);
 	if ('ok' in items) {
 		return items;
 	}
@@ -539,8 +554,12 @@ export async function getOrder(
 }
 
 // «Cliente nuevo»'s contact goes first in the order's batch, and the order finds its id by the
-// new document: never `last_insert_rowid()`, which its own event already relies on.
-function clientWrite(db: D1Database, actor: Actor, { columns, newClient }: ResolvedOrder) {
+// new document: never `last_insert_rowid()`, which its own event already relies on. A quote's too.
+export function clientWrite<Values extends Row & { client_id: number | null }>(
+	db: D1Database,
+	actor: Actor,
+	{ columns, newClient }: { columns: Values; newClient: NewClient | null }
+) {
 	const { client_id: clientId, ...values } = columns;
 	if (null === newClient) {
 		return { values: { ...values, client_id: clientId }, computed: {}, clientStatements: [] };

@@ -14,6 +14,7 @@ import {
 	formatWeekday,
 	formatWeekRange,
 	typedClockTime,
+	getInstantDate,
 	getTodaysDate,
 	getWeekStart
 } from './datetime';
@@ -113,4 +114,9 @@ test('an optional typed time: HH:MM, null when the hour is blank, the text when 
 	expect(typedClockTime({ hour: ' ', minute: '15', period: 'pm' })).toBeNull();
 	expect(typedClockTime({ hour: '13', minute: '00', period: 'pm' })).toBe('13:00');
 	expect(typedClockTime({ hour: '2', minute: '75', period: 'pm' })).toBe('2:75');
+});
+
+test("getInstantDate gives an instant's Bogotá day: 11:30 p.m. on the 1st is the 2nd in UTC", () => {
+	expect(getInstantDate(Date.UTC(2026, 11, 2, 4, 30) / 1000)).toBe('2026-12-01');
+	expect(getInstantDate(Date.UTC(2026, 11, 2, 5, 0) / 1000)).toBe('2026-12-02');
 });
