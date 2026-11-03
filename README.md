@@ -200,6 +200,20 @@ openssl rand -base64 32 | npx wrangler secret put PASSWORD_PEPPER
 > 1. Ejecutando `npx wrangler secret put ADMIN_PASSWORD`
 > 1. Usando el [dashboard](https://dash.cloudflare.com/d3898719718f3c05aa6c5bb85a15ea95/workers/services/view/consueloc-erp/production/settings) de Cloudflare
 
+## Importar el catálogo desde WooCommerce
+
+Se creó un script que toma el CSV de WooCommerce y lo convierte en un archivo `.sql` que luego puede importarse en D1 usando `wrangler`. Para exportar, en WordPress, _Productos → Exportar_ (todas las columnas) genera un CSV. Luego en la terminal se importa:
+
+```bash
+node scripts/convert-wc-catalog.js ~/Downloads/wc-product-export-….csv products-import.sql
+npx wrangler d1 execute consueloc-erp-db --local --file products-import.sql   # Desarrollo
+npx wrangler d1 execute consueloc-erp-db --remote --file products-import.sql  # Producción
+```
+
+- Solo entran los productos simples que tienen precio y categoría de alquiler. Las variaciones, el Catering, los productos sin precio y los nombres repetidos se omiten, y el script los lista.
+- Los productos no publicados entran inactivos. Todos entran con 0 unidades, que se completan en _Productos_.
+- Se puede ejecutar varias veces: un producto cuyo nombre ya existe (sin importar mayúsculas) se omite.
+
 <!-- vim: spelllang=es
 n,
 -->
