@@ -9,13 +9,15 @@ import { addDays, getInstantDate, getTodaysDate } from '$lib/datetime';
 import { calculateOrderTotals, type OrderTotals, type PricedLine } from '$lib/orders';
 import { getQuoteState, QUOTE_STATE_SQL, QUOTE_STATES, type QuoteState } from '$lib/quotes';
 import { requireRole, type Actor } from '../actor';
-import { auditedInsert, auditedUpdate } from '../audit';
+import { auditedInsert, auditedUpdate, eventFieldsSchema } from '../audit';
+import { describeQuoteEdit, type OrderChange } from '../order-changes';
 import {
 	blankable,
 	clientAttributesSchema,
 	clientInputShape,
 	clientWrite,
 	invalidOrder,
+	jsonColumn,
 	linesInputSchema,
 	orderItemsSchema,
 	pesosInputSchema,
@@ -466,4 +468,99 @@ export async function listQuotes(
 		.all<SummaryRow>();
 	const quotes = results.map((row) => toSummary(row, today));
 	return { quotes, total, pageCount, filters, hasQuotes };
+}
+
+/** The quote as its detail reads it: which of its lines hold a product deactivated since. */
+export type QuoteDetail = Quote & { inactiveProductIds: number[] };
+
+export async function getQuoteDetail(
+	db: D1Database,
+	id: unknown,
+	actor: Actor | null
+): Promise<QuoteDetail | null> {
+	const quote = await getQuote(db, id, actor);
+	if (null === quote) {
+		return null;
+	}
+	const { results } = await db
+		.prepare('select id from products where active = 0 and id in (select value from json_each(?))')
+		.bind(JSON.stringify(quote.items.map((item) => item.product_id)))
+		.all<{ id: number }>();
+	return { ...quote, inactiveProductIds: results.map((row) => row.id) };
+}
+
+/** One row of a quote's timeline. The edit's fields stay in `events` until it's expanded. */
+export type QuoteTimelineEntry = {
+	id: number;
+	action: 'CREATED' | 'EDITED' | 'CONVERTED';
+	/** The order a `CONVERTED` created. */
+	orderId: number | null;
+	actorUsername: string;
+	createdAt: number;
+};
+
+/** The quote's events, newest first, every one for every role that reaches it. Null: no such quote. */
+export async function getQuoteTimeline(
+	db: D1Database,
+	id: unknown,
+	actor: Actor | null
+): Promise<QuoteTimelineEntry[] | null> {
+	requireRole(actor, TAKES_QUOTES);
+	const parsedId = quoteIdSchema.safeParse(id);
+	if (!parsedId.success || null === (await findRow(db, parsedId.data))) {
+		return null;
+	}
+	const { results } = await db
+		.prepare(
+			`select id, action, json_extract(after, '$.order_id') as orderId,
+			actor_username as actorUsername, created_at as createdAt from events
+			where entity_type = 'QUOTE' and entity_id = ? order by created_at desc, id desc`
+		)
+		.bind(parsedId.data)
+		.all<QuoteTimelineEntry>();
+	return results;
+}
+
+// What an edit logs, read back through each column's schema. The client shows as its name, and the
+// totals the lines and the discount work out aren't changes of their own: z.object drops them.
+const editedFieldsSchema = z.object({
+	event_date: z.iso.date().nullable().optional(),
+	valid_until: z.iso.date().optional(),
+	rental_days: z.number().int().optional(),
+	discount: z.number().int().optional(),
+	transport_cost: z.number().int().nullable().optional(),
+	client_attributes: jsonColumn(clientAttributesSchema),
+	quote_items: jsonColumn(orderItemsSchema),
+	attributes: jsonColumn(quoteAttributesSchema)
+});
+
+export type QuoteEditedFields = z.infer<typeof editedFieldsSchema>;
+
+function toEditedFields(json: string | null): QuoteEditedFields {
+	return editedFieldsSchema.parse(eventFieldsSchema.parse(JSON.parse(json ?? '{}')));
+}
+
+const changeInputSchema = z.object({ quote: quoteIdSchema, event: quoteIdSchema });
+
+/** One edit's diff, fetched when its timeline row opens. Null for an event that isn't an edit of that quote. */
+export async function getQuoteChange(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<OrderChange[] | null> {
+	requireRole(actor, TAKES_QUOTES);
+	const parsed = changeInputSchema.safeParse(input);
+	if (!parsed.success) {
+		return null;
+	}
+	const row = await db
+		.prepare(
+			`select before, after from events
+			where id = ? and entity_type = 'QUOTE' and entity_id = ? and action = 'EDITED'`
+		)
+		.bind(parsed.data.event, parsed.data.quote)
+		.first<{ before: string | null; after: string | null }>();
+	return null === row
+		? null
+		: describeQuoteEdit(toEditedFields(row.before), toEditedFields(row.after));
 }

@@ -1,5 +1,6 @@
-// An order edit as its timeline reads it: each changed field by its Spanish label, the old and new
-// value formatted, the lines per product. Pure: the caller reads the event back through its schemas.
+// An order or a quote edit as its timeline reads it: each changed field by its Spanish label, the
+// old and new value formatted, the lines per product. Pure: the caller reads the event back through
+// its schemas.
 
 import { formatCivilDate, formatClockTime } from '$lib/datetime';
 import { formatInteger, formatPesos } from '$lib/format';
@@ -14,6 +15,7 @@ import type {
 	OrderItem,
 	PickupAttributes
 } from './services/orders';
+import type { QuoteAttributes, QuoteEditedFields } from './services/quotes';
 
 /** One row of an edit's diff: «Transporte», «$150.000 → $180.000». */
 export type OrderChange = { label: string; change: string };
@@ -129,5 +131,53 @@ export function describeOrderEdit(before: EditedFields, after: EditedFields): Or
 		...lineChanges(before.order_items, after.order_items),
 		...changesOf(MONEY_FIELDS, before, after),
 		...columnChanges(ATTRIBUTE_FIELDS, before.attributes, after.attributes)
+	];
+}
+
+type QuoteSchedule = Pick<QuoteEditedFields, 'event_date' | 'valid_until' | 'rental_days'>;
+
+// A quote's empty event date and transport say what they mean, not «—».
+const QUOTE_SCHEDULE_FIELDS: Fields<QuoteSchedule> = {
+	event_date: {
+		label: 'Fecha del evento',
+		format: (value) =>
+			null === value || undefined === value ? 'Sin fecha' : formatCivilDate(value)
+	},
+	valid_until: { label: 'Válida hasta', format: date },
+	rental_days: { label: 'Días cobrados', format: orBlank(formatInteger) }
+};
+
+type QuoteMoney = Pick<QuoteEditedFields, 'discount' | 'transport_cost'>;
+
+const QUOTE_MONEY_FIELDS: Fields<QuoteMoney> = {
+	discount: { label: 'Descuento', format: pesos },
+	transport_cost: {
+		label: 'Transporte',
+		format: (value) => (null === value || undefined === value ? 'Por acordar' : formatPesos(value))
+	}
+};
+
+// The place goes with the dates, the notes last, as on the form.
+const QUOTE_PLACE_FIELDS: Fields<Pick<QuoteAttributes, 'address_1' | 'address_2'>> = {
+	address_1: { label: 'Lugar del evento', format: text },
+	address_2: { label: 'Lugar del evento, segunda línea', format: text }
+};
+
+const QUOTE_NOTES_FIELDS: Fields<Pick<QuoteAttributes, 'notes'>> = {
+	notes: { label: 'Notas', format: text }
+};
+
+/** A quote's `EDITED` event's diff, in its form's order: client, dates, place, lines, money, notes. */
+export function describeQuoteEdit(
+	before: QuoteEditedFields,
+	after: QuoteEditedFields
+): OrderChange[] {
+	return [
+		...columnChanges(CLIENT_FIELDS, before.client_attributes, after.client_attributes),
+		...changesOf(QUOTE_SCHEDULE_FIELDS, before, after),
+		...columnChanges(QUOTE_PLACE_FIELDS, before.attributes, after.attributes),
+		...lineChanges(before.quote_items, after.quote_items),
+		...changesOf(QUOTE_MONEY_FIELDS, before, after),
+		...columnChanges(QUOTE_NOTES_FIELDS, before.attributes, after.attributes)
 	];
 }
