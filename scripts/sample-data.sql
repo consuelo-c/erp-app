@@ -1,10 +1,11 @@
--- Sample data, development only: the Design Brief's products, a few contacts, five employees, a login
--- per role on four of them, their punches from 10 to 18 October 2026, forty-five orders between 1 and
--- 18 October (the brief's three among them), three counts, and the orders' and standalone cash movements.
+-- Sample data, development only: the Design Brief's products and a retired one, a few contacts, five
+-- employees, a login per role on four of them, their punches from 10 to 18 October 2026, forty-five
+-- orders between 1 and 18 October (the brief's three among them), three counts, the orders' and
+-- standalone cash movements, and three quotes.
 -- `npm run db:seed` loads it into the local D1 after settings-defaults.sql; deploy.yml never applies
 -- it. Idempotent: a product whose name exists, a contact whose document exists, an employee whose
 -- contact exists, a login whose username exists, a punch whose employee and day exist, or an order,
--- count or movement whose id exists, is skipped, so a password admin set survives.
+-- count, movement or quote whose id exists, is skipped, so a password admin set survives.
 -- Writes no events row.
 -- Every JSON must pass its Zod schema in the services; sample-data.test.ts checks it.
 INSERT INTO products (name, category, variant_group, variant_name, rental_price, total_quantity, created_at, created_by, updated_at, updated_by)
@@ -24,6 +25,11 @@ FROM (VALUES
 	('Mantel cuadrado 50×50 — Azul', 'LINENS', 'Mantel cuadrado 50×50', 'Azul', 8000, 30)
 ) AS sample
 WHERE NOT EXISTS (SELECT 1 FROM products WHERE products.name = sample.column1);
+
+-- Retired, and on no order: quote #2 holds it, so «Duplicar» leaves it out.
+INSERT INTO products (name, category, rental_price, total_quantity, active, created_at, created_by, updated_at, updated_by)
+SELECT 'Silla Rimax', 'CHAIRS_TABLES', 1500, 300, 0, unixepoch(), 'system', unixepoch(), 'system'
+WHERE NOT EXISTS (SELECT 1 FROM products WHERE name = 'Silla Rimax');
 
 -- A client who gave no document gets a fixed automatic one, `@` and 8 Crockford base32 symbols, as
 -- the app would make up; fixed so a second run finds it.
@@ -46,7 +52,8 @@ FROM (VALUES
 	('573137724518', 'Sebastián Mejía', '1017234590', '["WAITER"]', '{"bank_account":"Nequi 313 772 4518","notes":"Trae su propio uniforme"}'),
 	('573158841203', 'Valentina Arango', '1037619844', '["WEDDING_PLANNER"]', '{"email":"valentina@arangoeventos.co"}'),
 	('573176630492', 'Mateo Londoño', '1020456781', '["BARTENDER","BARISTA"]', '{"notes":"Coctelería y estación de café"}'),
-	('573189952074', 'Natalia Cardona', '43987125', '["BARISTA"]', '{}')
+	('573189952074', 'Natalia Cardona', '43987125', '["BARISTA"]', '{}'),
+	('576045765100', 'Postobón S.A.', '8909039395', '[]', '{}')
 ) AS sample
 WHERE true -- SQLite reads ON CONFLICT after a SELECT only past a WHERE
 ON CONFLICT (document_id) DO NOTHING;
@@ -393,3 +400,51 @@ FROM (VALUES
 ) AS sample
 WHERE NOT EXISTS (SELECT 1 FROM cash_movements WHERE cash_movements.id = sample.column1)
 ORDER BY column1;
+
+-- Postobón's #1, open until 31 December 2027, to convert and print; its #2, expired, with no event
+-- date, transport «por acordar», a negotiated table and the retired «Silla Rimax», for the conversion
+-- warning, the empty transport on the order form and «Duplicar» repricing and leaving a product out;
+-- and #3, #1043's lines and terms, converted into it. Each line is `[name, qty]` priced from the
+-- catalog with the formula, or `[name, qty, unit_price]` when the price was negotiated. created_at
+-- is fixed, not unixepoch(): it's the date the quote prints, and «Válida hasta» counts from it.
+WITH sample (id, document_id, order_id, event_date, valid_until, rental_days, discount, transport_cost, lines, attributes, created_at) AS (VALUES
+	(1, '8909039395', NULL, '2026-12-12', '2027-12-31', 1, 122000, 250000,
+		'[["Silla Tiffany dorada",200],["Mesa redonda 10 puestos",20],["Mantel blanco 3×3",20],["Copa para vino tinto",200],["Samovar rectangular",4]]',
+		'{"address_1":"Hacienda Fizebad, km 38 vía Las Palmas","address_2":"Salón principal","notes":"Montaje desde las 7:00 a.m. Ingreso de vehículos por la portería 2."}',
+		'2026-10-14 15:00:00'),
+	(2, '8909039395', NULL, NULL, '2026-10-10', 2, 0, NULL,
+		'[["Silla Rimax",150],["Mesa redonda 10 puestos",15,11000],["Plato pando 26cm",150],["Tenedor de mesa",150]]',
+		'{"notes":"Llevar a la portería 3; preguntar por Juliana Ríos."}',
+		'2026-09-10 14:00:00'),
+	(3, '1036452118', 1043, '2026-10-17', '2026-10-15', 2, 104000, 180000,
+		'[["Silla Tiffany dorada",120],["Mesa redonda 10 puestos",12],["Copa para vino tinto",120]]',
+		'{"address_1":"Cra 43A #18-95, El Poblado","address_2":"Salón Social Torre Verde, piso 2"}',
+		'2026-09-15 21:00:00')
+),
+priced AS (
+	SELECT sample.*, (
+		SELECT json_group_array(json(line)) FROM (
+			SELECT json_object('product_id', products.id, 'name', products.name, 'qty', line.value ->> 1,
+				'list_price', products.rental_price, 'unit_price', coalesce(line.value ->> 2, products.rental_price),
+				'line_total', (line.value ->> 1) * coalesce(line.value ->> 2, products.rental_price) * sample.rental_days) AS line
+			FROM json_each(sample.lines) AS line JOIN products ON products.name = line.value ->> 0
+			ORDER BY line.key
+		)
+	) AS quote_items
+	FROM sample
+),
+totalled AS (
+	SELECT priced.*, (SELECT sum(value ->> 'line_total') FROM json_each(quote_items)) AS items_total
+	FROM priced
+)
+INSERT INTO quotes (id, client_id, order_id, event_date, valid_until, rental_days, client_attributes, quote_items, items_total, discount, transport_cost, quote_total, attributes, created_at, created_by, updated_at, updated_by)
+SELECT
+	totalled.id, contacts.id, totalled.order_id, totalled.event_date, totalled.valid_until, totalled.rental_days,
+	json_object('name', contacts.full_name, 'phone', contacts.phone),
+	totalled.quote_items, totalled.items_total, totalled.discount, totalled.transport_cost,
+	totalled.items_total - totalled.discount + coalesce(totalled.transport_cost, 0), totalled.attributes,
+	unixepoch(totalled.created_at), 'system', unixepoch(totalled.created_at), 'system'
+FROM totalled
+JOIN contacts ON contacts.document_id = totalled.document_id
+WHERE true -- SQLite reads ON CONFLICT after a SELECT only past a WHERE
+ON CONFLICT DO NOTHING;

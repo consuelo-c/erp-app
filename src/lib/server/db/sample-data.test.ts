@@ -18,6 +18,7 @@ import {
 	getOrderDetail,
 	pickupAttributesSchema
 } from '../services/orders';
+import { quoteAttributesSchema } from '../services/quotes';
 
 const sampleData = readFileSync('scripts/sample-data.sql', 'utf8');
 const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
@@ -39,9 +40,15 @@ function readAll(table: string) {
 	return database.prepare(`select * from ${table} order by id`).all();
 }
 
-test("loads the Design Brief's eight products and the four colors of one variant group", () => {
+test("loads the Design Brief's eight products, the four colors of one variant group and a retired chair", () => {
 	const products = readAll('products');
-	expect(products).toHaveLength(12);
+	expect(products).toHaveLength(13);
+	const retired = products.filter((product) => 0 === product.active);
+	expect(retired.map((product) => product.name)).toEqual(['Silla Rimax']);
+	const onOrders = database
+		.prepare("select 1 from orders, json_each(order_items) where value ->> 'name' = 'Silla Rimax'")
+		.all();
+	expect(onOrders).toEqual([]);
 	const variants = products.filter((product) => 'Mantel cuadrado 50×50' === product.variant_group);
 	expect(variants.map((variant) => [variant.variant_name, variant.rental_price])).toEqual([
 		['Dorado', 9500],
@@ -74,7 +81,8 @@ test('loads clients, two transporters, a decorator, one of each newer service an
 		['Sebastián Mejía', '573137724518', '["WAITER"]'],
 		['Valentina Arango', '573158841203', '["WEDDING_PLANNER"]'],
 		['Mateo Londoño', '573176630492', '["BARTENDER","BARISTA"]'],
-		['Natalia Cardona', '573189952074', '["BARISTA"]']
+		['Natalia Cardona', '573189952074', '["BARISTA"]'],
+		['Postobón S.A.', '576045765100', '[]']
 	]);
 	for (const contact of contacts) {
 		expect(servicesSchema.safeParse(JSON.parse(String(contact.services))).success).toBe(true);
@@ -95,7 +103,8 @@ test('a second run duplicates nothing and keeps an edit', () => {
 		readAll('employees'),
 		readAll('users'),
 		readAll('timesheets'),
-		readAll('orders')
+		readAll('orders'),
+		readAll('quotes')
 	];
 	const before = tables();
 	database.exec(sampleData);
@@ -136,7 +145,8 @@ test('every row is created by system and writes no events', () => {
 		'timesheets',
 		'orders',
 		'inventory_counts',
-		'cash_movements'
+		'cash_movements',
+		'quotes'
 	];
 	for (const row of tables.flatMap(readAll)) {
 		expect([row.created_by, row.updated_by]).toEqual(['system', 'system']);
@@ -365,4 +375,49 @@ test('every movement passes its Zod schema, each sign numbered 1, 2, 3… with o
 	expect([original?.concept, original?.amount]).toEqual([offset?.concept, -Number(offset?.amount)]);
 	const carrier = movements.find((movement) => 'CARRIER_PAYMENT' === movement.concept);
 	expect(carrier?.entity_id).toBe(1051);
+});
+
+function parseQuote(quote: Record<string, unknown>) {
+	return {
+		client: clientAttributesSchema.parse(JSON.parse(String(quote.client_attributes))),
+		items: orderItemsSchema.parse(JSON.parse(String(quote.quote_items))),
+		attributes: quoteAttributesSchema.parse(JSON.parse(String(quote.attributes)))
+	};
+}
+
+test('every quote passes the Zod schemas and follows the totals formula, «por acordar» as 0', () => {
+	for (const quote of readAll('quotes')) {
+		const { items } = parseQuote(quote);
+		const totals = calculateOrderTotals({
+			lines: items,
+			rentalDays: Number(quote.rental_days),
+			discount: Number(quote.discount),
+			transportCost: Number(quote.transport_cost ?? 0)
+		});
+		expect(items.map((item) => item.line_total)).toEqual(totals.lineTotals);
+		expect([quote.items_total, quote.quote_total]).toEqual([totals.itemsTotal, totals.orderTotal]);
+	}
+});
+
+test("loads Postobón's open #1 and expired #2, and #3 converted into #1043 with its lines", () => {
+	const [first, second, third] = readAll('quotes');
+	const postobon = database
+		.prepare("select id, document_id from contacts where full_name = 'Postobón S.A.'")
+		.get();
+	expect(isAutoDocument(String(postobon?.document_id))).toBe(false);
+	expect([first.client_id, second.client_id]).toEqual([postobon?.id, postobon?.id]);
+	expect(first).toMatchObject({
+		order_id: null,
+		valid_until: '2027-12-31',
+		event_date: '2026-12-12'
+	});
+	expect(parseQuote(first).attributes.address_1).toBeDefined();
+	expect(second).toMatchObject({ order_id: null, valid_until: '2026-10-10', event_date: null });
+	expect(second.transport_cost).toBeNull();
+	const secondItems = parseQuote(second).items;
+	expect(secondItems.map((item) => item.name)).toContain('Silla Rimax');
+	expect(secondItems.some((item) => item.unit_price < item.list_price)).toBe(true);
+	const order1043 = readAll('orders').find((order) => 1043 === order.id) ?? {};
+	expect(third).toMatchObject({ order_id: 1043, quote_total: 1180000 });
+	expect(parseQuote(third).items).toEqual(parseOrder(order1043).items);
 });

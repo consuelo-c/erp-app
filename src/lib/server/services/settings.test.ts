@@ -33,7 +33,7 @@ const warehouse: Actor = {
 const driver: Actor = { username: 'conductor', employeeId: null, roles: ['DRIVER'], kind: 'user' };
 
 // Both tabs' modules: General's and Nómina's.
-const modules: SettingModule[] = ['COMPANY', 'ORDERS', 'PAYROLL'];
+const modules: SettingModule[] = ['COMPANY', 'ORDERS', 'QUOTES', 'PAYROLL'];
 
 let db: D1Database;
 let database: DatabaseSync;
@@ -144,6 +144,21 @@ test('each tab reads and saves only its own modules: Nómina ignores a general f
 	});
 	expect(readValue('COMPANY_NAME')).toMatchObject({ value: 'Banquetes Consuelo C' });
 	expect(readEvents()).toEqual([]);
+});
+
+test("changing a quote's validity moves no existing quote's «Válida hasta»", async () => {
+	database.exec(readFileSync('scripts/sample-data.sql', 'utf8'));
+	const readValidity = () =>
+		database.prepare('select id, valid_until from quotes order by id').all();
+	const before = readValidity();
+	const form = {
+		...toForm(await getSystemSettings(db, modules, manager)),
+		QUOTES_VALIDITY_DAYS: '15'
+	};
+	expect(await updateSystemSettings(db, { modules, values: form }, manager)).toEqual({ ok: true });
+	expect(readValue('QUOTES_VALIDITY_DAYS')).toMatchObject({ value: '15' });
+	expect(before).toHaveLength(3);
+	expect(readValidity()).toEqual(before);
 });
 
 test('an event never carries both an id and a key', () => {

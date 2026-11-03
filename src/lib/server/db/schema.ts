@@ -242,6 +242,38 @@ export const orders = sqliteTable(
 	]
 );
 
+// «Cotización #N», numbered on its own from 1: an order without its trips or its money, so its own
+// table, and never a reader of `orders` has to skip it. The state isn't stored: getQuoteState derives
+// it from `order_id` and `valid_until`. Nothing on `orders` points back; the order finds its quote
+// through the UNIQUE `order_id`, which also keeps an order from coming from two quotes.
+export const quotes = sqliteTable(
+	'quotes',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		clientId: integer('client_id')
+			.notNull()
+			.references(() => contacts.id),
+		orderId: integer('order_id')
+			.unique()
+			.references(() => orders.id), // set on converting; NULL while open
+		eventDate: text('event_date'), // optional: a company often asks before it has a date
+		validUntil: text('valid_until').notNull(), // YYYY-MM-DD, valid through it
+		rentalDays: integer('rental_days').notNull(),
+		clientAttributes: text('client_attributes').notNull(), // the order's snapshot: name, phone
+		quoteItems: text('quote_items').notNull(), // JSON, validated with order_items' schema
+		itemsTotal: integer('items_total').notNull(),
+		discount: integer('discount').notNull().default(0),
+		transportCost: integer('transport_cost'), // NULL is «por acordar»; 0 is a real price
+		quoteTotal: integer('quote_total').notNull(),
+		attributes: text('attributes').notNull().default('{}'), // JSON: the event's address, notes
+		...auditColumns
+	},
+	(table) => [
+		index('quotes_client_id').on(table.clientId),
+		index('quotes_valid_until').on(table.validUntil)
+	]
+);
+
 // Damage or loss found on a return. Never deleted: a mistake is reversed, which keeps the row.
 // `reversed_by` is apart from `updated_by`, so a later edit doesn't lose who reversed it.
 export const incidents = sqliteTable(

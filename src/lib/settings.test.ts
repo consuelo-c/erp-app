@@ -65,3 +65,13 @@ test('COMPANY_WHATSAPP takes an empty value or a phone, stored normalized', () =
 	expect(whatsapp.parse('310 555 0142')).toBe('573105550142');
 	expect(whatsapp.safeParse('123').success).toBe(false);
 });
+
+test('QUOTES_VALIDITY_DAYS takes a whole number of days from 1 to 365', () => {
+	const days = SETTINGS.QUOTES_VALIDITY_DAYS.schema;
+	expect(['1', '365'].map((value) => days.safeParse(value).success)).toEqual([true, true]);
+	expect(['0', '366', '7.5'].map((value) => days.safeParse(value).success)).toEqual([
+		false,
+		false,
+		false
+	]);
+});

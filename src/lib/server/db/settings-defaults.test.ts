@@ -64,3 +64,10 @@ test('every row is created by system and writes no events', () => {
 	}
 	expect(database.prepare('select count(*) as count from events').get()).toEqual({ count: 0 });
 });
+
+test('a new quote is valid for 30 days by default', () => {
+	const row = database
+		.prepare("select value from settings where key = 'QUOTES_VALIDITY_DAYS'")
+		.get();
+	expect(row).toEqual({ value: '30' });
+});
