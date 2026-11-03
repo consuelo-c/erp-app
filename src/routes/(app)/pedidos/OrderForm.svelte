@@ -3,7 +3,6 @@
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import Button from '$lib/components/Button.svelte';
-	import Choice from '$lib/components/Choice.svelte';
 	import ClockField from '$lib/components/ClockField.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import Input from '$lib/components/Input.svelte';
@@ -37,8 +36,9 @@
 		OrderSchedule,
 		ReturnMethod
 	} from '$lib/server/services/orders';
+	import ClientSearch from './ClientSearch.svelte';
 	import OrderLines, { toFormLine, type FormLine } from './OrderLines.svelte';
-	import { moveThroughResults } from './order-form';
+	import OrderTotals from './OrderTotals.svelte';
 
 	// One screen, top to bottom, no wizard: the salesperson fills it in while the client talks.
 	// Everything is typed into local state and posted as one JSON field; the server validates it
@@ -200,7 +200,6 @@
 	let phone = $state(fields.phone);
 	let eventDate = $state(fields.eventDate);
 	let choice = $state(fields.choice);
-	let candidates = $state<ClientCandidate[]>([]);
 	let clientName = $state(fields.clientName);
 	let deliveryDate = $state(fields.deliveryDate);
 	let pickupDate = $state(fields.pickupDate);
@@ -221,16 +220,7 @@
 
 	const errorOf = (path: string): string | undefined => form?.errors[path];
 
-	let clientQuery = $state('');
-	// The client picked stays listed on top while another search is typed; on an edit, the order's.
 	let picked = $state(fields.picked);
-	const clientOptions = $derived.by(() => {
-		const own = 'new' === choice ? null : picked;
-		if (null === own || candidates.some((candidate) => own.id === candidate.id)) {
-			return candidates;
-		}
-		return [own, ...candidates];
-	});
 
 	const pickupAddress = $derived(
 		isPickupTyped ? pickup : { ...pickup, address1: delivery.address1, address2: delivery.address2 }
@@ -247,12 +237,6 @@
 			discount: parsePesos(discount),
 			transportCost: parsePesos(transport)
 		})
-	);
-	// For reference only: the discount is stored in pesos.
-	const discountShare = $derived(
-		0 === totals.itemsTotal
-			? ''
-			: `≈ ${((parsePesos(discount) / totals.itemsTotal) * 100).toFixed(1).replace('.', ',')} %`
 	);
 
 	const availability = $derived(
@@ -313,53 +297,6 @@
 		})
 	);
 
-	let searchTimer: ReturnType<typeof setTimeout> | undefined;
-
-	// The contacts matching what's typed, by name, phone or address, once the typing pauses.
-	function searchClients() {
-		clearTimeout(searchTimer);
-		const typed = clientQuery.trim();
-		if ('' === typed) {
-			candidates = [];
-			return;
-		}
-		searchTimer = setTimeout(async () => {
-			const query = new URLSearchParams({ texto: typed });
-			const response = await fetch(`${resolve('/pedidos/clientes')}?${query}`);
-			if (response.ok && typed === clientQuery.trim()) {
-				candidates = await response.json();
-			}
-		}, 300);
-	}
-
-	let clientList: HTMLElement | undefined = $state();
-
-	function clientRadios(): Iterable<HTMLInputElement> {
-		return clientList?.querySelectorAll<HTMLInputElement>('input[type="radio"]') ?? [];
-	}
-
-	// Enter would submit the order: it picks the first contact found instead. Down goes to the cards.
-	function keyInSearch(event: KeyboardEvent) {
-		if ('Enter' !== event.key) {
-			moveThroughResults(event, event.currentTarget as HTMLElement, clientRadios());
-			return;
-		}
-		event.preventDefault();
-		if (candidates.length) {
-			pick(candidates[0]);
-		}
-	}
-
-	// The arrows only move the focus between the cards; Enter picks the focused one.
-	function keyInCards(event: KeyboardEvent) {
-		if ('Enter' === event.key) {
-			event.preventDefault();
-			(event.target as HTMLElement).click();
-			return;
-		}
-		moveThroughResults(event, document.getElementById('client-search'), clientRadios());
-	}
-
 	// What the trips' dates and times leave available, and what to warn about, as they change.
 	const scheduleQuery = $derived.by(() => {
 		const times = [
@@ -400,8 +337,6 @@
 
 	// The client's phone and address fill the order's, each with a note when it changed.
 	function pick(candidate: ClientCandidate) {
-		choice = candidate.id;
-		picked = candidate;
 		clientName = candidate.fullName;
 		const note = `Cambió al escoger a ${candidate.fullName}.`;
 		const newPhone = formatPhone(candidate.phone);
@@ -419,7 +354,6 @@
 
 	// A new client starts blank: name, phone and the delivery address, unless it's the warehouse's.
 	function pickNewClient() {
-		choice = 'new';
 		clientName = '';
 		phone = '';
 		phoneNote = '';
@@ -458,10 +392,6 @@
 
 	function tripLabel(trip: 'DELIVERY' | 'PICKUP'): string {
 		return 'DELIVERY' === trip ? 'entrega' : 'recogida';
-	}
-
-	function addressOf(candidate: ClientCandidate): string {
-		return [candidate.address1, candidate.address2].filter(Boolean).join(', ');
 	}
 </script>
 
@@ -520,57 +450,13 @@
 	{/if}
 
 	<div class="order__main">
-		<Field label="Cliente" id="client-search">
-			<Input
-				id="client-search"
-				type="search"
-				autocomplete="off"
-				placeholder="Buscar por nombre, teléfono o dirección"
-				bind:value={clientQuery}
-				oninput={searchClients}
-				onkeydown={keyInSearch}
-			/>
-		</Field>
-
-		<!-- With nothing searched, only the client picked, if any, and «Cliente nuevo». -->
-		<Choice aria-label="Escoge el cliente" layout="none">
-			<div class="clients__list" bind:this={clientList}>
-				{#each clientOptions as candidate (candidate.id)}
-					<label class="client">
-						<input
-							type="radio"
-							name="client"
-							checked={candidate.id === choice}
-							onchange={() => pick(candidate)}
-							onkeydown={keyInCards}
-						/>
-						<span class="client__text">
-							<span class="client__name">{candidate.fullName}</span>
-							<span class="meta">{formatPhone(candidate.phone)}</span>
-							{#if candidate.address1}
-								<span class="meta">{addressOf(candidate)}</span>
-							{/if}
-						</span>
-					</label>
-				{/each}
-				<label class="client">
-					<input
-						type="radio"
-						name="client"
-						checked={'new' === choice}
-						onchange={pickNewClient}
-						onkeydown={keyInCards}
-					/>
-					<span class="client__text">
-						<span class="client__name">Cliente nuevo</span>
-						<span class="meta">Con el teléfono y el nombre que escribas</span>
-					</span>
-				</label>
-			</div>
-			{#if errorOf('client_id')}
-				<p class="field-error">{errorOf('client_id')}</p>
-			{/if}
-		</Choice>
+		<ClientSearch
+			bind:choice
+			bind:picked
+			onpick={pick}
+			onnew={pickNewClient}
+			error={errorOf('client_id')}
+		/>
 
 		<div class="field-row">
 			<Field label="Teléfono" id="phone" error={errorOf('client_phone')} hint={phoneNote}>
@@ -771,33 +657,13 @@
 			</Field>
 		</div>
 
-		<h2 class="section-title">Totales</h2>
-		<div class="form-stack totals">
-			<Field label="Descuento" id="discount" error={errorOf('discount')}>
-				<div class="discount">
-					<Input
-						id="discount"
-						inputmode="numeric"
-						placeholder="$0"
-						aria-invalid={undefined !== errorOf('discount')}
-						bind:value={discount}
-					/>
-					<span class="discount__share">{discountShare}</span>
-				</div>
-			</Field>
-			<Field label="Transporte" id="transport" error={errorOf('transport_cost')}>
-				<Input
-					id="transport"
-					inputmode="numeric"
-					placeholder="$0"
-					aria-invalid={undefined !== errorOf('transport_cost')}
-					bind:value={transport}
-				/>
-			</Field>
-		</div>
-		<div class="summary-row summary-row--total">
-			<span>Total</span><span>{formatPesos(totals.orderTotal)}</span>
-		</div>
+		<OrderTotals
+			bind:discount
+			bind:transport
+			itemsTotal={totals.itemsTotal}
+			total={totals.orderTotal}
+			{errorOf}
+		/>
 
 		<div class="deposit">
 			<Field
@@ -893,59 +759,6 @@
 		width: 110px;
 	}
 
-	.field-error {
-		margin-top: var(--space-3);
-		font-size: var(--text-xs);
-		color: var(--error-fg);
-	}
-
-	.clients__list {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-4);
-	}
-
-	/* A client to pick: the whole card is the radio's label, the ink border marks the picked one. */
-	.client {
-		box-sizing: border-box;
-		display: flex;
-		gap: var(--space-6);
-		align-items: center;
-		min-height: 52px;
-		padding: var(--space-4) var(--space-7);
-		cursor: pointer;
-		border: var(--border-w-strong) solid var(--border-default);
-		border-radius: var(--radius-card);
-	}
-
-	.client:has(input:checked) {
-		border-color: var(--border-strong);
-	}
-
-	.client input {
-		flex: none;
-		width: 18px;
-		height: 18px;
-		margin: 0;
-		accent-color: var(--neutral-800);
-	}
-
-	.client__text {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-1);
-		min-width: 0;
-	}
-
-	.client__name {
-		font-size: var(--text-base);
-		font-weight: var(--weight-medium);
-	}
-
-	.client:has(input:checked) .client__name {
-		font-weight: var(--weight-bold);
-	}
-
 	.trips {
 		display: grid;
 		gap: var(--space-8);
@@ -985,49 +798,6 @@
 
 	.notes:focus-visible {
 		border-color: var(--border-strong);
-	}
-
-	/* The Design System's summary rows: the subtotal, and the total under its ink rule. */
-	.summary-row {
-		display: flex;
-		gap: var(--space-5);
-		align-items: center;
-		justify-content: space-between;
-		font-size: var(--text-base);
-		line-height: var(--leading-loose);
-		color: var(--text-secondary);
-	}
-
-	.summary-row > :last-child {
-		font-weight: var(--weight-semibold);
-		color: var(--text-body);
-	}
-
-	.summary-row--total {
-		padding: var(--space-7) 0;
-		font-size: var(--text-lg);
-		font-weight: var(--weight-bold);
-		line-height: 1.2;
-		color: var(--text-body);
-		border-top: var(--border-w) solid var(--border-strong);
-	}
-
-	.summary-row--total > :last-child {
-		font: var(--type-total);
-	}
-
-	.discount {
-		display: flex;
-		gap: var(--space-6);
-		align-items: center;
-	}
-
-	.discount__share {
-		flex: none;
-		width: 64px;
-		font-size: var(--text-base);
-		font-weight: var(--weight-semibold);
-		color: var(--text-secondary);
 	}
 
 	.detail-list .meta {
