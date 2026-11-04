@@ -24,7 +24,7 @@
 		RESPONSIBLE_PARTY_LABELS,
 		RETURN_METHOD_LABELS
 	} from '$lib/labels';
-	import { isEditableStatus, isLegalTransition } from '$lib/orders';
+	import { isEditableStatus, isLegalTransition, readReceivableBalance } from '$lib/orders';
 	import { formatPhone } from '$lib/phone';
 	import type { Incident, ResponsibleParty } from '$lib/server/services/incidents';
 	import type { Carrier } from '$lib/server/services/orders';
@@ -38,6 +38,7 @@
 	const order = $derived(data.order);
 	const delivery = $derived(order.delivery);
 	const pickup = $derived(order.pickup);
+	const receivable = $derived(readReceivableBalance(order));
 
 	const isDraft = $derived('DRAFT' === order.status);
 	const canEdit = $derived(isEditableStatus(order.status));
@@ -168,6 +169,14 @@
 	</span>
 {/snippet}
 
+{#snippet receivableLink(id: number, text: string)}
+	{#if data.canOpenReceivable}
+		<a href={resolve('/(app)/cuentas-de-cobro/[id]', { id: String(id) })}>{text}</a>
+	{:else}
+		{text}
+	{/if}
+{/snippet}
+
 <Screen>
 	{#snippet header()}
 		<ScreenHeader title="Pedido #{order.id}" backHref={resolve('/pedidos')}>
@@ -213,6 +222,14 @@
 				<a href={resolve('/(app)/cotizaciones/[id]', { id: String(data.quoteId) })}
 					>#{data.quoteId}</a
 				>
+			</Notice>
+		</div>
+	{/if}
+
+	{#if receivable}
+		<div class="lead-notice">
+			<Notice tone="info">
+				{@render receivableLink(receivable.id, `Cuenta de cobro Nº ${receivable.id}`)}
 			</Notice>
 		</div>
 	{/if}
@@ -342,12 +359,14 @@
 		<li class="detail-list__row--strong">
 			<span>Total</span><span>{formatPesos(order.orderTotal)}</span>
 		</li>
-		<li class="detail-list__row--plain">
-			<span>Pagado</span><span>{formatBalance(order.paid)}</span>
-		</li>
-		<li class="detail-list__row--strong">
-			<span>Saldo</span><span>{formatBalance(order.balanceDue)}</span>
-		</li>
+		{#if null === receivable}
+			<li class="detail-list__row--plain">
+				<span>Pagado</span><span>{formatBalance(order.paid)}</span>
+			</li>
+			<li class="detail-list__row--strong">
+				<span>Saldo</span><span>{formatBalance(order.balanceDue)}</span>
+			</li>
+		{/if}
 		<li class="detail-list__row--plain deposit">
 			<span>Depósito acordado</span><span>{formatPesos(order.depositAmount)}</span>
 		</li>
@@ -360,7 +379,8 @@
 	{#if data.incidents?.length}
 		<h2 class="section-title" id="novedades">Novedades ({data.incidents.length})</h2>
 		<p class="meta incidents__money">
-			Depósito recibido {formatBalance(order.depositHeld)} · Saldo {formatBalance(order.balanceDue)}
+			Depósito recibido {formatBalance(order.depositHeld)} ·
+			{receivable?.text ?? `Saldo ${formatBalance(order.balanceDue)}`}
 		</p>
 		{#each data.incidents as incident (incident.id)}
 			<Card dimmed={null !== incident.reversal}>
@@ -415,6 +435,9 @@
 
 	<h2 class="section-title">Pagos</h2>
 	<PaymentList payments={order.payments} />
+	{#if receivable}
+		<p class="receivable-balance">{@render receivableLink(receivable.id, receivable.text)}</p>
+	{/if}
 
 	<!-- Payments are recorded in any state, a cancelled order's refunds included. -->
 	<div class="screen__action">
@@ -611,8 +634,10 @@
 
 	<Modal bind:open={isAssignOpen} title="Responsable de la novedad">
 		{#snippet body()}
-			Depósito recibido <b>{formatBalance(order.depositHeld)}</b> · Saldo
-			<b>{formatBalance(order.balanceDue)}</b>. Si no fue el cliente, el depósito no se retiene.
+			Depósito recibido <b>{formatBalance(order.depositHeld)}</b> ·
+			{#if receivable}<b>{receivable.text}</b>{:else}Saldo
+				<b>{formatBalance(order.balanceDue)}</b>{/if}. Si no fue el cliente, el depósito no se
+			retiene.
 		{/snippet}
 		<form
 			id="assign"
@@ -727,6 +752,12 @@
 
 	.detail-list .meta {
 		display: block;
+	}
+
+	.receivable-balance {
+		margin: var(--space-5) 0 0;
+		font-size: var(--text-base);
+		font-weight: var(--weight-semibold);
 	}
 
 	.deposit {

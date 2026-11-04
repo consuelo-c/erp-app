@@ -107,7 +107,34 @@ test("#1043's page: the printout's figures, and exactly the fields the client se
 		orderTotal: 1180000,
 		depositAmount: 200000,
 		paid: 500000,
-		balanceDue: 680000
+		balanceDue: 680000,
+		receivableId: null,
+		receivableBalance: null
+	});
+});
+
+test("a billed order carries its cuenta's balance, net of the cuenta's own payment", async () => {
+	const token = await create('COMPLETED');
+	database.exec(
+		`insert into receivables (id, client_id, issue_date, attributes, created_at, created_by, updated_at, updated_by)
+		values (4794, 1, '2026-10-20', '{"payment_terms":"Contado"}', 0, 'admin', 0, 'admin');
+		update orders set receivable_id = 4794 where id = 1`
+	);
+	await db.batch(
+		movementStatements(db, sales, {
+			concept: 'INSTALLMENT',
+			amount: 300000,
+			payment_method: 'TRANSFER',
+			movement_date: '2026-10-21',
+			entity_type: 'RECEIVABLE',
+			entity_id: 4794,
+			reverses_id: null,
+			attributes: {}
+		})
+	);
+	expect(await getPublicOrder(db, token)).toMatchObject({
+		receivableId: 4794,
+		receivableBalance: 880000
 	});
 });
 

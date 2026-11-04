@@ -1200,6 +1200,8 @@ export type OrderSummary = {
 	orderTotal: number;
 	/** The total less what was paid: negative is the client's credit. */
 	balanceDue: number;
+	/** The cuenta de cobro billing it, shown in place of the balance, or null. */
+	receivableId: number | null;
 };
 
 /** The filters come back parsed, `page` clamped: what the screen shows as chosen is what was applied. */
@@ -1250,6 +1252,26 @@ export const BALANCE_DUE_SQL = `order_total - coalesce((select sum(amount) from 
 	where entity_type = 'ORDER' and entity_id = orders.id
 	and concept in ('INSTALLMENT', 'INSTALLMENT_REFUND')), 0)`;
 
+// The movements `receivable_paid` sums, for the `receivables` row in scope: the cuenta's own and its
+// orders' installments and refunds. An offset keeps its original's concept and link, so it counts.
+export const RECEIVABLE_PAID_MOVEMENT_SQL = `((entity_type = 'ORDER'
+	and concept in ('INSTALLMENT', 'INSTALLMENT_REFUND')
+	and entity_id in (select id from orders where receivable_id = receivables.id))
+	or (entity_type = 'RECEIVABLE' and concept = 'INSTALLMENT' and entity_id = receivables.id))`;
+
+export const RECEIVABLE_TOTAL_SQL = `coalesce((select sum(order_total) from orders
+	where receivable_id = receivables.id), 0)`;
+
+export const RECEIVABLE_PAID_SQL = `coalesce((select sum(amount) from cash_movements
+	where ${RECEIVABLE_PAID_MOVEMENT_SQL}), 0)`;
+
+/** The orders' totals less what was paid: negative is the client's credit. */
+export const RECEIVABLE_BALANCE_SQL = `${RECEIVABLE_TOTAL_SQL} - ${RECEIVABLE_PAID_SQL}`;
+
+/** Over `orders` in the caller's query: the balance of the cuenta billing it, null if none does. */
+export const ORDER_RECEIVABLE_BALANCE_SQL = `(select ${RECEIVABLE_BALANCE_SQL} from receivables
+	where receivables.id = orders.receivable_id)`;
+
 type SummaryRow = {
 	id: number;
 	client_name: string;
@@ -1259,6 +1281,7 @@ type SummaryRow = {
 	delivery_method: DeliveryMethod;
 	order_total: number;
 	balance_due: number;
+	receivable_id: number | null;
 };
 
 function toSummary(row: SummaryRow): OrderSummary {
@@ -1270,7 +1293,8 @@ function toSummary(row: SummaryRow): OrderSummary {
 		hasIncident: 1 === row.has_incident,
 		deliveryMethod: row.delivery_method,
 		orderTotal: row.order_total,
-		balanceDue: row.balance_due
+		balanceDue: row.balance_due,
+		receivableId: row.receivable_id
 	};
 }
 
@@ -1296,7 +1320,7 @@ export async function listOrders(
 		.prepare(
 			`select id, json_extract(client_attributes, '$.name') as client_name, event_date, status,
 			has_incident, json_extract(delivery_attributes, '$.method') as delivery_method,
-			order_total, ${BALANCE_DUE_SQL} as balance_due
+			order_total, ${BALANCE_DUE_SQL} as balance_due, receivable_id
 			from orders where ${where} order by event_date desc, id desc limit ? offset ?`
 		)
 		.bind(...params, ORDERS_PAGE_SIZE, (filters.page - 1) * ORDERS_PAGE_SIZE)
@@ -1335,6 +1359,8 @@ export type OrderDetail = Order & {
 	paid: number;
 	balanceDue: number;
 	depositHeld: number;
+	/** The balance of the cuenta de cobro billing it, or null. Negative is the client's credit. */
+	receivableBalance: number | null;
 	payments: OrderPayment[];
 	cancellation: Cancellation | null;
 	extensions: Extension[];
@@ -1441,18 +1467,18 @@ async function findCancellation(db: D1Database, orderId: number): Promise<Cancel
 		.first<Cancellation>();
 }
 
-async function findBalances(
-	db: D1Database,
-	orderId: number
-): Promise<{ balanceDue: number; depositHeld: number }> {
+type OrderBalances = Pick<OrderDetail, 'balanceDue' | 'depositHeld' | 'receivableBalance'>;
+
+async function findBalances(db: D1Database, orderId: number): Promise<OrderBalances> {
 	const balances = await db
 		.prepare(
-			`select ${BALANCE_DUE_SQL} as balanceDue, ${DEPOSIT_HELD_SQL} as depositHeld
+			`select ${BALANCE_DUE_SQL} as balanceDue, ${DEPOSIT_HELD_SQL} as depositHeld,
+			${ORDER_RECEIVABLE_BALANCE_SQL} as receivableBalance
 			from orders where id = ?`
 		)
 		.bind(orderId)
-		.first<{ balanceDue: number; depositHeld: number }>();
-	return balances ?? { balanceDue: 0, depositHeld: 0 };
+		.first<OrderBalances>();
+	return balances ?? { balanceDue: 0, depositHeld: 0, receivableBalance: null };
 }
 
 const orderIdSchema = z.coerce.number().int().positive();

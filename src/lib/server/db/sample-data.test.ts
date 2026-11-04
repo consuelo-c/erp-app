@@ -437,6 +437,13 @@ test("Nº 4794 groups Postobón's #1060 and #1061 and reads the balance rules, p
 	expect(receivable?.payments.map((payment) => payment.orderId)).toEqual([1060, null]);
 });
 
+test("#1060 and #1061 carry Nº 4794's balance, and #1072 none", async () => {
+	const db = openSeededD1();
+	const balanceOf = async (id: number) =>
+		(await getOrderDetail(db, id, manager))?.receivableBalance;
+	expect(await Promise.all([1060, 1061, 1072].map(balanceOf))).toEqual([660000, 660000, null]);
+});
+
 test("#1072 is Postobón's too, COMPLETED and unbilled", () => {
 	const orders = readAll('orders');
 	const [billed, unbilled] = [1060, 1072].map((id) => orders.find((order) => id === order.id));

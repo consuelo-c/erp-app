@@ -3,6 +3,7 @@
 // input is whole pesos, so nothing rounds. Shared with the browser, so the order form recalculates
 // as it's typed and the screens offer only the legal transitions.
 
+import { formatPesos } from '$lib/format';
 import type { DeliveryMethod, OrderStatus, ReturnMethod } from '$lib/server/services/orders';
 
 export type PricedLine = { qty: number; unit_price: number };
@@ -20,6 +21,39 @@ export function calculateOrderTotals(order: OrderPricing): OrderTotals {
 	const lineTotals = order.lines.map((line) => line.qty * line.unit_price * order.rentalDays);
 	const itemsTotal = lineTotals.reduce((sum, lineTotal) => sum + lineTotal, 0);
 	return { lineTotals, itemsTotal, orderTotal: itemsTotal - order.discount + order.transportCost };
+}
+
+export type BilledOrder = { receivableId: number | null; receivableBalance: number | null };
+
+export type ReceivableReading = {
+	id: number;
+	/** The sentence, for where it reads as a line of text. */
+	text: string;
+	/** Label and amount, for where it reads as a totals row: the amount is empty once it's paid. */
+	label: string;
+	amount: string;
+	/** What the client paid over the cuenta's total, or 0. */
+	credit: number;
+};
+
+/**
+ * The only reading of a billed order's money: its cuenta's balance, since a payment on the cuenta
+ * isn't assigned to any order. Null for an unbilled order, which reads its own «Pagado» and «Saldo».
+ */
+export function readReceivableBalance(order: BilledOrder): ReceivableReading | null {
+	const { receivableId: id, receivableBalance: balance } = order;
+	if (null === id || null === balance) {
+		return null;
+	}
+	if (balance > 0) {
+		const label = `Saldo pendiente en cuenta de cobro Nº ${id}`;
+		const amount = formatPesos(balance);
+		return { id, text: `${label}: ${amount}`, label, amount, credit: 0 };
+	}
+	const label = `Pagado · cuenta de cobro Nº ${id}`;
+	const credit = Math.max(0, -balance);
+	const text = credit > 0 ? `${label} · Saldo a favor ${formatPesos(credit)}` : label;
+	return { id, text, label, amount: '', credit };
 }
 
 export type OrderMove = {
