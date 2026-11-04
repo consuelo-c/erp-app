@@ -40,6 +40,12 @@ export const DESTINATIONS: Destination[] = [
 		paths: [resolve('/cotizaciones')]
 	},
 	{
+		label: 'Cuentas de cobro',
+		icon: 'receipt',
+		href: resolve('/cuentas-de-cobro'),
+		paths: [resolve('/cuentas-de-cobro')]
+	},
+	{
 		label: 'Contactos',
 		icon: 'contact',
 		href: resolve('/contactos'),

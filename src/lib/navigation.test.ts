@@ -16,9 +16,19 @@ test('Cotizaciones follows Pedidos: the first in «Más», after Pedidos in the 
 	expect(labels.slice(BAR_SLOTS - 1, BAR_SLOTS + 2)).toEqual([
 		'Pedidos',
 		'Cotizaciones',
-		'Contactos'
+		'Cuentas de cobro'
 	]);
 	expect(findDestination('/cotizaciones/12/editar')).toMatchObject({ icon: 'file' });
+});
+
+test('Cuentas de cobro follows Cotizaciones, with an icon of its own', () => {
+	const labels = DESTINATIONS.map((destination) => destination.label);
+	expect(labels.slice(BAR_SLOTS, BAR_SLOTS + 3)).toEqual([
+		'Cotizaciones',
+		'Cuentas de cobro',
+		'Contactos'
+	]);
+	expect(findDestination('/cuentas-de-cobro/4794')).toMatchObject({ icon: 'receipt' });
 });
 
 test('Logins is its own destination, outside Configuración, whose tabs keep Nómina', () => {
