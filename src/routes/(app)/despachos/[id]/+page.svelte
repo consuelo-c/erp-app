@@ -324,12 +324,18 @@
 		<li class="detail-list__row--strong">
 			<span>Total</span><span>{formatPesos(order.orderTotal)}</span>
 		</li>
-		<li class="detail-list__row--plain">
-			<span>Pagado</span><span>{formatBalance(order.paid)}</span>
-		</li>
-		<li class="detail-list__row--strong">
-			<span>Saldo</span><span>{formatBalance(order.balanceDue)}</span>
-		</li>
+		{#if null !== order.receivableId}
+			<li class="detail-list__row--plain">
+				<span>Cuenta de cobro Nº {order.receivableId}</span><span></span>
+			</li>
+		{:else}
+			<li class="detail-list__row--plain">
+				<span>Pagado</span><span>{formatBalance(order.paid)}</span>
+			</li>
+			<li class="detail-list__row--strong">
+				<span>Saldo</span><span>{formatBalance(order.balanceDue)}</span>
+			</li>
+		{/if}
 		<li class="detail-list__row--plain">
 			<span>Depósito acordado</span><span>{formatPesos(order.depositAmount)}</span>
 		</li>
@@ -338,7 +344,7 @@
 		</li>
 	</ul>
 	<!-- The driver doesn't collect: a balance informs and blocks nothing. -->
-	{#if 0 < order.balanceDue}
+	{#if null === order.receivableId && 0 < order.balanceDue}
 		<p class="note balance-note">Saldo pendiente. No impide entregar.</p>
 	{/if}
 

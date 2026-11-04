@@ -5,6 +5,7 @@ import {
 	isLegalTransition,
 	LINES_PER_PAGE,
 	nextOperationalStatus,
+	readReceivableBalance,
 	splitIntoPages
 } from './orders';
 
@@ -134,4 +135,38 @@ test('30 lines spill onto a second sheet, which carries the totals and signature
 
 test('lines filling the first sheet exactly leave the totals and signature a second one', () => {
 	expect(splitIntoPages(linesOf(LINES_PER_PAGE))).toEqual([linesOf(LINES_PER_PAGE), []]);
+});
+
+test('a billed order with a balance reads what is pending on its cuenta', () => {
+	expect(readReceivableBalance({ receivableId: 4794, receivableBalance: 500000 })).toEqual({
+		id: 4794,
+		text: 'Saldo pendiente en cuenta de cobro Nº 4794: $500.000',
+		label: 'Saldo pendiente en cuenta de cobro Nº 4794',
+		amount: '$500.000',
+		credit: 0
+	});
+});
+
+test('a billed order at 0 reads paid, with no amount', () => {
+	expect(readReceivableBalance({ receivableId: 4794, receivableBalance: 0 })).toEqual({
+		id: 4794,
+		text: 'Pagado · cuenta de cobro Nº 4794',
+		label: 'Pagado · cuenta de cobro Nº 4794',
+		amount: '',
+		credit: 0
+	});
+});
+
+test("a billed order below 0 reads paid and the client's credit", () => {
+	expect(readReceivableBalance({ receivableId: 4794, receivableBalance: -20000 })).toEqual({
+		id: 4794,
+		text: 'Pagado · cuenta de cobro Nº 4794 · Saldo a favor $20.000',
+		label: 'Pagado · cuenta de cobro Nº 4794',
+		amount: '',
+		credit: 20000
+	});
+});
+
+test('an unbilled order has no reading: it keeps its own balance', () => {
+	expect(readReceivableBalance({ receivableId: null, receivableBalance: null })).toBeNull();
 });

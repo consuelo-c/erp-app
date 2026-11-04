@@ -8,6 +8,7 @@ import {
 	BALANCE_DUE_SQL,
 	clientAttributesSchema,
 	deliveryAttributesSchema,
+	ORDER_RECEIVABLE_BALANCE_SQL,
 	orderItemsSchema,
 	pickupAttributesSchema,
 	type DeliveryMethod,
@@ -50,6 +51,9 @@ export type PublicOrder = {
 	depositAmount: number;
 	paid: number;
 	balanceDue: number;
+	/** The cuenta de cobro billing it: only its balance line reaches the page, never a link. */
+	receivableId: number | null;
+	receivableBalance: number | null;
 };
 
 type PublicOrderRow = {
@@ -67,6 +71,8 @@ type PublicOrderRow = {
 	order_total: number;
 	deposit_amount: number;
 	balance_due: number;
+	receivable_id: number | null;
+	receivable_balance: number | null;
 };
 
 // A line as the client's paper prints it: never the list price.
@@ -101,7 +107,9 @@ function toPublicOrder(row: PublicOrderRow): PublicOrder {
 		orderTotal: row.order_total,
 		depositAmount: row.deposit_amount,
 		paid: row.order_total - row.balance_due,
-		balanceDue: row.balance_due
+		balanceDue: row.balance_due,
+		receivableId: row.receivable_id,
+		receivableBalance: row.receivable_balance
 	};
 }
 
@@ -118,7 +126,8 @@ export async function getPublicOrder(db: D1Database, token: unknown): Promise<Pu
 		.prepare(
 			`select id, status, event_date, rental_days, client_attributes, delivery_attributes,
 			pickup_attributes, order_items, items_total, discount, transport_cost, order_total,
-			deposit_amount, ${BALANCE_DUE_SQL} as balance_due
+			deposit_amount, ${BALANCE_DUE_SQL} as balance_due, receivable_id,
+			${ORDER_RECEIVABLE_BALANCE_SQL} as receivable_balance
 			from orders where public_token = ? and status <> 'DRAFT' and event_date >= ?`
 		)
 		.bind(parsed.data, getLookupWindowStart())

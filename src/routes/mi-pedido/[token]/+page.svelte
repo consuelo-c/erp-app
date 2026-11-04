@@ -7,6 +7,7 @@
 		CLIENT_RETURN_METHOD_LABELS,
 		ORDER_STATUS_LABELS
 	} from '$lib/labels';
+	import { readReceivableBalance } from '$lib/orders';
 	import type { PageProps } from './$types';
 
 	// «Su pedido»: the order as the client holds it on paper, read-only. The event's date only,
@@ -15,7 +16,8 @@
 	let { data }: PageProps = $props();
 
 	const order = $derived(data.order);
-	const credit = $derived(-order.balanceDue);
+	const receivable = $derived(readReceivableBalance(order));
+	const credit = $derived(receivable?.credit ?? -order.balanceDue);
 </script>
 
 <svelte:head>
@@ -97,20 +99,27 @@
 	<li class="detail-list__row--plain">
 		<span>Depósito</span><span>{formatPesos(order.depositAmount)}</span>
 	</li>
-	<li class="detail-list__row--plain">
-		<span>Pagado</span><span>{formatBalance(order.paid)}</span>
-	</li>
+	{#if null === receivable}
+		<li class="detail-list__row--plain">
+			<span>Pagado</span><span>{formatBalance(order.paid)}</span>
+		</li>
+	{:else}
+		<li class="detail-list__row--strong">
+			<span>{receivable.label}</span><span>{receivable.amount}</span>
+		</li>
+	{/if}
 	{#if credit > 0}
 		<li class="detail-list__row--strong">
 			<span>Saldo a su favor</span><span class="credit">{formatPesos(credit)}</span>
 		</li>
-	{:else}
+	{:else if null === receivable}
 		<li class="detail-list__row--strong">
 			<span>Saldo</span><span>{formatPesos(order.balanceDue)}</span>
 		</li>
 	{/if}
 </ul>
-{#if credit > 0}
+<!-- Over the order's own total: a billed order's credit is over its cuenta's. -->
+{#if null === receivable && credit > 0}
 	<p class="note credit-note">Pagó {formatPesos(credit)} más del total del pedido.</p>
 {/if}
 

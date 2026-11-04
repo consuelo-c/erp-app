@@ -206,7 +206,9 @@
 						<p class="meta">{DELIVERY_METHOD_LABELS[order.deliveryMethod]}</p>
 						<div class="card__amounts">
 							<span class="card__amount">{formatPesos(order.orderTotal)}</span>
-							{#if 0 !== order.balanceDue}
+							{#if null !== order.receivableId}
+								<span class="meta">CC Nº {order.receivableId}</span>
+							{:else if 0 !== order.balanceDue}
 								<span class="meta">Saldo {formatPesos(order.balanceDue)}</span>
 							{/if}
 						</div>
@@ -240,7 +242,11 @@
 							<td>{DELIVERY_METHOD_LABELS[order.deliveryMethod]}</td>
 							<td class="num nowrap"><b>{formatPesos(order.orderTotal)}</b></td>
 							<td class="num nowrap balance">
-								{0 === order.balanceDue ? '' : formatPesos(order.balanceDue)}
+								{#if null !== order.receivableId}
+									CC Nº {order.receivableId}
+								{:else if 0 !== order.balanceDue}
+									{formatPesos(order.balanceDue)}
+								{/if}
 							</td>
 						</tr>
 					{/each}

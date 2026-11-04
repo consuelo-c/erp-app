@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { formatClockTime, formatLongDay, formatShortDay } from '$lib/datetime';
 	import { formatBalance, formatPesos } from '$lib/format';
+	import { readReceivableBalance } from '$lib/orders';
 	import { formatPhone } from '$lib/phone';
 	import type { OrderPrintout } from '$lib/server/services/orders';
 	import HalfLetterPrintout from './HalfLetterPrintout.svelte';
@@ -13,6 +14,7 @@
 	const { order, company } = $derived(printout);
 	const delivery = $derived(order.delivery);
 	const pickup = $derived(order.pickup);
+	const receivable = $derived(readReceivableBalance(order));
 	// The pickup address only when the products come back from somewhere else.
 	const isPickupElsewhere = $derived(
 		delivery.address_1 !== pickup.address_1 || delivery.address_2 !== pickup.address_2
@@ -87,10 +89,21 @@
 	<div class="print-row">
 		<span>Depósito</span><span>{formatPesos(order.depositAmount)}</span>
 	</div>
-	<div class="print-row"><span>Pagado</span><span>{formatBalance(order.paid)}</span></div>
-	<div class="print-row print-row--strong">
-		<span>Saldo</span><span>{formatBalance(order.balanceDue)}</span>
-	</div>
+	{#if null === receivable}
+		<div class="print-row"><span>Pagado</span><span>{formatBalance(order.paid)}</span></div>
+		<div class="print-row print-row--strong">
+			<span>Saldo</span><span>{formatBalance(order.balanceDue)}</span>
+		</div>
+	{:else}
+		<div class="print-row print-row--strong">
+			<span>{receivable.label}</span><span>{receivable.amount}</span>
+		</div>
+		{#if receivable.credit > 0}
+			<div class="print-row">
+				<span>Saldo a favor</span><span>{formatPesos(receivable.credit)}</span>
+			</div>
+		{/if}
+	{/if}
 
 	<!-- The client's proof of receipt: never sacrificed for space. -->
 	<div class="signature">Recibí: Nombre / C.C. / NIT</div>

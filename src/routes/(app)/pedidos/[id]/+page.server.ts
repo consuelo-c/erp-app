@@ -1,5 +1,5 @@
 import { error, fail } from '@sveltejs/kit';
-import { isAdminOrManager, requireRole } from '$lib/server/actor';
+import { isAdminOrManager, requireRole, type Actor } from '$lib/server/actor';
 import {
 	listIncidents,
 	reverseIncident,
@@ -20,11 +20,20 @@ import type { Actions, PageServerLoad } from './$types';
 const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
 const MANAGES_INCIDENTS = ['ADMIN', 'MANAGER'] as const;
 
+// Only ADMIN and MANAGER open a cuenta de cobro, whose link everyone else reads as text, or issue one
+// from an order that can start it.
+async function getReceivableActions(db: D1Database, orderId: number, actor: Actor) {
+	if (!isAdminOrManager(actor)) {
+		return { canOpenReceivable: false, canIssueReceivable: false };
+	}
+	const form = await getReceivableIssueForm(db, orderId, actor);
+	return { canOpenReceivable: true, canIssueReceivable: null !== form };
+}
+
 // A draft brings what its «Confirmar» dialog shows: the suggested advance and any shortage.
 // «Novedades» only for ADMIN and MANAGER: null hides the section for everyone else.
 // The client's page token is null for a draft, which hides «Copiar enlace del cliente».
 // The quote it was converted from, if any, for «Desde la cotización #N».
-// «Emitir cuenta de cobro» only for ADMIN and MANAGER, on an order that can start one.
 export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	requireRole(locals.user, TAKES_ORDERS);
 	if (undefined === platform) {
@@ -44,10 +53,8 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 		: null;
 	const publicToken = await getPublicToken(db, order.id, locals.user);
 	const quoteId = await getSourceQuoteId(db, order.id, locals.user);
-	const canIssueReceivable =
-		isAdminOrManager(locals.user) &&
-		null !== (await getReceivableIssueForm(db, order.id, locals.user));
-	return { order, confirmation, incidents, publicToken, quoteId, canIssueReceivable };
+	const receivableActions = await getReceivableActions(db, order.id, locals.user);
+	return { order, confirmation, incidents, publicToken, quoteId, ...receivableActions };
 };
 
 export const actions: Actions = {

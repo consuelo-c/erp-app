@@ -829,7 +829,8 @@ test('the list shows every order by event date, latest first, with its summary',
 		hasIncident: false,
 		deliveryMethod: 'CLIENT_PICKUP',
 		orderTotal: 1284000,
-		balanceDue: 1284000
+		balanceDue: 1284000,
+		receivableId: null
 	});
 });
 

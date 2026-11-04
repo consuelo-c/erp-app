@@ -10,6 +10,10 @@ import { optional, recordLinkedMovement } from './cash';
 import { isAutoDocument, searchClause } from './contacts';
 import {
 	invalidOrder,
+	RECEIVABLE_BALANCE_SQL,
+	RECEIVABLE_PAID_MOVEMENT_SQL,
+	RECEIVABLE_PAID_SQL,
+	RECEIVABLE_TOTAL_SQL,
 	searchTextSchema,
 	toPayment,
 	type OrderPayment,
@@ -296,21 +300,6 @@ export async function recordReceivablePayment(
 	return recordLinkedMovement(db, { form: input, ...link }, actor);
 }
 
-// The movements `receivable_paid` sums, for the `receivables` row in scope: the cuenta's own and its
-// orders' installments and refunds. An offset keeps its original's concept and link, so it counts.
-const PAID_MOVEMENT_SQL = `((entity_type = 'ORDER' and concept in ('INSTALLMENT', 'INSTALLMENT_REFUND')
-	and entity_id in (select id from orders where receivable_id = receivables.id))
-	or (entity_type = 'RECEIVABLE' and concept = 'INSTALLMENT' and entity_id = receivables.id))`;
-
-const TOTAL_SQL = `coalesce((select sum(order_total) from orders
-	where receivable_id = receivables.id), 0)`;
-
-const PAID_SQL = `coalesce((select sum(amount) from cash_movements
-	where ${PAID_MOVEMENT_SQL}), 0)`;
-
-/** The orders' totals less what was paid: negative is the client's credit. */
-const BALANCE_SQL = `${TOTAL_SQL} - ${PAID_SQL}`;
-
 export type ReceivablePayment = OrderPayment & {
 	/** The order it was recorded on, or null when it's the cuenta's own. */
 	orderId: number | null;
@@ -351,7 +340,8 @@ async function findDetailRow(db: D1Database, id: number): Promise<DetailRow | nu
 	return db
 		.prepare(
 			`select receivables.id, issue_date, receivables.attributes, full_name, phone, document_id,
-			${TOTAL_SQL} as total, ${PAID_SQL} as paid, ${BALANCE_SQL} as balance
+			${RECEIVABLE_TOTAL_SQL} as total, ${RECEIVABLE_PAID_SQL} as paid,
+			${RECEIVABLE_BALANCE_SQL} as balance
 			from receivables join contacts on contacts.id = receivables.client_id
 			where receivables.id = ?`
 		)
@@ -377,7 +367,7 @@ async function findPayments(db: D1Database, id: number): Promise<ReceivablePayme
 			json_extract(cash_movements.attributes, '$.other_method') as other_method, payee,
 			receipt_number, iif('ORDER' = entity_type, entity_id, null) as order_id
 			from cash_movements join receivables on receivables.id = ?
-			where ${PAID_MOVEMENT_SQL}
+			where ${RECEIVABLE_PAID_MOVEMENT_SQL}
 			order by movement_date, cash_movements.id`
 		)
 		.bind(id)
@@ -541,7 +531,9 @@ export type ReceivablePage = {
 // The order list's search, over the contact: a cuenta freezes no client, and prints the current one.
 function listClauses(filters: ReceivableFilters) {
 	const search = undefined === filters.text ? null : searchClause(filters.text);
-	const pending = filters.hasBalance ? { sql: `(${BALANCE_SQL}) > 0`, params: [] } : null;
+	const pending = filters.hasBalance
+		? { sql: `(${RECEIVABLE_BALANCE_SQL}) > 0`, params: [] }
+		: null;
 	return [search, pending].filter((clause) => null !== clause);
 }
 
@@ -568,7 +560,7 @@ export async function listReceivables(
 	const { results } = await db
 		.prepare(
 			`select receivables.id, full_name as clientName, issue_date as issueDate,
-			${TOTAL_SQL} as total, ${BALANCE_SQL} as balance
+			${RECEIVABLE_TOTAL_SQL} as total, ${RECEIVABLE_BALANCE_SQL} as balance
 			${source} order by receivables.id desc limit ? offset ?`
 		)
 		.bind(...params, RECEIVABLES_PAGE_SIZE, (filters.page - 1) * RECEIVABLES_PAGE_SIZE)
