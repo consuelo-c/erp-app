@@ -2,6 +2,7 @@
 	type IconName =
 		| 'list'
 		| 'file'
+		| 'receipt'
 		| 'truck'
 		| 'clock'
 		| 'settings'

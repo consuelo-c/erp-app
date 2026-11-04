@@ -6,9 +6,11 @@ import { z } from 'zod';
 import { getTodaysDate } from '$lib/datetime';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, type Diff } from '../audit';
-import { isAutoDocument } from './contacts';
+import { optional } from './cash';
+import { isAutoDocument, searchClause } from './contacts';
 import {
 	invalidOrder,
+	searchTextSchema,
 	toPayment,
 	type OrderPayment,
 	type PaymentRow,
@@ -387,4 +389,71 @@ export async function getReceivableDetail(
 		return null;
 	}
 	return { ...toDetail(row), orders, payments };
+}
+
+/** A page of the list: it never loads the whole table. */
+export const RECEIVABLES_PAGE_SIZE = 20;
+
+// `page` past the last one shows the last: a typed URL is tolerated like any other filter.
+const listSchema = z.object({
+	text: optional(searchTextSchema),
+	hasBalance: optional(z.literal('1').transform(() => true)),
+	page: z.coerce.number().int().min(1).catch(1)
+});
+
+export type ReceivableFilters = z.output<typeof listSchema>;
+
+export type ReceivableSummary = {
+	id: number;
+	clientName: string;
+	issueDate: string;
+	total: number;
+	/** Negative is the client's credit. */
+	balance: number;
+};
+
+/** The filters come back parsed, `page` clamped: what the screen shows is what was applied. */
+export type ReceivablePage = {
+	receivables: ReceivableSummary[];
+	total: number;
+	pageCount: number;
+	filters: ReceivableFilters;
+};
+
+// The order list's search, over the contact: a cuenta freezes no client, and prints the current one.
+function listClauses(filters: ReceivableFilters) {
+	const search = undefined === filters.text ? null : searchClause(filters.text);
+	const pending = filters.hasBalance ? { sql: `(${BALANCE_SQL}) > 0`, params: [] } : null;
+	return [search, pending].filter((clause) => null !== clause);
+}
+
+/** One page of cuentas de cobro, newest first, narrowed by every filter at once. */
+export async function listReceivables(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<ReceivablePage> {
+	requireRole(actor, MANAGES_RECEIVABLES);
+	const parsed = listSchema.parse(input ?? {});
+	const clauses = listClauses(parsed);
+	const where = clauses.map(({ sql }) => `(${sql})`).join(' and ') || '1';
+	const params = clauses.flatMap((clause) => clause.params);
+	const source = `from receivables join contacts on contacts.id = receivables.client_id
+		where ${where}`;
+	const count = await db
+		.prepare(`select count(*) as total ${source}`)
+		.bind(...params)
+		.first<{ total: number }>();
+	const total = count?.total ?? 0;
+	const pageCount = Math.max(1, Math.ceil(total / RECEIVABLES_PAGE_SIZE));
+	const filters = { ...parsed, page: Math.min(parsed.page, pageCount) };
+	const { results } = await db
+		.prepare(
+			`select receivables.id, full_name as clientName, issue_date as issueDate,
+			${TOTAL_SQL} as total, ${BALANCE_SQL} as balance
+			${source} order by receivables.id desc limit ? offset ?`
+		)
+		.bind(...params, RECEIVABLES_PAGE_SIZE, (filters.page - 1) * RECEIVABLES_PAGE_SIZE)
+		.all<ReceivableSummary>();
+	return { receivables: results, total, pageCount, filters };
 }

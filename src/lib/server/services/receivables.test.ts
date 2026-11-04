@@ -7,6 +7,7 @@ import { getOrderTimeline, MODIFIED_AFTER_STAGING_AT } from './orders';
 import {
 	getReceivableDetail,
 	issueReceivable,
+	listReceivables,
 	receivableAttributesSchema,
 	updateReceivable
 } from './receivables';
@@ -442,4 +443,84 @@ test('SALES, WAREHOUSE and DRIVER get a 403 reading the detail; MANAGER passes',
 		expect(isHttpError(caught, 403), actor.username).toBe(true);
 	}
 	expect((await detailOf(id)).id).toBe(id);
+});
+
+async function listIds(input: Record<string, string> = {}): Promise<number[]> {
+	return (await listReceivables(db, input, manager)).receivables.map(({ id }) => id);
+}
+
+// Postobón's cuenta, then Luz Marina's: $500.000 each.
+async function issuedForTwoClients(): Promise<[number, number]> {
+	insertOrder(2001, { total: 500000 });
+	insertOrder(2002, { clientId: LUZ_MARINA, total: 500000 });
+	return [await issued([2001]), await issued([2002])];
+}
+
+test('the list goes newest first, with the client, date, total and balance of each', async () => {
+	const [postobon, luzMarina] = await issuedForTwoClients();
+	insertMovement({ amount: 200000, entityType: 'RECEIVABLE', entityId: postobon });
+	const page = await listReceivables(db, {}, manager);
+	expect(page.receivables.map(({ id }) => id)).toEqual([luzMarina, postobon]);
+	expect(page.total).toBe(2);
+	expect(page.receivables[1]).toEqual({
+		id: postobon,
+		clientName: 'Postobón S.A.',
+		issueDate: '2026-11-01',
+		total: 500000,
+		balance: 300000
+	});
+});
+
+test('?texto= finds the contact by a name in another word order, or digits of the phone', async () => {
+	const [postobon, luzMarina] = await issuedForTwoClients();
+	expect(await listIds({ text: 'restrepo LUZ' })).toEqual([luzMarina]);
+	expect(await listIds({ text: 'postobon' })).toEqual([postobon]);
+	expect(await listIds({ text: '002' })).toEqual([luzMarina]);
+	expect(await listIds({ text: 'Betancur' })).toEqual([]);
+});
+
+test('?pendiente=1 keeps a balance above 0, leaving out the paid and the credit', async () => {
+	const [paid, pending] = await issuedForTwoClients();
+	insertOrder(2003, { total: 500000 });
+	const credit = await issued([2003]);
+	insertMovement({ amount: 500000, entityType: 'RECEIVABLE', entityId: paid });
+	insertMovement({ amount: 600000, entityType: 'RECEIVABLE', entityId: credit });
+	expect(await listIds({ hasBalance: '1' })).toEqual([pending]);
+	expect(await listIds()).toEqual([credit, pending, paid]);
+});
+
+test('the filters combine', async () => {
+	const [postobon, luzMarina] = await issuedForTwoClients();
+	insertMovement({ amount: 500000, entityType: 'RECEIVABLE', entityId: postobon });
+	expect(await listIds({ text: 'postobon', hasBalance: '1' })).toEqual([]);
+	expect(await listIds({ text: 'luz', hasBalance: '1' })).toEqual([luzMarina]);
+});
+
+test('the list pages 20 at a time, in SQL, and a page past the last shows the last', async () => {
+	for (let i = 0; i < 23; i++) {
+		insertOrder(3000 + i);
+		await issued([3000 + i]);
+	}
+	const first = await listReceivables(db, {}, manager);
+	expect(first).toMatchObject({ total: 23, pageCount: 2, filters: { page: 1 } });
+	expect(first.receivables).toHaveLength(20);
+	const beyond = await listReceivables(db, { page: '9' }, manager);
+	expect(beyond.filters.page).toBe(2);
+	expect(beyond.receivables).toHaveLength(3);
+	expect((await listReceivables(db, { page: 'dos' }, manager)).filters.page).toBe(1);
+});
+
+test('an empty list has one page', async () => {
+	expect(await listReceivables(db, {}, manager)).toMatchObject({
+		receivables: [],
+		total: 0,
+		pageCount: 1
+	});
+});
+
+test('SALES, WAREHOUSE and DRIVER get a 403 on the list', async () => {
+	for (const actor of [sales, warehouse, driver]) {
+		const caught = await listReceivables(db, {}, actor).catch((error) => error);
+		expect(isHttpError(caught, 403), actor.username).toBe(true);
+	}
 });
