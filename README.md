@@ -214,6 +214,42 @@ npx wrangler d1 execute consueloc-erp-db --remote --file products-import.sql  # 
 - Los productos no publicados entran inactivos. Todos entran con 0 unidades, que se completan en _Productos_.
 - Se puede ejecutar varias veces: un producto cuyo nombre ya existe (sin importar mayúsculas) se omite.
 
+## Fijar la secuencia de los pedidos
+
+Para que el primer pedido que cree la aplicación siga la numeración en papel, la secuencia de `orders` se fija una sola vez en producción con el último número en papel.
+
+Se hace antes del primer pedido real y después del último despliegue con migraciones aplastadas: mientras `orders` esté vacía, ese despliegue borra la base de datos y con ella la secuencia.
+
+> [!NOTE]
+> Reemplazar `NNNN` por el último número en papel:
+
+```bash
+npx wrangler d1 execute consueloc-erp-db --remote --command "SELECT seq FROM sqlite_sequence WHERE name = 'orders'"
+npx wrangler d1 execute consueloc-erp-db --remote --command "INSERT INTO sqlite_sequence (name, seq) VALUES ('orders', NNNN)"
+npx wrangler d1 execute consueloc-erp-db --remote --command "SELECT seq FROM sqlite_sequence WHERE name = 'orders'"
+```
+
+> [!WARNING]
+> El primer `SELECT` no debe devolver filas. Si devuelve una, ya se creó un pedido y no se debe ejecutar el `INSERT`. El último `SELECT` debe devolver `NNNN`.
+
+## Fijar la secuencia de las cuentas de cobro
+
+Para que la primera cuenta de cobro que emita la aplicación siga la numeración en papel, la secuencia de `receivables` se fija una sola vez en producción con el último número en papel.
+
+Se hace después del lanzamiento y antes de emitir la primera cuenta de cobro
+
+> [!NOTE]
+> Reemplazar `NNNN` por el último número en papel:
+
+```bash
+npx wrangler d1 execute consueloc-erp-db --remote --command "SELECT seq FROM sqlite_sequence WHERE name = 'receivables'"
+npx wrangler d1 execute consueloc-erp-db --remote --command "INSERT INTO sqlite_sequence (name, seq) VALUES ('receivables', NNNN)"
+npx wrangler d1 execute consueloc-erp-db --remote --command "SELECT seq FROM sqlite_sequence WHERE name = 'receivables'"
+```
+
+> [!WARNING]
+> El primer `SELECT` no debe devolver filas. Si devuelve una, ya se emitió una cuenta de cobro y no se debe ejecutar el `INSERT`. El último `SELECT` debe devolver `NNNN`.
+
 <!-- vim: spelllang=es
 n,
 -->
