@@ -1700,9 +1700,17 @@ export async function getOrderFormOptions(
 /** One row of the order's timeline. The edit's fields stay in `events` until it's expanded. */
 export type TimelineEntry = {
 	id: number;
-	action: 'CREATED' | 'EDITED' | 'STATUS_CHANGED' | 'CANCELLED';
+	action:
+		| 'CREATED'
+		| 'EDITED'
+		| 'STATUS_CHANGED'
+		| 'CANCELLED'
+		| 'RECEIVABLE_LINKED'
+		| 'RECEIVABLE_UNLINKED';
 	/** The status a `STATUS_CHANGED` moved to. */
 	status: OrderStatus | null;
+	/** The cuenta de cobro the order joined or left: an unlink's is in `before`. */
+	receivableId: number | null;
 	/** A cancellation's. */
 	reason: string | null;
 	actorUsername: string;
@@ -1726,6 +1734,7 @@ export async function getOrderTimeline(
 	const { results } = await db
 		.prepare(
 			`select id, action, json_extract(after, '$.status') as status, reason,
+			coalesce(json_extract(after, '$.receivable_id'), json_extract(before, '$.receivable_id')) as receivableId,
 			actor_username as actorUsername, created_at as createdAt from events
 			where entity_type = 'ORDER' and entity_id = ? order by created_at desc, id desc`
 		)

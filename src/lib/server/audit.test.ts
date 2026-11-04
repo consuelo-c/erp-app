@@ -135,3 +135,37 @@ test('a column name that is not a plain identifier is rejected', () => {
 		})
 	).toThrow(/identifier/);
 });
+
+test('logged fields reach the event of an insert, not the row', () => {
+	runBatch(
+		auditedInsert(db, {
+			table: 'sample_rows',
+			entityType: 'SAMPLE_ROW',
+			actor: manager,
+			values: { name: 'Silla' },
+			logged: { order_ids: '[1,2]' }
+		})
+	);
+	const [created] = readEvents();
+	expect(JSON.parse(String(created.after))).toEqual({ name: 'Silla', order_ids: '[1,2]' });
+});
+
+test('logged fields alone are a change: the row refreshes its audit columns and logs them', () => {
+	database.exec("insert into sample_rows values (1, 'Silla', 0, 'admin', 0, 'admin')");
+	runBatch(
+		auditedUpdate(db, {
+			table: 'sample_rows',
+			entityType: 'SAMPLE_ROW',
+			actor: manager,
+			id: 1,
+			current: { name: 'Silla' },
+			changes: { name: 'Silla' },
+			logged: { before: { order_ids: '[1]' }, after: { order_ids: '[1,2]' } }
+		})
+	);
+	const row = database.prepare('select * from sample_rows').get();
+	expect(row).toMatchObject({ name: 'Silla', updated_by: 'gerente' });
+	const [edited] = readEvents();
+	expect(JSON.parse(String(edited.before))).toEqual({ order_ids: '[1]' });
+	expect(JSON.parse(String(edited.after))).toEqual({ order_ids: '[1,2]' });
+});
