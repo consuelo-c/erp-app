@@ -10,7 +10,7 @@
 	// An offsetting movement prints by its own sign: correcting an egreso prints a recibo.
 	let { data }: PageProps = $props();
 
-	const { movement, company } = $derived(data.receipt);
+	const { movement, company, receivableOrderIds } = $derived(data.receipt);
 	const isInflow = $derived(0 < movement.amount);
 	const title = $derived(isInflow ? 'RECIBO DE CAJA' : 'COMPROBANTE DE EGRESO');
 	// Sales came from the order: Caja isn't theirs.
@@ -19,6 +19,9 @@
 		backsToOrder
 			? resolve('/(app)/pedidos/[id]', { id: String(movement.orderId) })
 			: `${resolve('/(app)/caja')}?${new URLSearchParams({ movimiento: String(movement.id) })}`
+	);
+	const billedOrders = $derived(
+		`${1 === receivableOrderIds.length ? 'Pedido' : 'Pedidos'} ${receivableOrderIds.join(', ')}`
 	);
 	// A PAYROLL movement names its week; a standalone one, its description.
 	const concept = $derived(
@@ -70,6 +73,12 @@
 		<div class="print-row"><span>Concepto</span><span>{concept}</span></div>
 		{#if null !== movement.orderId}
 			<div class="print-row"><span>Pedido relacionado</span><span>#{movement.orderId}</span></div>
+		{/if}
+		{#if null !== movement.receivableId}
+			<div class="print-row">
+				<span>Cuenta de cobro relacionada</span>
+				<span>Nº {movement.receivableId} · {billedOrders}</span>
+			</div>
 		{/if}
 		<div class="print-row">
 			<span>Método de pago</span>

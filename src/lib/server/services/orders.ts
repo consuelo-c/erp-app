@@ -262,6 +262,8 @@ export type Order = {
 	depositAmount: number;
 	notes: string | null;
 	parentOrderId: number | null;
+	/** The cuenta de cobro billing it, or null. */
+	receivableId: number | null;
 };
 
 export type SaveResult =
@@ -292,11 +294,13 @@ type OrderRow = Omit<Columns, 'client_id'> & {
 	client_id: number;
 	status: OrderStatus;
 	has_incident: number;
+	receivable_id: number | null;
 };
 
 const SELECT_ORDER = `select id, status, has_incident, client_id, event_date, delivery_date,
 	pickup_date, rental_days, client_attributes, delivery_attributes, pickup_attributes, order_items,
-	items_total, discount, transport_cost, order_total, deposit_amount, attributes from orders`;
+	items_total, discount, transport_cost, order_total, deposit_amount, attributes, receivable_id
+	from orders`;
 
 const CHECK_FIELDS = 'Revisa los campos marcados en rojo antes de guardar.';
 const NOT_A_CARRIER = 'Escoge un transportador de la lista';
@@ -334,7 +338,8 @@ function toOrder(row: OrderRow): Order {
 		orderTotal: row.order_total,
 		depositAmount: row.deposit_amount,
 		notes: attributes.notes ?? null,
-		parentOrderId: attributes.parent_order_id ?? null
+		parentOrderId: attributes.parent_order_id ?? null,
+		receivableId: row.receivable_id
 	};
 }
 
@@ -1592,7 +1597,8 @@ function payeeOf(order: Order, payment: PaymentInput): string | Refusal {
 
 /**
  * Records one of the order's movements, in any state, cancelled included: nothing blocks on the
- * balance or the deposit. Valor is typed positive; the concept gives the sign.
+ * balance or the deposit. Valor is typed positive; the concept gives the sign. Once billed, its
+ * «Pago» goes on the cuenta de cobro.
  */
 export async function recordOrderPayment(
 	db: D1Database,
@@ -1612,11 +1618,15 @@ export async function recordOrderPayment(
 		return { ok: false, message: 'Ese pedido no existe.', errors: {} };
 	}
 	const order = toOrder(row);
+	const { concept } = parsed.data;
+	if ('INSTALLMENT' === concept && null !== order.receivableId) {
+		const message = `El pago va en la cuenta de cobro Nº ${order.receivableId}.`;
+		return { ok: false, message, errors: {} };
+	}
 	const payee = payeeOf(order, parsed.data);
 	if ('string' !== typeof payee) {
 		return payee;
 	}
-	const { concept } = parsed.data;
 	const link = { concept, entityType: 'ORDER', entityId: order.id, payee };
 	return recordLinkedMovement(db, { form: input, ...link }, actor);
 }

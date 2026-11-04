@@ -1,11 +1,14 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import Button from '$lib/components/Button.svelte';
 	import IconButton from '$lib/components/IconButton.svelte';
+	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import { formatLongDay } from '$lib/datetime';
 	import { formatIdNumber, formatPesos } from '$lib/format';
+	import { CASH_CONCEPT_LABELS } from '$lib/labels';
 	import { formatPhone } from '$lib/phone';
 	import PaymentList from '../../PaymentList.svelte';
 	import type { PageProps } from './$types';
@@ -16,6 +19,11 @@
 	const client = $derived(receivable.client);
 	const isPaid = $derived(receivable.balance <= 0);
 	const hasCredit = $derived(receivable.balance < 0);
+
+	// Set by the payment entry's redirect: the payment just recorded, its receipt in «Pagos».
+	const recordedPayment = $derived(
+		receivable.payments.find(({ id }) => String(id) === page.url.searchParams.get('pago'))
+	);
 </script>
 
 <svelte:head>
@@ -29,6 +37,16 @@
 			backHref={resolve('/cuentas-de-cobro')}
 		/>
 	{/snippet}
+
+	{#if recordedPayment}
+		<div class="lead-notice">
+			<Notice tone="success">
+				Pago registrado: {CASH_CONCEPT_LABELS[recordedPayment.concept]} · {formatPesos(
+					recordedPayment.amount
+				)}
+			</Notice>
+		</div>
+	{/if}
 
 	<h2 class="section-title client-name">{client.name}</h2>
 	{#if null !== client.documentId}
@@ -85,8 +103,7 @@
 	<h2 class="section-title">Pagos</h2>
 	<PaymentList payments={receivable.payments} />
 
-	<!-- STUB: #422 and #420 (phase 16) give these their routes: the printout (46) and the payment
-	entry (45). -->
+	<!-- STUB: #422 (phase 16) gives «Imprimir» its route, the printout (46). -->
 	<div class="screen__action">
 		<Button
 			variant="secondary"
@@ -96,11 +113,17 @@
 			Editar
 		</Button>
 		<Button variant="secondary" size="sm" disabled>Imprimir</Button>
-		<Button disabled>Registrar pago</Button>
+		<Button href={resolve('/(app)/cuentas-de-cobro/[id]/pago', { id: String(receivable.id) })}>
+			Registrar pago
+		</Button>
 	</div>
 </Screen>
 
 <style>
+	.lead-notice {
+		margin-bottom: var(--space-8);
+	}
+
 	.client-name {
 		margin-bottom: var(--space-2);
 	}

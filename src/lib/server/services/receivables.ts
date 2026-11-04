@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { getTodaysDate } from '$lib/datetime';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, type Diff } from '../audit';
-import { optional } from './cash';
+import { optional, recordLinkedMovement } from './cash';
 import { isAutoDocument, searchClause } from './contacts';
 import {
 	invalidOrder,
@@ -264,6 +264,36 @@ export async function updateReceivable(
 		await db.batch(statements);
 	}
 	return { ok: true, id };
+}
+
+const paymentInputSchema = z.object({ id: idSchema });
+
+/**
+ * «Registrar pago»: one movement on the cuenta, never split across its orders, whatever the form
+ * posts as its concept. Nothing blocks on the balance. `payee` copies the client's current name.
+ */
+export async function recordReceivablePayment(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<SaveResult> {
+	requireRole(actor, MANAGES_RECEIVABLES);
+	const parsed = paymentInputSchema.safeParse(input);
+	if (!parsed.success) {
+		return NOT_FOUND;
+	}
+	const row = await findRow(db, parsed.data.id);
+	if (null === row) {
+		return NOT_FOUND;
+	}
+	const { name: payee } = await findClient(db, row.client_id);
+	const link = {
+		concept: 'INSTALLMENT',
+		entityType: 'RECEIVABLE',
+		entityId: row.id,
+		payee
+	} as const;
+	return recordLinkedMovement(db, { form: input, ...link }, actor);
 }
 
 // The movements `receivable_paid` sums, for the `receivables` row in scope: the cuenta's own and its

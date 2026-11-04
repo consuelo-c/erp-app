@@ -1240,6 +1240,22 @@ test('a payment on an order that does not exist is rejected, and writes nothing'
 	});
 });
 
+test('a billed order refuses a «Pago», and still takes a refund', async () => {
+	const id = await create();
+	database.exec(
+		`insert into receivables (id, client_id, issue_date, created_at, created_by, updated_at, updated_by)
+		select 4794, client_id, '2026-08-01', 0, 'admin', 0, 'admin' from orders where id = ${id}`
+	);
+	database.exec(`update orders set receivable_id = 4794 where id = ${id}`);
+	expect(await recordOrderPayment(db, typedPayment(id), manager)).toEqual({
+		ok: false,
+		message: 'El pago va en la cuenta de cobro Nº 4794.',
+		errors: {}
+	});
+	const refund = await recordPayment(id, { concept: 'INSTALLMENT_REFUND' });
+	expect(refund).toMatchObject({ amount: -300000, entity_type: 'ORDER' });
+});
+
 test('SALES records money in only; WAREHOUSE and DRIVER record nothing: a 403', async () => {
 	const id = await create(withCarriers(WILSON, null));
 	for (const concept of ['INSTALLMENT_REFUND', 'DEPOSIT_REFUND', 'CARRIER_PAYMENT']) {
