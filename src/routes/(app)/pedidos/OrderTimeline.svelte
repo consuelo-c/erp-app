@@ -18,13 +18,18 @@
 		CREATED: 'Creado',
 		EDITED: 'Editado',
 		STATUS_CHANGED: 'Cambio de estado',
-		CANCELLED: 'Cancelado'
+		CANCELLED: 'Cancelado',
+		RECEIVABLE_LINKED: 'Incluido en la cuenta de cobro',
+		RECEIVABLE_UNLINKED: 'Retirado de la cuenta de cobro'
 	};
 
 	// A status change reads as the status it moved to: «Confirmado».
 	function titleOf(entry: TimelineEntry): string {
 		if ('STATUS_CHANGED' === entry.action && null !== entry.status) {
 			return ORDER_STATUS_LABELS[entry.status];
+		}
+		if (null !== entry.receivableId) {
+			return `${ACTION_TITLES[entry.action]} Nº ${entry.receivableId}`;
 		}
 		return ACTION_TITLES[entry.action];
 	}

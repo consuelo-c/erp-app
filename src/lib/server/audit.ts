@@ -109,13 +109,14 @@ function insertStatement(
 /**
  * Inserts `values` with the four audit columns filled from `actor`, plus its `CREATED` event.
  * `unlogged` columns are inserted but left out of the event: a password hash never reaches `events`.
+ * `logged` fields are the reverse: in the event's `after`, but no column of the row.
  * `computed` columns come from a subquery in the same statement, like a receipt's consecutive.
  * Returns both statements for the caller's `db.batch()`, in this order: the event takes
  * `entity_id` from `last_insert_rowid()`, so it must run right after the insert.
  */
 export function auditedInsert(
 	db: D1Database,
-	write: AuditedWrite & { values: Row; unlogged?: Row; computed?: Computed }
+	write: AuditedWrite & { values: Row; unlogged?: Row; logged?: Row; computed?: Computed }
 ): D1PreparedStatement[] {
 	const now = nowInSeconds();
 	const row = {
@@ -131,7 +132,7 @@ export function auditedInsert(
 		...write,
 		action: 'CREATED',
 		before: null,
-		after: write.values,
+		after: { ...write.values, ...write.logged },
 		now,
 		entityId: 'NEW_ROW' as const
 	};
@@ -147,7 +148,7 @@ export function diffFields(current: Row, changes: Row): { before: Row; after: Ro
 	};
 }
 
-type Diff = { before: Row; after: Row };
+export type Diff = { before: Row; after: Row };
 
 function parseObject(json: ColumnValue | undefined): Row {
 	return null === json || undefined === json ? {} : (JSON.parse(String(json)) as Row);
@@ -222,6 +223,7 @@ type AuditedEdit = AuditedWrite & {
 	current: Row;
 	changes: Row;
 	unlogged?: Row;
+	logged?: Diff;
 	jsonColumns?: readonly string[];
 	computed?: Computed;
 	action?: string;
@@ -234,7 +236,9 @@ type AuditedEdit = AuditedWrite & {
  * (or `action`) with those fields only, and `reason` when the write needs one. `unlogged` columns
  * are always written but never logged: a new password hash. `jsonColumns` are written whole but logged
  * key by key, only the keys that changed. `computed` columns are set from a subquery, like the id of
- * a row inserted earlier in the same batch, and logged only when `isLogged`. Returns the statements
+ * a row inserted earlier in the same batch, and logged only when `isLogged`. `logged` fields are no
+ * column of the row, only of the event: its `after` having any counts as a change, and the row still
+ * refreshes `updated_at`/`updated_by`. Returns the statements
  * for the caller's `db.batch()`, or none when nothing changed: an edit that changes nothing writes
  * nothing.
  */
@@ -242,7 +246,9 @@ export function auditedUpdate(db: D1Database, write: AuditedEdit): D1PreparedSta
 	const diff = diffFields(write.current, write.changes);
 	const columns = { ...diff.after, ...write.unlogged };
 	const computed = write.computed ?? {};
-	if (0 === Object.keys(columns).length + Object.keys(computed).length) {
+	const logged = write.logged ?? { before: {}, after: {} };
+	const changeCount = [columns, computed, logged.after].flatMap(Object.keys).length;
+	if (0 === changeCount) {
 		return [];
 	}
 	const now = nowInSeconds();
@@ -251,8 +257,12 @@ export function auditedUpdate(db: D1Database, write: AuditedEdit): D1PreparedSta
 	const event = {
 		...write,
 		action: write.action ?? 'EDITED',
-		before: { ...fields.before, ...loggedComputedBefore(write.current, computed) },
-		after: fields.after,
+		before: {
+			...fields.before,
+			...loggedComputedBefore(write.current, computed),
+			...logged.before
+		},
+		after: { ...fields.after, ...logged.after },
 		now,
 		...entityOf(write.id)
 	};
