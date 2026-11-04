@@ -103,7 +103,6 @@
 	<h2 class="section-title">Pagos</h2>
 	<PaymentList payments={receivable.payments} />
 
-	<!-- STUB: #422 (phase 16) gives «Imprimir» its route, the printout (46). -->
 	<div class="screen__action">
 		<Button
 			variant="secondary"
@@ -112,7 +111,16 @@
 		>
 			Editar
 		</Button>
-		<Button variant="secondary" size="sm" disabled>Imprimir</Button>
+		<!-- A full load: a stylesheet stays once a route loaded it, and a half-letter printout's
+		@page would otherwise size this one. -->
+		<Button
+			variant="secondary"
+			size="sm"
+			href={resolve('/(app)/cuentas-de-cobro/[id]/impresion', { id: String(receivable.id) })}
+			data-sveltekit-reload
+		>
+			Imprimir
+		</Button>
 		<Button href={resolve('/(app)/cuentas-de-cobro/[id]/pago', { id: String(receivable.id) })}>
 			Registrar pago
 		</Button>

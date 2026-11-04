@@ -7,20 +7,23 @@ import { getTodaysDate } from '$lib/datetime';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, type Diff } from '../audit';
 import { optional, recordLinkedMovement } from './cash';
-import { isAutoDocument, searchClause } from './contacts';
+import { contactAttributesSchema, isAutoDocument, searchClause } from './contacts';
 import {
 	invalidOrder,
+	orderItemsSchema,
 	RECEIVABLE_BALANCE_SQL,
 	RECEIVABLE_PAID_MOVEMENT_SQL,
 	RECEIVABLE_PAID_SQL,
 	RECEIVABLE_TOTAL_SQL,
 	searchTextSchema,
 	toPayment,
+	type OrderItem,
 	type OrderPayment,
 	type PaymentRow,
 	type Refusal,
 	type SaveResult
 } from './orders';
+import { COMPANY_SETTINGS, readSettings, type CompanySettings } from './settings';
 
 const MANAGES_RECEIVABLES = ['ADMIN', 'MANAGER'] as const;
 
@@ -331,6 +334,7 @@ type DetailRow = ClientRow & {
 	id: number;
 	issue_date: string;
 	attributes: string;
+	contact_attributes: string;
 	total: number;
 	paid: number;
 	balance: number;
@@ -340,6 +344,7 @@ async function findDetailRow(db: D1Database, id: number): Promise<DetailRow | nu
 	return db
 		.prepare(
 			`select receivables.id, issue_date, receivables.attributes, full_name, phone, document_id,
+			contacts.attributes as contact_attributes,
 			${RECEIVABLE_TOTAL_SQL} as total, ${RECEIVABLE_PAID_SQL} as paid,
 			${RECEIVABLE_BALANCE_SQL} as balance
 			from receivables join contacts on contacts.id = receivables.client_id
@@ -416,6 +421,79 @@ export async function getReceivableDetail(
 		return null;
 	}
 	return { ...toDetail(row), orders, payments };
+}
+
+export type PrintedOrder = {
+	id: number;
+	items: OrderItem[];
+	itemsTotal: number;
+	rentalDays: number;
+	discount: number;
+	transportCost: number;
+	orderTotal: number;
+};
+
+export type ReceivablePrintout = {
+	id: number;
+	issueDate: string;
+	paymentTerms: string;
+	client: ReceivableClient & { address: string };
+	orders: PrintedOrder[];
+	total: number;
+	company: CompanySettings;
+};
+
+type PrintedOrderRow = Omit<PrintedOrder, 'items'> & { order_items: string };
+
+async function findPrintedOrders(db: D1Database, id: number): Promise<PrintedOrder[]> {
+	const { results } = await db
+		.prepare(
+			`select id, order_items, items_total as itemsTotal, rental_days as rentalDays, discount,
+			transport_cost as transportCost, order_total as orderTotal from orders
+			where receivable_id = ? order by id`
+		)
+		.bind(id)
+		.all<PrintedOrderRow>();
+	return results.map(({ order_items: orderItems, ...order }) => ({
+		...order,
+		items: orderItemsSchema.parse(JSON.parse(orderItems))
+	}));
+}
+
+function toAddress(contactAttributes: string): string {
+	const { address_1, address_2 } = contactAttributesSchema.parse(JSON.parse(contactAttributes));
+	return [address_1, address_2].filter(Boolean).join(', ');
+}
+
+/** The letter sheets: the client is read live from the contact. Null if there's no such cuenta. */
+export async function getReceivablePrintout(
+	db: D1Database,
+	id: unknown,
+	actor: Actor | null
+): Promise<ReceivablePrintout | null> {
+	requireRole(actor, MANAGES_RECEIVABLES);
+	const parsedId = idSchema.safeParse(id);
+	if (!parsedId.success) {
+		return null;
+	}
+	const [row, orders, company] = await Promise.all([
+		findDetailRow(db, parsedId.data),
+		findPrintedOrders(db, parsedId.data),
+		readSettings(db, COMPANY_SETTINGS)
+	]);
+	if (null === row) {
+		return null;
+	}
+	const { id: receivableId, issueDate, paymentTerms, client, total } = toDetail(row);
+	return {
+		id: receivableId,
+		issueDate,
+		paymentTerms,
+		client: { ...client, address: toAddress(row.contact_attributes) },
+		orders,
+		total,
+		company
+	};
 }
 
 export type ReceivableForm = {

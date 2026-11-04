@@ -6,7 +6,9 @@ import {
 	LINES_PER_PAGE,
 	nextOperationalStatus,
 	readReceivableBalance,
-	splitIntoPages
+	formatRemisiones,
+	splitIntoPages,
+	splitOrdersIntoPages
 } from './orders';
 
 // The Design Brief's order #1043.
@@ -135,6 +137,37 @@ test('30 lines spill onto a second sheet, which carries the totals and signature
 
 test('lines filling the first sheet exactly leave the totals and signature a second one', () => {
 	expect(splitIntoPages(linesOf(LINES_PER_PAGE))).toEqual([linesOf(LINES_PER_PAGE), []]);
+});
+
+function orderOf(id: number, lineCount: number) {
+	return { id, items: linesOf(lineCount) };
+}
+
+test('three orders of 15 lines take two letter sheets, every line printed once', () => {
+	const orders = [orderOf(1, 15), orderOf(2, 15), orderOf(3, 15)];
+	const pages = splitOrdersIntoPages(orders);
+	expect(pages).toHaveLength(2);
+	expect(pages.flat().flatMap((block) => block.items)).toHaveLength(45);
+});
+
+test('an order split across sheets closes where its last line is, with its totals', () => {
+	const pages = splitOrdersIntoPages([orderOf(1, 15), orderOf(2, 15), orderOf(3, 15)]);
+	const blocksOfSecond = pages.flat().filter((block) => 2 === block.order.id);
+	expect(blocksOfSecond.map((block) => block.isClosed)).toEqual([false, true]);
+	expect(blocksOfSecond[1].items.at(-1)).toBe(14);
+});
+
+test('lines that leave no room for the closing give it a sheet of its own, their totals behind', () => {
+	const pages = splitOrdersIntoPages([orderOf(1, 30)]);
+	expect(pages).toHaveLength(2);
+	expect(pages[0][0].isClosed).toBe(true);
+	expect(pages[1]).toEqual([]);
+});
+
+test("the concept lists every order's number", () => {
+	expect(formatRemisiones([1043])).toBe('Remisión 1043');
+	expect(formatRemisiones([1043, 1060])).toBe('Remisiones 1043 y 1060');
+	expect(formatRemisiones([1060, 1061, 1072])).toBe('Remisiones 1060, 1061 y 1072');
 });
 
 test('a billed order with a balance reads what is pending on its cuenta', () => {
