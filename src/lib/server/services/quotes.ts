@@ -34,8 +34,14 @@ import {
 	type SaveResult
 } from './orders';
 import { foldedSql, optional } from './cash';
-import { getContact, searchClause, type ClientCandidate, type NewClient } from './contacts';
-import { readSettings } from './settings';
+import {
+	getContact,
+	isAutoDocument,
+	searchClause,
+	type ClientCandidate,
+	type NewClient
+} from './contacts';
+import { COMPANY_SETTINGS, readSettings, type CompanySettings } from './settings';
 
 // The same three who take orders: converting a quote creates one.
 const TAKES_QUOTES = ['ADMIN', 'MANAGER', 'SALES'] as const;
@@ -750,4 +756,32 @@ export async function getSourceQuoteId(
 		.bind(orderId)
 		.first<{ id: number }>();
 	return row?.id ?? null;
+}
+
+/**
+ * The half-letter quote, in any state. `document` is the contact's NIT or cédula as it is when
+ * printed, or null when it's an automatic one: nothing prints in its place.
+ */
+export type QuotePrintout = { quote: Quote; document: string | null; company: CompanySettings };
+
+export async function getQuotePrintout(
+	db: D1Database,
+	id: unknown,
+	actor: Actor | null
+): Promise<QuotePrintout | null> {
+	requireRole(actor, TAKES_QUOTES);
+	const [quote, company] = await Promise.all([
+		getQuote(db, id, actor),
+		readSettings(db, COMPANY_SETTINGS)
+	]);
+	if (null === quote) {
+		return null;
+	}
+	const contact = await db
+		.prepare('select document_id from contacts where id = ?')
+		.bind(quote.clientId)
+		.first<{ document_id: string }>();
+	const documentId = contact?.document_id ?? null;
+	const document = null === documentId || isAutoDocument(documentId) ? null : documentId;
+	return { quote, document, company };
 }

@@ -11,6 +11,7 @@ import {
 	createQuote,
 	getQuoteConversion,
 	getQuoteFormOptions,
+	getQuotePrintout,
 	getQuote,
 	getQuoteChange,
 	getQuoteDetail,
@@ -832,4 +833,24 @@ test('DRIVER gets a 403 converting a quote; SALES converts it', async () => {
 	expect(isHttpError(refusal, 403)).toBe(true);
 	expect(countOrders()).toEqual({ orders: 0 });
 	expect(await convert(id)).toBeGreaterThan(0);
+});
+
+test("the printout carries the contact's document as it is when printed, and none for an automatic one", async () => {
+	const id = await create();
+	expect(await getQuotePrintout(db, id, sales)).toMatchObject({
+		quote: { id },
+		document: null,
+		company: { COMPANY_NAME: expect.any(String) }
+	});
+	database.exec(`update contacts set document_id = '43521789' where id = ${LUZ_MARINA}`);
+	expect((await getQuotePrintout(db, id, sales))?.document).toBe('43521789');
+	expect(await getQuotePrintout(db, 99, sales)).toBeNull();
+});
+
+test('WAREHOUSE and DRIVER get a 403 on the printout', async () => {
+	const id = await create();
+	for (const actor of [warehouse, driver]) {
+		const refusal = await getQuotePrintout(db, id, actor).catch((caught) => caught);
+		expect(isHttpError(refusal, 403)).toBe(true);
+	}
 });
