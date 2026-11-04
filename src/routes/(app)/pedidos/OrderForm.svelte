@@ -522,7 +522,15 @@
 			error={errorOf('client_id')}
 		/>
 
-		<div class="field-row">
+		<div class="field-row field-row--stack">
+			<Field label="Nombre" id="client-name" error={errorOf('client_name')}>
+				<Input
+					id="client-name"
+					placeholder="Ej. Luz Marina Restrepo"
+					aria-invalid={undefined !== errorOf('client_name')}
+					bind:value={clientName}
+				/>
+			</Field>
 			<Field label="Teléfono" id="phone" error={errorOf('client_phone')} hint={phoneNote}>
 				<Input
 					id="phone"
@@ -534,94 +542,171 @@
 					oninput={() => (phoneNote = '')}
 				/>
 			</Field>
-			<Field label="Fecha del evento" id="event-date" error={errorOf('event_date')}>
-				<Input
-					id="event-date"
-					type="date"
-					aria-invalid={undefined !== errorOf('event_date')}
-					bind:value={eventDate}
-				/>
-			</Field>
 		</div>
 
-		<div class="trips">
-			<div class="trip">
-				<Field
-					label="↧ Entrega"
-					id="delivery-date"
-					error={errorOf('delivery_date')}
-					hint={original ? `El día siguiente a la recogida del pedido #${original.id}.` : ''}
-				>
+		<section class="section">
+			<h2 class="section-title">Información del evento</h2>
+			<div class="field-row">
+				<Field label="Fecha del evento" id="event-date" error={errorOf('event_date')}>
 					<Input
+						id="event-date"
+						type="date"
+						aria-invalid={undefined !== errorOf('event_date')}
+						bind:value={eventDate}
+					/>
+				</Field>
+				<Field label="Días cobrados" id="rental-days" error={errorOf('rental_days')}>
+					<Input
+						id="rental-days"
+						inputmode="numeric"
+						aria-invalid={undefined !== errorOf('rental_days')}
+						bind:value={rentalDays}
+					/>
+				</Field>
+			</div>
+		</section>
+
+		<section class="section">
+			<h2 class="section-title">Despacho</h2>
+			<!-- Each trip keeps its when, how and where together: bodega and the driver read it as one. -->
+			<div class="trips">
+				<div class="trip">
+					<Field
+						label="↧ Entrega"
 						id="delivery-date"
-						type="date"
-						disabled={null !== original}
-						aria-invalid={undefined !== errorOf('delivery_date')}
-						bind:value={deliveryDate}
+						error={errorOf('delivery_date')}
+						hint={original ? `El día siguiente a la recogida del pedido #${original.id}.` : ''}
+					>
+						<Input
+							id="delivery-date"
+							type="date"
+							disabled={null !== original}
+							aria-invalid={undefined !== errorOf('delivery_date')}
+							bind:value={deliveryDate}
+						/>
+					</Field>
+					<ClockField
+						legend="Hora (opcional)"
+						prefix="delivery-"
+						optional
+						placeholder={null}
+						error={errorOf('delivery_attributes.time')}
+						bind:hour={deliveryTime.hour}
+						bind:minute={deliveryTime.minute}
+						bind:period={deliveryTime.period}
 					/>
-				</Field>
-				<ClockField
-					legend="Hora (opcional)"
-					prefix="delivery-"
-					optional
-					placeholder={null}
-					error={errorOf('delivery_attributes.time')}
-					bind:hour={deliveryTime.hour}
-					bind:minute={deliveryTime.minute}
-					bind:period={deliveryTime.period}
-				/>
-			</div>
-			<div class="trip">
-				<Field label="↥ Recogida" id="pickup-date" error={errorOf('pickup_date')}>
-					<Input
-						id="pickup-date"
-						type="date"
-						aria-invalid={undefined !== errorOf('pickup_date')}
-						bind:value={pickupDate}
+					<Field label="Método de entrega" id="delivery-method">
+						<Select
+							id="delivery-method"
+							bind:value={deliveryMethod}
+							onchange={changeDeliveryMethod}
+						>
+							{#each Object.entries(DELIVERY_METHOD_LABELS) as [method, label] (method)}
+								<option value={method}>{label}</option>
+							{/each}
+						</Select>
+					</Field>
+					{#if 'EXTERNAL_CARRIER' === deliveryMethod}
+						{@render carrierPicker('delivery-carrier', 'Transportador de la entrega', delivery)}
+					{/if}
+					<Field
+						label="Dirección de entrega"
+						id="delivery-address"
+						error={errorOf('delivery_attributes.address_1')}
+						hint={'CLIENT_PICKUP' === deliveryMethod
+							? 'La de la empresa, porque recoge el cliente. Puedes cambiarla.'
+							: addressNote || '\u00a0'}
+					>
+						<div class="address" oninput={() => (addressNote = '')}>
+							<Input
+								id="delivery-address"
+								placeholder="Ej. Cra 43A #18-95, El Poblado"
+								aria-invalid={undefined !== errorOf('delivery_attributes.address_1')}
+								bind:value={delivery.address1}
+							/>
+							<Input
+								aria-label="Dirección de entrega, segunda línea"
+								placeholder="Ej. Salón Social Torre Verde, piso 2 (opcional)"
+								bind:value={delivery.address2}
+							/>
+						</div>
+					</Field>
+				</div>
+				<div class="trip">
+					<Field label="↥ Recogida" id="pickup-date" error={errorOf('pickup_date')}>
+						<Input
+							id="pickup-date"
+							type="date"
+							aria-invalid={undefined !== errorOf('pickup_date')}
+							bind:value={pickupDate}
+						/>
+					</Field>
+					<ClockField
+						legend="Hora (opcional)"
+						prefix="pickup-"
+						optional
+						placeholder={null}
+						error={errorOf('pickup_attributes.time')}
+						bind:hour={pickupTime.hour}
+						bind:minute={pickupTime.minute}
+						bind:period={pickupTime.period}
 					/>
-				</Field>
-				<ClockField
-					legend="Hora (opcional)"
-					prefix="pickup-"
-					optional
-					placeholder={null}
-					error={errorOf('pickup_attributes.time')}
-					bind:hour={pickupTime.hour}
-					bind:minute={pickupTime.minute}
-					bind:period={pickupTime.period}
-				/>
+					<Field label="Método de retorno" id="return-method">
+						<Select id="return-method" bind:value={returnMethod} onchange={changeReturnMethod}>
+							{#each Object.entries(RETURN_METHOD_LABELS) as [method, label] (method)}
+								<option value={method}>{label}</option>
+							{/each}
+						</Select>
+					</Field>
+					{#if 'EXTERNAL_CARRIER' === returnMethod}
+						{@render carrierPicker('pickup-carrier', 'Transportador del retorno', pickup)}
+					{/if}
+					<Field
+						label="Dirección de recogida"
+						id="pickup-address"
+						error={errorOf('pickup_attributes.address_1')}
+						hint={'CLIENT_RETURN' === returnMethod
+							? 'La de la empresa, porque devuelve el cliente. Puedes cambiarla.'
+							: 'Sale de la dirección de entrega. Puedes cambiarla.'}
+					>
+						<div class="address">
+							<Input
+								id="pickup-address"
+								placeholder="Igual a la de entrega"
+								aria-invalid={undefined !== errorOf('pickup_attributes.address_1')}
+								value={pickupAddress.address1}
+								oninput={(event) => typePickup('address1', event.currentTarget.value)}
+							/>
+							<Input
+								aria-label="Dirección de recogida, segunda línea"
+								placeholder="(opcional)"
+								value={pickupAddress.address2}
+								oninput={(event) => typePickup('address2', event.currentTarget.value)}
+							/>
+						</div>
+					</Field>
+				</div>
 			</div>
-		</div>
 
-		<!-- Warnings never block: they can all show at once and the order still saves. -->
-		{#if schedule}
-			<div class="warnings">
-				{#each schedule.warnings.holidays as holiday (holiday.trip)}
-					<Notice tone="warning">
-						⚠ La {tripLabel(holiday.trip)}, {formatShortDay(holiday.date)}, es festivo ({holiday.label}).
-						Puedes continuar igual.
-					</Notice>
-				{/each}
-				{#each schedule.warnings.clashes as clash (`${clash.trip}-${clash.orderId}`)}
-					<Notice tone="warning">
-						⚠ El pedido #{clash.orderId} también tiene {tripLabel(clash.theirTrip)} el
-						{formatShortDay(clash.date)} a las {formatClockTime(clash.time)}. Puedes continuar
-						igual.
-					</Notice>
-				{/each}
-			</div>
-		{/if}
-
-		<div class="field--narrow">
-			<Field label="Días cobrados" id="rental-days" error={errorOf('rental_days')}>
-				<Input
-					id="rental-days"
-					inputmode="numeric"
-					aria-invalid={undefined !== errorOf('rental_days')}
-					bind:value={rentalDays}
-				/>
-			</Field>
-		</div>
+			<!-- Warnings never block: they can all show at once and the order still saves. -->
+			{#if schedule}
+				<div class="warnings">
+					{#each schedule.warnings.holidays as holiday (holiday.trip)}
+						<Notice tone="warning">
+							⚠ La {tripLabel(holiday.trip)}, {formatShortDay(holiday.date)}, es festivo ({holiday.label}).
+							Puedes continuar igual.
+						</Notice>
+					{/each}
+					{#each schedule.warnings.clashes as clash (`${clash.trip}-${clash.orderId}`)}
+						<Notice tone="warning">
+							⚠ El pedido #{clash.orderId} también tiene {tripLabel(clash.theirTrip)} el
+							{formatShortDay(clash.date)} a las {formatClockTime(clash.time)}. Puedes continuar
+							igual.
+						</Notice>
+					{/each}
+				</div>
+			{/if}
+		</section>
 
 		<OrderLines
 			bind:lines
@@ -632,95 +717,21 @@
 			{errorOf}
 			{original}
 		/>
+
+		<section class="section">
+			<h2 class="section-title"><label for="notes">Notas</label></h2>
+			<textarea
+				class="notes"
+				id="notes"
+				rows="3"
+				placeholder="Ej. Entrar por el portón de servicio"
+				aria-describedby="notes-hint"
+				bind:value={notes}></textarea>
+			<p class="note" id="notes-hint">Opcional: lo que bodega y el conductor deben saber.</p>
+		</section>
 	</div>
 
 	<div class="order__side">
-		<h2 class="section-title">Cliente</h2>
-		<div class="form-stack">
-			<Field label="Nombre" id="client-name" error={errorOf('client_name')}>
-				<Input
-					id="client-name"
-					placeholder="Ej. Luz Marina Restrepo"
-					aria-invalid={undefined !== errorOf('client_name')}
-					bind:value={clientName}
-				/>
-			</Field>
-			<Field label="Método de entrega" id="delivery-method">
-				<Select id="delivery-method" bind:value={deliveryMethod} onchange={changeDeliveryMethod}>
-					{#each Object.entries(DELIVERY_METHOD_LABELS) as [method, label] (method)}
-						<option value={method}>{label}</option>
-					{/each}
-				</Select>
-			</Field>
-			{#if 'EXTERNAL_CARRIER' === deliveryMethod}
-				{@render carrierPicker('delivery-carrier', 'Transportador de la entrega', delivery)}
-			{/if}
-			<Field
-				label="Dirección de entrega"
-				id="delivery-address"
-				error={errorOf('delivery_attributes.address_1')}
-				hint={'CLIENT_PICKUP' === deliveryMethod
-					? 'La de la empresa, porque recoge el cliente. Puedes cambiarla.'
-					: addressNote}
-			>
-				<div class="address" oninput={() => (addressNote = '')}>
-					<Input
-						id="delivery-address"
-						placeholder="Ej. Cra 43A #18-95, El Poblado"
-						aria-invalid={undefined !== errorOf('delivery_attributes.address_1')}
-						bind:value={delivery.address1}
-					/>
-					<Input
-						aria-label="Dirección de entrega, segunda línea"
-						placeholder="Ej. Salón Social Torre Verde, piso 2 (opcional)"
-						bind:value={delivery.address2}
-					/>
-				</div>
-			</Field>
-			<Field label="Método de retorno" id="return-method">
-				<Select id="return-method" bind:value={returnMethod} onchange={changeReturnMethod}>
-					{#each Object.entries(RETURN_METHOD_LABELS) as [method, label] (method)}
-						<option value={method}>{label}</option>
-					{/each}
-				</Select>
-			</Field>
-			{#if 'EXTERNAL_CARRIER' === returnMethod}
-				{@render carrierPicker('pickup-carrier', 'Transportador del retorno', pickup)}
-			{/if}
-			<Field
-				label="Dirección de recogida"
-				id="pickup-address"
-				error={errorOf('pickup_attributes.address_1')}
-				hint={'CLIENT_RETURN' === returnMethod
-					? 'La de la empresa, porque devuelve el cliente. Puedes cambiarla.'
-					: 'Sale de la dirección de entrega. Puedes cambiarla.'}
-			>
-				<div class="address">
-					<Input
-						id="pickup-address"
-						placeholder="Igual a la de entrega"
-						aria-invalid={undefined !== errorOf('pickup_attributes.address_1')}
-						value={pickupAddress.address1}
-						oninput={(event) => typePickup('address1', event.currentTarget.value)}
-					/>
-					<Input
-						aria-label="Dirección de recogida, segunda línea"
-						placeholder="(opcional)"
-						value={pickupAddress.address2}
-						oninput={(event) => typePickup('address2', event.currentTarget.value)}
-					/>
-				</div>
-			</Field>
-			<Field label="Notas" id="notes" hint="Opcional: lo que bodega y el conductor deben saber.">
-				<textarea
-					class="notes"
-					id="notes"
-					rows="3"
-					placeholder="Ej. Entrar por el portón de servicio"
-					bind:value={notes}></textarea>
-			</Field>
-		</div>
-
 		<OrderTotals
 			bind:discount
 			bind:transport
@@ -820,13 +831,18 @@
 		min-width: 0;
 	}
 
-	.field--narrow {
-		width: 110px;
+	/* Side by side on a phone, a long name gets cut off. */
+	.field-row--stack {
+		flex-direction: column;
+		gap: var(--space-9);
 	}
 
+	/* The delivery address always shows a hint line, blank if need be, so both trips end level.
+	   A taller one (a carrier, an extension's hint) leaves the other short, not stretched. */
 	.trips {
 		display: grid;
 		gap: var(--space-8);
+		align-items: start;
 	}
 
 	.trip {
@@ -845,6 +861,17 @@
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-4);
+	}
+
+	.section {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-9);
+	}
+
+	/* Closer to its fields than they are to each other, so it reads as their title. */
+	.section .section-title {
+		margin: 0 0 calc(var(--space-5) - var(--space-9));
 	}
 
 	.notes {
@@ -871,11 +898,27 @@
 
 	@container (width >= 1024px) {
 		.trips {
+			position: relative;
 			grid-template-columns: 1fr 1fr;
+			column-gap: calc(2 * var(--space-8));
+		}
+
+		/* The line between the trips: on the grid, so it runs the taller one's height. */
+		.trips::before {
+			position: absolute;
+			inset-block: 0;
+			left: 50%;
+			content: '';
+			border-left: var(--border-w-hair) solid var(--border-default);
+		}
+
+		.field-row--stack {
+			flex-direction: row;
+			gap: var(--control-gap);
 		}
 	}
 
-	/* A desktop: the order on the left, the client, totals and saving in a column on the right. */
+	/* A desktop: the order on the left, its money and saving in a column on the right. */
 	@container (width >= 1280px) {
 		.order {
 			display: grid;
