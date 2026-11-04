@@ -519,11 +519,17 @@ async function resolveTrips(
 
 type ResolvedOrder = { columns: Columns; newClient: NewClient | null };
 
-/** The columns to store for `order`, or why it can't be saved. `current` is the order being edited. */
+/**
+ * What an order is resolved against: `current`, the order being edited, and `frozenItems`, the
+ * lines that keep their name and list price.
+ */
+type Basis = { current: Order | null; frozenItems: OrderItem[] };
+
+/** The columns to store for `order`, or why it can't be saved. */
 async function resolveColumns(
 	db: D1Database,
 	order: OrderInput,
-	current: Order | null
+	{ current, frozenItems }: Basis
 ): Promise<ResolvedOrder | Refusal> {
 	const client = await resolveClient(db, order, current);
 	if ('ok' in client) {
@@ -534,7 +540,7 @@ async function resolveColumns(
 		return trips;
 	}
 	const lines = { field: 'order_items', lines: order.order_items, rentalDays: order.rental_days };
-	const items = await resolveItems(db, lines, current?.items ?? []);
+	const items = await resolveItems(db, lines, frozenItems);
 	if ('ok' in items) {
 		return items;
 	}
@@ -573,23 +579,45 @@ export function clientWrite<Values extends Row & { client_id: number | null }>(
 	return { values, computed, clientStatements: newClientStatements(db, actor, newClient) };
 }
 
-async function insertOrder(
+type NewOrder = { resolved: ResolvedOrder; status: OrderStatus };
+
+/**
+ * A new order's statements, «Cliente nuevo»'s first, for one `db.batch()`. `insertAt` is the
+ * order's own insert among them; `publicToken` finds its id from a later statement in the batch.
+ */
+export type OrderStatements = {
+	statements: D1PreparedStatement[];
+	insertAt: number;
+	publicToken: string;
+};
+
+function orderStatements(
 	db: D1Database,
 	actor: Actor,
-	{ resolved, status }: { resolved: ResolvedOrder; status: OrderStatus }
-): Promise<SaveResult> {
+	{ resolved, status }: NewOrder
+): OrderStatements {
 	const { values, computed, clientStatements } = clientWrite(db, actor, resolved);
 	// The public lookup's key: it stays out of events, which every role's timeline reads.
+	const publicToken = crypto.randomUUID();
 	const statements = auditedInsert(db, {
 		table: 'orders',
 		entityType: 'ORDER',
 		actor,
 		values: { ...values, status },
-		unlogged: { public_token: crypto.randomUUID() },
+		unlogged: { public_token: publicToken },
 		computed
 	});
-	const results = await db.batch([...clientStatements, ...statements]);
-	return { ok: true, id: results[clientStatements.length].meta.last_row_id };
+	return {
+		statements: [...clientStatements, ...statements],
+		insertAt: clientStatements.length,
+		publicToken
+	};
+}
+
+async function insertOrder(db: D1Database, actor: Actor, order: NewOrder): Promise<SaveResult> {
+	const { statements, insertAt } = orderStatements(db, actor, order);
+	const results = await db.batch(statements);
+	return { ok: true, id: results[insertAt].meta.last_row_id };
 }
 
 /** A new order, on a client picked or a new one, born a draft: confirming is a step of its own. */
@@ -603,8 +631,37 @@ export async function createOrder(
 	if (!parsed.success) {
 		return invalidOrder(parsed.error);
 	}
-	const resolved = await resolveColumns(db, parsed.data, null);
+	const resolved = await resolveColumns(db, parsed.data, { current: null, frozenItems: [] });
 	return 'ok' in resolved ? resolved : insertOrder(db, actor, { resolved, status: 'DRAFT' });
+}
+
+// A quote's «por acordar» transport arrives empty: the order never gets it free because nobody
+// typed it. 0 is typed.
+const quotedOrderInputSchema = orderInputSchema.safeExtend({
+	transport_cost: z
+		.number('Escribe el transporte: 0 si no se cobra')
+		.int('Escribe el transporte en pesos')
+		.min(0, 'No puede ser negativo')
+});
+
+/**
+ * A quote's order, a draft, not yet written: its statements, for the batch that also links the
+ * quote. The lines quoted keep their name and list price, an inactive product's too: the quote is
+ * what the company holds on paper. A line added on the form takes today's catalog.
+ */
+export async function prepareQuotedOrder(
+	db: D1Database,
+	input: unknown,
+	{ actor, quotedItems }: { actor: Actor | null; quotedItems: OrderItem[] }
+): Promise<OrderStatements | Refusal> {
+	requireRole(actor, TAKES_ORDERS);
+	const parsed = quotedOrderInputSchema.safeParse(input);
+	if (!parsed.success) {
+		return invalidOrder(parsed.error);
+	}
+	const basis = { current: null, frozenItems: quotedItems };
+	const resolved = await resolveColumns(db, parsed.data, basis);
+	return 'ok' in resolved ? resolved : orderStatements(db, actor, { resolved, status: 'DRAFT' });
 }
 
 const NOT_FOUND: Refusal = { ok: false, message: 'Ese pedido no existe', errors: {} };
@@ -659,7 +716,8 @@ export async function updateOrder(
 	if (!isEditableStatus(row.status)) {
 		return NOT_EDITABLE;
 	}
-	const resolved = await resolveColumns(db, parsed.data, toOrder(row));
+	const current = toOrder(row);
+	const resolved = await resolveColumns(db, parsed.data, { current, frozenItems: current.items });
 	return 'ok' in resolved ? resolved : applyEdit(db, actor, { row, resolved });
 }
 
@@ -729,8 +787,8 @@ export async function createExtension(
 	}
 	// Resolved against the original, so its snapshots and its lines' frozen names and prices carry over.
 	const resolved = await resolveColumns(db, parsed.data, {
-		...original,
-		parentOrderId: original.id
+		current: { ...original, parentOrderId: original.id },
+		frozenItems: original.items
 	});
 	return 'ok' in resolved ? resolved : insertOrder(db, actor, { resolved, status: 'DELIVERED' });
 }

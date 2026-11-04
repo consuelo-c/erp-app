@@ -16,5 +16,5 @@
 	{#snippet header()}
 		<ScreenHeader title="Nuevo pedido" backHref={resolve('/pedidos')} />
 	{/snippet}
-	<OrderForm options={data.options} order={null} {form} />
+	<OrderForm options={data.options} order={null} conversion={data.conversion} {form} />
 </Screen>

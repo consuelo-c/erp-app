@@ -22,6 +22,7 @@ import {
 	listCatalogProducts,
 	orderItemsSchema,
 	pesosInputSchema,
+	prepareQuotedOrder,
 	refusal,
 	resolveClient,
 	resolveItems,
@@ -33,7 +34,7 @@ import {
 	type SaveResult
 } from './orders';
 import { foldedSql, optional } from './cash';
-import { searchClause, type NewClient } from './contacts';
+import { getContact, searchClause, type ClientCandidate, type NewClient } from './contacts';
 import { readSettings } from './settings';
 
 // The same three who take orders: converting a quote creates one.
@@ -661,4 +662,92 @@ export async function getQuoteDuplicate(
 		notes
 	};
 	return { from: quote.id, draft: { ...draft, items }, removed };
+}
+
+/** «Convertir en pedido»: the quote, and its client as the contact is today, for the order form. */
+export type QuoteConversion = { quote: Quote; client: ClientCandidate };
+
+/** What the order form opens filled with. Writes nothing: only «Guardar pedido» converts. Null: no such quote. */
+export async function getQuoteConversion(
+	db: D1Database,
+	id: unknown,
+	actor: Actor | null
+): Promise<QuoteConversion | null> {
+	const quote = await getQuote(db, id, actor);
+	if (null === quote) {
+		return null;
+	}
+	// The contact is the quote's foreign key: it's always there.
+	const contact = await getContact(db, quote.clientId, actor);
+	const { fullName, phone, address1, address2 } = contact as ClientCandidate;
+	return { quote, client: { id: quote.clientId, fullName, phone, address1, address2 } };
+}
+
+const conversionInputSchema = z.object({ quote: quoteIdSchema, order: z.unknown() });
+
+const ALREADY_CONVERTED: Refusal = {
+	ok: false,
+	message: 'Esta cotización ya se convirtió en pedido',
+	errors: {}
+};
+
+type Link = { row: QuoteRow; publicToken: string };
+
+// The quote's `order_id`, and its CONVERTED event's, from the order's token: by then
+// `last_insert_rowid()` is the order's own event.
+function linkStatements(db: D1Database, actor: Actor, { row, publicToken }: Link) {
+	const orderId = { sql: 'select id from orders where public_token = ?', params: [publicToken] };
+	return auditedUpdate(db, {
+		table: 'quotes',
+		entityType: 'QUOTE',
+		actor,
+		id: row.id,
+		current: row,
+		changes: {},
+		computed: { order_id: { ...orderId, isLogged: true } },
+		action: 'CONVERTED'
+	});
+}
+
+/**
+ * «Guardar pedido» on the form a quote filled: the DRAFT order, its event, and the quote linked to
+ * it with its CONVERTED event, in one batch. A converted quote is never converted again.
+ */
+export async function convertQuote(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<SaveResult> {
+	requireRole(actor, TAKES_QUOTES);
+	const parsed = conversionInputSchema.safeParse(input);
+	const row = parsed.success ? await findRow(db, parsed.data.quote) : null;
+	if (!parsed.success || null === row) {
+		return NOT_FOUND;
+	}
+	if (null !== row.order_id) {
+		return ALREADY_CONVERTED;
+	}
+	const quotedItems = toQuote(row).items;
+	const order = await prepareQuotedOrder(db, parsed.data.order, { actor, quotedItems });
+	if ('ok' in order) {
+		return order;
+	}
+	// ponytail: two saves racing on one quote both pass the check above; a guarded link if it ever happens.
+	const link = linkStatements(db, actor, { row, publicToken: order.publicToken });
+	const results = await db.batch([...order.statements, ...link]);
+	return { ok: true, id: results[order.insertAt].meta.last_row_id };
+}
+
+/** The quote order `orderId` came from, read through `quotes.order_id`: null for most orders. */
+export async function getSourceQuoteId(
+	db: D1Database,
+	orderId: number,
+	actor: Actor | null
+): Promise<number | null> {
+	requireRole(actor, TAKES_QUOTES);
+	const row = await db
+		.prepare('select id from quotes where order_id = ?')
+		.bind(orderId)
+		.first<{ id: number }>();
+	return row?.id ?? null;
 }

@@ -31,12 +31,19 @@ function toEventJson(fields: Row | null): string | null {
 	return null === fields ? null : JSON.stringify(eventFieldsSchema.parse(fields));
 }
 
+/**
+ * Columns whose value a subquery works out inside the same statement: no separate read. Left out of
+ * the event unless `isLogged`: then `after` takes the value the subquery found.
+ */
+type Computed = Record<string, { sql: string; params: ColumnValue[]; isLogged?: boolean }>;
+
 type EventRow = {
 	entityType: string;
 	action: string;
 	actor: Actor;
 	before: Row | null;
 	after: Row;
+	computed?: Computed;
 	now: number;
 	// NEW_ROW: the row inserted by the statement right before this one in the batch.
 	entityId: number | null | 'NEW_ROW';
@@ -49,13 +56,27 @@ function entityOf(id: number | string) {
 	return 'string' === typeof id ? { entityId: null, entityKey: id } : { entityId: id };
 }
 
+// `after` as SQL: the logged computed columns merged into it, each from its own subquery.
+function afterSql(computed: Computed = {}): { sql: string; params: ColumnValue[] } {
+	const logged = Object.entries(computed).filter(([, column]) => column.isLogged);
+	if (0 === logged.length) {
+		return { sql: '?', params: [] };
+	}
+	const pairs = logged.map(([column, { sql }]) => `'${column}', (${sql})`);
+	return {
+		sql: `json_patch(?, json_object(${pairs.join(', ')}))`,
+		params: logged.flatMap(([, { params }]) => params)
+	};
+}
+
 function eventStatement(db: D1Database, event: EventRow) {
 	const isNewRow = 'NEW_ROW' === event.entityId;
 	const entityIdSql = isNewRow ? 'last_insert_rowid()' : '?';
 	const entityId = isNewRow ? [] : [event.entityId];
+	const after = afterSql(event.computed);
 	return db
 		.prepare(
-			`insert into events (entity_type, entity_id, entity_key, action, actor_username, actor_kind, before, after, reason, created_at) values (?, ${entityIdSql}, ?, ?, ?, ?, ?, ?, ?, ?)`
+			`insert into events (entity_type, entity_id, entity_key, action, actor_username, actor_kind, before, after, reason, created_at) values (?, ${entityIdSql}, ?, ?, ?, ?, ?, ${after.sql}, ?, ?)`
 		)
 		.bind(
 			event.entityType,
@@ -66,13 +87,11 @@ function eventStatement(db: D1Database, event: EventRow) {
 			event.actor.kind,
 			toEventJson(event.before),
 			toEventJson(event.after),
+			...after.params,
 			event.reason ?? null,
 			event.now
 		);
 }
-
-/** Columns whose value a subquery works out inside the same INSERT: no separate read. */
-type Computed = Record<string, { sql: string; params: ColumnValue[] }>;
 
 function insertStatement(
 	db: D1Database,
@@ -191,6 +210,12 @@ function updateStatement(db: D1Database, write: UpdateRow): D1PreparedStatement 
 		);
 }
 
+// A logged computed column's value before the update; its `after` is the subquery's.
+function loggedComputedBefore(current: Row, computed: Computed): Row {
+	const logged = Object.keys(computed).filter((column) => computed[column].isLogged);
+	return Object.fromEntries(logged.map((column) => [column, current[column] ?? null]));
+}
+
 type AuditedEdit = AuditedWrite & {
 	id: number | string;
 	idColumn?: string;
@@ -208,9 +233,10 @@ type AuditedEdit = AuditedWrite & {
  * that differ from `current`, refreshes `updated_at`/`updated_by`, and logs an `EDITED` event
  * (or `action`) with those fields only, and `reason` when the write needs one. `unlogged` columns
  * are always written but never logged: a new password hash. `jsonColumns` are written whole but logged
- * key by key, only the keys that changed. `computed` columns are set from a subquery and not logged,
- * like the id of a row inserted earlier in the same batch. Returns the statements for the caller's
- * `db.batch()`, or none when nothing changed: an edit that changes nothing writes nothing.
+ * key by key, only the keys that changed. `computed` columns are set from a subquery, like the id of
+ * a row inserted earlier in the same batch, and logged only when `isLogged`. Returns the statements
+ * for the caller's `db.batch()`, or none when nothing changed: an edit that changes nothing writes
+ * nothing.
  */
 export function auditedUpdate(db: D1Database, write: AuditedEdit): D1PreparedStatement[] {
 	const diff = diffFields(write.current, write.changes);
@@ -221,10 +247,12 @@ export function auditedUpdate(db: D1Database, write: AuditedEdit): D1PreparedSta
 	}
 	const now = nowInSeconds();
 	const update = updateStatement(db, { ...write, columns, computed, now });
+	const fields = loggedFields(diff, write.jsonColumns ?? []);
 	const event = {
 		...write,
 		action: write.action ?? 'EDITED',
-		...loggedFields(diff, write.jsonColumns ?? []),
+		before: { ...fields.before, ...loggedComputedBefore(write.current, computed) },
+		after: fields.after,
 		now,
 		...entityOf(write.id)
 	};

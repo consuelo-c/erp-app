@@ -225,6 +225,17 @@
 		</div>
 	{/if}
 
+	{#if data.quoteId}
+		<div class="lead-notice">
+			<Notice tone="info">
+				Desde la cotización
+				<a href={resolve('/(app)/cotizaciones/[id]', { id: String(data.quoteId) })}
+					>#{data.quoteId}</a
+				>
+			</Notice>
+		</div>
+	{/if}
+
 	{#if order.cancellation}
 		<div class="lead-notice">
 			<Notice tone="info">

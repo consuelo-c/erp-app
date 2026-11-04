@@ -5,14 +5,18 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
 import { getQuoteState, QUOTE_STATE_SQL } from '$lib/quotes';
+import { cancelOrder, confirmOrder, getOrder, previewConfirmation } from './orders';
 import {
+	convertQuote,
 	createQuote,
+	getQuoteConversion,
 	getQuoteFormOptions,
 	getQuote,
 	getQuoteChange,
 	getQuoteDetail,
 	getQuoteDuplicate,
 	getQuoteTimeline,
+	getSourceQuoteId,
 	listQuotes,
 	QUOTES_PAGE_SIZE,
 	quoteAttributesSchema,
@@ -682,4 +686,150 @@ test('WAREHOUSE and DRIVER get a 403 duplicating', async () => {
 		const refusal = await getQuoteDuplicate(db, id, actor).catch((caught) => caught);
 		expect(isHttpError(refusal, 403)).toBe(true);
 	}
+});
+
+// The order form as «Convertir en pedido» fills it from quote1043, with the trips typed in.
+function orderInput(overrides: object = {}) {
+	const trip = { address_1: quote1043.address_1, address_2: quote1043.address_2 };
+	return {
+		client_id: LUZ_MARINA,
+		client_name: 'Luz Marina Restrepo',
+		event_date: '2026-12-12',
+		delivery_date: '2026-12-11',
+		pickup_date: '2026-12-13',
+		rental_days: 2,
+		delivery_attributes: { ...trip, method: 'COMPANY_DELIVERY' },
+		pickup_attributes: { ...trip, method: 'COMPANY_PICKUP' },
+		order_items: quote1043.quote_items,
+		discount: 104000,
+		transport_cost: 180000,
+		notes: quote1043.notes,
+		...overrides
+	};
+}
+
+async function convert(quote: number, overrides: object = {}): Promise<number> {
+	const result = await convertQuote(db, { quote, order: orderInput(overrides) }, sales);
+	if (!result.ok) {
+		throw new Error(JSON.stringify(result));
+	}
+	return result.id;
+}
+
+function countOrders() {
+	return database.prepare('select count(*) as orders from orders').get();
+}
+
+test('the form opens filled from the quote, with its client as the contact is today, and writes nothing', async () => {
+	const id = await create();
+	database.exec(
+		`update contacts set full_name = 'Luz Marina Restrepo Gil' where id = ${LUZ_MARINA}`
+	);
+	const before = { ...countRows(), ...countOrders() };
+	const conversion = await getQuoteConversion(db, id, sales);
+	expect(conversion).toMatchObject({
+		quote: { id, state: 'VALID', rentalDays: 2, discount: 104000, transportCost: 180000 },
+		client: { id: LUZ_MARINA, fullName: 'Luz Marina Restrepo Gil', phone: '573104428890' }
+	});
+	expect({ ...countRows(), ...countOrders() }).toEqual(before);
+	expect((await read(id)).state).toBe('VALID');
+	expect(await getQuoteConversion(db, 99, sales)).toBeNull();
+});
+
+test('saving creates a DRAFT order and links the quote, with ORDER CREATED and QUOTE CONVERTED', async () => {
+	const id = await create();
+	const orderId = await convert(id);
+	expect(await getOrder(db, orderId, sales)).toMatchObject({
+		status: 'DRAFT',
+		clientId: LUZ_MARINA,
+		orderTotal: 1180000
+	});
+	expect(await read(id)).toMatchObject({ orderId, state: 'CONVERTED' });
+	const events = database
+		.prepare(
+			"select entity_type, entity_id, action, before, after from events where action != 'CREATED' or entity_type = 'ORDER'"
+		)
+		.all();
+	expect(events).toEqual([
+		expect.objectContaining({ entity_type: 'ORDER', entity_id: orderId, action: 'CREATED' }),
+		{
+			entity_type: 'QUOTE',
+			entity_id: id,
+			action: 'CONVERTED',
+			before: '{"order_id":null}',
+			after: `{"order_id":${orderId}}`
+		}
+	]);
+	expect(await getSourceQuoteId(db, orderId, sales)).toBe(id);
+});
+
+test('the lines come exactly as quoted, a product deactivated since included', async () => {
+	const lines = [
+		{ product_id: 1, qty: 120, unit_price: 2200 },
+		{ product_id: 3, qty: 120, unit_price: 900 }
+	];
+	const id = await create({ ...quote1043, quote_items: lines, discount: 0 });
+	database.exec("update products set name = 'Silla Tiffany', rental_price = 2800 where id = 1");
+	database.exec('update products set active = 0 where id = 3');
+	const orderId = await convert(id, { order_items: lines, discount: 0 });
+	const order = await getOrder(db, orderId, sales);
+	expect(order?.items.map((item) => [item.name, item.list_price, item.unit_price])).toEqual([
+		['Silla Tiffany dorada', 2500, 2200],
+		['Copa para vino tinto', 900, 900]
+	]);
+});
+
+test('a «por acordar» transport has to be typed before saving; 0 saves', async () => {
+	const id = await create({ ...quote1043, transport_cost: null });
+	const empty = await convertQuote(
+		db,
+		{ quote: id, order: orderInput({ transport_cost: undefined }) },
+		sales
+	);
+	expect(empty).toMatchObject({ ok: false, errors: { transport_cost: expect.any(String) } });
+	expect(countOrders()).toEqual({ orders: 0 });
+	expect((await read(id)).state).toBe('VALID');
+	const orderId = await convert(id, { transport_cost: 0 });
+	expect(await getOrder(db, orderId, sales)).toMatchObject({
+		transportCost: 0,
+		orderTotal: 1000000
+	});
+});
+
+test("a converted quote, or one that doesn't exist, isn't converted", async () => {
+	const id = await create();
+	await convert(id);
+	const again = await convertQuote(db, { quote: id, order: orderInput() }, sales);
+	expect(again).toMatchObject({ ok: false, message: expect.stringContaining('ya se convirtió') });
+	const missing = await convertQuote(db, { quote: 99, order: orderInput() }, sales);
+	expect(missing).toMatchObject({ ok: false, message: 'Esa cotización no existe' });
+	expect(countOrders()).toEqual({ orders: 1 });
+});
+
+test('the order is an ordinary draft: confirming re-checks availability; cancelling leaves the quote converted', async () => {
+	const id = await create();
+	const orderId = await convert(id);
+	database.exec('update products set total_quantity = 100 where id = 1');
+	const preview = await previewConfirmation(db, { id: orderId }, sales);
+	expect(preview?.shortages).toEqual([{ productId: 1, name: 'Silla Tiffany dorada', short: 20 }]);
+	expect(await confirmOrder(db, { id: orderId }, sales)).toEqual({ ok: true, id: orderId });
+	const reason = 'El cliente aplazó el evento';
+	expect(await cancelOrder(db, { id: orderId, reason }, sales)).toMatchObject({ ok: true });
+	expect(await read(id)).toMatchObject({ orderId, state: 'CONVERTED' });
+});
+
+test('an order that came from no quote has no source quote', async () => {
+	const id = await create();
+	await convert(id);
+	expect(await getSourceQuoteId(db, 99, sales)).toBeNull();
+});
+
+test('DRIVER gets a 403 converting a quote; SALES converts it', async () => {
+	const id = await create();
+	const refusal = await convertQuote(db, { quote: id, order: orderInput() }, driver).catch(
+		(caught) => caught
+	);
+	expect(isHttpError(refusal, 403)).toBe(true);
+	expect(countOrders()).toEqual({ orders: 0 });
+	expect(await convert(id)).toBeGreaterThan(0);
 });
