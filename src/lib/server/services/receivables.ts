@@ -41,6 +41,8 @@ type EligibleOrder = {
 	client_id: number;
 	status: string;
 	receivable_id: number | null;
+	event_date: string;
+	order_total: number;
 };
 
 type ReceivableRow = { id: number; client_id: number; attributes: string };
@@ -66,7 +68,7 @@ async function findEligibleOrders(
 ): Promise<EligibleOrder[]> {
 	const { results } = await db
 		.prepare(
-			`select id, client_id, status, receivable_id from orders
+			`select id, client_id, status, receivable_id, event_date, order_total from orders
 			where client_id = ? and status = 'COMPLETED' and (receivable_id is null or receivable_id = ?)
 			order by event_date, id`
 		)
@@ -286,15 +288,17 @@ export type ReceivablePayment = OrderPayment & {
 
 export type ReceivableOrder = { id: number; eventDate: string; orderTotal: number };
 
+export type ReceivableClient = {
+	name: string;
+	phone: string;
+	/** Null when it's automatic. */ documentId: string | null;
+};
+
 export type ReceivableDetail = {
 	id: number;
 	issueDate: string;
 	paymentTerms: string;
-	client: {
-		name: string;
-		phone: string;
-		/** Null when it's automatic. */ documentId: string | null;
-	};
+	client: ReceivableClient;
 	orders: ReceivableOrder[];
 	payments: ReceivablePayment[];
 	total: number;
@@ -302,13 +306,12 @@ export type ReceivableDetail = {
 	balance: number;
 };
 
-type DetailRow = {
+type ClientRow = { full_name: string; phone: string; document_id: string };
+
+type DetailRow = ClientRow & {
 	id: number;
 	issue_date: string;
 	attributes: string;
-	full_name: string;
-	phone: string;
-	document_id: string;
 	total: number;
 	paid: number;
 	balance: number;
@@ -352,17 +355,21 @@ async function findPayments(db: D1Database, id: number): Promise<ReceivablePayme
 	return results.map((row) => ({ ...toPayment(row), orderId: row.order_id }));
 }
 
+function toClient(row: ClientRow): ReceivableClient {
+	return {
+		name: row.full_name,
+		phone: row.phone,
+		documentId: isAutoDocument(row.document_id) ? null : row.document_id
+	};
+}
+
 function toDetail(row: DetailRow): Omit<ReceivableDetail, 'orders' | 'payments'> {
 	const attributes = receivableAttributesSchema.parse(JSON.parse(row.attributes));
 	return {
 		id: row.id,
 		issueDate: row.issue_date,
 		paymentTerms: attributes.payment_terms,
-		client: {
-			name: row.full_name,
-			phone: row.phone,
-			documentId: isAutoDocument(row.document_id) ? null : row.document_id
-		},
+		client: toClient(row),
 		total: row.total,
 		paid: row.paid,
 		balance: row.balance
@@ -389,6 +396,87 @@ export async function getReceivableDetail(
 		return null;
 	}
 	return { ...toDetail(row), orders, payments };
+}
+
+export type ReceivableForm = {
+	client: ReceivableClient;
+	/** The checklist, by event date. */ orders: ReceivableOrder[];
+	checkedOrderIds: number[];
+	paymentTerms: string;
+};
+
+async function findClient(db: D1Database, clientId: number): Promise<ReceivableClient> {
+	const row = await db
+		.prepare('select full_name, phone, document_id from contacts where id = ?')
+		.bind(clientId)
+		.first<ClientRow>();
+	if (null === row) {
+		throw new Error(`Contact ${clientId} is gone: contacts are never deleted`);
+	}
+	return toClient(row);
+}
+
+function toFormOrder(order: EligibleOrder): ReceivableOrder {
+	return { id: order.id, eventDate: order.event_date, orderTotal: order.order_total };
+}
+
+/**
+ * The form to issue a cuenta from an order, which comes checked. Null when that order can't start
+ * one: it doesn't exist, isn't COMPLETED or is already billed.
+ */
+export async function getReceivableIssueForm(
+	db: D1Database,
+	orderId: unknown,
+	actor: Actor | null
+): Promise<ReceivableForm | null> {
+	requireRole(actor, MANAGES_RECEIVABLES);
+	const parsedId = idSchema.safeParse(orderId);
+	if (!parsedId.success) {
+		return null;
+	}
+	const clientId = await findClientOf(db, parsedId.data);
+	if (null === clientId) {
+		return null;
+	}
+	const eligible = await findEligibleOrders(db, { clientId, receivableId: null });
+	if (!isEveryOrderEligible([parsedId.data], eligible)) {
+		return null;
+	}
+	return {
+		client: await findClient(db, clientId),
+		orders: eligible.map(toFormOrder),
+		checkedOrderIds: [parsedId.data],
+		paymentTerms: 'Contado'
+	};
+}
+
+/** The form to edit a cuenta: its orders checked, the client's other eligible ones not. */
+export async function getReceivableEditForm(
+	db: D1Database,
+	id: unknown,
+	actor: Actor | null
+): Promise<ReceivableForm | null> {
+	requireRole(actor, MANAGES_RECEIVABLES);
+	const parsedId = idSchema.safeParse(id);
+	if (!parsedId.success) {
+		return null;
+	}
+	const row = await findRow(db, parsedId.data);
+	if (null === row) {
+		return null;
+	}
+	const eligible = await findEligibleOrders(db, {
+		clientId: row.client_id,
+		receivableId: row.id
+	});
+	return {
+		client: await findClient(db, row.client_id),
+		orders: eligible.map(toFormOrder),
+		checkedOrderIds: eligible
+			.filter((order) => row.id === order.receivable_id)
+			.map(({ id: orderId }) => orderId),
+		paymentTerms: receivableAttributesSchema.parse(JSON.parse(row.attributes)).payment_terms
+	};
 }
 
 /** A page of the list: it never loads the whole table. */

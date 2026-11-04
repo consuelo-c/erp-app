@@ -6,6 +6,8 @@ import { createMemoryD1 } from '../db/memory-d1';
 import { getOrderTimeline, MODIFIED_AFTER_STAGING_AT } from './orders';
 import {
 	getReceivableDetail,
+	getReceivableEditForm,
+	getReceivableIssueForm,
 	issueReceivable,
 	listReceivables,
 	receivableAttributesSchema,
@@ -522,5 +524,54 @@ test('SALES, WAREHOUSE and DRIVER get a 403 on the list', async () => {
 	for (const actor of [sales, warehouse, driver]) {
 		const caught = await listReceivables(db, {}, actor).catch((error) => error);
 		expect(isHttpError(caught, 403), actor.username).toBe(true);
+	}
+});
+
+test('the issue form lists the client eligible orders with the starting one checked', async () => {
+	insertOrder(1070, { total: 360000 });
+	insertOrder(1071, { status: 'DELIVERED' });
+	insertOrder(1072, { clientId: LUZ_MARINA });
+	await issued([1043]);
+
+	const form = await getReceivableIssueForm(db, '1061', manager);
+
+	expect(form?.orders.map(({ id }) => id)).toEqual([1060, 1061, 1070]);
+	expect(form?.orders[2]).toEqual({ id: 1070, eventDate: '2026-10-10', orderTotal: 360000 });
+	expect(form?.checkedOrderIds).toEqual([1061]);
+	expect(form?.paymentTerms).toBe('Contado');
+	expect(form?.client.name).toBe('Postobón S.A.');
+	expect(form?.client.documentId).toBeNull();
+});
+
+test('an order that cannot start a cuenta has no issue form', async () => {
+	insertOrder(1070, { status: 'DELIVERED' });
+	insertOrder(1071, { status: 'OUT_FOR_PICKUP' });
+	await issued([1043]);
+
+	for (const orderId of [1043, 1070, 1071, 99, null, '', 'abc']) {
+		expect(await getReceivableIssueForm(db, orderId, manager), String(orderId)).toBeNull();
+	}
+});
+
+test('the edit form checks the cuenta orders and leaves the other eligible ones unchecked', async () => {
+	insertOrder(1070);
+	await issued([1070]);
+	const id = await issued([1043, 1060]);
+	await edit(id, [1043, 1060], 'Crédito 30 días');
+
+	const form = await getReceivableEditForm(db, id, manager);
+
+	expect(form?.orders.map((order) => order.id)).toEqual([1043, 1060, 1061]);
+	expect(form?.checkedOrderIds).toEqual([1043, 1060]);
+	expect(form?.paymentTerms).toBe('Crédito 30 días');
+	expect(await getReceivableEditForm(db, 99, manager)).toBeNull();
+});
+
+test('only ADMIN and MANAGER read the form', async () => {
+	for (const actor of [sales, warehouse, driver]) {
+		for (const read of [getReceivableIssueForm, getReceivableEditForm]) {
+			const caught = await read(db, 1, actor).catch((error) => error);
+			expect(isHttpError(caught, 403), actor.username).toBe(true);
+		}
 	}
 });

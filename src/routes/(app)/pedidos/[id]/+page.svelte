@@ -479,6 +479,11 @@
 				<Button type="submit">Reabrir pedido</Button>
 			</form>
 		{/if}
+		{#if data.canIssueReceivable}
+			<Button href="{resolve('/(app)/cuentas-de-cobro/nueva')}?pedido={order.id}">
+				Emitir cuenta de cobro
+			</Button>
+		{/if}
 	</div>
 
 	{#if copyNotice}
