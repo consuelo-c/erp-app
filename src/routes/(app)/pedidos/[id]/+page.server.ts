@@ -14,6 +14,7 @@ import {
 	reopenOrder
 } from '$lib/server/services/orders';
 import { getSourceQuoteId } from '$lib/server/services/quotes';
+import { getReceivableIssueForm } from '$lib/server/services/receivables';
 import type { Actions, PageServerLoad } from './$types';
 
 const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
@@ -23,6 +24,7 @@ const MANAGES_INCIDENTS = ['ADMIN', 'MANAGER'] as const;
 // «Novedades» only for ADMIN and MANAGER: null hides the section for everyone else.
 // The client's page token is null for a draft, which hides «Copiar enlace del cliente».
 // The quote it was converted from, if any, for «Desde la cotización #N».
+// «Emitir cuenta de cobro» only for ADMIN and MANAGER, on an order that can start one.
 export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	requireRole(locals.user, TAKES_ORDERS);
 	if (undefined === platform) {
@@ -42,7 +44,10 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 		: null;
 	const publicToken = await getPublicToken(db, order.id, locals.user);
 	const quoteId = await getSourceQuoteId(db, order.id, locals.user);
-	return { order, confirmation, incidents, publicToken, quoteId };
+	const canIssueReceivable =
+		isAdminOrManager(locals.user) &&
+		null !== (await getReceivableIssueForm(db, order.id, locals.user));
+	return { order, confirmation, incidents, publicToken, quoteId, canIssueReceivable };
 };
 
 export const actions: Actions = {

@@ -30,7 +30,7 @@
 		/>
 	{/snippet}
 
-	<h2 class="section-title client">{client.name}</h2>
+	<h2 class="section-title client-name">{client.name}</h2>
 	{#if null !== client.documentId}
 		<p class="meta document">NIT/C.C. {formatIdNumber(client.documentId)}</p>
 	{/if}
@@ -85,17 +85,23 @@
 	<h2 class="section-title">Pagos</h2>
 	<PaymentList payments={receivable.payments} />
 
-	<!-- STUB: #419, #422 and #420 (phase 16) give these their routes: the form (44), the printout (46)
-	and the payment entry (45). -->
+	<!-- STUB: #422 and #420 (phase 16) give these their routes: the printout (46) and the payment
+	entry (45). -->
 	<div class="screen__action">
-		<Button variant="secondary" size="sm" disabled>Editar</Button>
+		<Button
+			variant="secondary"
+			size="sm"
+			href={resolve('/(app)/cuentas-de-cobro/[id]/editar', { id: String(receivable.id) })}
+		>
+			Editar
+		</Button>
 		<Button variant="secondary" size="sm" disabled>Imprimir</Button>
 		<Button disabled>Registrar pago</Button>
 	</div>
 </Screen>
 
 <style>
-	.client {
+	.client-name {
 		margin-bottom: var(--space-2);
 	}
 
