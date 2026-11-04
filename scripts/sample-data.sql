@@ -1,11 +1,11 @@
 -- Sample data, development only: the Design Brief's products and a retired one, a few contacts, five
--- employees, a login per role on four of them, their punches from 10 to 18 October 2026, forty-five
+-- employees, a login per role on four of them, their punches from 10 to 18 October 2026, forty-eight
 -- orders between 1 and 18 October (the brief's three among them), three counts, the orders' and
--- standalone cash movements, and three quotes.
+-- standalone cash movements, three quotes, and a cuenta de cobro.
 -- `npm run db:seed` loads it into the local D1 after settings-defaults.sql; deploy.yml never applies
 -- it. Idempotent: a product whose name exists, a contact whose document exists, an employee whose
 -- contact exists, a login whose username exists, a punch whose employee and day exist, or an order,
--- count, movement or quote whose id exists, is skipped, so a password admin set survives.
+-- count, movement, quote or cuenta de cobro whose id exists, is skipped, so a password admin set survives.
 -- Writes no events row.
 -- Every JSON must pass its Zod schema in the services; sample-data.test.ts checks it.
 INSERT INTO products (name, category, variant_group, variant_name, rental_price, total_quantity, created_at, created_by, updated_at, updated_by)
@@ -138,7 +138,15 @@ FROM (VALUES
 WHERE true -- SQLite reads ON CONFLICT after a SELECT only past a WHERE
 ON CONFLICT (employee_id, work_date) DO NOTHING;
 
--- Forty-five orders, every delivery and pickup from Thursday 1 to Sunday 18 October 2026, their
+-- Cuenta de cobro Nº 4794, Postobón's, ahead of the orders that point to it: #1060 and #1061 bill in
+-- it, #1072 is left to try «Emitir cuenta de cobro» and «Editar». Its explicit id leaves the sequence
+-- as if it had been set to 4793 and this were the first one issued, so the next is Nº 4795.
+INSERT INTO receivables (id, client_id, issue_date, attributes, created_at, created_by, updated_at, updated_by)
+SELECT 4794, id, '2026-10-13', '{"payment_terms":"Contado"}', unixepoch(), 'system', unixepoch(), 'system'
+FROM contacts WHERE document_id = '8909039395'
+ON CONFLICT (id) DO NOTHING;
+
+-- Forty-eight orders, every delivery and pickup from Thursday 1 to Sunday 18 October 2026, their
 -- statuses read as if today were Wednesday 14: picked up before it `COMPLETED`, out with the client
 -- across it `DELIVERED`, its own trips somewhere along the way, after it `CONFIRMED` or `DRAFT`, and a
 -- few `CANCELLED`. The Design Brief's #1043 and #1051 keep their weekdays, #1047 is `DELIVERED` to try
@@ -300,7 +308,16 @@ sample (id, token, document_id, status, event_date, venue, rental_days, discount
 		'[["Silla Tiffany dorada",100],["Mesa redonda 10 puestos",10],["Copa para vino tinto",100]]', NULL),
 	(1042, NULL, '@C5VB0PZT', 'DRAFT', '2026-10-18', 'estadio', 1, 0, 0, 0,
 		'2026-10-18', 'CLIENT_PICKUP', '11:00', NULL, '2026-10-18', 'CLIENT_RETURN', NULL, NULL,
-		'[["Silla Tiffany dorada",16],["Copa para vino tinto",16]]', NULL)
+		'[["Silla Tiffany dorada",16],["Copa para vino tinto",16]]', NULL),
+	(1060, NULL, '8909039395', 'COMPLETED', '2026-10-06', 'colegio', 1, 0, 120000, 0,
+		'2026-10-05', 'COMPANY_DELIVERY', '09:00', NULL, '2026-10-07', 'COMPANY_PICKUP', '10:00', NULL,
+		'[["Silla Tiffany dorada",200],["Mesa redonda 10 puestos",20]]', NULL),
+	(1061, NULL, '8909039395', 'COMPLETED', '2026-10-09', 'colegio', 1, 0, 80000, 0,
+		'2026-10-08', 'COMPANY_DELIVERY', '09:00', NULL, '2026-10-10', 'COMPANY_PICKUP', '10:00', NULL,
+		'[["Silla Tiffany dorada",120],["Mesa redonda 10 puestos",10]]', NULL),
+	(1072, NULL, '8909039395', 'COMPLETED', '2026-10-11', 'colegio', 1, 0, 100000, 0,
+		'2026-10-10', 'COMPANY_DELIVERY', '14:00', NULL, '2026-10-13', 'COMPANY_PICKUP', '10:00', NULL,
+		'[["Silla Tiffany dorada",80],["Mesa redonda 10 puestos",5]]', NULL)
 ),
 priced AS (
 	SELECT sample.*, (
@@ -318,7 +335,7 @@ totalled AS (
 	SELECT priced.*, (SELECT sum(value ->> 'line_total') FROM json_each(order_items)) AS items_total
 	FROM priced
 )
-INSERT INTO orders (id, public_token, client_id, status, event_date, delivery_date, pickup_date, rental_days, client_attributes, delivery_attributes, pickup_attributes, order_items, items_total, discount, transport_cost, order_total, deposit_amount, attributes, created_at, created_by, updated_at, updated_by)
+INSERT INTO orders (id, public_token, client_id, status, event_date, delivery_date, pickup_date, rental_days, client_attributes, delivery_attributes, pickup_attributes, order_items, items_total, discount, transport_cost, order_total, deposit_amount, attributes, receivable_id, created_at, created_by, updated_at, updated_by)
 SELECT
 	totalled.id, coalesce(totalled.token, printf('00000000-0000-4000-8000-%012d', totalled.id)), contacts.id, totalled.status,
 	totalled.event_date, totalled.delivery_date, totalled.pickup_date, totalled.rental_days,
@@ -336,6 +353,7 @@ SELECT
 	totalled.order_items, totalled.items_total, totalled.discount, totalled.transport_cost,
 	totalled.items_total - totalled.discount + totalled.transport_cost, totalled.deposit_amount,
 	iif(totalled.notes IS NULL, '{}', json_object('notes', totalled.notes)),
+	iif(totalled.id IN (1060, 1061), 4794, NULL),
 	unixepoch(), 'system', unixepoch(), 'system'
 FROM totalled
 JOIN contacts ON contacts.document_id = totalled.document_id
@@ -372,6 +390,7 @@ ON CONFLICT (id) DO NOTHING;
 -- $680.000, holds a $200.000 deposit); #1051 pays its carrier; four more orders: an advance on
 -- #1035, #1009 paid in two, #1012 paid with its deposit given back, #1004 cancelled and refunded.
 -- October's standalone ones include an expense typed as $850.000, its offset and the right one.
+-- Nº 4794 reads as in the design: $1.360.000, a $100.000 advance on #1060 and $600.000 on the cuenta.
 -- `receipt_number` per sign as the cash service's INSERT works it out, each sign's highest plus one,
 -- here in id order; explicit ids, so a second run finds them and `reverses_id` can name its original.
 INSERT INTO cash_movements (id, concept, payment_method, amount, movement_date, entity_type, entity_id, payee, attributes, reverses_id, receipt_number, created_at, created_by, updated_at, updated_by)
@@ -396,7 +415,9 @@ FROM (VALUES
 	(14, 'OTHER_EXPENSE', 'CASH', -850000, '2026-10-08', NULL, NULL, 'Ferretería Laureles', '{"description":"Bombillos y extensiones para la bodega"}', NULL),
 	(15, 'OTHER_EXPENSE', 'CASH', 850000, '2026-10-08', NULL, NULL, 'Ferretería Laureles', '{"description":"Bombillos y extensiones para la bodega","notes":"El valor era $85.000"}', 14),
 	(16, 'OTHER_EXPENSE', 'CASH', -85000, '2026-10-08', NULL, NULL, 'Ferretería Laureles', '{"description":"Bombillos y extensiones para la bodega"}', NULL),
-	(17, 'OTHER_EXPENSE', 'TRANSFER', -320000, '2026-10-20', NULL, NULL, 'EPM', '{"description":"Servicios públicos de la bodega, septiembre","bank_account":"Convenio EPM 0045821"}', NULL)
+	(17, 'OTHER_EXPENSE', 'TRANSFER', -320000, '2026-10-20', NULL, NULL, 'EPM', '{"description":"Servicios públicos de la bodega, septiembre","bank_account":"Convenio EPM 0045821"}', NULL),
+	(18, 'INSTALLMENT', 'CASH', 100000, '2026-10-02', 'ORDER', 1060, 'Postobón S.A.', '{}', NULL),
+	(19, 'INSTALLMENT', 'TRANSFER', 600000, '2026-10-14', 'RECEIVABLE', 4794, 'Postobón S.A.', '{"bank_account":"Bancolombia"}', NULL)
 ) AS sample
 WHERE NOT EXISTS (SELECT 1 FROM cash_movements WHERE cash_movements.id = sample.column1)
 ORDER BY column1;

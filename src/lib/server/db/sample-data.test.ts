@@ -19,6 +19,7 @@ import {
 	pickupAttributesSchema
 } from '../services/orders';
 import { quoteAttributesSchema } from '../services/quotes';
+import { getReceivableDetail } from '../services/receivables';
 
 const sampleData = readFileSync('scripts/sample-data.sql', 'utf8');
 const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
@@ -146,7 +147,8 @@ test('every row is created by system and writes no events', () => {
 		'orders',
 		'inventory_counts',
 		'cash_movements',
-		'quotes'
+		'quotes',
+		'receivables'
 	];
 	for (const row of tables.flatMap(readAll)) {
 		expect([row.created_by, row.updated_by]).toEqual(['system', 'system']);
@@ -233,7 +235,7 @@ function parseOrder(order: Record<string, unknown>) {
 
 test("loads the Design Brief's #1043 and #1051, #1047 delivered, and enough for a third page", () => {
 	const orders = readAll('orders');
-	expect(orders).toHaveLength(45);
+	expect(orders).toHaveLength(48);
 	expect(new Set(orders.map((order) => order.status)).size).toBe(8);
 	expect(orders.every((order) => 0 === order.has_incident)).toBe(true);
 	expect(readAll('incidents')).toEqual([]);
@@ -420,4 +422,39 @@ test("loads Postobón's open #1 and expired #2, and #3 converted into #1043 with
 	const order1043 = readAll('orders').find((order) => 1043 === order.id) ?? {};
 	expect(third).toMatchObject({ order_id: 1043, quote_total: 1180000 });
 	expect(parseQuote(third).items).toEqual(parseOrder(order1043).items);
+});
+
+test("Nº 4794 groups Postobón's #1060 and #1061 and reads the balance rules, partly paid", async () => {
+	const receivable = await getReceivableDetail(openSeededD1(), 4794, manager);
+	expect(receivable).toMatchObject({
+		paymentTerms: 'Contado',
+		client: { name: 'Postobón S.A.', documentId: '8909039395' },
+		total: 1360000,
+		paid: 700000,
+		balance: 660000
+	});
+	expect(receivable?.orders.map((order) => order.id)).toEqual([1060, 1061]);
+	expect(receivable?.payments.map((payment) => payment.orderId)).toEqual([1060, null]);
+});
+
+test("#1072 is Postobón's too, COMPLETED and unbilled", () => {
+	const orders = readAll('orders');
+	const [billed, unbilled] = [1060, 1072].map((id) => orders.find((order) => id === order.id));
+	expect(unbilled).toMatchObject({ status: 'COMPLETED', receivable_id: null });
+	expect(unbilled?.client_id).toBe(billed?.client_id);
+});
+
+test('the next cuenta after a second run is Nº 4795, with nothing duplicated', () => {
+	database.exec(sampleData);
+	expect(readAll('receivables')).toHaveLength(1);
+	expect(
+		database.prepare("select seq from sqlite_sequence where name = 'receivables'").get()
+	).toEqual({ seq: 4794 });
+});
+
+test('a second run keeps an order taken out of Nº 4794', () => {
+	database.exec('update orders set receivable_id = null where id = 1061');
+	database.exec(sampleData);
+	const order = readAll('orders').find((row) => 1061 === row.id);
+	expect(order?.receivable_id).toBeNull();
 });

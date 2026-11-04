@@ -6,7 +6,15 @@ import { z } from 'zod';
 import { getTodaysDate } from '$lib/datetime';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, type Diff } from '../audit';
-import { invalidOrder, type Refusal, type SaveResult } from './orders';
+import { isAutoDocument } from './contacts';
+import {
+	invalidOrder,
+	toPayment,
+	type OrderPayment,
+	type PaymentRow,
+	type Refusal,
+	type SaveResult
+} from './orders';
 
 const MANAGES_RECEIVABLES = ['ADMIN', 'MANAGER'] as const;
 
@@ -252,4 +260,131 @@ export async function updateReceivable(
 		await db.batch(statements);
 	}
 	return { ok: true, id };
+}
+
+// The movements `receivable_paid` sums, for the `receivables` row in scope: the cuenta's own and its
+// orders' installments and refunds. An offset keeps its original's concept and link, so it counts.
+const PAID_MOVEMENT_SQL = `((entity_type = 'ORDER' and concept in ('INSTALLMENT', 'INSTALLMENT_REFUND')
+	and entity_id in (select id from orders where receivable_id = receivables.id))
+	or (entity_type = 'RECEIVABLE' and concept = 'INSTALLMENT' and entity_id = receivables.id))`;
+
+const TOTAL_SQL = `coalesce((select sum(order_total) from orders
+	where receivable_id = receivables.id), 0)`;
+
+const PAID_SQL = `coalesce((select sum(amount) from cash_movements
+	where ${PAID_MOVEMENT_SQL}), 0)`;
+
+/** The orders' totals less what was paid: negative is the client's credit. */
+const BALANCE_SQL = `${TOTAL_SQL} - ${PAID_SQL}`;
+
+export type ReceivablePayment = OrderPayment & {
+	/** The order it was recorded on, or null when it's the cuenta's own. */
+	orderId: number | null;
+};
+
+export type ReceivableOrder = { id: number; eventDate: string; orderTotal: number };
+
+export type ReceivableDetail = {
+	id: number;
+	issueDate: string;
+	paymentTerms: string;
+	client: {
+		name: string;
+		phone: string;
+		/** Null when it's automatic. */ documentId: string | null;
+	};
+	orders: ReceivableOrder[];
+	payments: ReceivablePayment[];
+	total: number;
+	paid: number;
+	balance: number;
+};
+
+type DetailRow = {
+	id: number;
+	issue_date: string;
+	attributes: string;
+	full_name: string;
+	phone: string;
+	document_id: string;
+	total: number;
+	paid: number;
+	balance: number;
+};
+
+async function findDetailRow(db: D1Database, id: number): Promise<DetailRow | null> {
+	return db
+		.prepare(
+			`select receivables.id, issue_date, receivables.attributes, full_name, phone, document_id,
+			${TOTAL_SQL} as total, ${PAID_SQL} as paid, ${BALANCE_SQL} as balance
+			from receivables join contacts on contacts.id = receivables.client_id
+			where receivables.id = ?`
+		)
+		.bind(id)
+		.first<DetailRow>();
+}
+
+async function findOrders(db: D1Database, id: number): Promise<ReceivableOrder[]> {
+	const { results } = await db
+		.prepare(
+			`select id, event_date as eventDate, order_total as orderTotal from orders
+			where receivable_id = ? order by id`
+		)
+		.bind(id)
+		.all<ReceivableOrder>();
+	return results;
+}
+
+async function findPayments(db: D1Database, id: number): Promise<ReceivablePayment[]> {
+	const { results } = await db
+		.prepare(
+			`select cash_movements.id, movement_date, concept, amount, payment_method,
+			json_extract(cash_movements.attributes, '$.other_method') as other_method, payee,
+			receipt_number, iif('ORDER' = entity_type, entity_id, null) as order_id
+			from cash_movements join receivables on receivables.id = ?
+			where ${PAID_MOVEMENT_SQL}
+			order by movement_date, cash_movements.id`
+		)
+		.bind(id)
+		.all<PaymentRow & { order_id: number | null }>();
+	return results.map((row) => ({ ...toPayment(row), orderId: row.order_id }));
+}
+
+function toDetail(row: DetailRow): Omit<ReceivableDetail, 'orders' | 'payments'> {
+	const attributes = receivableAttributesSchema.parse(JSON.parse(row.attributes));
+	return {
+		id: row.id,
+		issueDate: row.issue_date,
+		paymentTerms: attributes.payment_terms,
+		client: {
+			name: row.full_name,
+			phone: row.phone,
+			documentId: isAutoDocument(row.document_id) ? null : row.document_id
+		},
+		total: row.total,
+		paid: row.paid,
+		balance: row.balance
+	};
+}
+
+/** The detail screen: its fields, orders, payments, oldest first, and balance. Null if there's none. */
+export async function getReceivableDetail(
+	db: D1Database,
+	id: unknown,
+	actor: Actor | null
+): Promise<ReceivableDetail | null> {
+	requireRole(actor, MANAGES_RECEIVABLES);
+	const parsedId = idSchema.safeParse(id);
+	if (!parsedId.success) {
+		return null;
+	}
+	const [row, orders, payments] = await Promise.all([
+		findDetailRow(db, parsedId.data),
+		findOrders(db, parsedId.data),
+		findPayments(db, parsedId.data)
+	]);
+	if (null === row) {
+		return null;
+	}
+	return { ...toDetail(row), orders, payments };
 }
