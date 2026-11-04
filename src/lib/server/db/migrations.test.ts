@@ -4,14 +4,19 @@ import { beforeEach, expect, test } from 'vitest';
 
 let database: DatabaseSync;
 
-beforeEach(() => {
-	database = new DatabaseSync(':memory:');
-	const files = readdirSync('migrations')
-		.filter((file) => file.endsWith('.sql'))
-		.sort();
+const MIGRATION_FILES = readdirSync('migrations')
+	.filter((file) => file.endsWith('.sql'))
+	.sort();
+
+function applyMigrations(files: string[]) {
 	for (const file of files) {
 		database.exec(readFileSync(`migrations/${file}`, 'utf8'));
 	}
+}
+
+beforeEach(() => {
+	database = new DatabaseSync(':memory:');
+	applyMigrations(MIGRATION_FILES);
 });
 
 function listTables(): string[] {
@@ -60,6 +65,7 @@ test('creates exactly the tables of the phases built so far', () => {
 		'payroll_runs',
 		'products',
 		'quotes',
+		'receivables',
 		'sessions',
 		'settings',
 		'timesheets',
@@ -325,9 +331,98 @@ test('receipt_number is required and unique per sign', () => {
 	expect(() => insert(-50, null)).toThrow(/NOT NULL/);
 });
 
-test('users, employees, sessions, products and orders carry the audit columns', () => {
+test('cash_movements: an INSTALLMENT links to an order or a cuenta de cobro, nothing else does', () => {
+	insertMovement({ concept: 'INSTALLMENT', amount: 100, entityType: 'RECEIVABLE' });
+	insertMovement({ concept: 'INSTALLMENT', amount: -100, entityType: 'RECEIVABLE', reversesId: 1 });
+	insertMovement({ concept: 'INSTALLMENT', amount: 100, entityType: 'ORDER' });
+	const refused = [
+		{ concept: 'SECURITY_DEPOSIT', amount: 100, entityType: 'RECEIVABLE' },
+		{ concept: 'INSTALLMENT_REFUND', amount: -100, entityType: 'RECEIVABLE' },
+		{ concept: 'CARRIER_PAYMENT', amount: -100, entityType: 'RECEIVABLE' },
+		{ concept: 'INSTALLMENT', amount: -100, entityType: 'RECEIVABLE' },
+		{ concept: 'INSTALLMENT', amount: 100, entityType: 'PAYROLL_RUN' }
+	];
+	for (const movement of refused) {
+		expect(() => insertMovement(movement)).toThrow(/CHECK/);
+	}
+});
+
+function insertReceivable(clientId: number) {
+	return database
+		.prepare(
+			`insert into receivables (client_id, issue_date, created_at, created_by, updated_at, updated_by) values (?, '2026-11-04', ${AUDIT})`
+		)
+		.run(clientId);
+}
+
+function indexedColumnsOf(table: string): unknown[] {
+	return database
+		.prepare(
+			`select info.name from pragma_index_list('${table}') as list, pragma_index_info(list.name) as info`
+		)
+		.all()
+		.map((row) => row.name);
+}
+
+test('receivables: client_id must be a contact, attributes defaults to {}, indexed by client_id', () => {
+	insertContact('8909039395');
+	insertReceivable(1);
+	expect(() => insertReceivable(99)).toThrow(/FOREIGN KEY/);
+	expect(database.prepare('select attributes from receivables').get()?.attributes).toBe('{}');
+	expect(listColumns('receivables')).toEqual([
+		'id',
+		'client_id',
+		'issue_date',
+		'attributes',
+		'created_at',
+		'created_by',
+		'updated_at',
+		'updated_by'
+	]);
+	expect(indexedColumnsOf('receivables')).toContain('client_id');
+});
+
+test('orders: receivable_id is NULL until billed, a real cuenta de cobro, and indexed', () => {
+	insertContact('8909039395');
+	insertOrder({});
+	insertReceivable(1);
+	expect(database.prepare('select receivable_id from orders').get()?.receivable_id).toBeNull();
+	database.exec('update orders set receivable_id = 1 where id = 1');
+	expect(() => database.exec('update orders set receivable_id = 99 where id = 1')).toThrow(
+		/FOREIGN KEY/
+	);
+	expect(indexedColumnsOf('orders')).toContain('receivable_id');
+});
+
+const REBUILD_MIGRATION = '0005_curly_grey_gargoyle.sql';
+
+test('the cash_movements rebuild keeps every row as it was, inside a transaction as on D1', () => {
+	database = new DatabaseSync(':memory:');
+	applyMigrations(MIGRATION_FILES.slice(0, MIGRATION_FILES.indexOf(REBUILD_MIGRATION)));
+	insertMovement({ concept: 'INSTALLMENT', amount: 100, entityType: 'ORDER' });
+	insertMovement({ concept: 'INSTALLMENT', amount: -100, entityType: 'ORDER', reversesId: 1 });
+	insertMovement({ concept: 'SECURITY_DEPOSIT', amount: 50, entityType: 'ORDER' });
+	insertMovement({ concept: 'INSTALLMENT_REFUND', amount: -30, entityType: 'ORDER' });
+	insertMovement({ concept: 'DEPOSIT_REFUND', amount: -50, entityType: 'ORDER' });
+	insertMovement({ concept: 'CARRIER_PAYMENT', amount: -20, entityType: 'ORDER' });
+	insertMovement({ concept: 'PAYROLL', amount: -400, entityType: 'PAYROLL_RUN' });
+	insertMovement({ concept: 'OTHER_INCOME', amount: 10 });
+	insertMovement({ concept: 'OTHER_EXPENSE', amount: -10 });
+	const before = database.prepare('select * from cash_movements order by id').all();
+	database.exec('begin');
+	applyMigrations([REBUILD_MIGRATION]);
+	database.exec('commit');
+	expect(database.prepare('select * from cash_movements order by id').all()).toEqual(before);
+	expect(listTables()).not.toContain('__old_cash_movements');
+	expect(indexedColumnsOf('cash_movements')).toEqual(
+		expect.arrayContaining(['reverses_id', 'entity_type', 'entity_id', 'receipt_number'])
+	);
+});
+
+test('users, employees, sessions, products, orders, quotes and receivables carry the audit columns', () => {
 	const audit = ['created_at', 'created_by', 'updated_at', 'updated_by'];
-	for (const table of ['users', 'employees', 'sessions', 'products', 'orders', 'quotes']) {
+	const tables = ['users', 'employees', 'sessions', 'products', 'orders', 'quotes', 'receivables'];
+	for (const table of tables) {
 		expect(listColumns(table)).toEqual(expect.arrayContaining(audit));
 	}
 });

@@ -218,6 +218,8 @@ export const orders = sqliteTable(
 		orderTotal: integer('order_total').notNull(),
 		depositAmount: integer('deposit_amount').notNull().default(0), // held, never part of the total
 		attributes: text('attributes').notNull().default('{}'),
+		// NULL until it's billed. A column, not a link table: an order is in one cuenta de cobro at most.
+		receivableId: integer('receivable_id').references((): AnySQLiteColumn => receivables.id),
 		...auditColumns
 	},
 	(table) => [
@@ -226,6 +228,7 @@ export const orders = sqliteTable(
 		index('orders_event_date').on(table.eventDate),
 		index('orders_status').on(table.status),
 		index('orders_client_id').on(table.clientId),
+		index('orders_receivable_id').on(table.receivableId),
 		check(
 			'orders_status',
 			sql`${table.status} IN ('DRAFT', 'CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'OUT_FOR_PICKUP', 'COMPLETED', 'CANCELLED')`
@@ -240,6 +243,23 @@ export const orders = sqliteTable(
 			sql`coalesce(json_extract(${table.pickupAttributes}, '$.method'), '') IN ('COMPANY_PICKUP', 'CLIENT_RETURN', 'EXTERNAL_CARRIER')`
 		)
 	]
+);
+
+// «Cuenta de cobro Nº 4794»: `id` continues the paper sequence. It bills its orders through
+// `orders.receivable_id` and stores no total, status or lines: they're read live from its orders,
+// read-only once COMPLETED, and its balance from `cash_movements`.
+export const receivables = sqliteTable(
+	'receivables',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		clientId: integer('client_id')
+			.notNull()
+			.references(() => contacts.id),
+		issueDate: text('issue_date').notNull(), // YYYY-MM-DD, Bogotá's, fixed when issued
+		attributes: text('attributes').notNull().default('{}'), // JSON: payment_terms, validated with Zod
+		...auditColumns
+	},
+	(table) => [index('receivables_client_id').on(table.clientId)]
 );
 
 // «Cotización #N», numbered on its own from 1: an order without its trips or its money, so its own
@@ -338,7 +358,7 @@ export const cashMovements = sqliteTable(
 		paymentMethod: text('payment_method').notNull(),
 		amount: integer('amount').notNull(), // whole pesos, negative is an outflow
 		movementDate: text('movement_date').notNull(), // YYYY-MM-DD
-		entityType: text('entity_type'), // 'ORDER' | 'PAYROLL_RUN'
+		entityType: text('entity_type'), // 'ORDER' | 'RECEIVABLE' | 'PAYROLL_RUN'
 		entityId: integer('entity_id'),
 		payee: text('payee'), // a third party: carrier, supplier
 		attributes: text('attributes').notNull().default('{}'), // JSON, validated with Zod
@@ -361,12 +381,14 @@ export const cashMovements = sqliteTable(
 			'cash_movements_entity_pair',
 			sql`(${table.entityType} IS NULL) = (${table.entityId} IS NULL)`
 		),
-		// `IS`, not `=`: a CHECK passes when it evaluates to NULL. `ELSE 0` also refuses an unknown concept.
+		// `IS`, not `=`, and `coalesce` before `IN`: a CHECK passes when it evaluates to NULL. `ELSE 0`
+		// also refuses an unknown concept.
 		// A concept's natural sign flips only on an offsetting movement, the one with reverses_id.
 		check(
 			'cash_movements_concept_link',
 			sql`CASE
-				WHEN ${table.concept} IN ('INSTALLMENT', 'SECURITY_DEPOSIT') THEN ${table.entityType} IS 'ORDER' AND (${table.amount} > 0) = (${table.reversesId} IS NULL)
+				WHEN ${table.concept} = 'INSTALLMENT' THEN coalesce(${table.entityType}, '') IN ('ORDER', 'RECEIVABLE') AND (${table.amount} > 0) = (${table.reversesId} IS NULL)
+				WHEN ${table.concept} = 'SECURITY_DEPOSIT' THEN ${table.entityType} IS 'ORDER' AND (${table.amount} > 0) = (${table.reversesId} IS NULL)
 				WHEN ${table.concept} IN ('INSTALLMENT_REFUND', 'DEPOSIT_REFUND', 'CARRIER_PAYMENT') THEN ${table.entityType} IS 'ORDER' AND (${table.amount} < 0) = (${table.reversesId} IS NULL)
 				WHEN ${table.concept} = 'PAYROLL' THEN ${table.entityType} IS 'PAYROLL_RUN' AND (${table.amount} < 0) = (${table.reversesId} IS NULL)
 				WHEN ${table.concept} = 'OTHER_INCOME' THEN ${table.entityType} IS NULL AND (${table.amount} > 0) = (${table.reversesId} IS NULL)
