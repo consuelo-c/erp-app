@@ -96,7 +96,7 @@
 	}
 </script>
 
-<Field label="Cliente" id={SEARCH_ID}>
+<Field label="Buscar cliente" id={SEARCH_ID}>
 	<Input
 		id={SEARCH_ID}
 		type="search"
