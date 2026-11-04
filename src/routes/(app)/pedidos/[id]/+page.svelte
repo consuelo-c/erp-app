@@ -14,21 +14,21 @@
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import { formatClockTime, formatInstant, formatLongDay, formatShortDay } from '$lib/datetime';
-	import { formatBalance, formatPesos, formatReceiptNumber, formatSignedPesos } from '$lib/format';
+	import { formatBalance, formatPesos } from '$lib/format';
 	import {
 		CASH_CONCEPT_LABELS,
 		DELIVERY_METHOD_LABELS,
 		INCIDENT_OUTCOME_LABELS,
 		INCIDENT_STATUS_LABELS,
 		ORDER_STATUS_LABELS,
-		PAYMENT_METHOD_LABELS,
 		RESPONSIBLE_PARTY_LABELS,
 		RETURN_METHOD_LABELS
 	} from '$lib/labels';
 	import { isEditableStatus, isLegalTransition } from '$lib/orders';
 	import { formatPhone } from '$lib/phone';
 	import type { Incident, ResponsibleParty } from '$lib/server/services/incidents';
-	import type { Carrier, OrderPayment } from '$lib/server/services/orders';
+	import type { Carrier } from '$lib/server/services/orders';
+	import PaymentList from '../../PaymentList.svelte';
 	import type { PageProps } from './$types';
 
 	// The order as everyone at the office reads it: who, where, when, what, and its money. The
@@ -80,25 +80,6 @@
 	const recordedPayment = $derived(
 		order.payments.find((payment) => String(payment.id) === page.url.searchParams.get('pago'))
 	);
-
-	function receiptHref(payment: OrderPayment): string {
-		const query = new URLSearchParams({ movimiento: String(payment.id) });
-		return `${resolve('/(app)/caja/comprobante')}?${query}`;
-	}
-
-	// The method, and who a carrier payment went to: the client is the order's own.
-	function paymentMeta(payment: OrderPayment): string {
-		const method = payment.otherMethod ?? PAYMENT_METHOD_LABELS[payment.method];
-		const payee = 'CARRIER_PAYMENT' === payment.concept ? payment.payee : null;
-		return [formatLongDay(payment.movementDate), method, payee, receiptName(payment)]
-			.filter(Boolean)
-			.join(' · ');
-	}
-
-	function receiptName(payment: OrderPayment): string {
-		const title = 0 < payment.amount ? 'Recibo de caja' : 'Comprobante de egreso';
-		return `${title} # ${formatReceiptNumber(payment.receiptNumber)}`;
-	}
 
 	// «Novedades»: one incident at a time in each dialog.
 	let selected = $state<Incident | null>(null);
@@ -433,24 +414,7 @@
 	{/if}
 
 	<h2 class="section-title">Pagos</h2>
-	{#if 0 === order.payments.length}
-		<p class="note">Sin pagos todavía.</p>
-	{:else}
-		<ul class="payments">
-			{#each order.payments as payment (payment.id)}
-				<li class="payment">
-					<div class="payment__head">
-						<span>{CASH_CONCEPT_LABELS[payment.concept]}</span>
-						<b>{formatSignedPesos(payment.amount)}</b>
-					</div>
-					<p class="meta payment__meta">{paymentMeta(payment)}</p>
-					<Button variant="secondary" size="sm" inline href={receiptHref(payment)}>
-						Imprimir recibo
-					</Button>
-				</li>
-			{/each}
-		</ul>
-	{/if}
+	<PaymentList payments={order.payments} />
 
 	<!-- Payments are recorded in any state, a cancelled order's refunds included. -->
 	<div class="screen__action">
@@ -762,29 +726,6 @@
 
 	.deposit {
 		margin-top: var(--space-4);
-	}
-
-	.payments {
-		padding: 0;
-		margin: 0;
-		list-style: none;
-		border-top: var(--border-w-strong) solid var(--border-strong);
-	}
-
-	.payment {
-		padding: var(--space-6) 0;
-		border-bottom: var(--border-w-hair) solid var(--border-default);
-	}
-
-	.payment__meta {
-		margin: var(--space-1) 0 var(--space-4);
-	}
-
-	.payment__head {
-		display: flex;
-		gap: var(--space-6);
-		justify-content: space-between;
-		font-size: var(--text-base);
 	}
 
 	.incidents__money {

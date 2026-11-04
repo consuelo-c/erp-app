@@ -4,7 +4,12 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
 import { getOrderTimeline, MODIFIED_AFTER_STAGING_AT } from './orders';
-import { issueReceivable, receivableAttributesSchema, updateReceivable } from './receivables';
+import {
+	getReceivableDetail,
+	issueReceivable,
+	receivableAttributesSchema,
+	updateReceivable
+} from './receivables';
 
 const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
 const sales: Actor = { ...manager, username: 'ventas', roles: ['SALES'] };
@@ -25,13 +30,13 @@ function insertContact(id: number, fullName: string) {
 	);
 }
 
-type OrderSeed = { clientId?: number; status?: string; attributes?: string };
+type OrderSeed = { clientId?: number; status?: string; attributes?: string; total?: number };
 
 function insertOrder(id: number, seed: OrderSeed = {}) {
-	const { clientId = POSTOBON, status = 'COMPLETED', attributes = '{}' } = seed;
+	const { clientId = POSTOBON, status = 'COMPLETED', attributes = '{}', total = 0 } = seed;
 	database.exec(
 		`insert into orders (id, public_token, client_id, status, event_date, delivery_date, pickup_date, rental_days, client_attributes, delivery_attributes, pickup_attributes, order_items, items_total, order_total, attributes, created_at, created_by, updated_at, updated_by)
-		values (${id}, 'token-${id}', ${clientId}, '${status}', '2026-10-10', '2026-10-09', '2026-10-11', 2, '{}', '{"method":"COMPANY_DELIVERY"}', '{"method":"COMPANY_PICKUP"}', '[]', 0, 0, '${attributes}', ${AUDIT})`
+		values (${id}, 'token-${id}', ${clientId}, '${status}', '2026-10-10', '2026-10-09', '2026-10-11', 2, '{}', '{"method":"COMPANY_DELIVERY"}', '{"method":"COMPANY_PICKUP"}', '[]', ${total}, ${total}, '${attributes}', ${AUDIT})`
 	);
 }
 
@@ -72,12 +77,50 @@ function events(entityType: string, action?: string) {
 	}));
 }
 
+type MovementSeed = {
+	concept?: string;
+	amount: number;
+	entityType?: string;
+	entityId: number;
+	date?: string;
+	reversesId?: number;
+};
+
+let nextMovementId = 1;
+
+function insertMovement(seed: MovementSeed): number {
+	const { concept = 'INSTALLMENT', amount, entityType = 'ORDER', entityId } = seed;
+	const { date = '2026-11-01', reversesId = null } = seed;
+	const id = nextMovementId++;
+	database.exec(
+		`insert into cash_movements (id, concept, payment_method, amount, movement_date, entity_type, entity_id, payee, reverses_id, receipt_number, created_at, created_by, updated_at, updated_by)
+		values (${id}, '${concept}', 'CASH', ${amount}, '${date}', '${entityType}', ${entityId}, 'Postobón S.A.', ${reversesId}, ${id}, ${AUDIT})`
+	);
+	return id;
+}
+
+async function detailOf(id: number) {
+	const detail = await getReceivableDetail(db, id, manager);
+	if (null === detail) {
+		throw new Error(`No receivable ${id}`);
+	}
+	return detail;
+}
+
+// Two orders of $860.000 and $500.000, billed together.
+async function billedPair(): Promise<number> {
+	insertOrder(1070, { total: 860000 });
+	insertOrder(1071, { total: 500000 });
+	return issued([1070, 1071]);
+}
+
 // The clock on Sunday 1 November 2026, 10:00 a.m. in Bogotá.
 const NOVEMBER_1 = new Date('2026-11-01T15:00:00Z');
 
 beforeEach(() => {
 	vi.useFakeTimers({ toFake: ['Date'] });
 	vi.setSystemTime(NOVEMBER_1);
+	nextMovementId = 1;
 	({ db, database } = createMemoryD1());
 	insertContact(POSTOBON, 'Postobón S.A.');
 	insertContact(LUZ_MARINA, 'Luz Marina Restrepo');
@@ -311,4 +354,92 @@ test('SALES gets a 403 issuing and editing; MANAGER passes', async () => {
 	}
 	expect(linkOf(1060)).toBeNull();
 	expect(await updateReceivable(db, { ...input, id }, manager)).toEqual({ ok: true, id });
+});
+
+test("the balance is the orders' total less their advance and the cuenta's payment", async () => {
+	const id = await billedPair();
+	insertMovement({ amount: 100000, entityId: 1070 });
+	insertMovement({ amount: 600000, entityType: 'RECEIVABLE', entityId: id });
+	expect(await detailOf(id)).toMatchObject({ total: 1360000, paid: 700000, balance: 660000 });
+});
+
+test("an offset cancels the cuenta's payment, and an order's refund counts", async () => {
+	const id = await billedPair();
+	const payment = insertMovement({ amount: 600000, entityType: 'RECEIVABLE', entityId: id });
+	insertMovement({ amount: -600000, entityType: 'RECEIVABLE', entityId: id, reversesId: payment });
+	expect((await detailOf(id)).balance).toBe(1360000);
+	insertMovement({ amount: 100000, entityId: 1070 });
+	insertMovement({ concept: 'INSTALLMENT_REFUND', amount: -40000, entityId: 1070 });
+	expect((await detailOf(id)).balance).toBe(1300000);
+});
+
+test('deposits and carrier payments stay out of the balance and the payments', async () => {
+	const id = await billedPair();
+	insertMovement({ concept: 'SECURITY_DEPOSIT', amount: 200000, entityId: 1070 });
+	insertMovement({ concept: 'DEPOSIT_REFUND', amount: -200000, entityId: 1070 });
+	insertMovement({ concept: 'CARRIER_PAYMENT', amount: -50000, entityId: 1071 });
+	expect(await detailOf(id)).toMatchObject({ paid: 0, balance: 1360000, payments: [] });
+});
+
+test("another order's payments and another cuenta's stay out", async () => {
+	const id = await billedPair();
+	const other = await issued([1060]);
+	insertMovement({ amount: 100000, entityId: 1061 });
+	insertMovement({ amount: 100000, entityId: 1060 });
+	insertMovement({ amount: 100000, entityType: 'RECEIVABLE', entityId: other });
+	expect((await detailOf(id)).paid).toBe(0);
+});
+
+test("paying over the total leaves a negative balance, the client's credit", async () => {
+	const id = await billedPair();
+	insertMovement({ amount: 1410000, entityType: 'RECEIVABLE', entityId: id });
+	expect((await detailOf(id)).balance).toBe(-50000);
+});
+
+test('the balance follows an order leaving the cuenta, its advance with it', async () => {
+	const id = await billedPair();
+	insertMovement({ amount: 100000, entityId: 1071 });
+	await edit(id, [1070]);
+	expect(await detailOf(id)).toMatchObject({ total: 860000, paid: 0, balance: 860000 });
+});
+
+test("the payments go oldest first, an order's marked with it, the cuenta's with none", async () => {
+	const id = await billedPair();
+	insertMovement({ amount: 600000, entityType: 'RECEIVABLE', entityId: id, date: '2026-10-30' });
+	insertMovement({ amount: 100000, entityId: 1070, date: '2026-10-06' });
+	const { payments } = await detailOf(id);
+	expect(payments).toMatchObject([
+		{ amount: 100000, movementDate: '2026-10-06', orderId: 1070, concept: 'INSTALLMENT' },
+		{ amount: 600000, movementDate: '2026-10-30', orderId: null, concept: 'INSTALLMENT' }
+	]);
+});
+
+test('the detail carries its fields and orders, and hides an automatic document', async () => {
+	const id = await billedPair();
+	expect(await detailOf(id)).toMatchObject({
+		id,
+		issueDate: '2026-11-01',
+		paymentTerms: 'Contado',
+		client: { name: 'Postobón S.A.', phone: '573000000001', documentId: null },
+		orders: [
+			{ id: 1070, eventDate: '2026-10-10', orderTotal: 860000 },
+			{ id: 1071, eventDate: '2026-10-10', orderTotal: 500000 }
+		]
+	});
+	database.exec(`update contacts set document_id = '8909039395' where id = ${POSTOBON}`);
+	expect((await detailOf(id)).client.documentId).toBe('8909039395');
+});
+
+test('a cuenta that does not exist, or a tampered id, reads as none', async () => {
+	expect(await getReceivableDetail(db, 4794, manager)).toBeNull();
+	expect(await getReceivableDetail(db, 'abc', manager)).toBeNull();
+});
+
+test('SALES, WAREHOUSE and DRIVER get a 403 reading the detail; MANAGER passes', async () => {
+	const id = await issued([1043]);
+	for (const actor of [sales, warehouse, driver]) {
+		const caught = await getReceivableDetail(db, id, actor).catch((error) => error);
+		expect(isHttpError(caught, 403), actor.username).toBe(true);
+	}
+	expect((await detailOf(id)).id).toBe(id);
 });

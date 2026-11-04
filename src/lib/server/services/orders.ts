@@ -1386,7 +1386,7 @@ async function findExtensions(db: D1Database, orderId: number): Promise<Extensio
 	return results;
 }
 
-type PaymentRow = {
+export type PaymentRow = {
 	id: number;
 	movement_date: string;
 	concept: CashConcept;
@@ -1397,7 +1397,7 @@ type PaymentRow = {
 	receipt_number: number;
 };
 
-function toPayment(row: PaymentRow): OrderPayment {
+export function toPayment(row: PaymentRow): OrderPayment {
 	return {
 		id: row.id,
 		movementDate: row.movement_date,
