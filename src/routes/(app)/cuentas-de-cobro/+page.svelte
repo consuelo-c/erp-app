@@ -189,12 +189,13 @@
 								<td class="num nowrap"><b>{formatPesos(receivable.balance)}</b></td>
 							{/if}
 							<td class="num edit">
-								<!-- STUB: #419 (phase 16) links this to the form (44). -->
 								<IconButton
 									icon="edit"
 									label="Editar cuenta de cobro Nº {receivable.id}"
 									title="Editar cuenta de cobro Nº {receivable.id}"
-									disabled
+									href={resolve('/(app)/cuentas-de-cobro/[id]/editar', {
+										id: String(receivable.id)
+									})}
 								/>
 							</td>
 						</tr>
