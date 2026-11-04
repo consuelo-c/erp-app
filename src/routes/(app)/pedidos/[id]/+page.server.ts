@@ -13,6 +13,7 @@ import {
 	previewConfirmation,
 	reopenOrder
 } from '$lib/server/services/orders';
+import { getSourceQuoteId } from '$lib/server/services/quotes';
 import type { Actions, PageServerLoad } from './$types';
 
 const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
@@ -21,6 +22,7 @@ const MANAGES_INCIDENTS = ['ADMIN', 'MANAGER'] as const;
 // A draft brings what its «Confirmar» dialog shows: the suggested advance and any shortage.
 // «Novedades» only for ADMIN and MANAGER: null hides the section for everyone else.
 // The client's page token is null for a draft, which hides «Copiar enlace del cliente».
+// The quote it was converted from, if any, for «Desde la cotización #N».
 export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	requireRole(locals.user, TAKES_ORDERS);
 	if (undefined === platform) {
@@ -39,7 +41,8 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 		? await listIncidents(db, order.id, locals.user)
 		: null;
 	const publicToken = await getPublicToken(db, order.id, locals.user);
-	return { order, confirmation, incidents, publicToken };
+	const quoteId = await getSourceQuoteId(db, order.id, locals.user);
+	return { order, confirmation, incidents, publicToken, quoteId };
 };
 
 export const actions: Actions = {

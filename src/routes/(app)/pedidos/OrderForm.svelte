@@ -11,6 +11,7 @@
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import {
 		addDays,
+		formatCivilDate,
 		formatClockTime,
 		formatDayRange,
 		formatLongDay,
@@ -36,6 +37,7 @@
 		OrderSchedule,
 		ReturnMethod
 	} from '$lib/server/services/orders';
+	import type { QuoteConversion } from '$lib/server/services/quotes';
 	import ClientSearch from './ClientSearch.svelte';
 	import OrderLines, { toFormLine, type FormLine } from './OrderLines.svelte';
 	import OrderTotals from './OrderTotals.svelte';
@@ -49,11 +51,13 @@
 		order: OrderDetail | null;
 		/** The delivered order a new extension comes from. */
 		original?: OrderDetail | null;
+		/** «Convertir en pedido»: the quote a new order comes from. */
+		conversion?: QuoteConversion | null;
 		/** A refused save: its message and each field's. */
 		form: { message: string; errors: Record<string, string> } | null | undefined;
 	}
 
-	let { options, order, original = null, form }: Props = $props();
+	let { options, order, original = null, conversion = null, form }: Props = $props();
 
 	// While the save is on its way, so the button doesn't post it twice.
 	let isSaving = $state(false);
@@ -188,9 +192,50 @@
 		};
 	}
 
+	// A quote's order starts with its client as the contact is today, «Lugar del evento» as both
+	// addresses, and its terms and lines as quoted. The trips are the salesperson's, and a «por
+	// acordar» transport stays empty: «Guardar pedido» asks for it.
+	function quotedFields({ quote, client }: QuoteConversion): Fields {
+		const address = {
+			carrierId: '',
+			address1: quote.address1 ?? '',
+			address2: quote.address2 ?? ''
+		};
+		return {
+			...structuredClone(NEW_ORDER),
+			phone: formatPhone(client.phone),
+			eventDate: quote.eventDate ?? '',
+			choice: client.id,
+			picked: client,
+			clientName: client.fullName,
+			rentalDays: String(quote.rentalDays),
+			lines: quote.items.map(toFormLine),
+			delivery: address,
+			notes: quote.notes ?? '',
+			discount: pesosOf(quote.discount),
+			transport: null === quote.transportCost ? '' : formatPesos(quote.transportCost)
+		};
+	}
+
+	// What the quote filled, and what's left for the salesperson.
+	const isTransportPending = $derived(null === conversion?.quote.transportCost);
+	const quoteNote = $derived(
+		isTransportPending
+			? 'el descuento y las notas. Faltan las fechas, los métodos y el transporte.'
+			: 'el descuento, el transporte y las notas. Faltan las fechas y los métodos.'
+	);
+
+	// As the printed date reads: `1 dic. 2026`.
+	function expiredOn(validUntil: string): string {
+		return formatCivilDate(validUntil).replace(/ (\d{4})$/, '. $1');
+	}
+
 	function readFields(): Fields {
 		if (null !== original) {
 			return extensionFields(original);
+		}
+		if (null !== conversion) {
+			return quotedFields(conversion);
 		}
 		return null === order ? structuredClone(NEW_ORDER) : savedFields(order);
 	}
@@ -438,6 +483,25 @@
 		<div class="order__notice"><Notice tone="error">{form.message}</Notice></div>
 	{/if}
 
+	{#if conversion}
+		{@const { quote } = conversion}
+		<div class="order__notice">
+			<Notice tone="info">
+				Desde la cotización
+				<a href={resolve('/(app)/cotizaciones/[id]', { id: String(quote.id) })}>#{quote.id}</a>: el
+				cliente, las líneas con sus precios, los días, {quoteNote}
+			</Notice>
+		</div>
+		{#if 'EXPIRED' === quote.state}
+			<div class="order__notice">
+				<Notice tone="warning">
+					⚠ Esta cotización venció el {expiredOn(quote.validUntil)}; los precios pueden haber
+					cambiado.
+				</Notice>
+			</div>
+		{/if}
+	{/if}
+
 	{#if original}
 		<div class="order__notice">
 			<Notice tone="info">
@@ -663,6 +727,7 @@
 			itemsTotal={totals.itemsTotal}
 			total={totals.orderTotal}
 			{errorOf}
+			transportPlaceholder={isTransportPending ? 'Por acordar' : '$0'}
 		/>
 
 		<div class="deposit">
