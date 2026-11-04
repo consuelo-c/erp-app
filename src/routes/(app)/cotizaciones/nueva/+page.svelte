@@ -16,5 +16,5 @@
 	{#snippet header()}
 		<ScreenHeader title="Nueva cotización" backHref={resolve('/cotizaciones')} />
 	{/snippet}
-	<QuoteForm options={data.options} quote={null} {form} />
+	<QuoteForm options={data.options} quote={null} copy={data.copy} {form} />
 </Screen>

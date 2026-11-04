@@ -11,11 +11,13 @@ import {
 	getQuote,
 	getQuoteChange,
 	getQuoteDetail,
+	getQuoteDuplicate,
 	getQuoteTimeline,
 	listQuotes,
 	QUOTES_PAGE_SIZE,
 	quoteAttributesSchema,
-	updateQuote
+	updateQuote,
+	type QuoteDraft
 } from './quotes';
 
 const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
@@ -568,4 +570,116 @@ test('the form adds lines from the active catalog only: «Silla Rimax» is out',
 		'Mesa redonda 10 puestos',
 		'Silla Tiffany dorada'
 	]);
+});
+
+function readQuoteRow(id: number) {
+	return database.prepare('select * from quotes where id = ?').get(id);
+}
+
+function countRows() {
+	return database
+		.prepare(
+			'select (select count(*) from quotes) as quotes, (select count(*) from events) as events'
+		)
+		.get();
+}
+
+test('«Duplicar» reprices every line from today’s catalog: name, list price and price to charge', async () => {
+	// Quoted at list $2.500 and charged $2.200; the product now lists at $2.800 under a new name.
+	const lines = [{ product_id: 1, qty: 120, unit_price: 2200 }];
+	const id = await create({ ...quote1043, quote_items: lines, discount: 0 });
+	database.exec("update products set name = 'Silla Tiffany oro', rental_price = 2800 where id = 1");
+	const copy = await getQuoteDuplicate(db, id, sales);
+	expect(copy?.draft.items).toEqual([
+		{
+			product_id: 1,
+			name: 'Silla Tiffany oro',
+			qty: 120,
+			list_price: 2800,
+			unit_price: 2800,
+			line_total: 120 * 2800 * 2
+		}
+	]);
+	expect(copy).toMatchObject({
+		from: id,
+		removed: [],
+		draft: {
+			clientId: LUZ_MARINA,
+			address1: quote1043.address_1,
+			rentalDays: 2,
+			discount: 0,
+			transportCost: 180000,
+			notes: quote1043.notes
+		}
+	});
+});
+
+test('«Duplicar» keeps «por acordar», and leaves inactive products out, naming them', async () => {
+	const items = [...quote1043.quote_items, { product_id: RIMAX, qty: 10, unit_price: 1500 }];
+	database.exec(`update products set active = 1 where id = ${RIMAX}`);
+	const id = await create({ ...quote1043, quote_items: items, transport_cost: null });
+	database.exec(`update products set active = 0 where id in (2, ${RIMAX})`);
+	const copy = await getQuoteDuplicate(db, id, sales);
+	expect(copy?.draft.transportCost).toBeNull();
+	expect(copy?.draft.items.map((item) => item.product_id)).toEqual([1, 3]);
+	expect(copy?.removed).toEqual(['Mesa redonda 10 puestos', 'Silla Rimax']);
+});
+
+test('a quote whose every product is inactive opens empty, and saving it needs a line', async () => {
+	const id = await create();
+	database.exec('update products set active = 0');
+	const copy = await getQuoteDuplicate(db, id, sales);
+	expect([copy?.draft.items, copy?.removed.length]).toEqual([[], 3]);
+	const result = await createQuote(db, { ...quote1043, quote_items: [] }, sales);
+	expect(errorsOf(result)).toMatchObject({ quote_items: 'Agrega al menos un producto' });
+});
+
+// What the form posts back from a duplicate's draft, with today's «Válida hasta» and no event date.
+function draftInput(draft: QuoteDraft) {
+	return {
+		client_id: draft.clientId,
+		client_name: draft.client.name,
+		event_date: '',
+		valid_until: '2026-12-01',
+		rental_days: draft.rentalDays,
+		quote_items: draft.items.map((item) => ({
+			product_id: item.product_id,
+			qty: item.qty,
+			unit_price: item.unit_price
+		})),
+		discount: draft.discount,
+		transport_cost: draft.transportCost,
+		address_1: draft.address1,
+		address_2: draft.address2,
+		notes: draft.notes
+	};
+}
+
+test('nothing is written until saved; the copy takes the next number and leaves the original as it was', async () => {
+	const id = await create();
+	const original = readQuoteRow(id);
+	const before = countRows();
+	const copy = await getQuoteDuplicate(db, id, sales);
+	expect(countRows()).toEqual(before);
+	expect(await getQuoteDuplicate(db, 99, sales)).toBeNull();
+	if (null === copy) {
+		throw new Error('No copy');
+	}
+	expect(await create(draftInput(copy.draft))).toBe(id + 1);
+	expect(readQuoteRow(id)).toEqual(original);
+	const events = database
+		.prepare("select entity_id, action from events where entity_type = 'QUOTE' order by id")
+		.all();
+	expect(events).toEqual([
+		{ entity_id: id, action: 'CREATED' },
+		{ entity_id: id + 1, action: 'CREATED' }
+	]);
+});
+
+test('WAREHOUSE and DRIVER get a 403 duplicating', async () => {
+	const id = await create();
+	for (const actor of [warehouse, driver]) {
+		const refusal = await getQuoteDuplicate(db, id, actor).catch((caught) => caught);
+		expect(isHttpError(refusal, 403)).toBe(true);
+	}
 });

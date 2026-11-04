@@ -22,3 +22,15 @@ export function getQuoteState(quote: QuoteValidity, today: string): QuoteState {
 	}
 	return quote.validUntil >= today ? 'VALID' : 'EXPIRED';
 }
+
+/** The note «Duplicar» shows above the grid, naming the inactive products it left out; null for none. */
+export function describeRemovedProducts(names: string[]): string | null {
+	if (0 === names.length) {
+		return null;
+	}
+	const sorted = [...names].sort((first, second) => first.localeCompare(second, 'es'));
+	if (1 === sorted.length) {
+		return `Se quitó un producto inactivo: ${sorted[0]}.`;
+	}
+	return `Se quitaron ${sorted.length} productos inactivos: ${sorted.join(', ')}.`;
+}

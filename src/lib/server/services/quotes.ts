@@ -580,3 +580,85 @@ export async function getQuoteChange(
 		? null
 		: describeQuoteEdit(toEditedFields(row.before), toEditedFields(row.after));
 }
+
+/** A quote's terms, as the form fills a new one from them. */
+export type QuoteDraft = Pick<
+	Quote,
+	| 'clientId'
+	| 'client'
+	| 'address1'
+	| 'address2'
+	| 'rentalDays'
+	| 'items'
+	| 'discount'
+	| 'transportCost'
+	| 'notes'
+>;
+
+/** «Duplicar»: the new quote's draft, from quote `id`, and the inactive products it left out. */
+export type QuoteDuplicate = { from: number; draft: QuoteDraft; removed: string[] };
+
+type CatalogPrice = { id: number; name: string; rental_price: number };
+
+// Today's name and list price of each active product among `productIds`.
+async function readActivePrices(
+	db: D1Database,
+	productIds: number[]
+): Promise<Map<number, CatalogPrice>> {
+	const { results } = await db
+		.prepare(
+			`select id, name, rental_price from products
+			where active = 1 and id in (select value from json_each(?))`
+		)
+		.bind(JSON.stringify(productIds))
+		.all<CatalogPrice>();
+	return new Map(results.map((product) => [product.id, product]));
+}
+
+// Each line at today's catalog name and list price, charged at that price; an inactive product's
+// line is left out and named.
+function repriceLines(quote: Quote, prices: Map<number, CatalogPrice>) {
+	const items = quote.items
+		.filter((item) => prices.has(item.product_id))
+		.map((item) => {
+			const { name, rental_price: price } = prices.get(item.product_id) as CatalogPrice;
+			const lineTotal = item.qty * price * quote.rentalDays;
+			return { ...item, name, list_price: price, unit_price: price, line_total: lineTotal };
+		});
+	const removed = quote.items
+		.filter((item) => !prices.has(item.product_id))
+		.map((item) => item.name);
+	return { items, removed };
+}
+
+/**
+ * A fresh quote at today's prices, for a company that repeats its event: each line takes the
+ * catalog's name and list price, and charges that price; what was negotiated isn't carried. An
+ * inactive product is left out and named. The event date and «Válida hasta» are the form's: empty,
+ * and today's default. Writes nothing: only saving the form creates the copy. Null: no such quote.
+ */
+export async function getQuoteDuplicate(
+	db: D1Database,
+	id: unknown,
+	actor: Actor | null
+): Promise<QuoteDuplicate | null> {
+	const quote = await getQuote(db, id, actor);
+	if (null === quote) {
+		return null;
+	}
+	const productIds = quote.items.map((item) => item.product_id);
+	const { items, removed } = repriceLines(quote, await readActivePrices(db, productIds));
+	const { clientId, client, address1, address2, rentalDays, discount, transportCost, notes } =
+		quote;
+	const draft = {
+		clientId,
+		client,
+		address1,
+		address2,
+		rentalDays,
+		discount,
+		transportCost,
+		notes
+	};
+	return { from: quote.id, draft: { ...draft, items }, removed };
+}
