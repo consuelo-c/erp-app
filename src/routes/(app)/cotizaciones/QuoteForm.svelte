@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { resolve } from '$app/paths';
 	import Button from '$lib/components/Button.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import Input from '$lib/components/Input.svelte';
@@ -7,10 +8,16 @@
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import { formatPesos } from '$lib/format';
 	import { calculateOrderTotals } from '$lib/orders';
+	import { describeRemovedProducts } from '$lib/quotes';
 	import { parsePesos, parseQuantity } from '$lib/payroll';
 	import { formatPhone } from '$lib/phone';
 	import type { ClientCandidate } from '$lib/server/services/contacts';
-	import type { Quote, QuoteFormOptions } from '$lib/server/services/quotes';
+	import type {
+		Quote,
+		QuoteDraft,
+		QuoteDuplicate,
+		QuoteFormOptions
+	} from '$lib/server/services/quotes';
 	import ClientSearch from '../pedidos/ClientSearch.svelte';
 	import OrderLines, { toFormLine, type FormLine } from '../pedidos/OrderLines.svelte';
 	import OrderTotals from '../pedidos/OrderTotals.svelte';
@@ -20,13 +27,15 @@
 	// field; the server validates it and works the totals out again.
 	interface Props {
 		options: QuoteFormOptions;
-		/** Null for a new quote. */
+		/** The quote being edited; null for a new one. */
 		quote: Quote | null;
+		/** «Duplicar»: a new quote filled from another's terms, at today's prices. */
+		copy?: QuoteDuplicate | null;
 		/** A refused save: its message and each field's. */
 		form: { message: string; errors: Record<string, string> } | null | undefined;
 	}
 
-	let { options, quote, form }: Props = $props();
+	let { options, quote, copy = null, form }: Props = $props();
 
 	const FORM_ID = 'quote-form';
 
@@ -55,16 +64,18 @@
 		return null === amount ? '' : formatPesos(amount);
 	}
 
-	// A saved quote's fields as the form holds them; its client as its snapshot.
-	function savedFields(saved: Quote): Fields {
+	type Dates = Pick<Fields, 'eventDate' | 'validUntil'>;
+
+	// A quote's terms as the form holds them; its client as its snapshot.
+	function savedFields(saved: QuoteDraft, { eventDate, validUntil }: Dates): Fields {
 		const { name: fullName, phone } = saved.client;
 		return {
 			choice: saved.clientId,
 			picked: { id: saved.clientId, fullName, phone, address1: null, address2: null },
 			clientName: fullName,
 			phone: formatPhone(phone),
-			eventDate: saved.eventDate ?? '',
-			validUntil: saved.validUntil,
+			eventDate,
+			validUntil,
 			address1: saved.address1 ?? '',
 			address2: saved.address2 ?? '',
 			rentalDays: String(saved.rentalDays),
@@ -75,10 +86,14 @@
 		};
 	}
 
-	// A new quote starts empty, billed for one day, valid for the configured days.
+	// A new quote starts empty, billed for one day, valid for the configured days; a copy, with the
+	// other's terms and no event date.
 	function readFields(): Fields {
 		if (null !== quote) {
-			return savedFields(quote);
+			return savedFields(quote, { eventDate: quote.eventDate ?? '', validUntil: quote.validUntil });
+		}
+		if (null !== copy) {
+			return savedFields(copy.draft, { eventDate: '', validUntil: options.validUntil });
 		}
 		return {
 			choice: null,
@@ -208,6 +223,15 @@
 		<Notice tone="error">{form.message}</Notice>
 	{/if}
 
+	{#if copy}
+		<Notice tone="info">
+			Copia de la cotización
+			<a href={resolve('/(app)/cotizaciones/[id]', { id: String(copy.from) })}>#{copy.from}</a>
+			a los precios de hoy: el cliente, el lugar, los días, el descuento, el transporte, las notas y los
+			productos con sus cantidades. La fecha del evento queda vacía y la vigencia empieza de nuevo.
+		</Notice>
+	{/if}
+
 	<ClientSearch
 		bind:choice
 		bind:picked
@@ -296,6 +320,10 @@
 			/>
 		</Field>
 	</div>
+
+	{#if copy && describeRemovedProducts(copy.removed)}
+		<Notice tone="info">{describeRemovedProducts(copy.removed)}</Notice>
+	{/if}
 
 	<OrderLines
 		bind:lines

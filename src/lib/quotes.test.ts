@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { getTodaysDate } from './datetime';
 import { QUOTE_STATE_LABELS } from './labels';
-import { getQuoteState } from './quotes';
+import { describeRemovedProducts, getQuoteState } from './quotes';
 
 afterEach(() => {
 	vi.useRealTimers();
@@ -29,4 +29,14 @@ test('each state reaches the screen through its label', () => {
 		EXPIRED: 'Vencida',
 		CONVERTED: 'Convertida'
 	});
+});
+
+test('«Duplicar» names the inactive products it left out: one, or how many, in order', () => {
+	expect(describeRemovedProducts([])).toBeNull();
+	expect(describeRemovedProducts(['Silla Rimax'])).toBe(
+		'Se quitó un producto inactivo: Silla Rimax.'
+	);
+	expect(describeRemovedProducts(['Silla Rimax', 'Mantel rosa'])).toBe(
+		'Se quitaron 2 productos inactivos: Mantel rosa, Silla Rimax.'
+	);
 });

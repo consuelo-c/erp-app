@@ -1,18 +1,29 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { requireRole } from '$lib/server/actor';
-import { createQuote, getQuoteFormOptions } from '$lib/server/services/quotes';
+import { createQuote, getQuoteDuplicate, getQuoteFormOptions } from '$lib/server/services/quotes';
 import { readPostedJson } from '../../pedidos/order-form';
 import type { Actions, PageServerLoad } from './$types';
 
 const TAKES_QUOTES = ['ADMIN', 'MANAGER', 'SALES'] as const;
 
-export const load: PageServerLoad = async ({ locals, platform }) => {
+// `?desde=12` is «Duplicar»: the form opens filled from quote #12, and nothing is written until saved.
+export const load: PageServerLoad = async ({ locals, platform, url }) => {
 	requireRole(locals.user, TAKES_QUOTES);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
-	return { options: await getQuoteFormOptions(platform.env.DB, locals.user) };
+	const db = platform.env.DB;
+	const options = await getQuoteFormOptions(db, locals.user);
+	const from = url.searchParams.get('desde');
+	if (null === from) {
+		return { options, copy: null };
+	}
+	const copy = await getQuoteDuplicate(db, from, locals.user);
+	if (null === copy) {
+		error(404, 'Esa cotización no existe');
+	}
+	return { options, copy };
 };
 
 export const actions: Actions = {
