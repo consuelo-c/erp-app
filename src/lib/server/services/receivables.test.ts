@@ -10,6 +10,7 @@ import {
 	getReceivableDetail,
 	getReceivableEditForm,
 	getReceivableIssueForm,
+	getReceivablePrintout,
 	issueReceivable,
 	listReceivables,
 	receivableAttributesSchema,
@@ -695,4 +696,36 @@ test("the cuenta's offsetting movement, made from Caja, keeps its link and cance
 		reverses_id: movementId
 	});
 	expect((await detailOf(id)).balance).toBe(1360000);
+});
+
+test('the printout reads the client live, and each order with its lines, by number', async () => {
+	const lines = JSON.stringify([
+		{ product_id: 1, name: 'Silla', qty: 2, list_price: 10, unit_price: 10, line_total: 20 }
+	]);
+	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
+	insertOrder(1071, { total: 500 });
+	insertOrder(1070, { total: 300 });
+	database.exec(`update orders set order_items = '${lines}'`);
+	const id = await issued([1071, 1070]);
+	database.exec(
+		`update contacts set full_name = 'Postobón S.A.', document_id = '8909039395',
+		attributes = '{"address_1":"Calle 52","address_2":"Medellín"}' where id = ${POSTOBON}`
+	);
+	const printout = await getReceivablePrintout(db, id, manager);
+	expect(printout?.client).toMatchObject({
+		name: 'Postobón S.A.',
+		documentId: '8909039395',
+		address: 'Calle 52, Medellín'
+	});
+	expect(printout?.orders.map((order) => order.id)).toEqual([1070, 1071]);
+	expect(printout?.orders[0].items[0].name).toBe('Silla');
+	expect(printout?.total).toBe(800);
+});
+
+test('the printout of a cuenta that does not exist is null, and SALES is refused', async () => {
+	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
+	expect(await getReceivablePrintout(db, 999, manager)).toBeNull();
+	await expect(getReceivablePrintout(db, 999, sales)).rejects.toSatisfy((thrown) =>
+		isHttpError(thrown, 403)
+	);
 });

@@ -152,19 +152,107 @@ export function isOrderInflow(concept: OrderPaymentConcept): boolean {
 }
 
 // A half-letter sheet holds this many lines under the order's header. The totals and the
-// signature take the room of CLOSING_LINES of them, and are never split across two sheets.
+// signature take the room of `closingLines` of them, and are never split across two sheets.
 export const LINES_PER_PAGE = 20;
-const CLOSING_LINES = 10;
 
-/** The printout's lines, sheet by sheet: the last one keeps room for the totals and signature. */
-export function splitIntoPages<Line>(lines: Line[]): Line[][] {
-	const pages: Line[][] = [];
-	for (let start = 0; start < lines.length; start += LINES_PER_PAGE) {
-		pages.push(lines.slice(start, start + LINES_PER_PAGE));
+export type PrintSheet = { firstPageLines: number; linesPerPage: number; closingLines: number };
+
+const HALF_LETTER_SHEET: PrintSheet = {
+	firstPageLines: LINES_PER_PAGE,
+	linesPerPage: LINES_PER_PAGE,
+	closingLines: 10
+};
+
+/**
+ * The printout's lines, sheet by sheet: the last one keeps room for the totals and signature.
+ * `linesOf` says how many lines of room one takes, for a line that carries more than itself.
+ */
+export function splitIntoPages<Line>(
+	lines: Line[],
+	sheet: PrintSheet = HALF_LETTER_SHEET,
+	linesOf: (line: Line) => number = () => 1
+): Line[][] {
+	const pages: Line[][] = [[]];
+	let usedLines = 0;
+	const roomOnPage = () => (1 === pages.length ? sheet.firstPageLines : sheet.linesPerPage);
+	for (const line of lines) {
+		if (usedLines + linesOf(line) > roomOnPage()) {
+			pages.push([]);
+			usedLines = 0;
+		}
+		pages[pages.length - 1].push(line);
+		usedLines += linesOf(line);
 	}
-	const lastPage = pages.at(-1);
-	if (undefined === lastPage || lastPage.length > LINES_PER_PAGE - CLOSING_LINES) {
+	if (usedLines > roomOnPage() - sheet.closingLines) {
 		pages.push([]);
 	}
 	return pages;
+}
+
+// A letter sheet in lines of 16px, the row height of the cuenta de cobro's table: 952px between its
+// margins. The first page gives 17 lines to the opening and one to «Continúa»; the others, 7 to the
+// header and 4 to the head of an order that continues on them.
+// ponytail: a product name that wraps counts as one line; measure rows if a sheet ever overflows.
+const LETTER_SHEET: PrintSheet = { firstPageLines: 41, linesPerPage: 48, closingLines: 17 };
+const BLOCK_HEAD_LINES = 4;
+const BLOCK_TOTALS_LINES = 5;
+
+type PrintedOrder = { id: number; items: unknown[] };
+
+type PrintedLine<Order extends PrintedOrder> = {
+	order: Order;
+	item: Order['items'][number];
+	isFirst: boolean;
+	isLast: boolean;
+};
+
+/** An order's lines on one sheet. `isClosed` when its totals go under them, on this sheet. */
+export type OrderBlock<Order extends PrintedOrder> = {
+	order: Order;
+	items: Order['items'];
+	isClosed: boolean;
+};
+
+function toPrintedLines<Order extends PrintedOrder>(order: Order): PrintedLine<Order>[] {
+	return order.items.map((item, index) => ({
+		order,
+		item,
+		isFirst: 0 === index,
+		isLast: order.items.length - 1 === index
+	}));
+}
+
+// The head rides on an order's first line and the totals on its last: neither is left alone.
+function linesOfPrinted<Order extends PrintedOrder>(line: PrintedLine<Order>): number {
+	return 1 + (line.isFirst ? BLOCK_HEAD_LINES : 0) + (line.isLast ? BLOCK_TOTALS_LINES : 0);
+}
+
+function toBlocks<Order extends PrintedOrder>(lines: PrintedLine<Order>[]): OrderBlock<Order>[] {
+	const blocks: OrderBlock<Order>[] = [];
+	for (const { order, item, isLast } of lines) {
+		const block = blocks.at(-1);
+		if (order.id === block?.order.id) {
+			block.items.push(item);
+			block.isClosed = isLast;
+		} else {
+			blocks.push({ order, items: [item], isClosed: isLast });
+		}
+	}
+	return blocks;
+}
+
+/** A cuenta de cobro's orders, sheet by sheet on letter paper. */
+export function splitOrdersIntoPages<Order extends PrintedOrder>(
+	orders: Order[]
+): OrderBlock<Order>[][] {
+	const lines = orders.flatMap((order) => toPrintedLines(order));
+	return splitIntoPages(lines, LETTER_SHEET, linesOfPrinted).map(toBlocks);
+}
+
+const orderNumbers = new Intl.ListFormat('es');
+
+/** The printout's «Concepto»: `Remisión 1043`, `Remisiones 1060, 1061 y 1072`. */
+export function formatRemisiones(orderIds: number[]): string {
+	const noun = 1 === orderIds.length ? 'Remisión' : 'Remisiones';
+	return `${noun} ${orderNumbers.format(orderIds.map(String))}`;
 }

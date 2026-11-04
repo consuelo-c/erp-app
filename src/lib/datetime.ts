@@ -191,6 +191,12 @@ export function formatLongDay(date: string): string {
 	return `${WEEKDAY_NAMES[toUtcDate(date).getUTCDay()]} ${formatCivilDate(date)}`;
 }
 
+/** A civil date as `13 de octubre de 2026`. */
+export function formatSpelledDate(date: string): string {
+	const [year, month, day] = date.split('-');
+	return `${Number(day)} de ${MONTH_NAMES[Number(month) - 1]} de ${year}`;
+}
+
 /** Two civil dates as `27 jul – 1 ago`. */
 export function formatDayRange(start: string, end: string): string {
 	return `${formatDayAndMonth(start)} – ${formatDayAndMonth(end)}`;

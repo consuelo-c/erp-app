@@ -11,6 +11,7 @@ import {
 	formatLongDay,
 	formatShortClockTime,
 	formatShortDay,
+	formatSpelledDate,
 	formatWeekday,
 	formatWeekRange,
 	typedClockTime,
@@ -119,4 +120,8 @@ test('an optional typed time: HH:MM, null when the hour is blank, the text when 
 test("getInstantDate gives an instant's Bogotá day: 11:30 p.m. on the 1st is the 2nd in UTC", () => {
 	expect(getInstantDate(Date.UTC(2026, 11, 2, 4, 30) / 1000)).toBe('2026-12-01');
 	expect(getInstantDate(Date.UTC(2026, 11, 2, 5, 0) / 1000)).toBe('2026-12-02');
+});
+
+test('a civil date spelled out, as the cuenta de cobro prints it', () => {
+	expect(formatSpelledDate('2026-10-03')).toBe('3 de octubre de 2026');
 });
