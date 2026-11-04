@@ -1,8 +1,10 @@
 import { isHttpError } from '@sveltejs/kit';
+import { readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
+import { getCashBook, getReceipt, recordOffset } from './cash';
 import { getOrderTimeline, MODIFIED_AFTER_STAGING_AT } from './orders';
 import {
 	getReceivableDetail,
@@ -11,6 +13,7 @@ import {
 	issueReceivable,
 	listReceivables,
 	receivableAttributesSchema,
+	recordReceivablePayment,
 	updateReceivable
 } from './receivables';
 
@@ -574,4 +577,122 @@ test('only ADMIN and MANAGER read the form', async () => {
 			expect(isHttpError(caught, 403), actor.username).toBe(true);
 		}
 	}
+});
+
+function typedPayment(id: number, fields: Record<string, string> = {}) {
+	return {
+		id: String(id),
+		payment_method: 'CASH',
+		amount: '$600.000',
+		movement_date: '2026-11-01',
+		notes: '',
+		...fields
+	};
+}
+
+async function paid(id: number, fields?: Record<string, string>): Promise<number> {
+	const result = await recordReceivablePayment(db, typedPayment(id, fields), manager);
+	if (!result.ok) {
+		throw new Error(JSON.stringify(result));
+	}
+	return result.id;
+}
+
+function readMovement(id: number) {
+	return database.prepare('select * from cash_movements where id = ?').get(id);
+}
+
+test('a payment links the cuenta as an INSTALLMENT, whatever concept is posted, and counts', async () => {
+	const id = await billedPair();
+	const movementId = await paid(id, { concept: 'INSTALLMENT_REFUND' });
+	expect(readMovement(movementId)).toMatchObject({
+		concept: 'INSTALLMENT',
+		amount: 600000,
+		entity_type: 'RECEIVABLE',
+		entity_id: id,
+		created_by: 'gerente'
+	});
+	expect((await detailOf(id)).balance).toBe(760000);
+});
+
+test("payee is the client's name when recorded: a later rename leaves it", async () => {
+	const id = await billedPair();
+	const movementId = await paid(id);
+	database.exec(`update contacts set full_name = 'Otro nombre' where id = ${POSTOBON}`);
+	expect(readMovement(movementId)).toMatchObject({ payee: 'Postobón S.A.' });
+});
+
+test('an amount above the balance saves, and leaves the client a credit', async () => {
+	const id = await billedPair();
+	await paid(id, { amount: '$1.410.000' });
+	expect((await detailOf(id)).balance).toBe(-50000);
+});
+
+test("a payment takes the entry's checks, and a cuenta that exists", async () => {
+	const id = await billedPair();
+	const transfer = typedPayment(id, { payment_method: 'TRANSFER' });
+	expect(await recordReceivablePayment(db, transfer, manager)).toMatchObject({
+		ok: false,
+		errors: { bank_account: 'Escribe el banco' }
+	});
+	expect(await recordReceivablePayment(db, typedPayment(99), manager)).toMatchObject({ ok: false });
+});
+
+test('only MANAGER and ADMIN record a payment on a cuenta', async () => {
+	const id = await billedPair();
+	for (const actor of [sales, warehouse, driver]) {
+		const caught = await recordReceivablePayment(db, typedPayment(id), actor).catch(
+			(error) => error
+		);
+		expect(isHttpError(caught, 403), actor.username).toBe(true);
+	}
+	const admin: Actor = { ...manager, roles: ['ADMIN'] };
+	expect(await recordReceivablePayment(db, typedPayment(id), admin)).toMatchObject({ ok: true });
+});
+
+test("the cash book links a cuenta's movement, found by its client and not by «Pedido»", async () => {
+	const id = await billedPair();
+	const movementId = await paid(id);
+	const period = { from: '2026-11-01', to: '2026-11-30' };
+	const found = await getCashBook(db, { ...period, text: 'postobón' }, manager);
+	expect(found.entries).toMatchObject([{ id: movementId, receivableId: id, orderId: null }]);
+	const byOrder = await getCashBook(db, { ...period, order: '1070' }, manager);
+	expect(byOrder.entries).toEqual([]);
+});
+
+test("a cuenta's receipt names its orders, for the manager and never for SALES", async () => {
+	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
+	const id = await billedPair();
+	const movementId = await paid(id);
+	expect(await getReceipt(db, movementId, manager)).toMatchObject({
+		movement: { receivableId: id, orderId: null },
+		receivableOrderIds: [1070, 1071]
+	});
+	const caught = await getReceipt(db, movementId, sales).catch((error) => error);
+	expect(isHttpError(caught, 403)).toBe(true);
+});
+
+test("the cuenta's offsetting movement, made from Caja, keeps its link and cancels it", async () => {
+	const id = await billedPair();
+	const movementId = await paid(id);
+	const result = await recordOffset(
+		db,
+		{
+			reverses_id: String(movementId),
+			payment_method: 'CASH',
+			movement_date: '2026-11-01'
+		},
+		manager
+	);
+	if (!result.ok) {
+		throw new Error(JSON.stringify(result));
+	}
+	expect(readMovement(result.id)).toMatchObject({
+		concept: 'INSTALLMENT',
+		amount: -600000,
+		entity_type: 'RECEIVABLE',
+		entity_id: id,
+		reverses_id: movementId
+	});
+	expect((await detailOf(id)).balance).toBe(1360000);
 });

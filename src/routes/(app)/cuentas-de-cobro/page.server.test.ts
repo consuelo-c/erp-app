@@ -4,6 +4,7 @@ import type { Actor, Role } from '$lib/server/actor';
 import { load as loadList } from './+page.server';
 import { load as loadDetail } from './[id]/+page.server';
 import { actions as editActions, load as loadEdit } from './[id]/editar/+page.server';
+import { actions as paymentActions, load as loadPayment } from './[id]/pago/+page.server';
 import { actions as issueActions, load as loadIssue } from './nueva/+page.server';
 
 test('SALES, WAREHOUSE and DRIVER get the no-permission screen on every /cuentas-de-cobro route', async () => {
@@ -20,8 +21,10 @@ test('SALES, WAREHOUSE and DRIVER get the no-permission screen on every /cuentas
 			loadDetail,
 			loadIssue,
 			loadEdit,
+			loadPayment,
 			issueActions.default,
-			editActions.default
+			editActions.default,
+			paymentActions.default
 		]) {
 			await expect(
 				(async () => (handler as (event: never) => unknown)(event as never))()

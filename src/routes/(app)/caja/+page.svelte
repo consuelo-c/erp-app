@@ -93,16 +93,27 @@
 		current: filters.method ?? ''
 	});
 
-	// The link: the order it belongs to, the payroll week it pays, or a standalone movement's party.
+	// The link: the order or cuenta de cobro it belongs to, the payroll week it pays, or a standalone
+	// movement's party.
 	function link(entry: CashBookEntry): string {
 		if (null !== entry.orderId) {
 			return `pedido #${entry.orderId}`;
 		}
+		if (null !== entry.receivableId) {
+			return `cuenta de cobro Nº ${entry.receivableId}`;
+		}
 		return null === entry.weekNumber ? (entry.payee ?? '') : `Semana ${entry.weekNumber}`;
 	}
 
-	function orderHref(orderId: number): string {
-		return resolve('/(app)/pedidos/[id]', { id: String(orderId) });
+	// Where its link opens, when it has somewhere to.
+	function originHref(entry: CashBookEntry): string | undefined {
+		if (null !== entry.orderId) {
+			return resolve('/(app)/pedidos/[id]', { id: String(entry.orderId) });
+		}
+		if (null !== entry.receivableId) {
+			return resolve('/(app)/cuentas-de-cobro/[id]', { id: String(entry.receivableId) });
+		}
+		return undefined;
 	}
 
 	// Who the money went to or came from: the employee paid, or the payee.
@@ -116,7 +127,7 @@
 
 	// A phone's second line: what it was and for whom.
 	function summary(entry: CashBookEntry): string {
-		if (null === entry.weekNumber && null === entry.orderId) {
+		if (null === entry.weekNumber && undefined === originHref(entry)) {
 			return joined(entry.description, entry.payee);
 		}
 		return joined(link(entry), party(entry));
@@ -157,11 +168,14 @@
 		return `${receiptTitle(receipt)} # ${formatReceiptNumber(receipt.receiptNumber)}`;
 	}
 
-	// A PAYROLL movement says which week it paid, an order's which order.
+	// A PAYROLL movement says which week it paid, an order's which order, a cuenta's which cuenta.
 	function detailTitle(detail: MovementDetail): string {
 		const concept = CASH_CONCEPT_LABELS[detail.concept];
 		if (null !== detail.orderId) {
 			return `${concept} · #${detail.orderId}`;
+		}
+		if (null !== detail.receivableId) {
+			return `${concept} · Nº ${detail.receivableId}`;
 		}
 		return null === detail.weekNumber ? concept : `${concept} · semana ${detail.weekNumber}`;
 	}
@@ -308,6 +322,9 @@
 		{#if null !== detail.orderId}
 			<li><span>Pedido</span><span>#{detail.orderId}</span></li>
 		{/if}
+		{#if null !== detail.receivableId}
+			<li><span>Cuenta de cobro</span><span>Nº {detail.receivableId}</span></li>
+		{/if}
 		<li>
 			<span>Método</span><span>{detail.otherMethod ?? PAYMENT_METHOD_LABELS[detail.method]}</span>
 		</li>
@@ -338,9 +355,9 @@
 		</li>
 	</ul>
 	<div class="screen__action detail__actions">
-		<!-- Where the money came from or went to: its order, or the settlement it paid. -->
-		{#if null !== detail.orderId}
-			<Button variant="secondary" href={orderHref(detail.orderId)}>Ver origen</Button>
+		<!-- Where the money came from or went to: its order or cuenta, or the settlement it paid. -->
+		{#if originHref(detail)}
+			<Button variant="secondary" href={originHref(detail)}>Ver origen</Button>
 		{/if}
 		{#if detail.settlement}
 			<Button
@@ -537,12 +554,18 @@
 											</td>
 											<td>{PAYMENT_METHOD_LABELS[entry.method]}</td>
 											<td>
-												{#if null === entry.orderId}
-													{link(entry)}
-												{:else}
+												{#if null !== entry.orderId}
 													<a href={resolve('/(app)/pedidos/[id]', { id: String(entry.orderId) })}
 														>{link(entry)}</a
 													>
+												{:else if null !== entry.receivableId}
+													<a
+														href={resolve('/(app)/cuentas-de-cobro/[id]', {
+															id: String(entry.receivableId)
+														})}>{link(entry)}</a
+													>
+												{:else}
+													{link(entry)}
 												{/if}
 											</td>
 											<td>{entry.recordedBy}</td>

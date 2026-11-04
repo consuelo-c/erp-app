@@ -406,9 +406,10 @@ export type CashBookEntry = {
 	concept: CashConcept;
 	amount: number;
 	method: PaymentMethod;
-	/** The link: the order it belongs to, the payroll week a PAYROLL movement pays and to whom,
-	 * or a standalone one's payee. */
+	/** The link: the order or cuenta de cobro it belongs to, the payroll week a PAYROLL movement
+	 * pays and to whom, or a standalone one's payee. */
 	orderId: number | null;
+	receivableId: number | null;
 	weekNumber: number | null;
 	employeeName: string | null;
 	payee: string | null;
@@ -540,6 +541,7 @@ function toEntry(row: EntryRow): CashBookEntry {
 		amount: row.amount,
 		method: row.payment_method,
 		orderId: 'ORDER' === row.entity_type ? row.entity_id : null,
+		receivableId: 'RECEIVABLE' === row.entity_type ? row.entity_id : null,
 		weekNumber: row.week_number,
 		employeeName: row.full_name,
 		payee: row.payee,
@@ -668,15 +670,29 @@ async function findDetail(db: D1Database, input: unknown): Promise<MovementDetai
 	return null === row ? null : toDetail(row);
 }
 
+// Live, as the cuenta's own lines are: the receipt names the orders it bills today.
+async function findReceivableOrderIds(db: D1Database, receivableId: number): Promise<number[]> {
+	const { results } = await db
+		.prepare('select id from orders where receivable_id = ? order by id')
+		.bind(receivableId)
+		.all<{ id: number }>();
+	return results.map(({ id }) => id);
+}
+
 /**
- * A movement's printed receipt: its detail and the company's header. Sales prints an order
- * movement's from the order; the rest of Caja stays the manager's.
+ * A movement's printed receipt: its detail, the company's header and, on a cuenta de cobro's, the
+ * orders it bills. Sales prints an order movement's from the order; the rest of Caja stays the
+ * manager's.
  */
 export async function getReceipt(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<{ movement: MovementDetail; company: CompanySettings }> {
+): Promise<{
+	movement: MovementDetail;
+	company: CompanySettings;
+	receivableOrderIds: number[];
+}> {
 	requireRole(actor, TAKES_ORDERS);
 	const [movement, company] = await Promise.all([
 		findDetail(db, input),
@@ -688,7 +704,9 @@ export async function getReceipt(
 	if (null === movement.orderId) {
 		requireRole(actor, MANAGES_CASH);
 	}
-	return { movement, company };
+	const receivableOrderIds =
+		null === movement.receivableId ? [] : await findReceivableOrderIds(db, movement.receivableId);
+	return { movement, company, receivableOrderIds };
 }
 
 /** Every movement the filters let through, newest first, and the period's three totals. */
