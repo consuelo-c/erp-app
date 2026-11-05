@@ -404,20 +404,20 @@ test('«Otro» needs which method, kept in attributes.other_method', async () =>
 	expect(JSON.parse(String(storedMovement(1).attributes))).toMatchObject({ other_method: 'Nequi' });
 });
 
-test("a transfer needs, and keeps, an outflow's account or an inflow's bank", async () => {
+test('a transfer out needs its account, a transfer in may name its bank, and both keep it', async () => {
 	const transfer = { ...typedExpense, payment_method: 'TRANSFER' };
 	expect(await recordMovement(db, transfer, manager)).toMatchObject({
 		ok: false,
 		errors: { bank_account: 'Escribe la cuenta de destino' }
 	});
-	expect(await recordMovement(db, { ...transfer, direction: 'IN' }, manager)).toMatchObject({
-		ok: false,
-		errors: { bank_account: 'Escribe el banco' }
-	});
 	const account = 'Bancolombia ahorros 123-456789-01';
 	await recordMovement(db, { ...transfer, bank_account: account }, manager);
 	await recordMovement(db, { ...transfer, direction: 'IN', bank_account: 'Davivienda' }, manager);
 	await recordMovement(db, { ...typedExpense, bank_account: account }, manager);
+	expect(await recordMovement(db, { ...transfer, direction: 'IN' }, manager)).toMatchObject({
+		ok: true
+	});
+	expect(JSON.parse(String(storedMovement(4).attributes))).not.toHaveProperty('bank_account');
 	expect(JSON.parse(String(storedMovement(1).attributes))).toMatchObject({ bank_account: account });
 	expect(JSON.parse(String(storedMovement(2).attributes))).toMatchObject({
 		bank_account: 'Davivienda'

@@ -121,9 +121,11 @@
 		>
 			Imprimir
 		</Button>
-		<Button href={resolve('/(app)/cuentas-de-cobro/[id]/pago', { id: String(receivable.id) })}>
-			Registrar pago
-		</Button>
+		{#if !isPaid}
+			<Button href={resolve('/(app)/cuentas-de-cobro/[id]/pago', { id: String(receivable.id) })}>
+				Registrar pago
+			</Button>
+		{/if}
 	</div>
 </Screen>
 

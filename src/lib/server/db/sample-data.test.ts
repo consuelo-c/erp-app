@@ -424,24 +424,24 @@ test("loads Postobón's open #1 and expired #2, and #3 converted into #1043 with
 	expect(parseQuote(third).items).toEqual(parseOrder(order1043).items);
 });
 
-test("Nº 4794 groups Postobón's #1060 and #1061 and reads the balance rules, partly paid", async () => {
+test("Nº 4794 groups Postobón's #1060 and #1061 and is unpaid", async () => {
 	const receivable = await getReceivableDetail(openSeededD1(), 4794, manager);
 	expect(receivable).toMatchObject({
 		paymentTerms: 'Contado',
 		client: { name: 'Postobón S.A.', documentId: '8909039395' },
 		total: 1360000,
-		paid: 700000,
-		balance: 660000
+		paid: 0,
+		balance: 1360000
 	});
 	expect(receivable?.orders.map((order) => order.id)).toEqual([1060, 1061]);
-	expect(receivable?.payments.map((payment) => payment.orderId)).toEqual([1060, null]);
+	expect(receivable?.payments).toEqual([]);
 });
 
 test("#1060 and #1061 carry Nº 4794's balance, and #1072 none", async () => {
 	const db = openSeededD1();
 	const balanceOf = async (id: number) =>
 		(await getOrderDetail(db, id, manager))?.receivableBalance;
-	expect(await Promise.all([1060, 1061, 1072].map(balanceOf))).toEqual([660000, 660000, null]);
+	expect(await Promise.all([1060, 1061, 1072].map(balanceOf))).toEqual([1360000, 1360000, null]);
 });
 
 test("#1072 is Postobón's too, COMPLETED and unbilled", () => {

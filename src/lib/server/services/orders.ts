@@ -13,10 +13,11 @@ import {
 	isPickupStatus,
 	OPERATIONAL_STATUSES,
 	ORDER_PAYMENT_CONCEPTS,
+	type OrderPaymentConcept,
 	type OrderTotals,
 	type PricedLine
 } from '$lib/orders';
-import { ROLES, requireRole, type Actor } from '../actor';
+import { ROLES, isAdminOrManager, requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, eventFieldsSchema, type Row } from '../audit';
 import { describeOrderEdit, type OrderChange } from '../order-changes';
 import { filterTimelineForActor } from '../timeline';
@@ -1621,10 +1622,19 @@ function payeeOf(order: Order, payment: PaymentInput): string | Refusal {
 	return payment.payee ?? chosen.carrier.name;
 }
 
+// A billed order's «Pago» goes on its cuenta de cobro, and a paid one owes nothing.
+async function installmentRefusal(db: D1Database, order: Order): Promise<Refusal | null> {
+	if (null !== order.receivableId) {
+		const message = `El pago va en la cuenta de cobro Nº ${order.receivableId}.`;
+		return { ok: false, message, errors: {} };
+	}
+	const { balanceDue } = await findBalances(db, order.id);
+	return 0 < balanceDue ? null : { ok: false, message: 'Este pedido ya está pagado.', errors: {} };
+}
+
 /**
- * Records one of the order's movements, in any state, cancelled included: nothing blocks on the
- * balance or the deposit. Valor is typed positive; the concept gives the sign. Once billed, its
- * «Pago» goes on the cuenta de cobro.
+ * Records one of the order's movements, in any state, cancelled included. «Pago» needs a balance
+ * to pay, but never blocks on going over it. Valor is typed positive; the concept gives the sign.
  */
 export async function recordOrderPayment(
 	db: D1Database,
@@ -1645,9 +1655,9 @@ export async function recordOrderPayment(
 	}
 	const order = toOrder(row);
 	const { concept } = parsed.data;
-	if ('INSTALLMENT' === concept && null !== order.receivableId) {
-		const message = `El pago va en la cuenta de cobro Nº ${order.receivableId}.`;
-		return { ok: false, message, errors: {} };
+	const refusal = 'INSTALLMENT' === concept ? await installmentRefusal(db, order) : null;
+	if (null !== refusal) {
+		return refusal;
 	}
 	const payee = payeeOf(order, parsed.data);
 	if ('string' !== typeof payee) {
@@ -1655,6 +1665,22 @@ export async function recordOrderPayment(
 	}
 	const link = { concept, entityType: 'ORDER', entityId: order.id, payee };
 	return recordLinkedMovement(db, { form: input, ...link }, actor);
+}
+
+/**
+ * What the payment entry offers: «Pago» while there's a balance and no cuenta de cobro, the deposit
+ * while it isn't complete, and money out to the manager only. Empty, the entry isn't offered.
+ */
+export function offeredPaymentConcepts(order: OrderDetail, actor: Actor): OrderPaymentConcept[] {
+	const canPayOut = isAdminOrManager(actor);
+	const offered: Record<OrderPaymentConcept, boolean> = {
+		INSTALLMENT: null === order.receivableId && 0 < order.balanceDue,
+		SECURITY_DEPOSIT: order.depositHeld < order.depositAmount,
+		INSTALLMENT_REFUND: canPayOut,
+		DEPOSIT_REFUND: canPayOut,
+		CARRIER_PAYMENT: canPayOut && 0 < carriersOf(order).length
+	};
+	return ORDER_PAYMENT_CONCEPTS.filter((concept) => offered[concept]);
 }
 
 /** A carrier the order can pay, with the account its contact keeps. */

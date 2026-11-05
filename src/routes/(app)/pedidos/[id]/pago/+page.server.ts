@@ -1,14 +1,19 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { getTodaysDate } from '$lib/datetime';
-import { isAdminOrManager, requireRole } from '$lib/server/actor';
-import { getOrderDetail, getPaymentOptions, recordOrderPayment } from '$lib/server/services/orders';
+import { requireRole } from '$lib/server/actor';
+import {
+	getOrderDetail,
+	getPaymentOptions,
+	offeredPaymentConcepts,
+	recordOrderPayment
+} from '$lib/server/services/orders';
 import type { Actions, PageServerLoad } from './$types';
 
 const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
 
-// The payment entry: the order's balances for the confirmation's warnings, and the accounts
-// Cuenta de destino is pre-filled from. Money out is only offered to the manager.
+// The payment entry: the order's balances for the confirmation's warnings, the accounts Cuenta de
+// destino is pre-filled from, and its concepts. With none to offer, back to the order.
 export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	requireRole(locals.user, TAKES_ORDERS);
 	if (undefined === platform) {
@@ -19,10 +24,14 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	if (null === order) {
 		error(404, 'Ese pedido no existe');
 	}
+	const concepts = offeredPaymentConcepts(order, locals.user);
+	if (0 === concepts.length) {
+		redirect(303, resolve('/(app)/pedidos/[id]', { id: params.id }));
+	}
 	return {
 		order,
+		concepts,
 		options: await getPaymentOptions(db, order, locals.user),
-		canPayOut: isAdminOrManager(locals.user),
 		today: getTodaysDate()
 	};
 };

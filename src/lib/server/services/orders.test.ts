@@ -25,6 +25,7 @@ import {
 	ORDERS_PAGE_SIZE,
 	orderItemsSchema,
 	previewConfirmation,
+	offeredPaymentConcepts,
 	recordOrderPayment,
 	reopenOrder,
 	updateOrder
@@ -1332,6 +1333,28 @@ test('a transfer out needs the account, a copy the contact or order never change
 	const bank = { bank_account: 'Davivienda' };
 	const inflow = await recordPayment(id, { payment_method: 'TRANSFER', ...bank });
 	expect(inflow.attributes).toBe(JSON.stringify(bank));
+});
+
+test('a paid order takes no more «Pago»: its deposit and refunds stay, and a refund reopens it', async () => {
+	const id = await create();
+	await recordPayment(id, { amount: '1.180.000' }, sales);
+	const again = await recordOrderPayment(db, typedPayment(id), sales);
+	expect(again).toMatchObject({ ok: false, message: 'Este pedido ya está pagado.' });
+	await recordPayment(id, { concept: 'SECURITY_DEPOSIT' }, sales);
+	await recordPayment(id, { concept: 'INSTALLMENT_REFUND', amount: '10.000' });
+	expect(await recordOrderPayment(db, typedPayment(id), sales)).toMatchObject({ ok: true });
+});
+
+test('the entry offers «Pago» while there is a balance, the deposit until complete, money out to the manager', async () => {
+	const id = await create();
+	const offeredTo = async (actor: Actor) => offeredPaymentConcepts(await detail(id), actor);
+	expect(await offeredTo(sales)).toEqual(['INSTALLMENT', 'SECURITY_DEPOSIT']);
+	await recordPayment(id, { amount: '1.180.000' }, sales);
+	expect(await offeredTo(sales)).toEqual(['SECURITY_DEPOSIT']);
+	const { depositAmount } = await detail(id);
+	await recordPayment(id, { concept: 'SECURITY_DEPOSIT', amount: String(depositAmount) }, sales);
+	expect(await offeredTo(sales)).toEqual([]);
+	expect(await offeredTo(manager)).toEqual(['INSTALLMENT_REFUND', 'DEPOSIT_REFUND']);
 });
 
 test('nothing blocks on the amounts: above the balance, what was paid, or the deposit held', async () => {

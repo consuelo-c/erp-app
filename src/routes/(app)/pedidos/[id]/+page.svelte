@@ -41,6 +41,7 @@
 	const receivable = $derived(readReceivableBalance(order));
 
 	const isDraft = $derived('DRAFT' === order.status);
+	const canRecordPayment = $derived(0 < data.paymentConcepts.length);
 	const canEdit = $derived(isEditableStatus(order.status));
 	const canCancel = $derived(
 		isLegalTransition({
@@ -76,6 +77,11 @@
 	function mapsHref(address: string): string {
 		return `https://www.google.com/maps/search/?api=1&${new URLSearchParams({ query: address })}`;
 	}
+
+	// Paying is the usual next step, unless the order has its own: «Confirmar» or «Reabrir pedido».
+	const isPaymentNext = $derived(
+		data.paymentConcepts.includes('INSTALLMENT') && !isDraft && !canReopen
+	);
 
 	// Set by the payment entry's redirect: the payment just recorded, its receipt next.
 	const recordedPayment = $derived(
@@ -451,12 +457,6 @@
 		{/if}
 		<Button
 			variant="secondary"
-			href={resolve('/(app)/pedidos/[id]/pago', { id: String(order.id) })}
-		>
-			Registrar pago
-		</Button>
-		<Button
-			variant="secondary"
 			href={resolve('/(app)/pedidos/[id]/impresion', { id: String(order.id) })}
 		>
 			Imprimir
@@ -493,6 +493,22 @@
 				<Button variant="secondary" onclick={startCancel}>Cancelar pedido</Button>
 			</span>
 		{/if}
+		{#if data.canIssueReceivable}
+			<Button
+				variant="secondary"
+				href="{resolve('/(app)/cuentas-de-cobro/nueva')}?pedido={order.id}"
+			>
+				Emitir cuenta de cobro
+			</Button>
+		{/if}
+		{#if canRecordPayment}
+			<Button
+				variant={isPaymentNext ? 'primary' : 'secondary'}
+				href={resolve('/(app)/pedidos/[id]/pago', { id: String(order.id) })}
+			>
+				Registrar pago
+			</Button>
+		{/if}
 		{#if isDraft}
 			<Button onclick={() => (isConfirmOpen = true)}>Confirmar</Button>
 		{/if}
@@ -501,11 +517,6 @@
 			<form method="POST" action="?/reabrir" use:enhance>
 				<Button type="submit">Reabrir pedido</Button>
 			</form>
-		{/if}
-		{#if data.canIssueReceivable}
-			<Button href="{resolve('/(app)/cuentas-de-cobro/nueva')}?pedido={order.id}">
-				Emitir cuenta de cobro
-			</Button>
 		{/if}
 	</div>
 
