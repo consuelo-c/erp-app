@@ -176,6 +176,22 @@
 <Screen>
 	{#snippet header()}
 		<ScreenHeader title="Pedido #{order.id}" {backHref}>
+			{#snippet actions()}
+				<IconButton
+					icon="printer"
+					size="lg"
+					label="Imprimir pedido"
+					href={onlineHref(keepOrigin(resolve('/(app)/despachos/[id]/impresion', { id })))}
+					disabled={isOffline}
+				/>
+				<IconButton
+					icon="file"
+					size="lg"
+					label="Historial"
+					href={onlineHref(keepOrigin(resolve('/(app)/despachos/[id]/historial', { id })))}
+					disabled={isOffline}
+				/>
+			{/snippet}
 			<span class="badges">
 				<Badge tone={ORDER_STATUS_TONES[order.status]}>{ORDER_STATUS_LABELS[order.status]}</Badge>
 				{#if order.hasIncident}
@@ -358,20 +374,6 @@
 				Reportar novedad
 			</Button>
 		{/if}
-		<Button
-			variant="secondary"
-			href={onlineHref(keepOrigin(resolve('/(app)/despachos/[id]/impresion', { id })))}
-			disabled={isOffline}
-		>
-			Imprimir pedido
-		</Button>
-		<Button
-			variant="secondary"
-			href={onlineHref(keepOrigin(resolve('/(app)/despachos/[id]/historial', { id })))}
-			disabled={isOffline}
-		>
-			Historial
-		</Button>
 		{#if data.hasIncidents}
 			<Button
 				variant="secondary"

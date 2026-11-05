@@ -4,7 +4,7 @@
 	import Icon from './Icon.svelte';
 
 	// A bare glyph has no visible text, so `label` is its accessible name and its tooltip. With `href`
-	// it's a link.
+	// it's a link; a link that can't be followed drops its `href` and takes `disabled`, as `Button` does.
 	// `lg` is the 48px hit area and the 26px glyph of the driver's and the warehouse's screens, and of
 	// every call, WhatsApp and Maps link.
 	type Props = HTMLButtonAttributes &
@@ -52,5 +52,10 @@
 		min-width: var(--tap-min);
 		min-height: var(--tap-min);
 		margin: -11px;
+	}
+
+	.icon-btn:disabled {
+		color: var(--text-disabled);
+		cursor: default;
 	}
 </style>

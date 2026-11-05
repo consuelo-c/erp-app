@@ -168,6 +168,15 @@
 		return `${receiptTitle(receipt)} # ${formatReceiptNumber(receipt.receiptNumber)}`;
 	}
 
+	function printReceiptLabel({ amount }: ReceiptReference): string {
+		return 0 < amount ? 'Imprimir recibo de caja' : 'Imprimir comprobante de egreso';
+	}
+
+	function receiptHref({ id }: MovementDetail): string {
+		const query = new URLSearchParams({ movimiento: String(id) });
+		return `${resolve('/(app)/caja/comprobante')}?${query}`;
+	}
+
 	// A PAYROLL movement says which week it paid, an order's which order, a cuenta's which cuenta.
 	function detailTitle(detail: MovementDetail): string {
 		const concept = CASH_CONCEPT_LABELS[detail.concept];
@@ -302,6 +311,10 @@
 	>
 {/snippet}
 
+{#snippet printReceipt(detail: MovementDetail)}
+	<IconButton icon="printer" label={printReceiptLabel(detail)} href={receiptHref(detail)} />
+{/snippet}
+
 {#snippet movementDetail(detail: MovementDetail)}
 	{#if isJustRecorded}
 		<div class="detail__notice">
@@ -380,15 +393,10 @@
 				Registrar movimiento contrario
 			</Button>
 		{/if}
-		<!-- The receipt is the primary right after recording it, so it stays last. -->
-		<Button
-			variant={isJustRecorded ? 'primary' : 'secondary'}
-			href="{resolve('/(app)/caja/comprobante')}?{new URLSearchParams({
-				movimiento: String(detail.id)
-			})}"
-		>
-			{0 < detail.amount ? 'Imprimir recibo de caja' : 'Imprimir comprobante de egreso'}
-		</Button>
+		<!-- Printing is an icon by the title, except right after recording: then it's what comes next. -->
+		{#if isJustRecorded}
+			<Button href={receiptHref(detail)}>{printReceiptLabel(detail)}</Button>
+		{/if}
 	</div>
 	{#if isReversible(detail)}
 		<p class="note">
@@ -590,13 +598,18 @@
 						<div class="panel__content">
 							<div class="panel__head">
 								<h2 class="section-title">{movement ? detailTitle(movement) : 'Movimiento'}</h2>
-								<span class="panel__close">
-									<IconButton
-										icon="close"
-										label="Ocultar el detalle"
-										onclick={() => (isPanelCollapsed = true)}
-									/>
-								</span>
+								<div class="panel__icons">
+									{#if movement}
+										{@render printReceipt(movement)}
+									{/if}
+									<span class="panel__close">
+										<IconButton
+											icon="close"
+											label="Ocultar el detalle"
+											onclick={() => (isPanelCollapsed = true)}
+										/>
+									</span>
+								</div>
 							</div>
 							{#if movement}
 								{@render movementDetail(movement)}
@@ -613,7 +626,11 @@
 			<div class="book__detail phone-only">
 				<Screen>
 					{#snippet header()}
-						<ScreenHeader backHref={bookHref()} title={detailTitle(movement)} />
+						<ScreenHeader backHref={bookHref()} title={detailTitle(movement)}>
+							{#snippet actions()}
+								{@render printReceipt(movement)}
+							{/snippet}
+						</ScreenHeader>
 					{/snippet}
 					{@render movementDetail(movement)}
 				</Screen>
@@ -877,12 +894,21 @@
 			height: var(--table-head-h);
 		}
 
-		/* The close button keeps its 44px target, overlapping the head instead of growing it. */
-		.panel__close :global(.icon-btn) {
+		/* 24px apart, as in ScreenHeader: each 44px target overhangs its glyph by 12px. */
+		.panel__icons {
+			display: flex;
+			flex: none;
+			gap: var(--space-12);
+			align-items: center;
+		}
+
+		/* The icons keep their 44px target, overlapping the head instead of growing it. */
+		.panel__icons :global(.icon-btn) {
 			margin-block: calc((var(--table-head-h) - 44px) / 2);
 		}
 
 		.panel__head .section-title {
+			min-width: 0;
 			margin: 0;
 		}
 
