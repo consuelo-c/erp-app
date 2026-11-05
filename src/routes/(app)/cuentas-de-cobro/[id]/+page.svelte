@@ -35,7 +35,18 @@
 		<ScreenHeader
 			title="Cuenta de cobro Nº {receivable.id}"
 			backHref={resolve('/cuentas-de-cobro')}
-		/>
+		>
+			{#snippet actions()}
+				<!-- A full load: a stylesheet stays once a route loaded it, and a half-letter printout's
+				@page would otherwise size this one. -->
+				<IconButton
+					icon="printer"
+					label="Imprimir"
+					href={resolve('/(app)/cuentas-de-cobro/[id]/impresion', { id: String(receivable.id) })}
+					data-sveltekit-reload
+				/>
+			{/snippet}
+		</ScreenHeader>
 	{/snippet}
 
 	{#if recordedPayment}
@@ -110,16 +121,6 @@
 			href={resolve('/(app)/cuentas-de-cobro/[id]/editar', { id: String(receivable.id) })}
 		>
 			Editar
-		</Button>
-		<!-- A full load: a stylesheet stays once a route loaded it, and a half-letter printout's
-		@page would otherwise size this one. -->
-		<Button
-			variant="secondary"
-			size="sm"
-			href={resolve('/(app)/cuentas-de-cobro/[id]/impresion', { id: String(receivable.id) })}
-			data-sveltekit-reload
-		>
-			Imprimir
 		</Button>
 		{#if !isPaid}
 			<Button href={resolve('/(app)/cuentas-de-cobro/[id]/pago', { id: String(receivable.id) })}>
