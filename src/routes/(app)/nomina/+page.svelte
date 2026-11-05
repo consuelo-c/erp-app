@@ -4,6 +4,7 @@
 	import Badge from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import Field from '$lib/components/Field.svelte';
+	import IconButton from '$lib/components/IconButton.svelte';
 	import Input from '$lib/components/Input.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Notice from '$lib/components/Notice.svelte';
@@ -97,6 +98,13 @@
 		return `${resolve('/(app)/nomina')}?${new URLSearchParams({ semana: periodStart, ...employee })}`;
 	}
 
+	function receiptHref(employeeId: number): string {
+		return `${resolve('/(app)/nomina/comprobante')}?${new URLSearchParams({
+			empleado: String(employeeId),
+			semana: week.periodStart
+		})}`;
+	}
+
 	// After a failed save the fields come back with what was typed.
 	const typed = (name: string, saved: string) => String(form?.values?.[name] ?? saved);
 	const errorOf = (name: string): string | undefined => form?.errors?.[name];
@@ -159,7 +167,17 @@
 <!-- Only a draft has the side column. -->
 <Screen>
 	{#snippet header()}
-		<ScreenHeader title="Nómina" />
+		<ScreenHeader title="Nómina">
+			{#snippet actions()}
+				{#if draft?.payment}
+					<IconButton
+						icon="printer"
+						label="Imprimir comprobante"
+						href={receiptHref(draft.employeeId)}
+					/>
+				{/if}
+			{/snippet}
+		</ScreenHeader>
 	{/snippet}
 
 	<UnsavedChangesGuard form="settlement" />

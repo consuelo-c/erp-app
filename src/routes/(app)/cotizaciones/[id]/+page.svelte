@@ -29,6 +29,18 @@
 <Screen>
 	{#snippet header()}
 		<ScreenHeader title="Cotización #{quote.id}" backHref={resolve('/cotizaciones')}>
+			{#snippet actions()}
+				<IconButton
+					icon="printer"
+					label="Imprimir"
+					href={resolve('/(app)/cotizaciones/[id]/impresion', { id })}
+				/>
+				<IconButton
+					icon="file"
+					label="Historial"
+					href={resolve('/(app)/cotizaciones/[id]/historial', { id })}
+				/>
+			{/snippet}
 			<Badge tone={QUOTE_STATE_TONES[quote.state]}>{QUOTE_STATE_LABELS[quote.state]}</Badge>
 		</ScreenHeader>
 	{/snippet}
@@ -155,12 +167,6 @@
 			</Button>
 		{/if}
 		<Button variant="secondary" href="{resolve('/cotizaciones/nueva')}?desde={id}">Duplicar</Button>
-		<Button variant="secondary" href={resolve('/(app)/cotizaciones/[id]/impresion', { id })}>
-			Imprimir
-		</Button>
-		<Button variant="secondary" href={resolve('/(app)/cotizaciones/[id]/historial', { id })}>
-			Historial
-		</Button>
 		{#if isOpen}
 			<Button href="{resolve('/pedidos/nuevo')}?cotizacion={id}">Convertir en pedido</Button>
 		{/if}

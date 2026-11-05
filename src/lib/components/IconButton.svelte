@@ -3,7 +3,8 @@
 	import type { HTMLAnchorAttributes, HTMLButtonAttributes } from 'svelte/elements';
 	import Icon from './Icon.svelte';
 
-	// A bare glyph has no visible text, so `label` is its accessible name. With `href` it's a link.
+	// A bare glyph has no visible text, so `label` is its accessible name and its tooltip. With `href`
+	// it's a link.
 	// `lg` is the 48px hit area and the 26px glyph of the driver's and the warehouse's screens, and of
 	// every call, WhatsApp and Maps link.
 	type Props = HTMLButtonAttributes &
@@ -21,9 +22,11 @@
 
 {#if href}
 	<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- the caller passes an href built with resolve() -->
-	<a {...rest} {href} class={classes} aria-label={label}><Icon name={icon} size={glyph} /></a>
+	<a {...rest} {href} class={classes} aria-label={label} title={label}>
+		<Icon name={icon} size={glyph} />
+	</a>
 {:else}
-	<button type="button" {...rest} class={classes} aria-label={label}>
+	<button type="button" {...rest} class={classes} aria-label={label} title={label}>
 		<Icon name={icon} size={glyph} />
 	</button>
 {/if}

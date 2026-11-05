@@ -186,6 +186,34 @@
 <Screen>
 	{#snippet header()}
 		<ScreenHeader title="Pedido #{order.id}" backHref={resolve('/pedidos')}>
+			{#snippet actions()}
+				<IconButton
+					icon="printer"
+					label="Imprimir"
+					href={resolve('/(app)/pedidos/[id]/impresion', { id: String(order.id) })}
+				/>
+				<IconButton
+					icon="file"
+					label="Historial"
+					href={resolve('/(app)/pedidos/[id]/historial', { id: String(order.id) })}
+				/>
+				{#if data.publicToken}
+					{@const token = data.publicToken}
+					<IconButton
+						icon="copy"
+						label="Copiar enlace del cliente"
+						onclick={() => copyClientLink(token)}
+					/>
+				{/if}
+				<!-- A cancelled order is never delivered: Despachos has nothing to do with it. -->
+				{#if 'CANCELLED' !== order.status}
+					<IconButton
+						icon="truck"
+						label="Ver en Despachos"
+						href={resolve('/(app)/despachos/[id]', { id: String(order.id) })}
+					/>
+				{/if}
+			{/snippet}
 			<span class="badges">
 				<Badge tone={ORDER_STATUS_TONES[order.status]}>{ORDER_STATUS_LABELS[order.status]}</Badge>
 				{#if order.hasIncident}
@@ -453,30 +481,6 @@
 				href={resolve('/(app)/pedidos/[id]/editar', { id: String(order.id) })}
 			>
 				Editar
-			</Button>
-		{/if}
-		<Button
-			variant="secondary"
-			href={resolve('/(app)/pedidos/[id]/impresion', { id: String(order.id) })}
-		>
-			Imprimir
-		</Button>
-		<Button
-			variant="secondary"
-			href={resolve('/(app)/pedidos/[id]/historial', { id: String(order.id) })}
-		>
-			Historial
-		</Button>
-		{#if data.publicToken}
-			{@const token = data.publicToken}
-			<Button variant="secondary" onclick={() => copyClientLink(token)}>
-				Copiar enlace del cliente
-			</Button>
-		{/if}
-		<!-- A cancelled order is never delivered: Despachos has nothing to do with it. -->
-		{#if 'CANCELLED' !== order.status}
-			<Button variant="secondary" href={resolve('/(app)/despachos/[id]', { id: String(order.id) })}>
-				Ver en Despachos
 			</Button>
 		{/if}
 		<!-- Products already at the client's, kept for more days: a new order. -->

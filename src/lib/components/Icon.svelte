@@ -31,6 +31,8 @@
 		| 'contact'
 		| 'lock'
 		| 'clipboard'
+		| 'copy'
+		| 'printer'
 		| 'pin'
 		| 'whatsapp';
 

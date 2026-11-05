@@ -2,14 +2,16 @@
 	import type { Snippet } from 'svelte';
 	import Icon from './Icon.svelte';
 
-	// Root screens have no back button; detail screens do. `children` holds the header actions.
+	// Root screens have no back button; detail screens do. `actions` holds the icons that sit by the
+	// title, `children` what goes at the row's end.
 	interface Props {
 		title?: string;
 		backHref?: string;
+		actions?: Snippet;
 		children?: Snippet;
 	}
 
-	let { title, backHref, children }: Props = $props();
+	let { title, backHref, actions, children }: Props = $props();
 </script>
 
 <header class="screen-header">
@@ -19,6 +21,9 @@
 	{/if}
 	{#if title}
 		<h1 class="screen-header__title">{title}</h1>
+	{/if}
+	{#if actions}
+		<div class="screen-header__actions">{@render actions()}</div>
 	{/if}
 	{@render children?.()}
 </header>
@@ -54,5 +59,22 @@
 		min-width: 0;
 		margin: 0;
 		font: var(--type-screen-title);
+	}
+
+	/* On a phone the icons and what follows them drop to a second row rather than squeeze the title. */
+	.screen-header:has(> .screen-header__actions) {
+		flex-wrap: wrap;
+	}
+
+	.screen-header__title:has(+ .screen-header__actions) {
+		flex: 0 1 auto;
+	}
+
+	/* 24px apart: each icon's 44px hit area overhangs its glyph by 12px on either side. */
+	.screen-header__actions {
+		display: flex;
+		flex: 1 0 auto;
+		gap: var(--space-12);
+		align-items: center;
 	}
 </style>
