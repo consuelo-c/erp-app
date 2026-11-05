@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { formatBalance } from '$lib/format';
-	import { isOrderInflow, ORDER_PAYMENT_CONCEPTS, type OrderPaymentConcept } from '$lib/orders';
+	import type { OrderPaymentConcept } from '$lib/orders';
 	import PaymentEntry from '../../../PaymentEntry.svelte';
 	import type { PageProps } from './$types';
 
@@ -12,19 +12,13 @@
 	const receivableId = $derived(order.receivableId);
 	const isBilled = $derived(null !== receivableId);
 
-	// Money out is the manager's, a carrier is paid only on an order that has one, and a billed
-	// order's «Pago» goes on its cuenta de cobro.
-	const concepts = $derived(
-		ORDER_PAYMENT_CONCEPTS.filter((option) => {
-			if ('INSTALLMENT' === option && isBilled) {
-				return false;
-			}
-			return (
-				isOrderInflow(option) ||
-				(data.canPayOut && ('CARRIER_PAYMENT' !== option || 0 < carriers.length))
-			);
-		})
-	);
+	// Why «Pago» isn't offered.
+	const conceptNote = $derived.by(() => {
+		if (isBilled) {
+			return `El pago va en la cuenta de cobro Nº ${receivableId}.`;
+		}
+		return order.balanceDue <= 0 ? 'Este pedido ya está pagado.' : undefined;
+	});
 
 	// Valor starts at what's pending under the concept: the balance, the deposit still to receive,
 	// or the one held.
@@ -63,9 +57,9 @@
 	lead={isBilled
 		? `Pedido #${order.id} · Cuenta de cobro Nº ${receivableId}`
 		: `Pedido #${order.id} · Saldo ${formatBalance(order.balanceDue)}`}
-	conceptNote={isBilled ? `El pago va en la cuenta de cobro Nº ${receivableId}.` : undefined}
+	{conceptNote}
 	closeHref={resolve('/(app)/pedidos/[id]', { id: String(order.id) })}
-	{concepts}
+	concepts={data.concepts}
 	clientName={order.client.name}
 	clientBankAccount={data.options.clientBankAccount}
 	{carriers}

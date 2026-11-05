@@ -7,12 +7,6 @@
 	let { data, form }: PageProps = $props();
 
 	const receivable = $derived(data.receivable);
-
-	function warningOf(_concept: string, amount: number): string | null {
-		return amount > receivable.balance
-			? `Supera el saldo de la cuenta de cobro (${formatBalance(receivable.balance)}).`
-			: null;
-	}
 </script>
 
 <svelte:head>
@@ -29,5 +23,5 @@
 	today={data.today}
 	{form}
 	pendingOf={() => receivable.balance}
-	{warningOf}
+	amountLockNote="La cuenta de cobro se paga completa."
 />

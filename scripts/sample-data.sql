@@ -390,7 +390,7 @@ ON CONFLICT (id) DO NOTHING;
 -- $680.000, holds a $200.000 deposit); #1051 pays its carrier; four more orders: an advance on
 -- #1035, #1009 paid in two, #1012 paid with its deposit given back, #1004 cancelled and refunded.
 -- October's standalone ones include an expense typed as $850.000, its offset and the right one.
--- Nº 4794 reads as in the design: $1.360.000, a $100.000 advance on #1060 and $600.000 on the cuenta.
+-- Nº 4794 has no payment: a cuenta de cobro is paid once and in full, so it's left to try it.
 -- `receipt_number` per sign as the cash service's INSERT works it out, each sign's highest plus one,
 -- here in id order; explicit ids, so a second run finds them and `reverses_id` can name its original.
 INSERT INTO cash_movements (id, concept, payment_method, amount, movement_date, entity_type, entity_id, payee, attributes, reverses_id, receipt_number, created_at, created_by, updated_at, updated_by)
@@ -415,9 +415,7 @@ FROM (VALUES
 	(14, 'OTHER_EXPENSE', 'CASH', -850000, '2026-10-08', NULL, NULL, 'Ferretería Laureles', '{"description":"Bombillos y extensiones para la bodega"}', NULL),
 	(15, 'OTHER_EXPENSE', 'CASH', 850000, '2026-10-08', NULL, NULL, 'Ferretería Laureles', '{"description":"Bombillos y extensiones para la bodega","notes":"El valor era $85.000"}', 14),
 	(16, 'OTHER_EXPENSE', 'CASH', -85000, '2026-10-08', NULL, NULL, 'Ferretería Laureles', '{"description":"Bombillos y extensiones para la bodega"}', NULL),
-	(17, 'OTHER_EXPENSE', 'TRANSFER', -320000, '2026-10-20', NULL, NULL, 'EPM', '{"description":"Servicios públicos de la bodega, septiembre","bank_account":"Convenio EPM 0045821"}', NULL),
-	(18, 'INSTALLMENT', 'CASH', 100000, '2026-10-02', 'ORDER', 1060, 'Postobón S.A.', '{}', NULL),
-	(19, 'INSTALLMENT', 'TRANSFER', 600000, '2026-10-14', 'RECEIVABLE', 4794, 'Postobón S.A.', '{"bank_account":"Bancolombia"}', NULL)
+	(17, 'OTHER_EXPENSE', 'TRANSFER', -320000, '2026-10-20', NULL, NULL, 'EPM', '{"description":"Servicios públicos de la bodega, septiembre","bank_account":"Convenio EPM 0045821"}', NULL)
 ) AS sample
 WHERE NOT EXISTS (SELECT 1 FROM cash_movements WHERE cash_movements.id = sample.column1)
 ORDER BY column1;

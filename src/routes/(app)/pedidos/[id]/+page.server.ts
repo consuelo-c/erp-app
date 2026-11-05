@@ -10,8 +10,10 @@ import {
 	confirmOrder,
 	getOrderDetail,
 	getPublicToken,
+	offeredPaymentConcepts,
 	previewConfirmation,
-	reopenOrder
+	reopenOrder,
+	type OrderDetail
 } from '$lib/server/services/orders';
 import { getSourceQuoteId } from '$lib/server/services/quotes';
 import { getReceivableIssueForm } from '$lib/server/services/receivables';
@@ -20,14 +22,16 @@ import type { Actions, PageServerLoad } from './$types';
 const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
 const MANAGES_INCIDENTS = ['ADMIN', 'MANAGER'] as const;
 
-// Only ADMIN and MANAGER open a cuenta de cobro, whose link everyone else reads as text, or issue one
-// from an order that can start it.
-async function getReceivableActions(db: D1Database, orderId: number, actor: Actor) {
+// What the order offers for its money: the payment entry's concepts, which hide «Registrar pago»
+// when empty. Only ADMIN and MANAGER open a cuenta de cobro, whose link everyone else reads as text,
+// or issue one from an order that can start it.
+async function getPaymentActions(db: D1Database, order: OrderDetail, actor: Actor) {
+	const paymentConcepts = offeredPaymentConcepts(order, actor);
 	if (!isAdminOrManager(actor)) {
-		return { canOpenReceivable: false, canIssueReceivable: false };
+		return { paymentConcepts, canOpenReceivable: false, canIssueReceivable: false };
 	}
-	const form = await getReceivableIssueForm(db, orderId, actor);
-	return { canOpenReceivable: true, canIssueReceivable: null !== form };
+	const form = await getReceivableIssueForm(db, order.id, actor);
+	return { paymentConcepts, canOpenReceivable: true, canIssueReceivable: null !== form };
 }
 
 // A draft brings what its «Confirmar» dialog shows: the suggested advance and any shortage.
@@ -53,8 +57,8 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 		: null;
 	const publicToken = await getPublicToken(db, order.id, locals.user);
 	const quoteId = await getSourceQuoteId(db, order.id, locals.user);
-	const receivableActions = await getReceivableActions(db, order.id, locals.user);
-	return { order, confirmation, incidents, publicToken, quoteId, ...receivableActions };
+	const paymentActions = await getPaymentActions(db, order, locals.user);
+	return { order, confirmation, incidents, publicToken, quoteId, ...paymentActions };
 };
 
 export const actions: Actions = {

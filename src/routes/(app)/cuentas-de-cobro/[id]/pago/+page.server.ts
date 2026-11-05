@@ -16,6 +16,9 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	if (null === receivable) {
 		error(404, 'Esa cuenta de cobro no existe');
 	}
+	if (receivable.balance <= 0) {
+		redirect(303, resolve('/(app)/cuentas-de-cobro/[id]', { id: params.id }));
+	}
 	return { receivable, today: getTodaysDate() };
 };
 

@@ -39,8 +39,10 @@
 		form: { message?: string; errors?: Record<string, string> } | null | undefined;
 		/** What Valor starts at under a concept; picking another fills it again. */
 		pendingOf: (concept: OrderPaymentConcept) => number;
+		/** Why Valor can't be changed from what it starts at. */
+		amountLockNote?: string;
 		/** What the confirmation warns about, without blocking. */
-		warningOf: (concept: OrderPaymentConcept, amount: number) => string | null;
+		warningOf?: (concept: OrderPaymentConcept, amount: number) => string | null;
 	};
 
 	let {
@@ -56,6 +58,7 @@
 		today,
 		form,
 		pendingOf,
+		amountLockNote,
 		warningOf
 	}: Props = $props();
 
@@ -72,7 +75,7 @@
 	const payee = $derived(isCarrierPayment ? typed('payee', carrier.name) : clientName);
 	const amount = $derived(parsePesos(typed('amount', '')));
 	const pending = $derived(pendingOf(concept));
-	const warning = $derived(warningOf(concept, amount));
+	const warning = $derived(warningOf?.(concept, amount) ?? null);
 
 	// A refund goes to the client's account, a carrier payment to the carrier's.
 	const savedAccount = $derived(isCarrierPayment ? carrier.bankAccount : clientBankAccount);
@@ -182,10 +185,10 @@
 				</Field>
 			{/if}
 
-			<!-- The bank an inflow came into; the account an outflow was paid to, pre-filled. -->
+			<!-- The bank an inflow came into, optional; the account an outflow was paid to, pre-filled. -->
 			{#if 'TRANSFER' === method}
 				<Field
-					label={isInflow ? '¿A cuál banco?' : 'Cuenta de destino'}
+					label={isInflow ? 'Información bancaria (opcional)' : 'Cuenta de destino'}
 					id="bank_account"
 					hint={isInflow ? 'Y la cuenta, si la sabes.' : accountHint}
 					error={errorOf('bank_account')}
@@ -195,20 +198,21 @@
 						name="bank_account"
 						placeholder="Ej. Bancolombia ahorros 123-456789-01"
 						value={isInflow ? undefined : (savedAccount ?? undefined)}
-						required
+						required={!isInflow}
 						aria-invalid={undefined !== errorOf('bank_account')}
 					/>
 				</Field>
 			{/if}
 
 			<div class="field-row">
-				<Field label="Valor" id="amount" error={errorOf('amount')}>
+				<Field label="Valor" id="amount" hint={amountLockNote} error={errorOf('amount')}>
 					<Input
 						id="amount"
 						name="amount"
 						inputmode="numeric"
 						placeholder="$0"
 						value={0 < pending ? formatInteger(pending) : ''}
+						readonly={undefined !== amountLockNote}
 						required
 						aria-invalid={undefined !== errorOf('amount')}
 					/>

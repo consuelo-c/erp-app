@@ -203,6 +203,27 @@ test.each(NOT_ELIGIBLE_ORDERS)('editing with an order %s is refused', async (_, 
 	expect(events('RECEIVABLE')).toHaveLength(1);
 });
 
+test('a partly paid order can be neither checked nor billed; an unpaid or fully paid one can', async () => {
+	insertOrder(1070, { total: 500000 });
+	insertOrder(1071, { total: 500000 });
+	insertMovement({ amount: 100000, entityId: 1070 });
+	insertMovement({ amount: 500000, entityId: 1071 });
+	expect(await getReceivableIssueForm(db, 1070, manager)).toBeNull();
+	const form = await getReceivableIssueForm(db, 1071, manager);
+	const joining = form?.orders.filter((order) => order.canJoin).map((order) => order.id);
+	expect(joining).toEqual([1043, 1060, 1061, 1071]);
+	expect(form?.orders.find((order) => 1070 === order.id)?.canJoin).toBe(false);
+	expect(await issue([1043, 1070])).toMatchObject({ ok: false });
+	const id = await issued([1043, 1071]);
+	expect(await edit(id, [1043, 1070])).toMatchObject({ ok: false });
+});
+
+test('an order partly paid once in the cuenta stays in it', async () => {
+	const id = await billedPair();
+	insertMovement({ amount: 100000, entityId: 1070 });
+	expect(await edit(id, [1070, 1071], 'A 30 días')).toEqual({ ok: true, id });
+});
+
 test('issuing starting from an order that does not exist or is not COMPLETED is refused', async () => {
 	insertOrder(1101, { status: 'DELIVERED' });
 	expect(await issue([9999, 1043])).toMatchObject({ ok: false });
@@ -540,7 +561,7 @@ test('the issue form lists the client eligible orders with the starting one chec
 	const form = await getReceivableIssueForm(db, '1061', manager);
 
 	expect(form?.orders.map(({ id }) => id)).toEqual([1060, 1061, 1070]);
-	expect(form?.orders[2]).toEqual({ id: 1070, eventDate: '2026-10-10', orderTotal: 360000 });
+	expect(form?.orders[2]).toMatchObject({ id: 1070, eventDate: '2026-10-10', orderTotal: 360000 });
 	expect(form?.checkedOrderIds).toEqual([1061]);
 	expect(form?.paymentTerms).toBe('Contado');
 	expect(form?.client.name).toBe('Postobón S.A.');
@@ -584,7 +605,7 @@ function typedPayment(id: number, fields: Record<string, string> = {}) {
 	return {
 		id: String(id),
 		payment_method: 'CASH',
-		amount: '$600.000',
+		amount: '$1.360.000',
 		movement_date: '2026-11-01',
 		notes: '',
 		...fields
@@ -608,12 +629,12 @@ test('a payment links the cuenta as an INSTALLMENT, whatever concept is posted, 
 	const movementId = await paid(id, { concept: 'INSTALLMENT_REFUND' });
 	expect(readMovement(movementId)).toMatchObject({
 		concept: 'INSTALLMENT',
-		amount: 600000,
+		amount: 1360000,
 		entity_type: 'RECEIVABLE',
 		entity_id: id,
 		created_by: 'gerente'
 	});
-	expect((await detailOf(id)).balance).toBe(760000);
+	expect((await detailOf(id)).balance).toBe(0);
 });
 
 test("payee is the client's name when recorded: a later rename leaves it", async () => {
@@ -623,18 +644,32 @@ test("payee is the client's name when recorded: a later rename leaves it", async
 	expect(readMovement(movementId)).toMatchObject({ payee: 'Postobón S.A.' });
 });
 
-test('an amount above the balance saves, and leaves the client a credit', async () => {
+test.each(['$600.000', '$1.410.000', ''])(
+	'a cuenta is paid in full, not with %s',
+	async (amount) => {
+		const id = await billedPair();
+		const result = await recordReceivablePayment(db, typedPayment(id, { amount }), manager);
+		expect(result).toMatchObject({ ok: false, message: expect.stringContaining('$1.360.000') });
+		expect((await detailOf(id)).balance).toBe(1360000);
+	}
+);
+
+test('a paid cuenta takes no more payments, until an offset opens it again', async () => {
 	const id = await billedPair();
-	await paid(id, { amount: '$1.410.000' });
-	expect((await detailOf(id)).balance).toBe(-50000);
+	const movementId = await paid(id);
+	const again = await recordReceivablePayment(db, typedPayment(id), manager);
+	expect(again).toMatchObject({ ok: false, message: 'Esta cuenta de cobro ya está pagada.' });
+	const offset = { reverses_id: String(movementId), payment_method: 'CASH' };
+	await recordOffset(db, { ...offset, movement_date: '2026-11-01' }, manager);
+	expect(await recordReceivablePayment(db, typedPayment(id), manager)).toMatchObject({ ok: true });
 });
 
 test("a payment takes the entry's checks, and a cuenta that exists", async () => {
 	const id = await billedPair();
-	const transfer = typedPayment(id, { payment_method: 'TRANSFER' });
-	expect(await recordReceivablePayment(db, transfer, manager)).toMatchObject({
+	const other = typedPayment(id, { payment_method: 'OTHER' });
+	expect(await recordReceivablePayment(db, other, manager)).toMatchObject({
 		ok: false,
-		errors: { bank_account: 'Escribe el banco' }
+		errors: { other_method: 'Escribe el medio de pago' }
 	});
 	expect(await recordReceivablePayment(db, typedPayment(99), manager)).toMatchObject({ ok: false });
 });
@@ -690,7 +725,7 @@ test("the cuenta's offsetting movement, made from Caja, keeps its link and cance
 	}
 	expect(readMovement(result.id)).toMatchObject({
 		concept: 'INSTALLMENT',
-		amount: -600000,
+		amount: -1360000,
 		entity_type: 'RECEIVABLE',
 		entity_id: id,
 		reverses_id: movementId

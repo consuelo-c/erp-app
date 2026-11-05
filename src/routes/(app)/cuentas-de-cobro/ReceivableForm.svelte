@@ -13,7 +13,8 @@
 	import type { ReceivableForm } from '$lib/server/services/receivables';
 
 	// Issuing and editing a cuenta de cobro: the client is read-only, and the total follows what's
-	// checked. A cuenta always keeps an order: the last one checked can't be unchecked.
+	// checked. A cuenta always keeps an order: the last one checked can't be unchecked. A partly paid
+	// order reads as such and can't be checked.
 	interface Props {
 		receivable: ReceivableForm;
 		hint: string;
@@ -70,12 +71,13 @@
 						name="orders"
 						value={order.id}
 						bind:group={checkedIds}
-						disabled={isLastChecked}
+						disabled={isLastChecked || !order.canJoin}
 					/>
 					<span class="client__text">
 						<span class="client__name">Pedido #{order.id}</span>
 						<span class="meta">
 							{formatCivilDate(order.eventDate)} · {formatPesos(order.orderTotal)}
+							{#if !order.canJoin}· Con pago parcial{/if}
 						</span>
 					</span>
 				</label>

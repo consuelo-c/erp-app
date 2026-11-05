@@ -144,17 +144,17 @@ const entryBase = z.object({
 
 type EntryForm = z.infer<typeof entryBase>;
 
-// «Otro» says which method; a transfer names where the money went: the bank an inflow came
-// into, the account an outflow was paid to.
+// «Otro» says which method; a transfer out names the account it was paid to. The bank a transfer
+// in came into is optional.
 function checkMethod<T extends z.ZodType<EntryForm>>(isInflow: boolean, schema: T): T {
 	return schema
 		.refine((form) => 'OTHER' !== form.payment_method || undefined !== form.other_method, {
 			path: ['other_method'],
 			message: 'Escribe el medio de pago'
 		})
-		.refine((form) => !isTransfer(form) || undefined !== form.bank_account, {
+		.refine((form) => isInflow || !isTransfer(form) || undefined !== form.bank_account, {
 			path: ['bank_account'],
-			message: isInflow ? 'Escribe el banco' : 'Escribe la cuenta de destino'
+			message: 'Escribe la cuenta de destino'
 		});
 }
 

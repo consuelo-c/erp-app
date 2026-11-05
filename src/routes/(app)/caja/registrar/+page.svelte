@@ -185,9 +185,9 @@
 			{/if}
 
 			{#if 'TRANSFER' === method}
-				<!-- The bank an inflow came into, the account an outflow was paid to. -->
+				<!-- The bank an inflow came into, optional; the account an outflow was paid to. -->
 				<Field
-					label={isInflow ? '¿A cuál banco?' : 'Cuenta de destino'}
+					label={isInflow ? 'Información bancaria (opcional)' : 'Cuenta de destino'}
 					id="bank_account"
 					hint={isInflow ? 'Y la cuenta, si la sabes.' : undefined}
 					error={errorOf('bank_account')}
@@ -196,7 +196,7 @@
 						id="bank_account"
 						name="bank_account"
 						placeholder="Ej. Bancolombia ahorros 123-456789-01"
-						required
+						required={!isInflow}
 						aria-invalid={undefined !== errorOf('bank_account')}
 					/>
 				</Field>

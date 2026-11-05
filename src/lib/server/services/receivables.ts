@@ -4,11 +4,14 @@
 
 import { z } from 'zod';
 import { getTodaysDate } from '$lib/datetime';
+import { formatPesos } from '$lib/format';
+import { parsePesos } from '$lib/payroll';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, type Diff } from '../audit';
 import { optional, recordLinkedMovement } from './cash';
 import { contactAttributesSchema, isAutoDocument, searchClause } from './contacts';
 import {
+	BALANCE_DUE_SQL,
 	invalidOrder,
 	orderItemsSchema,
 	RECEIVABLE_BALANCE_SQL,
@@ -50,6 +53,7 @@ type EligibleOrder = {
 	receivable_id: number | null;
 	event_date: string;
 	order_total: number;
+	balance_due: number;
 };
 
 type ReceivableRow = { id: number; client_id: number; attributes: string };
@@ -57,7 +61,7 @@ type ReceivableRow = { id: number; client_id: number; attributes: string };
 const NOT_FOUND: Refusal = { ok: false, message: 'Esa cuenta de cobro no existe', errors: {} };
 
 const NOT_ELIGIBLE_MESSAGE =
-	'Solo se incluyen pedidos completados de este cliente, sin otra cuenta de cobro';
+	'Solo se incluyen pedidos completados de este cliente, sin pagos parciales ni otra cuenta de cobro';
 
 const NOT_ELIGIBLE: Refusal = {
 	ok: false,
@@ -66,8 +70,8 @@ const NOT_ELIGIBLE: Refusal = {
 };
 
 /**
- * The one rule for what a cuenta de cobro can bill: the client's COMPLETED orders with no cuenta, or
- * already in `receivableId`, which is null when issuing a new one.
+ * The client's COMPLETED orders with no cuenta, or already in `receivableId`, which is null when
+ * issuing a new one. `canJoin` says which of them a cuenta de cobro can bill.
  */
 async function findEligibleOrders(
 	db: D1Database,
@@ -75,7 +79,8 @@ async function findEligibleOrders(
 ): Promise<EligibleOrder[]> {
 	const { results } = await db
 		.prepare(
-			`select id, client_id, status, receivable_id, event_date, order_total from orders
+			`select id, client_id, status, receivable_id, event_date, order_total,
+			${BALANCE_DUE_SQL} as balance_due from orders
 			where client_id = ? and status = 'COMPLETED' and (receivable_id is null or receivable_id = ?)
 			order by event_date, id`
 		)
@@ -84,8 +89,14 @@ async function findEligibleOrders(
 	return results;
 }
 
+// An order joins unpaid or fully paid, never partly paid; one already in the cuenta stays.
+function canJoin(order: EligibleOrder): boolean {
+	const isPartlyPaid = 0 < order.balance_due && order.balance_due < order.order_total;
+	return null !== order.receivable_id || !isPartlyPaid;
+}
+
 function isEveryOrderEligible(orderIds: number[], eligible: EligibleOrder[]): boolean {
-	return orderIds.every((id) => eligible.some((order) => order.id === id));
+	return orderIds.every((id) => eligible.some((order) => order.id === id && canJoin(order)));
 }
 
 async function findClientOf(db: D1Database, orderId: number): Promise<number | null> {
@@ -273,11 +284,32 @@ export async function updateReceivable(
 	return { ok: true, id };
 }
 
-const paymentInputSchema = z.object({ id: idSchema });
+const paymentInputSchema = z.object({ id: idSchema, amount: z.string().default('') });
+
+// A cuenta is paid once and in full: only its whole balance, and nothing once it's paid.
+async function paymentRefusal(
+	db: D1Database,
+	receivableId: number,
+	typedAmount: string
+): Promise<Refusal | null> {
+	const row = await db
+		.prepare(`select ${RECEIVABLE_BALANCE_SQL} as balance from receivables where id = ?`)
+		.bind(receivableId)
+		.first<{ balance: number }>();
+	const balance = row?.balance ?? 0;
+	if (balance <= 0) {
+		return { ok: false, message: 'Esta cuenta de cobro ya está pagada.', errors: {} };
+	}
+	if (parsePesos(typedAmount) === balance) {
+		return null;
+	}
+	const message = `La cuenta de cobro se paga completa: ${formatPesos(balance)}.`;
+	return { ok: false, message, errors: {} };
+}
 
 /**
  * «Registrar pago»: one movement on the cuenta, never split across its orders, whatever the form
- * posts as its concept. Nothing blocks on the balance. `payee` copies the client's current name.
+ * posts as its concept. `payee` copies the client's current name.
  */
 export async function recordReceivablePayment(
 	db: D1Database,
@@ -292,6 +324,10 @@ export async function recordReceivablePayment(
 	const row = await findRow(db, parsed.data.id);
 	if (null === row) {
 		return NOT_FOUND;
+	}
+	const refusal = await paymentRefusal(db, row.id, parsed.data.amount);
+	if (null !== refusal) {
+		return refusal;
 	}
 	const { name: payee } = await findClient(db, row.client_id);
 	const link = {
@@ -496,9 +532,12 @@ export async function getReceivablePrintout(
 	};
 }
 
+/** A row of the form's checklist: one that can't join reads as such, and can't be checked. */
+export type ReceivableFormOrder = ReceivableOrder & { canJoin: boolean };
+
 export type ReceivableForm = {
 	client: ReceivableClient;
-	/** The checklist, by event date. */ orders: ReceivableOrder[];
+	/** The checklist, by event date. */ orders: ReceivableFormOrder[];
 	checkedOrderIds: number[];
 	paymentTerms: string;
 };
@@ -514,13 +553,18 @@ async function findClient(db: D1Database, clientId: number): Promise<ReceivableC
 	return toClient(row);
 }
 
-function toFormOrder(order: EligibleOrder): ReceivableOrder {
-	return { id: order.id, eventDate: order.event_date, orderTotal: order.order_total };
+function toFormOrder(order: EligibleOrder): ReceivableFormOrder {
+	return {
+		id: order.id,
+		eventDate: order.event_date,
+		orderTotal: order.order_total,
+		canJoin: canJoin(order)
+	};
 }
 
 /**
  * The form to issue a cuenta from an order, which comes checked. Null when that order can't start
- * one: it doesn't exist, isn't COMPLETED or is already billed.
+ * one: it doesn't exist, isn't COMPLETED, is partly paid or is already billed.
  */
 export async function getReceivableIssueForm(
 	db: D1Database,
