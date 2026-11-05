@@ -1345,6 +1345,37 @@ test('a paid order takes no more «Pago»: its deposit and refunds stay, and a r
 	expect(await recordOrderPayment(db, typedPayment(id), sales)).toMatchObject({ ok: true });
 });
 
+test.each(['INSTALLMENT', 'SECURITY_DEPOSIT'])('a %s confirms a draft', async (concept) => {
+	const id = await create();
+	await recordPayment(id, { concept, amount: '10.000' }, sales);
+	expect(await detail(id)).toMatchObject({ status: 'CONFIRMED' });
+	const event = database
+		.prepare(
+			`select actor_username, json_extract(after, '$.status') as status from events
+			where entity_type = 'ORDER' and entity_id = ? and action = 'STATUS_CHANGED'`
+		)
+		.all(id);
+	expect(event).toEqual([{ actor_username: 'ventas', status: 'CONFIRMED' }]);
+});
+
+test('money out leaves a draft as it is, and a payment only confirms a draft', async () => {
+	const draft = await create();
+	await recordPayment(draft, { concept: 'INSTALLMENT_REFUND', amount: '10.000' });
+	expect(await detail(draft)).toMatchObject({ status: 'DRAFT' });
+
+	const cancelled = await create();
+	await cancelOrder(db, { id: cancelled, reason: 'Cambió de fecha' }, sales);
+	await recordPayment(cancelled, { amount: '10.000' });
+	expect(await detail(cancelled)).toMatchObject({ status: 'CANCELLED' });
+});
+
+test('a refused payment leaves the draft a draft', async () => {
+	const id = await create();
+	const refused = await recordOrderPayment(db, typedPayment(id, { amount: '0' }), sales);
+	expect(refused).toMatchObject({ ok: false });
+	expect(await detail(id)).toMatchObject({ status: 'DRAFT' });
+});
+
 test('the entry offers «Pago» while there is a balance, the deposit until complete, money out to the manager', async () => {
 	const id = await create();
 	const offeredTo = async (actor: Actor) => offeredPaymentConcepts(await detail(id), actor);

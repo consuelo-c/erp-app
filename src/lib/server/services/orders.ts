@@ -1033,6 +1033,18 @@ function isLegalFrom(row: OrderRow, to: OrderStatus): boolean {
 	return isLegalTransition({ from: row.status, to, ...methods });
 }
 
+function transitionStatements(
+	db: D1Database,
+	actor: Actor,
+	{ row, transition }: { row: OrderRow; transition: Transition }
+): D1PreparedStatement[] {
+	const { id, to, notes, ...event } = transition;
+	const note = undefined === notes ? {} : noteChange(row, to, notes);
+	const changes = { status: to, ...note };
+	const write = { table: 'orders', entityType: 'ORDER', actor, id, current: row, changes };
+	return auditedUpdate(db, { ...write, ...event, jsonColumns: TRIP_COLUMNS });
+}
+
 // Every status change goes through here: the one rule decides, whoever asks.
 async function applyTransition(
 	db: D1Database,
@@ -1046,12 +1058,8 @@ async function applyTransition(
 	if (!isLegalFrom(row, transition.to)) {
 		return ILLEGAL_TRANSITION;
 	}
-	const { id, to, notes, ...event } = transition;
-	const note = undefined === notes ? {} : noteChange(row, to, notes);
-	const changes = { status: to, ...note };
-	const write = { table: 'orders', entityType: 'ORDER', actor, id, current: row, changes };
-	await db.batch(auditedUpdate(db, { ...write, ...event, jsonColumns: TRIP_COLUMNS }));
-	return { ok: true, id };
+	await db.batch(transitionStatements(db, actor, { row, transition }));
+	return { ok: true, id: transition.id };
 }
 
 /** A draft becomes a commitment. No advance is required: the salesperson confirms with $0 paid. */
@@ -1632,9 +1640,23 @@ async function installmentRefusal(db: D1Database, order: Order): Promise<Refusal
 	return 0 < balanceDue ? null : { ok: false, message: 'Este pedido ya está pagado.', errors: {} };
 }
 
+// Money in commits a draft, the same as «Confirmar»; money out leaves it a draft.
+function confirmationByPayment(
+	db: D1Database,
+	actor: Actor,
+	{ row, concept }: { row: OrderRow; concept: OrderPaymentConcept }
+): D1PreparedStatement[] {
+	if (!isOrderInflow(concept) || !isLegalFrom(row, 'CONFIRMED')) {
+		return [];
+	}
+	const transition = { id: row.id, to: 'CONFIRMED' as const, action: 'STATUS_CHANGED' };
+	return transitionStatements(db, actor, { row, transition });
+}
+
 /**
  * Records one of the order's movements, in any state, cancelled included. «Pago» needs a balance
  * to pay, but never blocks on going over it. Valor is typed positive; the concept gives the sign.
+ * Money in on a draft confirms it, in the movement's same batch.
  */
 export async function recordOrderPayment(
 	db: D1Database,
@@ -1646,9 +1668,7 @@ export async function recordOrderPayment(
 	if (!parsed.success) {
 		return invalidOrder(parsed.error);
 	}
-	if (!isOrderInflow(parsed.data.concept)) {
-		requireRole(actor, PAYS_OUT);
-	}
+	requireRole(actor, isOrderInflow(parsed.data.concept) ? TAKES_ORDERS : PAYS_OUT);
 	const row = await findRow(db, parsed.data.order_id);
 	if (null === row) {
 		return { ok: false, message: 'Ese pedido no existe.', errors: {} };
@@ -1663,7 +1683,8 @@ export async function recordOrderPayment(
 	if ('string' !== typeof payee) {
 		return payee;
 	}
-	const link = { concept, entityType: 'ORDER', entityId: order.id, payee };
+	const alongside = confirmationByPayment(db, actor, { row, concept });
+	const link = { concept, entityType: 'ORDER', entityId: order.id, payee, alongside };
 	return recordLinkedMovement(db, { form: input, ...link }, actor);
 }
 

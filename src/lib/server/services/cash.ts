@@ -232,6 +232,8 @@ export type LinkedMovement = {
 	entityType: string;
 	entityId: number;
 	payee: string;
+	/** What the movement brings with it, saved in its same batch. */
+	alongside?: D1PreparedStatement[];
 };
 
 /** Records a linked movement as typed: Valor positive, the sign from the concept. */
@@ -246,7 +248,7 @@ export async function recordLinkedMovement(
 	if (!form.success) {
 		return invalid(form.error);
 	}
-	return insertMovement(db, actor, {
+	const statements = movementStatements(db, actor, {
 		concept: movement.concept,
 		payment_method: form.data.payment_method,
 		amount: isInflow ? form.data.amount : -form.data.amount,
@@ -256,6 +258,8 @@ export async function recordLinkedMovement(
 		payee: movement.payee,
 		attributes: toAttributes(form.data)
 	});
+	const [inserted] = await db.batch([...statements, ...(movement.alongside ?? [])]);
+	return { ok: true, id: inserted.meta.last_row_id };
 }
 
 /** Why a movement can't be offset, or null when it can: once, and never a correction itself. */

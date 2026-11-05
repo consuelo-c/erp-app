@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { formatBalance } from '$lib/format';
-	import type { OrderPaymentConcept } from '$lib/orders';
+	import { isOrderInflow, type OrderPaymentConcept } from '$lib/orders';
 	import PaymentEntry from '../../../PaymentEntry.svelte';
 	import type { PageProps } from './$types';
 
@@ -35,7 +35,19 @@
 		return 0;
 	}
 
-	function warningOf(concept: OrderPaymentConcept, amount: number): string | null {
+	// Money in confirms a draft, without the order's own confirmation to warn about overbooking.
+	function confirmationWarning(concept: OrderPaymentConcept): string | null {
+		if ('DRAFT' !== order.status || !isOrderInflow(concept)) {
+			return null;
+		}
+		const shortages = data.shortages.map(({ name, short }) => `${name}: faltan ${short}`);
+		const overbooked = shortages.length
+			? ` Supera el inventario para esas fechas: ${shortages.join(', ')}.`
+			: '';
+		return `Este pago confirma el pedido.${overbooked}`;
+	}
+
+	function amountWarning(concept: OrderPaymentConcept, amount: number): string | null {
 		if ('INSTALLMENT' === concept && amount > order.balanceDue) {
 			return `Supera el saldo del pedido (${formatBalance(order.balanceDue)}).`;
 		}
@@ -46,6 +58,11 @@
 			return `Devuelve más del depósito recibido (${formatBalance(order.depositHeld)}).`;
 		}
 		return null;
+	}
+
+	function warningOf(concept: OrderPaymentConcept, amount: number): string | null {
+		const warnings = [amountWarning(concept, amount), confirmationWarning(concept)];
+		return warnings.filter(Boolean).join(' ') || null;
 	}
 </script>
 
