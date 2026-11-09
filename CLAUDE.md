@@ -1,6 +1,6 @@
 # erp-app
 
-SvelteKit app for Banquetes Consuelo C, a party rental business in Medellín, deployed as a Cloudflare Worker. Planning lives in the sibling repository `../planning/` ([`consuelo-c/erp-planning`](https://github.com/consuelo-c/erp-planning)), never copied here; the screens live in the [Design Project](https://claude.ai/artifact/TBE5f1FaBxQJxkKwncJspg), a Claude artifact read with the Artifact tool and never published to. All issues, milestones (`Phase 00`, `Phase 01`, …) and labels live in `consuelo-c/erp-app`: pass `--repo consuelo-c/erp-app` to every `gh` command.
+SvelteKit app for Banquetes Consuelo C, a party rental business in Medellín, deployed as a Cloudflare Worker. Planning lives in the sibling repository `../planning/` ([`consuelo-c/erp-planning`](https://github.com/consuelo-c/erp-planning)), never copied here; the screens live in the [Design Project](https://claude.ai/artifact/TBE5f1FaBxQJxkKwncJspg), a Claude artifact read and published to with the Artifact tool (the only artifact Claude publishes to, telling the developer each time). All issues, milestones (`Phase 00`, `Phase 01`, …) and labels live in `consuelo-c/erp-app`: pass `--repo consuelo-c/erp-app` to every `gh` command.
 
 ## Always
 

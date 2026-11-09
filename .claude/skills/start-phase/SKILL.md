@@ -33,7 +33,7 @@ An issue that already exists is never proposed again. Unplaced ideas that belong
 
 ## 4. Screens
 
-Follow "Opening a phase" → "Screens first". Read the [Design Project](https://claude.ai/artifact/TBE5f1FaBxQJxkKwncJspg) with the Artifact tool: its page list, `project/compat.json`, then the pages that hold the phase's screens, found by name (`project/_ds/`, `project/uploads/` and `project/old/` aren't screens). Report each screen as **ready**, **missing** or **contradicting the current planning**, and write the design prompt for each one that isn't ready; the developer runs it in the Design Project, in Claude. Never publish to the Design Project. Units are proposed only once the developer says every screen is ready.
+Follow "Opening a phase" → "Screens first". Read the [Design Project](https://claude.ai/artifact/TBE5f1FaBxQJxkKwncJspg) with the Artifact tool: its page list, `project/compat.json`, then the pages that hold the phase's screens, found by name (`project/_ds/`, `project/uploads/` and `project/old/` aren't screens). Report each screen as **ready**, **missing** or **contradicting the current planning**, and write the design prompt for each one that isn't ready; the developer runs it in the Design Project, in Claude. Units are proposed only once the developer says every screen is ready.
 
 ## 5. Units
 
