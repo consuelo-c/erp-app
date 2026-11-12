@@ -4,7 +4,7 @@ import { getReceipt } from '$lib/server/services/cash';
 import type { PageServerLoad } from './$types';
 
 // A movement's printed recibo de caja or comprobante de egreso: `?movimiento=`. Sales prints an
-// order movement's, from the order, and goes back to it.
+// order movement's from the order and a cuenta movement's from the cuenta, and goes back to it.
 export const load: PageServerLoad = async ({ locals, platform, url }) => {
 	requireRole(locals.user, ['ADMIN', 'MANAGER', 'SALES']);
 	if (undefined === platform) {

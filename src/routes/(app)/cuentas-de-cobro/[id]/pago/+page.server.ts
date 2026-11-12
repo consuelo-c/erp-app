@@ -5,7 +5,7 @@ import { requireRole } from '$lib/server/actor';
 import { getReceivableDetail, recordReceivablePayment } from '$lib/server/services/receivables';
 import type { Actions, PageServerLoad } from './$types';
 
-const MANAGES_RECEIVABLES = ['ADMIN', 'MANAGER'] as const;
+const MANAGES_RECEIVABLES = ['ADMIN', 'MANAGER', 'SALES'] as const;
 
 export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	requireRole(locals.user, MANAGES_RECEIVABLES);

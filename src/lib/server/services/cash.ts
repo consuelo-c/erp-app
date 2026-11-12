@@ -720,8 +720,8 @@ async function findReceivableOrderIds(db: D1Database, receivableId: number): Pro
 
 /**
  * A movement's printed receipt: its detail, the company's header and, on a cuenta de cobro's, the
- * orders it bills. Sales prints an order movement's from the order; the rest of Caja stays the
- * manager's.
+ * orders it bills. Sales prints an order movement's from the order and a cuenta movement's from
+ * the cuenta; the rest of Caja stays the manager's.
  */
 export async function getReceipt(
 	db: D1Database,
@@ -740,7 +740,7 @@ export async function getReceipt(
 	if (null === movement) {
 		error(404, 'Ese movimiento no existe');
 	}
-	if (null === movement.orderId) {
+	if (null === movement.orderId && null === movement.receivableId) {
 		requireRole(actor, MANAGES_CASH);
 	}
 	const receivableOrderIds =

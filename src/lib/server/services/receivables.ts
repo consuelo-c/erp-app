@@ -28,7 +28,8 @@ import {
 } from './orders';
 import { COMPANY_SETTINGS, readSettings, type CompanySettings } from './settings';
 
-const MANAGES_RECEIVABLES = ['ADMIN', 'MANAGER'] as const;
+// Sales works cuentas de cobro as the manager does: issues them and records their payments.
+const MANAGES_RECEIVABLES = ['ADMIN', 'MANAGER', 'SALES'] as const;
 
 const paymentTermsSchema = z.string().trim().min(1, 'Escribe la forma de pago');
 

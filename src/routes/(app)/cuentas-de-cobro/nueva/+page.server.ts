@@ -4,7 +4,7 @@ import { requireRole } from '$lib/server/actor';
 import { getReceivableIssueForm, issueReceivable } from '$lib/server/services/receivables';
 import type { Actions, PageServerLoad } from './$types';
 
-const MANAGES_RECEIVABLES = ['ADMIN', 'MANAGER'] as const;
+const MANAGES_RECEIVABLES = ['ADMIN', 'MANAGER', 'SALES'] as const;
 
 // An order that can't start a cuenta de cobro gets a null form, which the screen reads as a message.
 export const load: PageServerLoad = async ({ locals, platform, url }) => {

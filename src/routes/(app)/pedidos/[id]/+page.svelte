@@ -173,11 +173,7 @@
 {/snippet}
 
 {#snippet receivableLink(id: number, text: string)}
-	{#if data.canOpenReceivable}
-		<a href={resolve('/(app)/cuentas-de-cobro/[id]', { id: String(id) })}>{text}</a>
-	{:else}
-		{text}
-	{/if}
+	<a href={resolve('/(app)/cuentas-de-cobro/[id]', { id: String(id) })}>{text}</a>
 {/snippet}
 
 <Screen>

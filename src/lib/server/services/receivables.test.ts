@@ -370,18 +370,26 @@ test('the timeline names the cuenta an order joined and left, for those who see 
 	expect(await getOrderTimeline(db, 1043, driver)).toEqual([]);
 });
 
-test('SALES gets a 403 issuing and editing; MANAGER passes', async () => {
+test('SALES issues and edits a cuenta; WAREHOUSE and DRIVER get a 403', async () => {
 	const id = await issued([1043]);
 	const input = { orders: [1060], payment_terms: 'Contado' };
-	const attempts = [
-		issueReceivable(db, input, sales),
-		updateReceivable(db, { ...input, id }, sales)
-	];
-	for (const attempt of attempts) {
-		expect(isHttpError(await attempt.catch((caught) => caught), 403)).toBe(true);
+	for (const actor of [warehouse, driver]) {
+		const attempts = [
+			issueReceivable(db, input, actor),
+			updateReceivable(db, { ...input, id }, actor)
+		];
+		for (const attempt of attempts) {
+			const caught = await attempt.catch((error) => error);
+			expect(isHttpError(caught, 403), actor.username).toBe(true);
+		}
 	}
 	expect(linkOf(1060)).toBeNull();
-	expect(await updateReceivable(db, { ...input, id }, manager)).toEqual({ ok: true, id });
+	const own = await issueReceivable(db, input, sales);
+	expect(own).toMatchObject({ ok: true });
+	expect(linkOf(1060)).toBe(own.ok ? own.id : null);
+	const edited = { id, orders: [1043], payment_terms: 'Crédito 30 días' };
+	expect(await updateReceivable(db, edited, sales)).toEqual({ ok: true, id });
+	expect(readReceivable(id)?.attributes).toContain('Crédito 30 días');
 });
 
 test("the balance is the orders' total less their advance and the cuenta's payment", async () => {
@@ -469,13 +477,14 @@ test('a cuenta that does not exist, or a tampered id, reads as none', async () =
 	expect(await getReceivableDetail(db, 'abc', manager)).toBeNull();
 });
 
-test('SALES, WAREHOUSE and DRIVER get a 403 reading the detail; MANAGER passes', async () => {
+test('WAREHOUSE and DRIVER get a 403 reading the detail; SALES and MANAGER pass', async () => {
 	const id = await issued([1043]);
-	for (const actor of [sales, warehouse, driver]) {
+	for (const actor of [warehouse, driver]) {
 		const caught = await getReceivableDetail(db, id, actor).catch((error) => error);
 		expect(isHttpError(caught, 403), actor.username).toBe(true);
 	}
 	expect((await detailOf(id)).id).toBe(id);
+	expect((await getReceivableDetail(db, id, sales))?.id).toBe(id);
 });
 
 async function listIds(input: Record<string, string> = {}): Promise<number[]> {
@@ -558,11 +567,12 @@ test('an empty list has one page', async () => {
 	});
 });
 
-test('SALES, WAREHOUSE and DRIVER get a 403 on the list', async () => {
-	for (const actor of [sales, warehouse, driver]) {
+test('WAREHOUSE and DRIVER get a 403 on the list; SALES reads it', async () => {
+	for (const actor of [warehouse, driver]) {
 		const caught = await listReceivables(db, {}, actor).catch((error) => error);
 		expect(isHttpError(caught, 403), actor.username).toBe(true);
 	}
+	expect((await listReceivables(db, {}, sales)).receivables).toEqual([]);
 });
 
 test('the issue form lists the client eligible orders with the starting one checked', async () => {
@@ -605,8 +615,11 @@ test('the edit form checks the cuenta orders and leaves the other eligible ones 
 	expect(await getReceivableEditForm(db, 99, manager)).toBeNull();
 });
 
-test('only ADMIN and MANAGER read the form', async () => {
-	for (const actor of [sales, warehouse, driver]) {
+test('SALES reads the form; WAREHOUSE and DRIVER get a 403', async () => {
+	const id = await issued([1043]);
+	expect((await getReceivableIssueForm(db, 1060, sales))?.checkedOrderIds).toEqual([1060]);
+	expect((await getReceivableEditForm(db, id, sales))?.checkedOrderIds).toEqual([1043]);
+	for (const actor of [warehouse, driver]) {
 		for (const read of [getReceivableIssueForm, getReceivableEditForm]) {
 			const caught = await read(db, 1, actor).catch((error) => error);
 			expect(isHttpError(caught, 403), actor.username).toBe(true);
@@ -687,9 +700,9 @@ test("a payment takes the entry's checks, and a cuenta that exists", async () =>
 	expect(await recordReceivablePayment(db, typedPayment(99), manager)).toMatchObject({ ok: false });
 });
 
-test('only MANAGER and ADMIN record a payment on a cuenta', async () => {
+test('SALES, MANAGER and ADMIN record a payment on a cuenta; WAREHOUSE and DRIVER get a 403', async () => {
 	const id = await billedPair();
-	for (const actor of [sales, warehouse, driver]) {
+	for (const actor of [warehouse, driver]) {
 		const caught = await recordReceivablePayment(db, typedPayment(id), actor).catch(
 			(error) => error
 		);
@@ -697,6 +710,28 @@ test('only MANAGER and ADMIN record a payment on a cuenta', async () => {
 	}
 	const admin: Actor = { ...manager, roles: ['ADMIN'] };
 	expect(await recordReceivablePayment(db, typedPayment(id), admin)).toMatchObject({ ok: true });
+});
+
+test('SALES records a cuenta payment with any method', async () => {
+	const methods: Record<string, string>[] = [
+		{ payment_method: 'CASH' },
+		{ payment_method: 'TRANSFER' },
+		{ payment_method: 'OTHER', other_method: 'Nequi' }
+	];
+	for (const [index, fields] of methods.entries()) {
+		insertOrder(1080 + index, { total: 1360000 });
+		const id = await issued([1080 + index]);
+		const result = await recordReceivablePayment(db, typedPayment(id, fields), sales);
+		if (!result.ok) {
+			throw new Error(JSON.stringify(result));
+		}
+		expect(readMovement(result.id), fields.payment_method).toMatchObject({
+			payment_method: fields.payment_method,
+			entity_type: 'RECEIVABLE',
+			entity_id: id,
+			created_by: 'ventas'
+		});
+	}
 });
 
 test("the cash book links a cuenta's movement, found by its client and not by «Pedido»", async () => {
@@ -709,16 +744,32 @@ test("the cash book links a cuenta's movement, found by its client and not by «
 	expect(byOrder.entries).toEqual([]);
 });
 
-test("a cuenta's receipt names its orders, for the manager and never for SALES", async () => {
+test("a cuenta's receipt names its orders, for the manager and SALES; never WAREHOUSE", async () => {
 	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
 	const id = await billedPair();
 	const movementId = await paid(id);
-	expect(await getReceipt(db, movementId, manager)).toMatchObject({
-		movement: { receivableId: id, orderId: null },
-		receivableOrderIds: [1070, 1071]
-	});
-	const caught = await getReceipt(db, movementId, sales).catch((error) => error);
+	for (const actor of [manager, sales]) {
+		expect(await getReceipt(db, movementId, actor), actor.username).toMatchObject({
+			movement: { receivableId: id, orderId: null },
+			receivableOrderIds: [1070, 1071]
+		});
+	}
+	const caught = await getReceipt(db, movementId, warehouse).catch((error) => error);
 	expect(isHttpError(caught, 403)).toBe(true);
+});
+
+test("SALES can't offset a cuenta's payment: Caja's money out stays the manager's", async () => {
+	const id = await billedPair();
+	const movementId = await paid(id);
+	const offset = {
+		reverses_id: String(movementId),
+		payment_method: 'CASH',
+		movement_date: '2026-11-01'
+	};
+	const caught = await recordOffset(db, offset, sales).catch((error) => error);
+	expect(isHttpError(caught, 403)).toBe(true);
+	const book = await getCashBook(db, {}, sales).catch((error) => error);
+	expect(isHttpError(book, 403)).toBe(true);
 });
 
 test("the cuenta's offsetting movement, made from Caja, keeps its link and cancels it", async () => {
@@ -770,10 +821,11 @@ test('the printout reads the client live, and each order with its lines, by numb
 	expect(printout?.total).toBe(800);
 });
 
-test('the printout of a cuenta that does not exist is null, and SALES is refused', async () => {
+test('the printout of a cuenta that does not exist is null, and WAREHOUSE is refused', async () => {
 	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
 	expect(await getReceivablePrintout(db, 999, manager)).toBeNull();
-	await expect(getReceivablePrintout(db, 999, sales)).rejects.toSatisfy((thrown) =>
+	expect(await getReceivablePrintout(db, 999, sales)).toBeNull();
+	await expect(getReceivablePrintout(db, 999, warehouse)).rejects.toSatisfy((thrown) =>
 		isHttpError(thrown, 403)
 	);
 });

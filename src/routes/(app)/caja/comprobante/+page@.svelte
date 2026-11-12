@@ -13,13 +13,23 @@
 	const { movement, company, receivableOrderIds } = $derived(data.receipt);
 	const isInflow = $derived(0 < movement.amount);
 	const title = $derived(isInflow ? 'RECIBO DE CAJA' : 'COMPROBANTE DE EGRESO');
-	// Sales came from the order: Caja isn't theirs.
-	const backsToOrder = $derived(!data.opensCashBook && null !== movement.orderId);
-	const backHref = $derived(
-		backsToOrder
-			? resolve('/(app)/pedidos/[id]', { id: String(movement.orderId) })
-			: `${resolve('/(app)/caja')}?${new URLSearchParams({ movimiento: String(movement.id) })}`
-	);
+	// Sales came from the order or the cuenta de cobro: Caja isn't theirs.
+	const back = $derived.by(() => {
+		if (!data.opensCashBook && null !== movement.orderId) {
+			return {
+				href: resolve('/(app)/pedidos/[id]', { id: String(movement.orderId) }),
+				label: 'Volver al pedido'
+			};
+		}
+		if (!data.opensCashBook && null !== movement.receivableId) {
+			return {
+				href: resolve('/(app)/cuentas-de-cobro/[id]', { id: String(movement.receivableId) }),
+				label: 'Volver a la cuenta de cobro'
+			};
+		}
+		const query = new URLSearchParams({ movimiento: String(movement.id) });
+		return { href: `${resolve('/(app)/caja')}?${query}`, label: 'Volver al movimiento' };
+	});
 	const billedOrders = $derived(
 		`${1 === receivableOrderIds.length ? 'Pedido' : 'Pedidos'} ${receivableOrderIds.join(', ')}`
 	);
@@ -41,9 +51,7 @@
 
 <div class="receipt">
 	<div class="receipt__toolbar">
-		<Button href={backHref} variant="secondary" size="sm" inline>
-			{backsToOrder ? 'Volver al pedido' : 'Volver al movimiento'}
-		</Button>
+		<Button href={back.href} variant="secondary" size="sm" inline>{back.label}</Button>
 		<Button type="button" size="sm" inline onclick={() => window.print()}>Imprimir</Button>
 	</div>
 
