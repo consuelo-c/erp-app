@@ -11,6 +11,7 @@ import {
 	getContact,
 	listContacts,
 	listTransporters,
+	newClientStatements,
 	searchClients,
 	servicesSchema,
 	updateContact
@@ -33,8 +34,16 @@ beforeEach(() => {
 
 const luzMarina = { phone: '310 442 8890', full_name: 'Luz Marina Restrepo' };
 
+// Contactos always asks for one: each contact a test creates gets its own unless it types one.
+let documents = 0;
+
 async function create(input: Record<string, unknown>, actor: Actor = manager): Promise<number> {
-	const result = await createContact(db, input, actor);
+	documents += 1;
+	const result = await createContact(
+		db,
+		{ document_id: String(70000000 + documents), ...input },
+		actor
+	);
 	if (!result.ok) {
 		throw new Error(result.message);
 	}
@@ -85,6 +94,7 @@ test('a contact saves its phone normalized and its optional fields in attributes
 		address2: null,
 		bankAccount: null,
 		notes: null,
+		hasAutoDocument: false,
 		isEmployee: false
 	});
 	expect(database.prepare('select action, before from events').all()).toMatchObject([
@@ -152,9 +162,10 @@ test("changing a contact's username logs it with before and after", async () => 
 });
 
 test('the email is validated only when it has a value', async () => {
-	const result = await createContact(db, { ...luzMarina, email: 'luzmarina' }, sales);
+	const typed = { ...luzMarina, document_id: '1036452118' };
+	const result = await createContact(db, { ...typed, email: 'luzmarina' }, sales);
 	expect(result).toMatchObject({ ok: false, errors: { email: expect.any(String) } });
-	expect((await createContact(db, { ...luzMarina, email: '' }, sales)).ok).toBe(true);
+	expect((await createContact(db, { ...typed, email: '' }, sales)).ok).toBe(true);
 });
 
 test("a company's branches share its switchboard: two contacts can have one phone", async () => {
@@ -172,7 +183,7 @@ test('the automatic document is @ and 8 symbols of Crockford base32', () => {
 	expect(generateDocumentId()).not.toBe(generateDocumentId());
 });
 
-test('one document per contact; one not given is made up, and not typed as such', async () => {
+test('one document per contact, never typed as an automatic one', async () => {
 	await create({ ...luzMarina, document_id: '1.036.452.118' });
 	const result = await createContact(
 		db,
@@ -183,15 +194,6 @@ test('one document per contact; one not given is made up, and not typed as such'
 		ok: false,
 		errors: { document_id: 'Esa cédula o NIT ya es de Luz Marina Restrepo' }
 	});
-	const jorge = await create({ phone: '300 771 2043', full_name: 'Jorge Iván Betancur' });
-	const wilson = await create({
-		phone: '311 908 5512',
-		full_name: 'Wilson Muñoz',
-		document_id: ''
-	});
-	const documentOf = async (id: number) => (await getContact(db, id, sales))?.documentId;
-	expect(await documentOf(jorge)).toMatch(/^@.{8}$/);
-	expect(await documentOf(jorge)).not.toBe(await documentOf(wilson));
 	expect(
 		await createContact(db, { ...luzMarina, document_id: '@ABCDEFGH' }, manager)
 	).toMatchObject({ ok: false, errors: { document_id: expect.stringContaining('automáticos') } });
@@ -211,6 +213,80 @@ test('one document per contact; one not given is made up, and not typed as such'
 			)
 			.run()
 	).toThrow(/NOT NULL/);
+});
+
+const DOCUMENT_REQUIRED = { ok: false, errors: { document_id: 'Escribe la cédula o NIT' } };
+
+test('Contactos never creates a contact without a real document', async () => {
+	for (const documentId of [undefined, '', ' . - ']) {
+		const typed = { ...luzMarina, document_id: documentId };
+		expect(await createContact(db, typed, manager)).toMatchObject(DOCUMENT_REQUIRED);
+	}
+	expect(database.prepare('select count(*) as count from contacts').get()).toEqual({ count: 0 });
+});
+
+/** A contact as «Cliente nuevo» on the order form leaves it: an automatic document. */
+async function newClient(): Promise<{ id: number; automatic: string }> {
+	const automatic = generateDocumentId();
+	const client = { phone: '573104428890', fullName: 'Luz Marina Restrepo', documentId: automatic };
+	const [inserted] = await db.batch(newClientStatements(db, sales, client));
+	return { id: inserted.meta.last_row_id, automatic };
+}
+
+test('Contactos never saves an edit that leaves the document empty or still automatic', async () => {
+	const { id, automatic } = await newClient();
+	expect(await getContact(db, id, sales)).toMatchObject({ hasAutoDocument: true });
+	for (const documentId of ['', automatic]) {
+		for (const actor of [sales, manager]) {
+			const typed = { ...luzMarina, document_id: documentId, id };
+			expect(await updateContact(db, typed, actor)).toMatchObject(
+				'' === documentId
+					? DOCUMENT_REQUIRED
+					: { ok: false, errors: { document_id: expect.stringContaining('automático') } }
+			);
+		}
+	}
+	const real = await create({ ...luzMarina, document_id: '1036452118' });
+	expect(
+		await updateContact(db, { ...luzMarina, document_id: '', id: real }, manager)
+	).toMatchObject(DOCUMENT_REQUIRED);
+	expect((await getContact(db, real, manager))?.documentId).toBe('1036452118');
+});
+
+test('Sales types the real document over an automatic one, and on a new contact', async () => {
+	const { id } = await newClient();
+	const typed = { ...luzMarina, document_id: '1.036.452.118', id };
+	expect(await updateContact(db, typed, sales)).toEqual({ ok: true, id });
+	expect(await getContact(db, id, sales)).toMatchObject({
+		documentId: '1036452118',
+		hasAutoDocument: false
+	});
+	const edited = database.prepare("select before, after from events where action = 'EDITED'").get();
+	expect(JSON.parse(String(edited?.after))).toEqual({ document_id: '1036452118' });
+	const jorge = {
+		phone: '300 771 2043',
+		full_name: 'Jorge Iván Betancur',
+		document_id: '71234567'
+	};
+	const created = await createContact(db, jorge, sales);
+	expect(created).toMatchObject({ ok: true });
+});
+
+test('once real, only Manager and Admin change the document: Sales gets a 403', async () => {
+	const id = await create({ ...luzMarina, document_id: '1036452118' }, sales);
+	const kept = { ...luzMarina, document_id: '1.036.452.118', bank_account: 'Nequi 310 442 8890' };
+	expect(await updateContact(db, { ...kept, id }, sales)).toEqual({ ok: true, id });
+	expect(await rejection(updateContact(db, { ...kept, document_id: '71384902', id }, sales))).toBe(
+		403
+	);
+	for (const [actor, documentId] of [
+		[manager, '71384902'],
+		[actorWith('ADMIN'), '900.312.554-1']
+	] as const) {
+		const changed = { ...kept, document_id: documentId, id };
+		expect(await updateContact(db, changed, actor)).toEqual({ ok: true, id });
+	}
+	expect((await getContact(db, id, manager))?.documentId).toBe('9003125541');
 });
 
 test('search by name or by three digits of the phone, with the service filter, a page at a time', async () => {
@@ -263,33 +339,6 @@ test('Sales is rejected changing services, a set bank account or the document', 
 	);
 });
 
-test('Sales fills in an empty bank account but never assigns a document', async () => {
-	const id = await create(luzMarina, sales);
-	const automatic = (await getContact(db, id, sales))!.documentId;
-	const kept = { ...luzMarina, document_id: automatic, bank_account: 'Nequi 310 442 8890' };
-	expect(await updateContact(db, { ...kept, id }, sales)).toEqual({ ok: true, id });
-	expect(
-		await rejection(updateContact(db, { ...kept, document_id: '1036452118', id }, sales))
-	).toBe(403);
-	expect(
-		await rejection(createContact(db, { ...luzMarina, document_id: '1036452118' }, sales))
-	).toBe(403);
-});
-
-test('Manager assigns a real document over the automatic one, and clearing it makes a new one', async () => {
-	const id = await create(luzMarina);
-	const automatic = (await getContact(db, id, manager))!.documentId;
-	await updateContact(db, { ...luzMarina, document_id: automatic, id }, manager);
-	expect((await getContact(db, id, manager))?.documentId).toBe(automatic);
-	await updateContact(db, { ...luzMarina, document_id: '1.036.452.118', id }, manager);
-	expect((await getContact(db, id, manager))?.documentId).toBe('1036452118');
-	await updateContact(db, { ...luzMarina, document_id: '', bank_account: '', id }, manager);
-	expect(await getContact(db, id, manager)).toMatchObject({
-		documentId: expect.stringMatching(/^@/),
-		bankAccount: null
-	});
-});
-
 test("an employee's document is Manager's and Admin's, and never left empty", async () => {
 	const ana = { phone: '310 442 8890', full_name: 'Ana Pérez', document_id: '1036452118' };
 	const hired = { ...ana, monthly_salary: '1750905', position: 'Bodega', start: '2026-07-01' };
@@ -306,10 +355,9 @@ test("an employee's document is Manager's and Admin's, and never left empty", as
 		ok: true,
 		id
 	});
-	expect(await updateContact(db, { ...ana, document_id: '', id }, manager)).toMatchObject({
-		ok: false,
-		errors: { document_id: 'Es empleado: la cédula no puede quedar vacía' }
-	});
+	expect(await updateContact(db, { ...ana, document_id: '', id }, manager)).toMatchObject(
+		DOCUMENT_REQUIRED
+	);
 });
 
 test('an edit logs only the changed attributes key, old and new', async () => {

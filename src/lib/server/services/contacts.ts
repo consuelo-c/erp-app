@@ -50,8 +50,10 @@ export type Contact = {
 	/** The WhatsApp username, without its `@`. */
 	whatsapp: string | null;
 	fullName: string;
-	/** A real one, or the automatic one when none was given: `@` and 8 characters. */
+	/** A real one, or the automatic one «Cliente nuevo» gives: `@` and 8 characters. */
 	documentId: string;
+	/** Still the automatic one: Contactos asks for the real one, and Sales may type it. */
+	hasAutoDocument: boolean;
 	services: Service[];
 	email: string | null;
 	address1: string | null;
@@ -65,7 +67,7 @@ export type Contact = {
 export type SaveResult =
 	{ ok: true; id: number } | { ok: false; message: string; errors: Record<string, string> };
 
-/** The columns as typed: `document_id` is null until the automatic one fills a blank. */
+/** The columns as typed: `document_id` is null only on a contact not saved yet. */
 type Columns = {
 	phone: string | null;
 	whatsapp: string | null;
@@ -141,11 +143,15 @@ export function generateDocumentId(): string {
 	return AUTO_DOCUMENT_PREFIX + symbols.join('');
 }
 
+const DOCUMENT_REQUIRED = 'Escribe la cédula o NIT';
+
+// Contactos always saves a real one: only «Cliente nuevo» leaves an automatic one, so a call isn't
+// held up.
 const formSchema = z.object({
 	phone: phoneSchema,
 	whatsapp: whatsappSchema,
 	full_name: requiredText('Escribe el nombre'),
-	document_id: documentIdSchema,
+	document_id: documentIdSchema.pipe(z.string(DOCUMENT_REQUIRED)),
 	email: blankable.pipe(z.email('Revisa el correo: le falta la @ o el dominio').optional()),
 	address_1: blankable,
 	address_2: blankable,
@@ -189,6 +195,7 @@ function toContact(row: ContactRow): Contact {
 		whatsapp: row.whatsapp,
 		fullName: row.full_name,
 		documentId: row.document_id,
+		hasAutoDocument: isAutoDocument(row.document_id),
 		services: servicesSchema.parse(JSON.parse(row.services)),
 		email: attributes.email ?? null,
 		address1: attributes.address_1 ?? null,
@@ -216,13 +223,20 @@ function isOverwritten(current: string | null, next: string | null): boolean {
 	return null !== current && current !== next;
 }
 
+// What Sales may write over: nothing yet, or the automatic one «Cliente nuevo» left.
+function realDocumentOf(columns: Columns): string | null {
+	const documentId = columns.document_id;
+	return null === documentId || isAutoDocument(documentId) ? null : documentId;
+}
+
 // Redirected money: whoever pays copies the saved account without checking it, so changing one
 // that's set is the manager's, and so is a provider's services. The ID number goes with a refund
-// and is the contact's key: only the manager assigns it. Sales fills in an empty account.
+// and is the contact's key: Sales fills in an empty or automatic one, as it fills an empty account,
+// and only the manager changes a real one.
 function changesLockedField(current: Columns, next: Columns): boolean {
 	return (
 		current.services !== next.services ||
-		current.document_id !== next.document_id ||
+		isOverwritten(realDocumentOf(current), next.document_id) ||
 		isOverwritten(bankAccountOf(current), bankAccountOf(next))
 	);
 }
@@ -260,36 +274,22 @@ export async function documentTakenRefusal(
 	return null === owner ? null : documentRefusal(`Esa cédula o NIT ya es de ${owner.full_name}`);
 }
 
+// A typed `@` would pass for an automatic document, and the automatic one already saved isn't a
+// real one: either way the real one is still to be typed.
 const AUTO_DOCUMENT_TYPED = documentRefusal(
-	`Un documento no empieza con ${AUTO_DOCUMENT_PREFIX}: así empiezan los automáticos`
+	`Escribe la cédula o NIT real: los que empiezan con ${AUTO_DOCUMENT_PREFIX} son automáticos`
 );
 
-// Payroll prints it on every receipt: an employee's contact always has a real one.
-const EMPLOYEE_DOCUMENT_REQUIRED = documentRefusal('Es empleado: la cédula no puede quedar vacía');
-
-// A typed `@` would pass for an automatic document; the one already saved comes back as it was.
-function isForgedAutoDocument(typed: string | null, current: string | null): boolean {
-	return null !== typed && isAutoDocument(typed) && typed !== current;
-}
-
-// A blank keeps the automatic document there is, or makes one up.
-function documentOrAuto(typed: string | null, current: string | null): string {
-	if (null !== typed) {
-		return typed;
-	}
-	return null !== current && isAutoDocument(current) ? current : generateDocumentId();
-}
-
-/** The document to save on a contact whose current one is `current`, or why it can't be saved. */
-async function resolveDocument(
+/** Why the typed document can't be saved on contact `exceptId`, or null when it can. */
+async function documentRefusalOf(
 	db: D1Database,
-	{ typed, current, exceptId }: { typed: string | null; current: string | null; exceptId: number }
-): Promise<string | SaveResult> {
-	if (isForgedAutoDocument(typed, current)) {
+	documentId: string,
+	exceptId: number
+): Promise<SaveResult | null> {
+	if (isAutoDocument(documentId)) {
 		return AUTO_DOCUMENT_TYPED;
 	}
-	const documentId = documentOrAuto(typed, current);
-	return (await documentTakenRefusal(db, documentId, exceptId)) ?? documentId;
+	return documentTakenRefusal(db, documentId, exceptId);
 }
 
 async function findRow(db: D1Database, id: number): Promise<ContactRow | null> {
@@ -325,19 +325,15 @@ export async function createContact(
 	}
 	const columns = toColumns(parsed.data);
 	requireLockedFieldsKept(actor, NEW_CONTACT, columns);
-	const documentId = await resolveDocument(db, {
-		typed: columns.document_id,
-		current: null,
-		exceptId: 0
-	});
-	if ('string' !== typeof documentId) {
-		return documentId;
+	const refusal = await documentRefusalOf(db, parsed.data.document_id, 0);
+	if (null !== refusal) {
+		return refusal;
 	}
 	const statements = auditedInsert(db, {
 		table: 'contacts',
 		entityType: 'CONTACT',
 		actor,
-		values: { ...columns, document_id: documentId }
+		values: columns
 	});
 	const [inserted] = await db.batch(statements);
 	return { ok: true, id: inserted.meta.last_row_id };
@@ -384,18 +380,8 @@ export async function updateContact(
 	}
 	const columns = toColumns(form);
 	requireLockedFieldsKept(actor, row, columns);
-	if (1 === row.is_employee && null === columns.document_id) {
-		return EMPLOYEE_DOCUMENT_REQUIRED;
-	}
-	const documentId = await resolveDocument(db, {
-		typed: columns.document_id,
-		current: row.document_id,
-		exceptId: id
-	});
-	if ('string' !== typeof documentId) {
-		return documentId;
-	}
-	return applyEdit(db, actor, { row, columns: { ...columns, document_id: documentId } });
+	const refusal = await documentRefusalOf(db, form.document_id, id);
+	return refusal ?? applyEdit(db, actor, { row, columns });
 }
 
 /**

@@ -3,7 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import type { Actor, Role } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
-import { createContact } from './contacts';
+import { createContact, generateDocumentId, newClientStatements } from './contacts';
 import {
 	createEmployee,
 	employmentSchema,
@@ -53,6 +53,16 @@ function count(table: string) {
 
 const jorge = { phone: '300 771 2043', full_name: 'Jorge Iván Betancur', document_id: '71234567' };
 
+// Jorge as «Cliente nuevo» on the order form leaves him: an automatic document.
+async function newClient(): Promise<void> {
+	const client = {
+		phone: '573007712043',
+		fullName: 'Jorge Betancur',
+		documentId: generateDocumentId()
+	};
+	await db.batch(newClientStatements(db, manager, client));
+}
+
 test('without a picked contact, the contact and the employee in one batch, each with its CREATED event', async () => {
 	const id = await hire();
 	expect(await getEmployee(db, id, manager)).toEqual({
@@ -78,8 +88,8 @@ test('without a picked contact, the contact and the employee in one batch, each 
 });
 
 test('a contact picked from the search is reused, its phone, name and ID number as typed', async () => {
-	const jorgeContact = { phone: jorge.phone, full_name: 'Jorge Betancur', email: 'jorge@b.co' };
-	await createContact(db, jorgeContact, manager);
+	await newClient();
+	database.prepare(`update contacts set attributes = '{"email":"jorge@b.co"}'`).run();
 	const candidate = {
 		id: 1,
 		fullName: 'Jorge Betancur',
@@ -119,14 +129,15 @@ test("a contact that's already another employee's is refused naming them", async
 });
 
 test('without a pick, a shared phone gets a contact of its own', async () => {
-	await createContact(db, { phone: carlos.phone, full_name: 'Bodega Central' }, manager);
+	const bodega = { phone: carlos.phone, full_name: 'Bodega Central', document_id: '900111222' };
+	await createContact(db, bodega, manager);
 	await hire();
 	expect(count('contacts')).toBe(2);
 	expect(database.prepare('select contact_id from employees').get()?.contact_id).toBe(2);
 });
 
 test('the search needs three characters and never matches an automatic document', async () => {
-	await createContact(db, { phone: jorge.phone, full_name: 'Jorge Betancur' }, manager);
+	await newClient();
 	const automatic = String(database.prepare('select document_id from contacts').get()?.document_id);
 	expect(await searchContactCandidates(db, 'jo', manager)).toEqual([]);
 	expect(await searchContactCandidates(db, null, manager)).toEqual([]);

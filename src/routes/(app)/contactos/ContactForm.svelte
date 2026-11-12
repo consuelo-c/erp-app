@@ -42,14 +42,25 @@
 		Array.isArray(form?.values.services) ? form.values.services : (contact?.services ?? [])
 	);
 
-	// For Sales, a set account is the manager's to change, and so is the ID number, always: it's the
+	// For Sales, a set account is the manager's to change, and so is a real ID number: it's the
 	// contact's key. A locked field still posts its saved value: the service rejects a save that
 	// changes it.
 	const isAccountLocked = $derived(!isManager && null !== (contact?.bankAccount ?? null));
+	const hasRealDocument = $derived(null !== contact && !contact.hasAutoDocument);
+	const isDocumentLocked = $derived(!isManager && hasRealDocument);
 
 	// What Sales fills in once stays: the hint says so before it's saved.
 	const ONCE = 'Cuando la guardes, solo Gerente o Administrador la cambian.';
-	const AUTO_HINT = 'Si queda vacío, se asigna uno automático que empieza con @.';
+	// An automatic one isn't shown in the field: the real one is still to be typed.
+	const documentHint = $derived.by(() => {
+		if (isDocumentLocked) {
+			return lockedHint;
+		}
+		const hint = contact?.hasAutoDocument
+			? `Tiene uno automático, ${contact.documentId}: escribe el real para guardar.`
+			: '';
+		return isManager ? hint || undefined : `${hint} ${ONCE}`.trim();
+	});
 	const accountHint = $derived.by(() => {
 		if (isAccountLocked) {
 			return lockedHint;
@@ -88,22 +99,18 @@
 			required
 		/>
 	</Field>
-	<Field
-		label="Cédula o NIT (opcional)"
-		id="document_id"
-		hint={isManager ? AUTO_HINT : lockedHint}
-		error={errorOf('document_id')}
-	>
-		{#if !isManager}
-			{@render locked('document_id', contact?.documentId ?? 'Se asigna uno automático')}
-			<input type="hidden" name="document_id" value={contact?.documentId ?? ''} />
+	<Field label="Cédula o NIT" id="document_id" hint={documentHint} error={errorOf('document_id')}>
+		{#if isDocumentLocked}
+			{@render locked('document_id', contact?.documentId ?? '')}
+			<input type="hidden" name="document_id" value={contact?.documentId} />
 		{:else}
 			<Input
 				id="document_id"
 				name="document_id"
-				value={value('document_id', contact?.documentId)}
+				value={value('document_id', hasRealDocument ? contact?.documentId : null)}
 				placeholder="Ej. C.C. 71.234.567 o NIT 900.456.123-4"
 				aria-invalid={undefined !== errorOf('document_id')}
+				required
 			/>
 		{/if}
 	</Field>
