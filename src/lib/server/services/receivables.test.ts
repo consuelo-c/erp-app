@@ -448,7 +448,7 @@ test('the detail carries its fields and orders, and hides an automatic document'
 		id,
 		issueDate: '2026-11-01',
 		paymentTerms: 'Contado',
-		client: { name: 'Postobón S.A.', phone: '573000000001', documentId: null },
+		client: { name: 'Postobón S.A.', phone: '573000000001', whatsapp: null, documentId: null },
 		orders: [
 			{ id: 1070, eventDate: '2026-10-10', orderTotal: 860000 },
 			{ id: 1071, eventDate: '2026-10-10', orderTotal: 500000 }
@@ -456,6 +456,12 @@ test('the detail carries its fields and orders, and hides an automatic document'
 	});
 	database.exec(`update contacts set document_id = '8909039395' where id = ${POSTOBON}`);
 	expect((await detailOf(id)).client.documentId).toBe('8909039395');
+});
+
+test("the detail reads the client's username live from the contact, phone or not", async () => {
+	const id = await billedPair();
+	database.exec(`update contacts set phone = null, whatsapp = 'PostobonSA' where id = ${POSTOBON}`);
+	expect((await detailOf(id)).client).toMatchObject({ phone: null, whatsapp: 'PostobonSA' });
 });
 
 test('a cuenta that does not exist, or a tampered id, reads as none', async () => {

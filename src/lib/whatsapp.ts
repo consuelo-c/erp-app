@@ -45,3 +45,24 @@ export function formatNameAndReach(
 	}
 	return null === username ? name : `${name} · ${formatWhatsapp(username)}`;
 }
+
+/** The `wa.me` chat with a username: without its `@`, the form WhatsApp documents. */
+export function whatsappUsernameHref(username: string): string {
+	return `https://wa.me/${username}`;
+}
+
+/**
+ * A carrier's single link, on Despachos and the details' carrier line: the phone when there's one,
+ * otherwise the username, both to `wa.me`; null with neither. What it reads goes with it.
+ */
+export function singleReach(
+	phone: string | null,
+	username: string | null
+): { text: string; href: string } | null {
+	if (null !== phone) {
+		return { text: formatPhone(phone), href: `https://wa.me/${phone}` };
+	}
+	return null === username
+		? null
+		: { text: formatWhatsapp(username), href: whatsappUsernameHref(username) };
+}

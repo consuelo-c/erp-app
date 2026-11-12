@@ -9,8 +9,8 @@
 	import { formatLongDay } from '$lib/datetime';
 	import { formatIdNumber, formatPesos } from '$lib/format';
 	import { CASH_CONCEPT_LABELS } from '$lib/labels';
-	import { formatPhone } from '$lib/phone';
 	import PaymentList from '../../PaymentList.svelte';
+	import ReachLines from '../../ReachLines.svelte';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -63,10 +63,7 @@
 	{#if null !== client.documentId}
 		<p class="meta document">NIT/C.C. {formatIdNumber(client.documentId)}</p>
 	{/if}
-	<div class="reach">
-		<span>{formatPhone(client.phone)}</span>
-		<IconButton icon="phone" size="lg" label="Llamar a {client.name}" href="tel:+{client.phone}" />
-	</div>
+	<div class="reach"><ReachLines phone={client.phone} whatsapp={client.whatsapp} /></div>
 
 	<h2 class="section-title">Cuenta de cobro</h2>
 	<ul class="detail-list">
@@ -143,17 +140,8 @@
 		margin: 0;
 	}
 
-	/* 24px apart: each icon's 48px hit area overhangs its glyph by 11px on either side. */
 	.reach {
-		display: flex;
-		gap: var(--space-12);
-		align-items: center;
 		margin-bottom: var(--space-8);
-		color: var(--link);
-	}
-
-	.reach > span {
-		color: var(--text-body);
 	}
 
 	.order-money {

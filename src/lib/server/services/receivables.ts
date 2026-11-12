@@ -348,7 +348,8 @@ export type ReceivableOrder = { id: number; eventDate: string; orderTotal: numbe
 
 export type ReceivableClient = {
 	name: string;
-	phone: string;
+	phone: string | null;
+	whatsapp: string | null;
 	/** Null when it's automatic. */ documentId: string | null;
 };
 
@@ -364,7 +365,12 @@ export type ReceivableDetail = {
 	balance: number;
 };
 
-type ClientRow = { full_name: string; phone: string; document_id: string };
+type ClientRow = {
+	full_name: string;
+	phone: string | null;
+	whatsapp: string | null;
+	document_id: string;
+};
 
 type DetailRow = ClientRow & {
 	id: number;
@@ -379,7 +385,7 @@ type DetailRow = ClientRow & {
 async function findDetailRow(db: D1Database, id: number): Promise<DetailRow | null> {
 	return db
 		.prepare(
-			`select receivables.id, issue_date, receivables.attributes, full_name, phone, document_id,
+			`select receivables.id, issue_date, receivables.attributes, full_name, phone, whatsapp, document_id,
 			contacts.attributes as contact_attributes,
 			${RECEIVABLE_TOTAL_SQL} as total, ${RECEIVABLE_PAID_SQL} as paid,
 			${RECEIVABLE_BALANCE_SQL} as balance
@@ -420,6 +426,7 @@ function toClient(row: ClientRow): ReceivableClient {
 	return {
 		name: row.full_name,
 		phone: row.phone,
+		whatsapp: row.whatsapp,
 		documentId: isAutoDocument(row.document_id) ? null : row.document_id
 	};
 }
@@ -544,7 +551,7 @@ export type ReceivableForm = {
 
 async function findClient(db: D1Database, clientId: number): Promise<ReceivableClient> {
 	const row = await db
-		.prepare('select full_name, phone, document_id from contacts where id = ?')
+		.prepare('select full_name, phone, whatsapp, document_id from contacts where id = ?')
 		.bind(clientId)
 		.first<ClientRow>();
 	if (null === row) {

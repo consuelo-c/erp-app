@@ -30,6 +30,7 @@ const base: ReceivablePrintout = {
 	client: {
 		name: 'Postobón S.A.',
 		phone: '576045765100',
+		whatsapp: null,
 		documentId: '8909039395',
 		address: 'Calle 52 #47-42, Medellín'
 	},

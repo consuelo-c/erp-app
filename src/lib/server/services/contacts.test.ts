@@ -178,6 +178,16 @@ test("a company's branches share its switchboard: two contacts can have one phon
 	expect((await listContacts(db, { search: '442 8890' }, sales)).contacts).toHaveLength(2);
 });
 
+test("the list carries each contact's phone and username, either one null", async () => {
+	await create({ full_name: 'Mayra Castaño', whatsapp: '@MayC47' });
+	await create(luzMarina);
+	const { contacts } = await listContacts(db, {}, sales);
+	expect(contacts.map(({ phone, whatsapp }) => ({ phone, whatsapp }))).toEqual([
+		{ phone: '573104428890', whatsapp: null },
+		{ phone: null, whatsapp: 'MayC47' }
+	]);
+});
+
 test('the automatic document is @ and 8 symbols of Crockford base32', () => {
 	expect(generateDocumentId()).toMatch(/^@[0-9A-HJKMNP-TV-Z]{8}$/);
 	expect(generateDocumentId()).not.toBe(generateDocumentId());

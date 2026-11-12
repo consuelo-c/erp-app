@@ -9,8 +9,8 @@
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import { formatCivilDate } from '$lib/datetime';
 	import { formatIdNumber, formatPesos } from '$lib/format';
-	import { formatPhone } from '$lib/phone';
 	import type { ReceivableForm } from '$lib/server/services/receivables';
+	import { singleReach } from '$lib/whatsapp';
 
 	// Issuing and editing a cuenta de cobro: the client is read-only, and the total follows what's
 	// checked. A cuenta always keeps an order: the last one checked can't be unchecked. A partly paid
@@ -25,6 +25,8 @@
 	let { receivable, hint, submitLabel, failure }: Props = $props();
 
 	const client = $derived(receivable.client);
+	// The phone, or the username when there's no phone.
+	const reach = $derived(singleReach(client.phone, client.whatsapp));
 	const paymentTermsError = $derived(failure?.errors.payment_terms);
 	const message = $derived(failure?.errors.orders ?? failure?.message);
 
@@ -52,7 +54,9 @@
 		{#if null !== client.documentId}
 			<p class="meta client-line">NIT/C.C. {formatIdNumber(client.documentId)}</p>
 		{/if}
-		<p class="meta client-line">{formatPhone(client.phone)}</p>
+		{#if reach}
+			<p class="meta client-line">{reach.text}</p>
+		{/if}
 	</div>
 
 	{#if null === client.documentId}

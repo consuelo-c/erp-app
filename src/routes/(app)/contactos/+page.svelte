@@ -5,14 +5,13 @@
 	import Button from '$lib/components/Button.svelte';
 	import Chip from '$lib/components/Chip.svelte';
 	import Icon from '$lib/components/Icon.svelte';
-	import IconButton from '$lib/components/IconButton.svelte';
 	import Input from '$lib/components/Input.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import { CONTACT_KIND_LABELS, CONTACT_KIND_PLURAL_LABELS, SERVICE_LABELS } from '$lib/labels';
-	import { formatPhone } from '$lib/phone';
+	import ReachLines from '../ReachLines.svelte';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -144,25 +143,11 @@
 								</span>
 							{/if}
 						</a>
-						<!-- The number is read; its icons call it or open a WhatsApp chat with it. None, no icons. -->
-						{#if contact.phone}
-							<span class="contact__reach">
-								<span class="contact__phone">{formatPhone(contact.phone)}</span>
-								<IconButton
-									icon="phone"
-									size="lg"
-									label="Llamar a {contact.fullName}"
-									href="tel:+{contact.phone}"
-								/>
-								<IconButton
-									icon="whatsapp"
-									size="lg"
-									label="Escribir por WhatsApp a {contact.fullName}"
-									href="https://wa.me/{contact.phone}"
-									target="_blank"
-									rel="noopener"
-								/>
-							</span>
+						<!-- The number and the username, each with its own icons. Neither, no icons. -->
+						{#if contact.phone || contact.whatsapp}
+							<div class="contact__reach">
+								<ReachLines phone={contact.phone} whatsapp={contact.whatsapp} />
+							</div>
 						{/if}
 					</li>
 				{/each}
@@ -274,17 +259,12 @@
 		gap: var(--space-3);
 	}
 
-	/* 24px apart: each icon's 48px hit area overhangs its glyph by 11px on either side. */
 	.contact__reach {
-		display: flex;
 		flex: none;
-		gap: var(--space-12);
-		align-items: center;
-		padding: 0 var(--space-6);
-		color: var(--link);
+		padding: var(--space-4) var(--space-6);
 	}
 
-	.contact__phone {
+	.contact__reach :global(.reach-lines__value) {
 		font: var(--weight-semibold) var(--text-base) / 1.2 var(--font-sans);
 		font-variant-numeric: tabular-nums;
 		color: var(--text-body);

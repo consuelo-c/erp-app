@@ -434,6 +434,7 @@ export type ContactSummary = {
 	id: number;
 	fullName: string;
 	phone: string | null;
+	whatsapp: string | null;
 	services: Service[];
 	isEmployee: boolean;
 };
@@ -487,6 +488,7 @@ type SummaryRow = {
 	id: number;
 	full_name: string;
 	phone: string | null;
+	whatsapp: string | null;
 	services: string;
 	is_employee: number;
 };
@@ -496,6 +498,7 @@ function toSummary(row: SummaryRow): ContactSummary {
 		id: row.id,
 		fullName: row.full_name,
 		phone: row.phone,
+		whatsapp: row.whatsapp,
 		services: servicesSchema.parse(JSON.parse(row.services)),
 		isEmployee: 1 === row.is_employee
 	};
@@ -525,7 +528,7 @@ export async function listContacts(
 	// ponytail: nocase folds ASCII only, so «Ángela» sorts after Z; a sort key column if it bothers.
 	const { results } = await db
 		.prepare(
-			`select contacts.id, full_name, phone, services, employees.id is not null as is_employee
+			`select contacts.id, full_name, phone, contacts.whatsapp, services, employees.id is not null as is_employee
 			${from} where ${where}
 			order by full_name collate nocase, contacts.id limit ? offset ?`
 		)

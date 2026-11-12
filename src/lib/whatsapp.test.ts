@@ -1,5 +1,11 @@
 import { expect, test } from 'vitest';
-import { formatNameAndReach, formatWhatsapp, normalizeWhatsapp } from './whatsapp';
+import {
+	formatNameAndReach,
+	formatWhatsapp,
+	normalizeWhatsapp,
+	singleReach,
+	whatsappUsernameHref
+} from './whatsapp';
 
 test.each(['@MayC47', 'MayC47', ' wa.me/MayC47 ', 'https://wa.me/MayC47'])(
 	'%s is stored as MayC47, the case kept',
@@ -40,4 +46,20 @@ test('the carrier picker reads the phone, the username when there is no phone, o
 		'Wilson Muñoz · @WilsonMudanzas'
 	);
 	expect(formatNameAndReach('Wilson Muñoz', null, null)).toBe('Wilson Muñoz');
+});
+
+test("a username's chat link takes it without its @, the case kept", () => {
+	expect(whatsappUsernameHref('LuzMarinaR')).toBe('https://wa.me/LuzMarinaR');
+});
+
+test('a single link opens the phone when there is one, otherwise the username, or nothing', () => {
+	expect(singleReach('573119085512', 'WilsonMudanzas')).toEqual({
+		text: '311 908 5512',
+		href: 'https://wa.me/573119085512'
+	});
+	expect(singleReach(null, 'WilsonMudanzas')).toEqual({
+		text: '@WilsonMudanzas',
+		href: 'https://wa.me/WilsonMudanzas'
+	});
+	expect(singleReach(null, null)).toBeNull();
 });
