@@ -269,3 +269,8 @@ export function formatRemisiones(orderIds: number[]): string {
 	const noun = 1 === orderIds.length ? 'Remisión' : 'Remisiones';
 	return `${noun} ${orderNumbers.format(orderIds.map(String))}`;
 }
+
+/** Why a billed order's client can't change: its cuenta de cobro bills other orders too. */
+export function clientLockedMessage(receivableId: number): string {
+	return `Retire el pedido de la cuenta de cobro Nº ${receivableId} antes de cambiar el cliente.`;
+}

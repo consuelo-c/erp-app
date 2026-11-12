@@ -26,7 +26,7 @@
 		PAYMENT_METHOD_LABELS,
 		RETURN_METHOD_LABELS
 	} from '$lib/labels';
-	import { calculateOrderTotals } from '$lib/orders';
+	import { calculateOrderTotals, clientLockedMessage } from '$lib/orders';
 	import { parsePesos, parseQuantity } from '$lib/payroll';
 	import { formatPhone } from '$lib/phone';
 	import { formatNameAndReach, formatWhatsapp } from '$lib/whatsapp';
@@ -37,6 +37,7 @@
 		OrderFormOptions,
 		OrderSchedule,
 		ReturnMethod,
+		Billing,
 		Shortage
 	} from '$lib/server/services/orders';
 	import type { QuoteConversion } from '$lib/server/services/quotes';
@@ -56,6 +57,8 @@
 		original?: OrderDetail | null;
 		/** «Convertir en pedido»: the quote a new order comes from. */
 		conversion?: QuoteConversion | null;
+		/** A billed order's cuenta de cobro: a warning above «Guardar», and «Cliente» locked when it bills others. */
+		billing?: Billing | null;
 		/** A refused save: its message and each field's, or what's short for a new order's dates. */
 		form:
 			| { message: string; errors: Record<string, string>; shortages?: Shortage[] }
@@ -63,7 +66,14 @@
 			| undefined;
 	}
 
-	let { options, order, original = null, conversion = null, form }: Props = $props();
+	let {
+		options,
+		order,
+		original = null,
+		conversion = null,
+		billing = null,
+		form
+	}: Props = $props();
 
 	// While the save is on its way, so the button doesn't post it twice.
 	let isSaving = $state(false);
@@ -538,6 +548,7 @@
 			bind:picked
 			onpick={pick}
 			onnew={pickNewClient}
+			lockedNote={billing?.hasOtherOrders ? clientLockedMessage(billing.receivableId) : ''}
 			error={errorOf('client_id')}
 		/>
 
@@ -808,6 +819,15 @@
 			<p class="note">Los pagos se registran cuando el pedido esté guardado.</p>
 		{/if}
 
+		{#if billing}
+			<div class="order__billed">
+				<Notice tone="warning">
+					Este pedido está en la cuenta de cobro Nº {billing.receivableId}: reimprímala si ya la
+					entregó.
+				</Notice>
+			</div>
+		{/if}
+
 		<div class="order__save">
 			<Button type="submit" disabled={isSaving}>
 				{original ? 'Guardar extensión' : 'Guardar pedido'}
@@ -861,6 +881,7 @@
 		margin-bottom: calc(-1 * var(--space-4));
 	}
 
+	.order__billed,
 	.order__save {
 		margin-top: var(--space-4);
 	}

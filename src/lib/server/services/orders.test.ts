@@ -14,6 +14,7 @@ import {
 	deliveryAttributesSchema,
 	getAvailability,
 	getOrder,
+	getOrderBilling,
 	getOrderChange,
 	getOrderDetail,
 	getOrderPrintout,
@@ -29,6 +30,7 @@ import {
 	updateOrder
 } from './orders';
 import { createOrder } from '../db/test-orders';
+import { getReceivableDetail, issueReceivable } from './receivables';
 
 const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
 
@@ -360,6 +362,135 @@ test('changing the client changes client_id and its snapshot together, both logg
 	expect(Object.keys(edited.after).sort()).toEqual(['client_attributes', 'client_id']);
 	const unknown = await updateOrder(db, { ...order1043, id, client_id: 99 }, sales);
 	expect(unknown).toMatchObject({ ok: false, errors: { client_id: expect.any(String) } });
+});
+
+// The order, billed in a new cuenta de cobro with `others`, moved to `status` by hand.
+async function billed(status = 'CONFIRMED', others: number[] = []): Promise<[number, number]> {
+	const id = await create();
+	const result = await issueReceivable(
+		db,
+		{ orders: [id, ...others], payment_terms: 'Contado' },
+		sales
+	);
+	if (!result.ok) {
+		throw new Error(result.message);
+	}
+	setStatus(id, status);
+	return [id, result.id];
+}
+
+function receivableEvents() {
+	return database
+		.prepare("select action, entity_id, before, after from events where entity_type = 'RECEIVABLE'")
+		.all()
+		.map((event) => ({
+			action: event.action,
+			entityId: event.entity_id,
+			before: null === event.before ? null : JSON.parse(String(event.before)),
+			after: JSON.parse(String(event.after))
+		}));
+}
+
+function receivableClient(id: number) {
+	return database.prepare('select client_id from receivables where id = ?').get(id)?.client_id;
+}
+
+const jorge = { client_id: JORGE, client_name: 'Jorge Iván Betancur' };
+
+test.each(['CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY', 'DELIVERED'])(
+	'a billed %s order saves an edit of its lines, and its cuenta reads the new total',
+	async (status) => {
+		const [id, receivableId] = await billed(status);
+		const totalOf = async () => (await getReceivableDetail(db, receivableId, sales))?.total;
+		expect(await totalOf()).toBe(1180000);
+		const lines = [{ product_id: 1, qty: 100, unit_price: 2500 }];
+		const result = await updateOrder(db, { ...order1043, id, order_items: lines }, sales);
+		expect(result).toEqual({ ok: true, id });
+		expect(await totalOf()).toBe(100 * 2500 * 2 - 104000 + 180000);
+	}
+);
+
+test('a billed COMPLETED order stays read-only', async () => {
+	const [id] = await billed('COMPLETED');
+	const result = await updateOrder(db, { ...order1043, id, rental_days: 3 }, sales);
+	expect(result).toMatchObject({ ok: false });
+});
+
+test("the cuenta's only order changes the cuenta's client in the same save, logged", async () => {
+	const [id, receivableId] = await billed();
+	expect(await updateOrder(db, { ...order1043, id, ...jorge }, sales)).toEqual({ ok: true, id });
+	expect((await read(id)).clientId).toBe(JORGE);
+	expect(receivableClient(receivableId)).toBe(JORGE);
+	expect(receivableEvents().at(-1)).toEqual({
+		action: 'EDITED',
+		entityId: receivableId,
+		before: { client_id: LUZ_MARINA },
+		after: { client_id: JORGE }
+	});
+	const detail = await getReceivableDetail(db, receivableId, sales);
+	expect(detail?.client.name).toBe('Jorge Iván Betancur');
+	expect(database.prepare('select count(*) as count from receivables').get()?.count).toBe(1);
+});
+
+test("«Cliente nuevo» on the cuenta's only order becomes the cuenta's client", async () => {
+	const [id, receivableId] = await billed();
+	const newClient = { client_id: null, client_name: 'Gloria Patiño', client_phone: '3001234567' };
+	expect(await updateOrder(db, { ...order1043, id, ...newClient }, sales)).toEqual({
+		ok: true,
+		id
+	});
+	const { clientId } = await read(id);
+	expect(clientId).not.toBe(LUZ_MARINA);
+	expect(receivableClient(receivableId)).toBe(clientId);
+	expect(receivableEvents().at(-1)).toMatchObject({
+		action: 'EDITED',
+		before: { client_id: LUZ_MARINA },
+		after: { client_id: clientId }
+	});
+});
+
+test("an edit that keeps a billed order's client leaves its cuenta untouched", async () => {
+	const [id, receivableId] = await billed();
+	await updateOrder(db, { ...order1043, id, rental_days: 3 }, sales);
+	expect(receivableClient(receivableId)).toBe(LUZ_MARINA);
+	expect(receivableEvents().map(({ action }) => action)).toEqual(['CREATED']);
+});
+
+test("a cuenta's order with others keeps its client: the change is refused", async () => {
+	const other = await create();
+	const [id, receivableId] = await billed('CONFIRMED', [other]);
+	const result = await updateOrder(db, { ...order1043, id, ...jorge, rental_days: 3 }, sales);
+	expect(result).toEqual({
+		ok: false,
+		message: expect.any(String),
+		errors: {
+			client_id: `Retire el pedido de la cuenta de cobro Nº ${receivableId} antes de cambiar el cliente.`
+		}
+	});
+	expect(await read(id)).toMatchObject({ clientId: LUZ_MARINA, rentalDays: 2 });
+	expect(receivableClient(receivableId)).toBe(LUZ_MARINA);
+	const kept = await updateOrder(db, { ...order1043, id, rental_days: 3 }, sales);
+	expect(kept).toEqual({ ok: true, id });
+});
+
+test("the order form's billing: the cuenta's number, and whether it bills other orders", async () => {
+	const alone = await create();
+	expect(await getOrderBilling(db, await read(alone), sales)).toBeNull();
+	const [id, receivableId] = await billed();
+	expect(await getOrderBilling(db, await read(id), sales)).toEqual({
+		receivableId,
+		clientId: LUZ_MARINA,
+		hasOtherOrders: false
+	});
+	const [shared, sharedId] = await billed('CONFIRMED', [alone]);
+	expect(await getOrderBilling(db, await read(shared), sales)).toMatchObject({
+		receivableId: sharedId,
+		hasOtherOrders: true
+	});
+	const warehouse: Actor = { ...sales, roles: ['WAREHOUSE'] };
+	await expect(getOrderBilling(db, await read(id), warehouse)).rejects.toSatisfy((thrown) =>
+		isHttpError(thrown, 403)
+	);
 });
 
 test('WAREHOUSE and DRIVER get a 403 creating, editing or reading an order', async () => {

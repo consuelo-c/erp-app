@@ -8,6 +8,7 @@ import { formatPesos } from '$lib/format';
 import { INVALID_WHATSAPP } from '$lib/whatsapp';
 import {
 	calculateOrderTotals,
+	clientLockedMessage,
 	FEE_SOURCES,
 	isEditableStatus,
 	isLegalTransition,
@@ -702,29 +703,100 @@ const NOT_EDITABLE: Refusal = {
 	errors: {}
 };
 
+/** The cuenta de cobro billing an order: its number, its client, and whether it bills other orders. */
+export type Billing = { receivableId: number; clientId: number; hasOtherOrders: boolean };
+
+async function findBilling(
+	db: D1Database,
+	{ id, receivable_id: receivableId }: Pick<OrderRow, 'id' | 'receivable_id'>
+): Promise<Billing | null> {
+	if (null === receivableId) {
+		return null;
+	}
+	const row = await db
+		.prepare(
+			`select client_id as clientId, exists (select 1 from orders
+			where receivable_id = receivables.id and id <> ?) as hasOtherOrders
+			from receivables where id = ?`
+		)
+		.bind(id, receivableId)
+		.first<{ clientId: number; hasOtherOrders: number }>();
+	return null === row ? null : { receivableId, ...row, hasOtherOrders: 1 === row.hasOtherOrders };
+}
+
+/** The order form's «Este pedido está en la cuenta de cobro Nº …» and «Cliente»'s lock, or null. */
+export async function getOrderBilling(
+	db: D1Database,
+	order: Pick<Order, 'id' | 'receivableId'>,
+	actor: Actor | null
+): Promise<Billing | null> {
+	requireRole(actor, TAKES_ORDERS);
+	return findBilling(db, { id: order.id, receivable_id: order.receivableId });
+}
+
+// A cuenta has one client: its only order's new client is the cuenta's, in the order's batch.
+// «Cliente nuevo»'s id comes from the same subquery as the order's, logged.
+function billingStatements(
+	db: D1Database,
+	actor: Actor,
+	{ billing, edit }: { billing: Billing; edit: ReturnType<typeof clientWrite> }
+): D1PreparedStatement[] {
+	const write = {
+		table: 'receivables',
+		entityType: 'RECEIVABLE',
+		actor,
+		id: billing.receivableId,
+		current: { client_id: billing.clientId }
+	};
+	if ('client_id' in edit.computed) {
+		const computed = { client_id: { ...edit.computed.client_id, isLogged: true } };
+		return auditedUpdate(db, { ...write, changes: {}, computed });
+	}
+	return auditedUpdate(db, { ...write, changes: { client_id: edit.values.client_id ?? null } });
+}
+
+// A changed client's cuenta, to change with it; refused when the cuenta bills other orders.
+async function clientChangeBilling(
+	db: D1Database,
+	row: OrderRow,
+	clientId: number | null
+): Promise<Billing | Refusal | null> {
+	const billing = clientId === row.client_id ? null : await findBilling(db, row);
+	return billing?.hasOtherOrders
+		? refusal('client_id', clientLockedMessage(billing.receivableId))
+		: billing;
+}
+
+type Edit = { row: OrderRow; resolved: ResolvedOrder; billing: Billing | null };
+
 // `order_items` and each JSON column are logged whole when anything in them changed.
 async function applyEdit(
 	db: D1Database,
 	actor: Actor,
-	{ row, resolved }: { row: OrderRow; resolved: ResolvedOrder }
+	{ row, resolved, billing }: Edit
 ): Promise<SaveResult> {
-	const { values, computed, clientStatements } = clientWrite(db, actor, resolved);
+	const edit = clientWrite(db, actor, resolved);
 	const statements = auditedUpdate(db, {
 		table: 'orders',
 		entityType: 'ORDER',
 		actor,
 		id: row.id,
 		current: row,
-		changes: values,
-		computed
+		changes: edit.values,
+		computed: edit.computed
 	});
+	const receivable = null === billing ? [] : billingStatements(db, actor, { billing, edit });
 	if (0 < statements.length) {
-		await db.batch([...clientStatements, ...statements]);
+		await db.batch([...edit.clientStatements, ...statements, ...receivable]);
 	}
 	return { ok: true, id: row.id };
 }
 
-/** The whole form, from CONFIRMED through DELIVERED. Lines already on it keep their frozen name and price. */
+/**
+ * The whole form, from CONFIRMED through DELIVERED. Lines already on it keep their frozen name and
+ * price. A billed order too: its cuenta reads it live. Its client changes only when it's the cuenta's
+ * only order, and then the cuenta's changes with it.
+ */
 export async function updateOrder(
 	db: D1Database,
 	input: unknown,
@@ -746,9 +818,13 @@ export async function updateOrder(
 	if (!isEditableStatus(row.status)) {
 		return NOT_EDITABLE;
 	}
+	const billing = await clientChangeBilling(db, row, parsed.data.client_id);
+	if (null !== billing && 'ok' in billing) {
+		return billing;
+	}
 	const current = toOrder(row);
 	const resolved = await resolveColumns(db, parsed.data, { current, frozenItems: current.items });
-	return 'ok' in resolved ? resolved : applyEdit(db, actor, { row, resolved });
+	return 'ok' in resolved ? resolved : applyEdit(db, actor, { row, resolved, billing });
 }
 
 const extensionInputSchema = z.object({ parent_order_id: z.coerce.number().int().positive() });

@@ -2,7 +2,12 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { isEditableStatus } from '$lib/orders';
 import { requireRole } from '$lib/server/actor';
-import { getOrderDetail, getOrderFormOptions, updateOrder } from '$lib/server/services/orders';
+import {
+	getOrderBilling,
+	getOrderDetail,
+	getOrderFormOptions,
+	updateOrder
+} from '$lib/server/services/orders';
 import { readPostedJson } from '../../order-form';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -25,7 +30,8 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	if (!isEditableStatus(order.status)) {
 		redirect(303, resolve('/(app)/pedidos/[id]', { id: String(order.id) }));
 	}
-	return { order, options };
+	const billing = await getOrderBilling(db, order, locals.user);
+	return { order, options, billing };
 };
 
 export const actions: Actions = {
