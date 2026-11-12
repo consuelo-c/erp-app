@@ -115,7 +115,7 @@ Que alguien cambió el pedido después de que Bodega lo alistó: pudieron cambia
 
 ## ¿Cuándo pagan los clientes?
 
-Cuando quieran, en las cuotas que acuerden con Ventas. No hay un anticipo obligatorio: al confirmar, el sistema solo sugiere uno como referencia.
+Cuando quieran, en las cuotas que acuerden con Ventas. No hay un anticipo obligatorio: un pedido nace confirmado aunque no tenga pagos.
 
 Casi todos pagan por transferencia. **Un saldo pendiente no impide entregar**: el pedido dice «Saldo pendiente. No impide entregar.» y se entrega igual.
 
