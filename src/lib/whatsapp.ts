@@ -66,3 +66,18 @@ export function singleReach(
 		? null
 		: { text: formatWhatsapp(username), href: whatsappUsernameHref(username) };
 }
+
+/**
+ * The printouts' one contact line: «Teléfono» with the phone, even when there's a username too;
+ * «WhatsApp» with the username when there's only that; «Teléfono» blank with neither, written in
+ * by hand.
+ */
+export function printedContact(
+	phone: string | null,
+	username: string | null
+): { label: string; value: string } {
+	if (null === phone && null !== username) {
+		return { label: 'WhatsApp', value: formatWhatsapp(username) };
+	}
+	return { label: 'Teléfono', value: formatPhone(phone) };
+}

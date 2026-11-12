@@ -4,8 +4,8 @@
 	import { formatSpelledDate } from '$lib/datetime';
 	import { formatBalance, formatIdNumber, formatPesos } from '$lib/format';
 	import { formatRemisiones, splitOrdersIntoPages } from '$lib/orders';
-	import { formatPhone } from '$lib/phone';
 	import type { PrintedOrder } from '$lib/server/services/receivables';
+	import { printedContact } from '$lib/whatsapp';
 	import type { PageProps } from './$types';
 
 	// Outside the app's shell, the letter sheets that copy the company's paper. The fixed texts are
@@ -15,6 +15,7 @@
 	const printout = $derived(data.printout);
 	const client = $derived(printout.client);
 	const company = $derived(printout.company);
+	const contact = $derived(printedContact(client.phone, client.whatsapp));
 	const title = $derived(`CUENTA DE COBRO Nº ${printout.id}`);
 	const pages = $derived(splitOrdersIntoPages(printout.orders));
 	const isSingleOrder = $derived(1 === printout.orders.length);
@@ -58,7 +59,7 @@
 			{@render field('NIT/C.C.', formatIdNumber(client.documentId))}
 		{/if}
 		{@render field('Dirección', client.address)}
-		{@render field('Teléfono', formatPhone(client.phone))}
+		{@render field(contact.label, contact.value)}
 	</div>
 	{@render field('Concepto:', formatRemisiones(printout.orders.map(({ id }) => id)))}
 	{@render field('Debe a:', company.COMPANY_NAME)}

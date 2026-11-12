@@ -95,3 +95,16 @@ test('no signature, deposit, payments or terms', () => {
 		expect(body).not.toContain(absent);
 	}
 });
+
+test('one contact line: the phone, the username without one, or a blank «Teléfono»', () => {
+	const withBoth = { ...quote, client: { ...quote.client, whatsapp: 'mayc47' } };
+	const both = printout({ quote: withBoth });
+	expect(both).toContain('<span>Teléfono</span><span>604 576 5100</span>');
+	expect(both).not.toContain('WhatsApp');
+	const onlyUsername = { ...quote, client: { ...quote.client, phone: null, whatsapp: 'mayc47' } };
+	const username = printout({ quote: onlyUsername });
+	expect(username).toContain('<span>WhatsApp</span><span>@mayc47</span>');
+	expect(username).not.toContain('Teléfono');
+	const neither = { ...quote, client: { ...quote.client, phone: null } };
+	expect(printout({ quote: neither })).toContain('<span>Teléfono</span><span></span>');
+});

@@ -3,6 +3,7 @@ import {
 	formatNameAndReach,
 	formatWhatsapp,
 	normalizeWhatsapp,
+	printedContact,
 	singleReach,
 	whatsappUsernameHref
 } from './whatsapp';
@@ -62,4 +63,13 @@ test('a single link opens the phone when there is one, otherwise the username, o
 		href: 'https://wa.me/WilsonMudanzas'
 	});
 	expect(singleReach(null, null)).toBeNull();
+});
+
+test('a printout reads the phone, the username when there is no phone, or a blank «Teléfono»', () => {
+	expect(printedContact('573104428890', 'mayc47')).toEqual({
+		label: 'Teléfono',
+		value: '310 442 8890'
+	});
+	expect(printedContact(null, 'mayc47')).toEqual({ label: 'WhatsApp', value: '@mayc47' });
+	expect(printedContact(null, null)).toEqual({ label: 'Teléfono', value: '' });
 });

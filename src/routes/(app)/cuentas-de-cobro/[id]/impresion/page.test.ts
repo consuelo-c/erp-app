@@ -115,3 +115,14 @@ test("a single order's totals stay with its last line when the closing takes its
 	expect(sheets[1]).not.toContain('SUBTOTAL');
 	expect(sheets[1]).toContain('Bancolombia');
 });
+
+test('one contact line: the phone, the username without one, or a blank «Teléfono»', () => {
+	const both = printout({ client: { ...base.client, whatsapp: 'mayc47' } });
+	expect(both).toMatch(/>Teléfono<\/span><span[^>]*>604 576 5100</);
+	expect(both).not.toContain('WhatsApp');
+	const username = printout({ client: { ...base.client, phone: null, whatsapp: 'mayc47' } });
+	expect(username).toMatch(/>WhatsApp<\/span><span[^>]*>@mayc47</);
+	expect(username).not.toContain('Teléfono');
+	const neither = printout({ client: { ...base.client, phone: null } });
+	expect(neither).toMatch(/>Teléfono<\/span><span[^>]*><\/span>/);
+});
