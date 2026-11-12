@@ -4,7 +4,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
 import type { Actor, Role } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
-import { movementStatements } from './cash';
+import { movementStatements, recordOffset } from './cash';
 import {
 	advanceOrder,
 	cancelOrder,
@@ -1311,6 +1311,124 @@ test('the entry offers «Pago» while there is a balance, the deposit until comp
 	await recordPayment(id, { concept: 'SECURITY_DEPOSIT', amount: String(depositAmount) }, sales);
 	expect(await offeredTo(sales)).toEqual([]);
 	expect(await offeredTo(manager)).toEqual(['INSTALLMENT_REFUND', 'DEPOSIT_REFUND']);
+});
+
+// The planning's example: a $1.500.000 order, $800.000 paid and a $300.000 deposit, cancelled.
+async function cancelledWithMoney(): Promise<number> {
+	const id = await create({ ...order1043, transport_cost: 500000 });
+	await recordPayment(id, { amount: '800.000' }, sales);
+	await recordPayment(id, { concept: 'SECURITY_DEPOSIT', amount: '300.000' }, sales);
+	await cancelOrder(db, { id, reason: 'El camión llegó tarde' }, sales);
+	return id;
+}
+
+function movementsOf(id: number) {
+	return database
+		.prepare(
+			"select concept, amount, movement_date, payee, reverses_id from cash_movements where entity_type = 'ORDER' and entity_id = ? order by id"
+		)
+		.all(id);
+}
+
+const fee = (source: string, amount: string) => ({
+	concept: 'CANCELLATION_FEE',
+	fee_source: source,
+	amount
+});
+
+test('owed to the client: payments net of refunds plus the deposit held; a fee from payments lowers it', async () => {
+	const id = await cancelledWithMoney();
+	expect(await detail(id)).toMatchObject({
+		orderTotal: 1500000,
+		balanceDue: 700000,
+		owedToClient: 1100000
+	});
+	await recordPayment(id, fee('INSTALLMENTS', '150.000'));
+	expect((await detail(id)).owedToClient).toBe(950000);
+	await recordPayment(id, { concept: 'INSTALLMENT_REFUND', amount: '650.000' });
+	await recordPayment(id, { concept: 'DEPOSIT_REFUND', amount: '300.000' });
+	expect((await detail(id)).owedToClient).toBe(0);
+});
+
+test('«Retener de los pagos» and «Retener del depósito» write a pair that nets to 0, same date', async () => {
+	const id = await cancelledWithMoney();
+	await recordPayment(id, fee('INSTALLMENTS', '150.000'));
+	await recordPayment(id, fee('DEPOSIT', '100.000'));
+	const pairs = movementsOf(id).slice(2);
+	expect(pairs).toEqual([
+		expect.objectContaining({ concept: 'INSTALLMENT_REFUND', amount: -150000 }),
+		expect.objectContaining({ concept: 'CANCELLATION_FEE', amount: 150000 }),
+		expect.objectContaining({ concept: 'DEPOSIT_REFUND', amount: -100000 }),
+		expect.objectContaining({ concept: 'CANCELLATION_FEE', amount: 100000 })
+	]);
+	expect(pairs.reduce((sum, each) => sum + Number(each.amount), 0)).toBe(0);
+	expect(new Set(pairs.map((each) => each.movement_date))).toEqual(new Set(['2026-08-01']));
+	expect((await detail(id)).depositHeld).toBe(200000);
+});
+
+test('«Dinero nuevo» writes the fee alone, from the client', async () => {
+	const id = await cancelledWithMoney();
+	const written = await recordPayment(id, fee('NEW', '80.000'));
+	expect(written).toMatchObject({
+		concept: 'CANCELLATION_FEE',
+		amount: 80000,
+		payee: 'Luz Marina Restrepo'
+	});
+	expect(movementsOf(id)).toHaveLength(3);
+	expect((await detail(id)).owedToClient).toBe(1100000);
+});
+
+test('a retention above what its side holds is refused, and writes nothing', async () => {
+	const id = await cancelledWithMoney();
+	for (const [source, amount] of [
+		['INSTALLMENTS', '800.001'],
+		['DEPOSIT', '300.001']
+	]) {
+		const result = await recordOrderPayment(db, typedPayment(id, fee(source, amount)), manager);
+		expect(result).toMatchObject({
+			ok: false,
+			errors: { amount: expect.stringContaining('Supera') }
+		});
+	}
+	expect(movementsOf(id)).toHaveLength(2);
+});
+
+test('the fee is only for a cancelled order, and only for the manager', async () => {
+	const confirmed = await create();
+	const onConfirmed = await recordOrderPayment(
+		db,
+		typedPayment(confirmed, fee('NEW', '50.000')),
+		manager
+	);
+	expect(onConfirmed).toMatchObject({ ok: false });
+	const id = await cancelledWithMoney();
+	const bySales = recordOrderPayment(db, typedPayment(id, fee('NEW', '50.000')), sales);
+	await expect(bySales).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
+	expect(offeredPaymentConcepts(await detail(id), manager)).toContain('CANCELLATION_FEE');
+	expect(offeredPaymentConcepts(await detail(id), sales)).not.toContain('CANCELLATION_FEE');
+	expect(offeredPaymentConcepts(await detail(confirmed), manager)).not.toContain(
+		'CANCELLATION_FEE'
+	);
+});
+
+test('each half of a pair is offset on its own from Caja', async () => {
+	const id = await cancelledWithMoney();
+	const feeHalf = await recordPayment(id, fee('INSTALLMENTS', '150.000'));
+	const offset = {
+		reverses_id: String(feeHalf.id),
+		payment_method: 'CASH',
+		movement_date: '2026-08-02'
+	};
+	expect(await recordOffset(db, offset, manager)).toMatchObject({ ok: true });
+	expect(movementsOf(id).slice(2)).toEqual([
+		expect.objectContaining({ concept: 'INSTALLMENT_REFUND', amount: -150000, reverses_id: null }),
+		expect.objectContaining({ concept: 'CANCELLATION_FEE', amount: 150000, reverses_id: null }),
+		expect.objectContaining({
+			concept: 'CANCELLATION_FEE',
+			amount: -150000,
+			reverses_id: feeHalf.id
+		})
+	]);
 });
 
 test('nothing blocks on the amounts: above the balance, what was paid, or the deposit held', async () => {

@@ -13,8 +13,8 @@
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import { formatInteger, formatPesos } from '$lib/format';
-	import { CASH_CONCEPT_LABELS, PAYMENT_METHOD_LABELS } from '$lib/labels';
-	import { isOrderInflow, type OrderPaymentConcept } from '$lib/orders';
+	import { CASH_CONCEPT_LABELS, FEE_SOURCE_LABELS, PAYMENT_METHOD_LABELS } from '$lib/labels';
+	import { isOrderInflow, type FeeSource, type OrderPaymentConcept } from '$lib/orders';
 	import { parsePesos } from '$lib/payroll';
 	import type { PaymentMethod } from '$lib/server/services/cash';
 	import type { PayableCarrier } from '$lib/server/services/orders';
@@ -69,6 +69,8 @@
 	const concept = $derived(typed('concept', concepts[0]) as OrderPaymentConcept);
 	const isInflow = $derived(isOrderInflow(concept));
 	const isCarrierPayment = $derived('CARRIER_PAYMENT' === concept);
+	const isFee = $derived('CANCELLATION_FEE' === concept);
+	const feeSource = $derived(typed('fee_source', 'NEW') as FeeSource);
 	const method = $derived(typed('payment_method', initialMethod));
 	const trip = $derived(typed('trip', carriers[0]?.trip ?? ''));
 	const carrier = $derived(carriers.find((option) => option.trip === trip) ?? carriers[0]);
@@ -86,6 +88,7 @@
 	);
 
 	const METHOD_OPTIONS = Object.entries(PAYMENT_METHOD_LABELS);
+	const FEE_SOURCE_OPTIONS = Object.entries(FEE_SOURCE_LABELS);
 	const TRIP_LABELS = { DELIVERY: 'Entrega', PICKUP: 'Retorno' };
 
 	const methodLabel = $derived(
@@ -144,6 +147,15 @@
 					/>
 				{/each}
 			</Choice>
+
+			<!-- New money, or kept from what the order holds: then a refund from that side goes with it. -->
+			{#if isFee}
+				<Choice legend="¿De dónde sale?" layout="stack">
+					{#each FEE_SOURCE_OPTIONS as [value, label] (value)}
+						<Chip type="radio" name="fee_source" {value} {label} checked={value === feeSource} />
+					{/each}
+				</Choice>
+			{/if}
 
 			{#if isCarrierPayment && 1 < carriers.length}
 				<!-- Each carrier on its own line: its trip and its name. -->
@@ -255,6 +267,11 @@
 		<li class="detail-list__row--plain">
 			<span>Concepto</span><span>{CASH_CONCEPT_LABELS[concept]}</span>
 		</li>
+		{#if isFee}
+			<li class="detail-list__row--plain">
+				<span>De dónde sale</span><span>{FEE_SOURCE_LABELS[feeSource]}</span>
+			</li>
+		{/if}
 		<li><span>Valor</span><span>{formatPesos(amount)}</span></li>
 		<li class="detail-list__row--plain"><span>Método</span><span>{methodLabel}</span></li>
 		<li class="detail-list__row--plain">

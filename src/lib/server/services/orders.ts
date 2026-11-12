@@ -4,15 +4,18 @@
 
 import { z } from 'zod';
 import { addDays, getTodaysDate, getWeekStart } from '$lib/datetime';
+import { formatPesos } from '$lib/format';
 import { normalizePhone } from '$lib/phone';
 import {
 	calculateOrderTotals,
+	FEE_SOURCES,
 	isEditableStatus,
 	isLegalTransition,
 	isOrderInflow,
 	isPickupStatus,
 	OPERATIONAL_STATUSES,
 	ORDER_PAYMENT_CONCEPTS,
+	type FeeSource,
 	type OrderPaymentConcept,
 	type OrderTotals,
 	type PricedLine
@@ -26,6 +29,7 @@ import {
 	optional,
 	recordLinkedMovement,
 	type CashConcept,
+	type LinkedMovement,
 	type PaymentMethod
 } from './cash';
 import { listProducts, type Product } from './products';
@@ -1287,6 +1291,16 @@ const DEPOSIT_HELD_SQL = `coalesce((select sum(amount) from cash_movements
 	where entity_type = 'ORDER' and entity_id = orders.id
 	and concept in ('SECURITY_DEPOSIT', 'DEPOSIT_REFUND')), 0)`;
 
+/**
+ * The only rule for what a CANCELLED order owes its client, over `orders` in the caller's query: its
+ * installments net of their refunds, plus the deposit held. A CANCELLATION_FEE isn't in it: a fee
+ * kept from the payments already lowered it through its refund half. The company owes the client
+ * when it's above 0.
+ */
+export const OWED_TO_CLIENT_SQL = `coalesce((select sum(amount) from cash_movements
+	where entity_type = 'ORDER' and entity_id = orders.id
+	and concept in ('INSTALLMENT', 'INSTALLMENT_REFUND')), 0) + ${DEPOSIT_HELD_SQL}`;
+
 /** One of the order's movements, as its detail lists it. */
 export type OrderPayment = {
 	id: number;
@@ -1313,6 +1327,8 @@ export type OrderDetail = Order & {
 	paid: number;
 	balanceDue: number;
 	depositHeld: number;
+	/** «A favor del cliente»: what it owes the client, read only once it's CANCELLED. */
+	owedToClient: number;
 	/** The balance of the cuenta de cobro billing it, or null. Negative is the client's credit. */
 	receivableBalance: number | null;
 	payments: OrderPayment[];
@@ -1420,18 +1436,22 @@ async function findCancellation(db: D1Database, orderId: number): Promise<Cancel
 		.first<Cancellation>();
 }
 
-type OrderBalances = Pick<OrderDetail, 'balanceDue' | 'depositHeld' | 'receivableBalance'>;
+type OrderBalances = Pick<
+	OrderDetail,
+	'balanceDue' | 'depositHeld' | 'owedToClient' | 'receivableBalance'
+>;
 
 async function findBalances(db: D1Database, orderId: number): Promise<OrderBalances> {
 	const balances = await db
 		.prepare(
 			`select ${BALANCE_DUE_SQL} as balanceDue, ${DEPOSIT_HELD_SQL} as depositHeld,
+			${OWED_TO_CLIENT_SQL} as owedToClient,
 			${ORDER_RECEIVABLE_BALANCE_SQL} as receivableBalance
 			from orders where id = ?`
 		)
 		.bind(orderId)
 		.first<OrderBalances>();
-	return balances ?? { balanceDue: 0, depositHeld: 0, receivableBalance: null };
+	return balances ?? { balanceDue: 0, depositHeld: 0, owedToClient: 0, receivableBalance: null };
 }
 
 const orderIdSchema = z.coerce.number().int().positive();
@@ -1534,6 +1554,7 @@ const paymentInputSchema = z.object({
 	order_id: orderIdSchema,
 	concept: z.enum(ORDER_PAYMENT_CONCEPTS, 'Escoge el concepto'),
 	trip: z.enum(['DELIVERY', 'PICKUP']).optional(),
+	fee_source: z.enum(FEE_SOURCES).optional(),
 	payee: blankable
 });
 
@@ -1583,6 +1604,40 @@ async function installmentRefusal(db: D1Database, order: Order): Promise<Refusal
 	return 0 < balanceDue ? null : { ok: false, message: 'Este pedido ya está pagado.', errors: {} };
 }
 
+type Retention = { concept: CashConcept; available: number; message: string };
+
+/**
+ * «Cargo por cancelación», only on a CANCELLED order. «Dinero nuevo» is the fee alone; a fee kept
+ * from what the order already holds is paired with a refund from that side, up to what it holds.
+ */
+async function feeRetention(
+	db: D1Database,
+	order: Order,
+	source: FeeSource | undefined
+): Promise<Retention | undefined | Refusal> {
+	if ('CANCELLED' !== order.status) {
+		return {
+			ok: false,
+			message: 'Solo un pedido cancelado tiene cargo por cancelación.',
+			errors: {}
+		};
+	}
+	if (undefined === source) {
+		return refusal('fee_source', 'Escoge de dónde sale el cargo');
+	}
+	if ('NEW' === source) {
+		return undefined;
+	}
+	const { owedToClient, depositHeld } = await findBalances(db, order.id);
+	if ('DEPOSIT' === source) {
+		const message = `Supera el depósito recibido (${formatPesos(depositHeld)}).`;
+		return { concept: 'DEPOSIT_REFUND', available: depositHeld, message };
+	}
+	const paid = owedToClient - depositHeld;
+	const message = `Supera lo pagado (${formatPesos(paid)}).`;
+	return { concept: 'INSTALLMENT_REFUND', available: paid, message };
+}
+
 /**
  * Records one of the order's movements, in any state, cancelled included. «Pago» needs a balance
  * to pay, but never blocks on going over it. Valor is typed positive; the concept gives the sign.
@@ -1598,28 +1653,44 @@ export async function recordOrderPayment(
 	if (!parsed.success) {
 		return invalidOrder(parsed.error);
 	}
-	requireRole(actor, isOrderInflow(parsed.data.concept) ? TAKES_ORDERS : PAYS_OUT);
+	const { concept } = parsed.data;
+	const isSalesConcept = isOrderInflow(concept) && 'CANCELLATION_FEE' !== concept;
+	requireRole(actor, isSalesConcept ? TAKES_ORDERS : PAYS_OUT);
 	const row = await findRow(db, parsed.data.order_id);
 	if (null === row) {
 		return { ok: false, message: 'Ese pedido no existe.', errors: {} };
 	}
-	const order = toOrder(row);
-	const { concept } = parsed.data;
+	const link = await linkOf(db, toOrder(row), parsed.data);
+	return 'ok' in link ? link : recordLinkedMovement(db, { form: input, ...link }, actor);
+}
+
+// What the movement links to and who it's with, or why the order refuses it.
+async function linkOf(
+	db: D1Database,
+	order: Order,
+	payment: PaymentInput
+): Promise<Omit<LinkedMovement, 'form'> | Refusal> {
+	const { concept } = payment;
 	const refusal = 'INSTALLMENT' === concept ? await installmentRefusal(db, order) : null;
 	if (null !== refusal) {
 		return refusal;
 	}
-	const payee = payeeOf(order, parsed.data);
+	const retention =
+		'CANCELLATION_FEE' === concept ? await feeRetention(db, order, payment.fee_source) : undefined;
+	if (undefined !== retention && 'ok' in retention) {
+		return retention;
+	}
+	const payee = payeeOf(order, payment);
 	if ('string' !== typeof payee) {
 		return payee;
 	}
-	const link = { concept, entityType: 'ORDER', entityId: order.id, payee };
-	return recordLinkedMovement(db, { form: input, ...link }, actor);
+	return { concept, entityType: 'ORDER', entityId: order.id, payee, retention };
 }
 
 /**
  * What the payment entry offers: «Pago» while there's a balance and no cuenta de cobro, the deposit
- * while it isn't complete, and money out to the manager only. Empty, the entry isn't offered.
+ * while it isn't complete, and money out to the manager only, as a cancelled order's fee. Empty,
+ * the entry isn't offered.
  */
 export function offeredPaymentConcepts(order: OrderDetail, actor: Actor): OrderPaymentConcept[] {
 	const canPayOut = isAdminOrManager(actor);
@@ -1628,7 +1699,8 @@ export function offeredPaymentConcepts(order: OrderDetail, actor: Actor): OrderP
 		SECURITY_DEPOSIT: order.depositHeld < order.depositAmount,
 		INSTALLMENT_REFUND: canPayOut,
 		DEPOSIT_REFUND: canPayOut,
-		CARRIER_PAYMENT: canPayOut && 0 < carriersOf(order).length
+		CARRIER_PAYMENT: canPayOut && 0 < carriersOf(order).length,
+		CANCELLATION_FEE: canPayOut && 'CANCELLED' === order.status
 	};
 	return ORDER_PAYMENT_CONCEPTS.filter((concept) => offered[concept]);
 }

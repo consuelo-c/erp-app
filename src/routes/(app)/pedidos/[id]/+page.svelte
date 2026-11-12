@@ -374,9 +374,16 @@
 			<li class="detail-list__row--plain">
 				<span>Pagado</span><span>{formatBalance(order.paid)}</span>
 			</li>
-			<li class="detail-list__row--strong">
-				<span>Saldo</span><span>{formatBalance(order.balanceDue)}</span>
-			</li>
+			<!-- Cancelled, nothing is delivered: what's left is what the company holds for the client. -->
+			{#if 'CANCELLED' === order.status}
+				<li class="detail-list__row--strong">
+					<span>A favor del cliente</span><span>{formatPesos(order.owedToClient)}</span>
+				</li>
+			{:else}
+				<li class="detail-list__row--strong">
+					<span>Saldo</span><span>{formatBalance(order.balanceDue)}</span>
+				</li>
+			{/if}
 		{/if}
 		<li class="detail-list__row--plain deposit">
 			<span>Depósito acordado</span><span>{formatPesos(order.depositAmount)}</span>

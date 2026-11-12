@@ -115,12 +115,7 @@ export function isPickupStatus(status: OrderStatus): boolean {
 }
 
 // Once the products are on their way back, or the order was cancelled, it's read-only.
-const EDITABLE: readonly OrderStatus[] = [
-	'CONFIRMED',
-	'PICKED',
-	'OUT_FOR_DELIVERY',
-	'DELIVERED'
-];
+const EDITABLE: readonly OrderStatus[] = ['CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY', 'DELIVERED'];
 
 /** Whether an order in this state can still be edited: from CONFIRMED through DELIVERED. */
 export function isEditableStatus(status: OrderStatus): boolean {
@@ -136,7 +131,7 @@ export function isIncidentReportable(status: OrderStatus): boolean {
 }
 
 // Sales records the money in; only the manager pays it out.
-const ORDER_INFLOWS = ['INSTALLMENT', 'SECURITY_DEPOSIT'] as const;
+const ORDER_INFLOWS = ['INSTALLMENT', 'SECURITY_DEPOSIT', 'CANCELLATION_FEE'] as const;
 const ORDER_OUTFLOWS = ['INSTALLMENT_REFUND', 'DEPOSIT_REFUND', 'CARRIER_PAYMENT'] as const;
 
 /** The movements an order records from its payment entry, in the order the entry offers them. */
@@ -144,10 +139,15 @@ export const ORDER_PAYMENT_CONCEPTS = [...ORDER_INFLOWS, ...ORDER_OUTFLOWS] as c
 
 export type OrderPaymentConcept = (typeof ORDER_PAYMENT_CONCEPTS)[number];
 
-/** Whether the money comes in: the rest goes out, and only the manager records it. */
+/** Whether the money comes in; the rest goes out. Only the manager records money out, and the fee. */
 export function isOrderInflow(concept: OrderPaymentConcept): boolean {
 	return (ORDER_INFLOWS as readonly string[]).includes(concept);
 }
+
+/** Where a «Cargo por cancelación» comes from: new money, or money the order already holds. */
+export const FEE_SOURCES = ['NEW', 'INSTALLMENTS', 'DEPOSIT'] as const;
+
+export type FeeSource = (typeof FEE_SOURCES)[number];
 
 // A half-letter sheet holds this many lines under the order's header. The totals and the
 // signature take the room of `closingLines` of them, and are never split across two sheets.

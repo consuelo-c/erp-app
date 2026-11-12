@@ -22,6 +22,7 @@ export const CASH_CONCEPTS = [
 	'DEPOSIT_REFUND',
 	'PAYROLL',
 	'CARRIER_PAYMENT',
+	'CANCELLATION_FEE',
 	'OTHER_INCOME',
 	'OTHER_EXPENSE'
 ] as const;
@@ -29,7 +30,12 @@ export const CASH_CONCEPTS = [
 export type CashConcept = (typeof CASH_CONCEPTS)[number];
 
 /** The concepts whose money comes in: every other one goes out. An offset flips the sign. */
-const INFLOW_CONCEPTS: readonly CashConcept[] = ['INSTALLMENT', 'SECURITY_DEPOSIT', 'OTHER_INCOME'];
+const INFLOW_CONCEPTS: readonly CashConcept[] = [
+	'INSTALLMENT',
+	'SECURITY_DEPOSIT',
+	'CANCELLATION_FEE',
+	'OTHER_INCOME'
+];
 
 export const PAYMENT_METHODS = ['CASH', 'TRANSFER', 'OTHER'] as const;
 
@@ -232,9 +238,43 @@ export type LinkedMovement = {
 	entityType: string;
 	entityId: number;
 	payee: string;
-	/** What the movement brings with it, saved in its same batch. */
-	alongside?: D1PreparedStatement[];
+	/**
+	 * Money already in the cash book, relabelled: a refund of the same amount from `concept`,
+	 * written first in the same batch and on the same date, so the pair nets to 0. Refused above
+	 * `available`, what that side holds.
+	 */
+	retention?: { concept: CashConcept; available: number; message: string };
 };
+
+type LinkedForm = EntryForm & { amount: number };
+
+// The movement's statements, its retention's refund first: `[refund, movement]`.
+function linkedStatements(
+	db: D1Database,
+	actor: Actor,
+	{ movement, form }: { movement: LinkedMovement; form: LinkedForm }
+): [D1PreparedStatement[], D1PreparedStatement[]] {
+	const written = {
+		payment_method: form.payment_method,
+		movement_date: form.movement_date,
+		entity_type: movement.entityType,
+		entity_id: movement.entityId,
+		payee: movement.payee,
+		attributes: toAttributes(form)
+	};
+	const { retention } = movement;
+	const refund =
+		undefined === retention ? null : { concept: retention.concept, amount: -form.amount };
+	const sign = INFLOW_CONCEPTS.includes(movement.concept) ? 1 : -1;
+	return [
+		null === refund ? [] : movementStatements(db, actor, { ...written, ...refund }),
+		movementStatements(db, actor, {
+			...written,
+			concept: movement.concept,
+			amount: sign * form.amount
+		})
+	];
+}
 
 /** Records a linked movement as typed: Valor positive, the sign from the concept. */
 export async function recordLinkedMovement(
@@ -248,18 +288,13 @@ export async function recordLinkedMovement(
 	if (!form.success) {
 		return invalid(form.error);
 	}
-	const statements = movementStatements(db, actor, {
-		concept: movement.concept,
-		payment_method: form.data.payment_method,
-		amount: isInflow ? form.data.amount : -form.data.amount,
-		movement_date: form.data.movement_date,
-		entity_type: movement.entityType,
-		entity_id: movement.entityId,
-		payee: movement.payee,
-		attributes: toAttributes(form.data)
-	});
-	const [inserted] = await db.batch([...statements, ...(movement.alongside ?? [])]);
-	return { ok: true, id: inserted.meta.last_row_id };
+	const { retention } = movement;
+	if (undefined !== retention && form.data.amount > retention.available) {
+		return { ok: false, message: retention.message, errors: { amount: retention.message } };
+	}
+	const [refund, statements] = linkedStatements(db, actor, { movement, form: form.data });
+	const results = await db.batch([...refund, ...statements]);
+	return { ok: true, id: results[refund.length].meta.last_row_id };
 }
 
 /** Why a movement can't be offset, or null when it can: once, and never a correction itself. */
