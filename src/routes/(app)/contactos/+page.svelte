@@ -144,24 +144,26 @@
 								</span>
 							{/if}
 						</a>
-						<!-- The number is read; its icons call it or open a WhatsApp chat with it. -->
-						<span class="contact__reach">
-							<span class="contact__phone">{formatPhone(contact.phone)}</span>
-							<IconButton
-								icon="phone"
-								size="lg"
-								label="Llamar a {contact.fullName}"
-								href="tel:+{contact.phone}"
-							/>
-							<IconButton
-								icon="whatsapp"
-								size="lg"
-								label="Escribir por WhatsApp a {contact.fullName}"
-								href="https://wa.me/{contact.phone}"
-								target="_blank"
-								rel="noopener"
-							/>
-						</span>
+						<!-- The number is read; its icons call it or open a WhatsApp chat with it. None, no icons. -->
+						{#if contact.phone}
+							<span class="contact__reach">
+								<span class="contact__phone">{formatPhone(contact.phone)}</span>
+								<IconButton
+									icon="phone"
+									size="lg"
+									label="Llamar a {contact.fullName}"
+									href="tel:+{contact.phone}"
+								/>
+								<IconButton
+									icon="whatsapp"
+									size="lg"
+									label="Escribir por WhatsApp a {contact.fullName}"
+									href="https://wa.me/{contact.phone}"
+									target="_blank"
+									rel="noopener"
+								/>
+							</span>
+						{/if}
 					</li>
 				{/each}
 			</ul>

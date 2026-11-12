@@ -1,10 +1,12 @@
 // Contactos: the company's clients, providers and employees in one table, one document each; a phone
-// may be shared. Never deleted: orders and employees point to them.
+// or a WhatsApp username may be shared, and either may be missing. Never deleted: orders and
+// employees point to them.
 
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { fold } from '$lib/format';
 import { normalizePhone } from '$lib/phone';
+import { INVALID_WHATSAPP, normalizeWhatsapp } from '$lib/whatsapp';
 import { isAdminOrManager, requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
 import { containing, foldedSql } from './cash';
@@ -44,7 +46,9 @@ type Attributes = z.infer<typeof contactAttributesSchema>;
 
 export type Contact = {
 	id: number;
-	phone: string;
+	phone: string | null;
+	/** The WhatsApp username, without its `@`. */
+	whatsapp: string | null;
 	fullName: string;
 	/** A real one, or the automatic one when none was given: `@` and 8 characters. */
 	documentId: string;
@@ -63,7 +67,8 @@ export type SaveResult =
 
 /** The columns as typed: `document_id` is null until the automatic one fills a blank. */
 type Columns = {
-	phone: string;
+	phone: string | null;
+	whatsapp: string | null;
 	full_name: string;
 	document_id: string | null;
 	services: string;
@@ -88,15 +93,30 @@ const blankable = z
 	.optional()
 	.transform((value) => value || undefined);
 
-/** The typed phone, stored normalized; the employee form takes it the same way. */
-export const phoneSchema = requiredText('Escribe el teléfono').transform((typed, context) => {
-	const phone = normalizePhone(typed);
-	if (null === phone) {
-		context.addIssue({ code: 'custom', message: INVALID_PHONE });
-		return z.NEVER;
-	}
-	return phone;
-});
+// A blank optional value is null; anything typed must pass its normalizer.
+function normalizedOrNull(normalize: (typed: string) => string | null, message: string) {
+	return z
+		.string()
+		.trim()
+		.optional()
+		.transform((typed, context) => {
+			if (!typed) {
+				return null;
+			}
+			const normalized = normalize(typed);
+			if (null === normalized) {
+				context.addIssue({ code: 'custom', message });
+				return z.NEVER;
+			}
+			return normalized;
+		});
+}
+
+/** The typed phone, stored normalized, or null; the employee form takes it the same way. */
+export const phoneSchema = normalizedOrNull(normalizePhone, INVALID_PHONE);
+
+/** The typed WhatsApp username, stored without its `@`, or null; the employee form's too. */
+export const whatsappSchema = normalizedOrNull(normalizeWhatsapp, INVALID_WHATSAPP);
 
 /** Spaces, dots and hyphens are how it's typed: «1.036.452.118» and «1036452118» are one document. */
 export const documentIdSchema = z
@@ -123,6 +143,7 @@ export function generateDocumentId(): string {
 
 const formSchema = z.object({
 	phone: phoneSchema,
+	whatsapp: whatsappSchema,
 	full_name: requiredText('Escribe el nombre'),
 	document_id: documentIdSchema,
 	email: blankable.pipe(z.email('Revisa el correo: le falta la @ o el dominio').optional()),
@@ -149,9 +170,10 @@ function attributesJson(attributes: Attributes): string {
 }
 
 function toColumns(form: Form): Columns {
-	const { phone, full_name, document_id, services, ...attributes } = form;
+	const { phone, whatsapp, full_name, document_id, services, ...attributes } = form;
 	return {
 		phone,
+		whatsapp,
 		full_name,
 		document_id,
 		services: servicesJson(services),
@@ -164,6 +186,7 @@ function toContact(row: ContactRow): Contact {
 	return {
 		id: row.id,
 		phone: row.phone,
+		whatsapp: row.whatsapp,
 		fullName: row.full_name,
 		documentId: row.document_id,
 		services: servicesSchema.parse(JSON.parse(row.services)),
@@ -177,7 +200,8 @@ function toContact(row: ContactRow): Contact {
 }
 
 const NEW_CONTACT: Columns = {
-	phone: '',
+	phone: null,
+	whatsapp: null,
 	full_name: '',
 	document_id: null,
 	services: '[]',
@@ -271,7 +295,7 @@ async function resolveDocument(
 async function findRow(db: D1Database, id: number): Promise<ContactRow | null> {
 	return db
 		.prepare(
-			`select id, phone, full_name, document_id, services, attributes,
+			`select id, phone, whatsapp, full_name, document_id, services, attributes,
 			exists (select 1 from employees where contact_id = contacts.id) as is_employee
 			from contacts where id = ?`
 		)
@@ -374,6 +398,36 @@ export async function updateContact(
 	return applyEdit(db, actor, { row, columns: { ...columns, document_id: documentId } });
 }
 
+/**
+ * The name of another contact with this username, any case, for the forms to warn under the field;
+ * null when none has it or it isn't a valid one. It never stops a save: a username is no key.
+ */
+export async function findWhatsappOwner(
+	db: D1Database,
+	input: { whatsapp: unknown; exceptId: unknown },
+	actor: Actor | null
+): Promise<string | null> {
+	requireRole(actor, EDITS_CONTACTS);
+	const whatsapp = normalizeWhatsapp(z.string().catch('').parse(input.whatsapp));
+	if (null === whatsapp) {
+		return null;
+	}
+	const exceptId = z.coerce
+		.number()
+		.int()
+		.catch(0)
+		.parse(input.exceptId ?? 0);
+	// Usernames are ASCII, so nocase folds them whole.
+	const owner = await db
+		.prepare(
+			`select full_name from contacts where whatsapp = ? collate nocase and id != ?
+			order by full_name collate nocase, id limit 1`
+		)
+		.bind(whatsapp, exceptId)
+		.first<{ full_name: string }>();
+	return owner?.full_name ?? null;
+}
+
 /** One page of the list; it never loads the whole table. */
 export const CONTACTS_PAGE_SIZE = 20;
 
@@ -393,7 +447,7 @@ const listSchema = z.object({
 export type ContactSummary = {
 	id: number;
 	fullName: string;
-	phone: string;
+	phone: string | null;
 	services: Service[];
 	isEmployee: boolean;
 };
@@ -446,7 +500,7 @@ function serviceClause(service: ContactKind | undefined): Clause | null {
 type SummaryRow = {
 	id: number;
 	full_name: string;
-	phone: string;
+	phone: string | null;
 	services: string;
 	is_employee: number;
 };
@@ -524,7 +578,7 @@ export function newClientStatements(
 export type ClientCandidate = {
 	id: number;
 	fullName: string;
-	phone: string;
+	phone: string | null;
 	address1: string | null;
 	address2: string | null;
 };
@@ -554,7 +608,7 @@ export async function searchClients(
 	}
 	const { results } = await db
 		.prepare(
-			`select id, phone, full_name, document_id, services, attributes, 0 as is_employee
+			`select id, phone, whatsapp, full_name, document_id, services, attributes, 0 as is_employee
 			from contacts where ${clause.sql} order by full_name collate nocase, id limit ?`
 		)
 		.bind(...clause.params, CLIENT_MATCHES)

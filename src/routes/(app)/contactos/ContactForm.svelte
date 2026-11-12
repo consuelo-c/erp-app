@@ -9,6 +9,8 @@
 	import { SERVICE_LABELS } from '$lib/labels';
 	import { formatPhone, normalizePhone } from '$lib/phone';
 	import type { Contact } from '$lib/server/services/contacts';
+	import { formatWhatsapp } from '$lib/whatsapp';
+	import WhatsappField from '../WhatsappField.svelte';
 
 	// A failed save: its message, each field's error, what was typed.
 	type Submitted = {
@@ -30,6 +32,11 @@
 	const value = (name: string, saved: string | null | undefined) =>
 		String(form?.values[name] ?? saved ?? '');
 	const errorOf = (name: string): string | undefined => form?.errors[name];
+
+	// Shown with its `@`, as every username is; typing overrides it until the next load.
+	let whatsapp = $derived(
+		value('whatsapp', contact?.whatsapp ? formatWhatsapp(contact.whatsapp) : null)
+	);
 
 	const chosen = $derived(
 		Array.isArray(form?.values.services) ? form.values.services : (contact?.services ?? [])
@@ -71,24 +78,6 @@
 
 <!-- The submit button sits in the screen's action bar and reaches this form through its `form` attribute. -->
 <form id="contact" class="form-stack" method="POST">
-	<Field
-		label="Teléfono"
-		id="phone"
-		hint="Si es de otro país, escríbelo con + y el indicativo: +13055550142."
-		error={errorOf('phone')}
-	>
-		<Input
-			id="phone"
-			name="phone"
-			type="tel"
-			inputmode="tel"
-			value={value('phone', contact && formatPhone(contact.phone))}
-			placeholder="Ej. 310 442 8890"
-			onblur={tidyPhone}
-			aria-invalid={undefined !== errorOf('phone')}
-			required
-		/>
-	</Field>
 	<Field label="Nombre" id="full_name" error={errorOf('full_name')}>
 		<Input
 			id="full_name"
@@ -118,6 +107,24 @@
 			/>
 		{/if}
 	</Field>
+	<Field
+		label="Teléfono (opcional)"
+		id="phone"
+		hint="Si es de otro país, escríbelo con + y el indicativo: +13055550142."
+		error={errorOf('phone')}
+	>
+		<Input
+			id="phone"
+			name="phone"
+			type="tel"
+			inputmode="tel"
+			value={value('phone', contact && formatPhone(contact.phone))}
+			placeholder="Ej. 310 442 8890"
+			onblur={tidyPhone}
+			aria-invalid={undefined !== errorOf('phone')}
+		/>
+	</Field>
+	<WhatsappField bind:value={whatsapp} exceptId={contact?.id ?? null} error={errorOf('whatsapp')} />
 	<Field label="Correo (opcional)" id="email" error={errorOf('email')}>
 		<Input
 			id="email"

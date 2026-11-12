@@ -57,7 +57,9 @@ test('without a picked contact, the contact and the employee in one batch, each 
 	const id = await hire();
 	expect(await getEmployee(db, id, manager)).toEqual({
 		id,
+		contactId: 1,
 		phone: '573152847710',
+		whatsapp: null,
 		fullName: 'Carlos Vélez',
 		idNumber: '71384902',
 		monthlySalary: 1423500,
@@ -82,6 +84,7 @@ test('a contact picked from the search is reused, its phone, name and ID number 
 		id: 1,
 		fullName: 'Jorge Betancur',
 		phone: '573007712043',
+		whatsapp: null,
 		documentId: null,
 		isEmployee: false
 	};
@@ -150,20 +153,52 @@ test('an ID number another contact has is refused naming that contact', async ()
 	expect(count('contacts')).toBe(1);
 });
 
-test('phone, name and ID number are required', async () => {
+test('name and ID number are required; the phone and the username are not', async () => {
 	const result = await createEmployee(
 		db,
 		{ ...carlos, phone: '', full_name: ' ', document_id: '' },
 		manager
 	);
-	expect(result).toMatchObject({
+	expect(result).toEqual({
 		ok: false,
+		message: expect.any(String),
 		errors: {
-			phone: 'Escribe el teléfono',
 			full_name: 'Escribe el nombre completo',
 			document_id: 'Escribe la cédula'
 		}
 	});
+	const id = await hire({ ...carlos, phone: '', whatsapp: '' });
+	expect(await getEmployee(db, id, manager)).toMatchObject({ phone: null, whatsapp: null });
+});
+
+test("the username is saved on the employee's contact, its change logged with before and after", async () => {
+	const id = await hire({ ...carlos, whatsapp: '@CarlosVelez' });
+	expect(await getEmployee(db, id, manager)).toMatchObject({ whatsapp: 'CarlosVelez' });
+	await updateEmployee(db, { ...carlos, id, whatsapp: 'wa.me/CVelez_' }, manager);
+	expect(await getEmployee(db, id, manager)).toMatchObject({ whatsapp: 'CVelez_' });
+	const edited = events().at(-1)!;
+	expect(edited).toMatchObject({ entity_type: 'CONTACT', action: 'EDITED' });
+	expect(JSON.parse(String(edited.before))).toEqual({ whatsapp: 'CarlosVelez' });
+	expect(JSON.parse(String(edited.after))).toEqual({ whatsapp: 'CVelez_' });
+});
+
+test('an invalid username is a field error on the employee form', async () => {
+	const result = await createEmployee(db, { ...carlos, whatsapp: 'may..c' }, manager);
+	expect(result).toMatchObject({
+		ok: false,
+		errors: { whatsapp: 'Escriba el usuario como aparece en WhatsApp, por ejemplo @mayc47.' }
+	});
+});
+
+test('picking a contact fills in its username', async () => {
+	await createContact(
+		db,
+		{ full_name: 'Jorge Betancur', whatsapp: '@JorgeB', document_id: '71234567' },
+		manager
+	);
+	expect(await searchContactCandidates(db, 'betan', manager)).toMatchObject([
+		{ phone: null, whatsapp: 'JorgeB' }
+	]);
 });
 
 test('editing name, phone or ID number changes the contact, logged as CONTACT EDITED', async () => {

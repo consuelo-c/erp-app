@@ -13,6 +13,8 @@
 	import { formatCivilDate } from '$lib/datetime';
 	import { formatIdNumber, formatPesos } from '$lib/format';
 	import { formatPhone } from '$lib/phone';
+	import { formatWhatsapp } from '$lib/whatsapp';
+	import WhatsappField from '../../WhatsappField.svelte';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import type { PageProps } from './$types';
 
@@ -29,6 +31,11 @@
 	// After a failed save the fields come back with what was typed.
 	const value = (name: string, saved: string) => String(form?.values?.[name] ?? saved);
 	const errorOf = (name: string): string | undefined => form?.errors?.[name];
+
+	// Shown with its `@`; a save reloads the employee, and the field follows what was saved.
+	let whatsapp = $derived(
+		value('whatsapp', data.employee.whatsapp ? formatWhatsapp(data.employee.whatsapp) : '')
+	);
 
 	// Saving stays on the screen: the fields keep what was typed until the reloaded employee replaces it.
 	const keepValues: SubmitFunction = () => {
@@ -63,17 +70,6 @@
 		{:else if form?.saved}
 			<Notice tone="success">Datos guardados con éxito</Notice>
 		{/if}
-		<Field label="Teléfono" id="phone" error={errorOf('phone')}>
-			<Input
-				id="phone"
-				name="phone"
-				type="tel"
-				inputmode="tel"
-				value={value('phone', formatPhone(employee.phone))}
-				aria-invalid={undefined !== errorOf('phone')}
-				required
-			/>
-		</Field>
 		<Field label="Nombre completo" id="full_name" error={errorOf('full_name')}>
 			<Input
 				id="full_name"
@@ -93,6 +89,21 @@
 				required
 			/>
 		</Field>
+		<Field label="Teléfono (opcional)" id="phone" error={errorOf('phone')}>
+			<Input
+				id="phone"
+				name="phone"
+				type="tel"
+				inputmode="tel"
+				value={value('phone', formatPhone(employee.phone))}
+				aria-invalid={undefined !== errorOf('phone')}
+			/>
+		</Field>
+		<WhatsappField
+			bind:value={whatsapp}
+			exceptId={employee.contactId}
+			error={errorOf('whatsapp')}
+		/>
 		<Field label="Salario mensual" id="monthly_salary" error={errorOf('monthly_salary')}>
 			<Input
 				id="monthly_salary"

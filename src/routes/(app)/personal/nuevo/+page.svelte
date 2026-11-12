@@ -13,6 +13,8 @@
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import { formatIdNumber } from '$lib/format';
 	import { formatPhone } from '$lib/phone';
+	import { formatWhatsapp } from '$lib/whatsapp';
+	import WhatsappField from '../../WhatsappField.svelte';
 	import type { ContactCandidate } from '$lib/server/services/employees';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import type { PageProps } from './$types';
@@ -25,6 +27,7 @@
 
 	// Filled in from the contact picked in the search; after a failed submit, what was typed.
 	let phone = $state(value('phone'));
+	let whatsapp = $state(value('whatsapp'));
 	let fullName = $state(value('full_name'));
 	let documentId = $state(value('document_id'));
 	let picked = $state<{ id: number; fullName: string } | null>(
@@ -56,6 +59,7 @@
 	function pick(candidate: ContactCandidate) {
 		picked = { id: candidate.id, fullName: candidate.fullName };
 		phone = formatPhone(candidate.phone);
+		whatsapp = candidate.whatsapp ? formatWhatsapp(candidate.whatsapp) : '';
 		fullName = candidate.fullName;
 		documentId = candidate.documentId ? formatIdNumber(candidate.documentId) : '';
 		candidates = [];
@@ -149,18 +153,6 @@
 			<Notice tone="error">{form.message}</Notice>
 		{/if}
 		<input type="hidden" name="contact_id" value={picked?.id ?? ''} />
-		<Field label="Teléfono" id="phone" error={errorOf('phone')}>
-			<Input
-				id="phone"
-				name="phone"
-				type="tel"
-				inputmode="tel"
-				bind:value={phone}
-				placeholder="Ej. 310 442 8890"
-				aria-invalid={undefined !== errorOf('phone')}
-				required
-			/>
-		</Field>
 		<Field label="Nombre completo" id="full_name" error={errorOf('full_name')}>
 			<Input
 				id="full_name"
@@ -182,6 +174,22 @@
 				required
 			/>
 		</Field>
+		<Field label="Teléfono (opcional)" id="phone" error={errorOf('phone')}>
+			<Input
+				id="phone"
+				name="phone"
+				type="tel"
+				inputmode="tel"
+				bind:value={phone}
+				placeholder="Ej. 310 442 8890"
+				aria-invalid={undefined !== errorOf('phone')}
+			/>
+		</Field>
+		<WhatsappField
+			bind:value={whatsapp}
+			exceptId={picked?.id ?? null}
+			error={errorOf('whatsapp')}
+		/>
 		<Field label="Salario mensual" id="monthly_salary" error={errorOf('monthly_salary')}>
 			<Input
 				id="monthly_salary"

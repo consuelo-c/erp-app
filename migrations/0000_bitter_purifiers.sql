@@ -34,7 +34,8 @@ CREATE INDEX `cash_movements_entity` ON `cash_movements` (`entity_type`,`entity_
 CREATE UNIQUE INDEX `cash_movements_receipt_number` ON `cash_movements` (("amount" > 0),`receipt_number`);--> statement-breakpoint
 CREATE TABLE `contacts` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`phone` text NOT NULL,
+	`phone` text,
+	`whatsapp` text,
 	`full_name` text NOT NULL,
 	`document_id` text NOT NULL,
 	`services` text DEFAULT '[]' NOT NULL,

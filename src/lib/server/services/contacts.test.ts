@@ -6,6 +6,7 @@ import { createMemoryD1 } from '../db/memory-d1';
 import {
 	contactAttributesSchema,
 	createContact,
+	findWhatsappOwner,
 	generateDocumentId,
 	getContact,
 	listContacts,
@@ -75,6 +76,7 @@ test('a contact saves its phone normalized and its optional fields in attributes
 	expect(await getContact(db, id, sales)).toEqual({
 		id,
 		phone: '573104428890',
+		whatsapp: null,
 		fullName: 'Luz Marina Restrepo',
 		documentId: '1036452118',
 		services: ['DECORATOR'],
@@ -99,6 +101,54 @@ test('a phone that is not valid, or a missing name, comes back on its field', as
 			full_name: 'Escribe el nombre'
 		}
 	});
+});
+
+test.each([
+	['a phone only', { phone: '310 442 8890' }, { phone: '573104428890', whatsapp: null }],
+	['a username only', { whatsapp: '@LuzMarinaR' }, { phone: null, whatsapp: 'LuzMarinaR' }],
+	[
+		'both',
+		{ phone: '310 442 8890', whatsapp: 'wa.me/LuzMarinaR' },
+		{ phone: '573104428890', whatsapp: 'LuzMarinaR' }
+	],
+	['neither', { phone: '', whatsapp: ' ' }, { phone: null, whatsapp: null }]
+])('a contact saves with %s', async (_, typed, saved) => {
+	const id = await create({ full_name: 'Luz Marina Restrepo', ...typed });
+	expect(await getContact(db, id, sales)).toMatchObject(saved);
+});
+
+test('a username that is not valid comes back on its field', async () => {
+	const result = await createContact(db, { ...luzMarina, whatsapp: 'mayc.com' }, sales);
+	expect(result).toMatchObject({
+		ok: false,
+		errors: { whatsapp: 'Escriba el usuario como aparece en WhatsApp, por ejemplo @mayc47.' }
+	});
+});
+
+test('a username another contact has, in any case, is named for the warning and still saves', async () => {
+	const luz = await create({ ...luzMarina, whatsapp: 'LuzMarinaR' });
+	const input = { whatsapp: '@luzmarinar', exceptId: null };
+	expect(await findWhatsappOwner(db, input, sales)).toBe('Luz Marina Restrepo');
+	const other = await create({ full_name: 'Luz Marina Arango', whatsapp: 'luzmarinar' });
+	expect(await getContact(db, other, sales)).toMatchObject({ whatsapp: 'luzmarinar' });
+	// The contact's own username doesn't count; an invalid or missing one names no one.
+	expect(await findWhatsappOwner(db, { whatsapp: 'LuzMarinaR', exceptId: other }, sales)).toBe(
+		'Luz Marina Restrepo'
+	);
+	expect(await findWhatsappOwner(db, { whatsapp: 'nadie', exceptId: luz }, sales)).toBeNull();
+	expect(await findWhatsappOwner(db, { whatsapp: 'may..c', exceptId: null }, sales)).toBeNull();
+	expect(await findWhatsappOwner(db, { whatsapp: null, exceptId: null }, sales)).toBeNull();
+	const driver = actorWith('DRIVER');
+	expect(await rejection(findWhatsappOwner(db, input, driver))).toBe(403);
+});
+
+test("changing a contact's username logs it with before and after", async () => {
+	const id = await create({ ...luzMarina, document_id: '1036452118', whatsapp: 'LuzMarinaR' });
+	const edit = { ...luzMarina, id, document_id: '1036452118', whatsapp: '@LuzMarina_R' };
+	expect(await updateContact(db, edit, sales)).toEqual({ ok: true, id });
+	const edited = database.prepare("select before, after from events where action = 'EDITED'").get();
+	expect(JSON.parse(String(edited?.before))).toEqual({ whatsapp: 'LuzMarinaR' });
+	expect(JSON.parse(String(edited?.after))).toEqual({ whatsapp: 'LuzMarina_R' });
 });
 
 test('the email is validated only when it has a value', async () => {
