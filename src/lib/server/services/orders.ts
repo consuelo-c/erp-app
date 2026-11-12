@@ -5,7 +5,7 @@
 import { z } from 'zod';
 import { addDays, getTodaysDate, getWeekStart } from '$lib/datetime';
 import { formatPesos } from '$lib/format';
-import { normalizePhone } from '$lib/phone';
+import { INVALID_WHATSAPP } from '$lib/whatsapp';
 import {
 	calculateOrderTotals,
 	FEE_SOURCES,
@@ -39,7 +39,9 @@ import {
 	INVALID_PHONE,
 	listTransporters,
 	newClientStatements,
+	phoneSchema,
 	searchClause,
+	whatsappSchema,
 	type NewClient,
 	type Transporter
 } from './contacts';
@@ -80,9 +82,19 @@ const textSchema = z.string().min(1);
 const clockTimeSchema = z.iso.time({ precision: -1 });
 
 // SQLite validates nothing: each JSON is checked on write and on read. A new key is a code change.
-export const clientAttributesSchema = z.strictObject({ name: textSchema, phone: textSchema });
+// The phone and the WhatsApp username are each null when not given, and both keys are required.
+export const clientAttributesSchema = z.strictObject({
+	name: textSchema,
+	phone: textSchema.nullable(),
+	whatsapp: textSchema.nullable()
+});
 
-const carrierSchema = z.strictObject({ id: idSchema, name: textSchema, phone: textSchema });
+const carrierSchema = z.strictObject({
+	id: idSchema,
+	name: textSchema,
+	phone: textSchema.nullable(),
+	whatsapp: textSchema.nullable()
+});
 
 function tripSchema<Methods extends readonly [string, ...string[]]>(methods: Methods) {
 	return z
@@ -150,7 +162,7 @@ export const blankable = z
 	.nullish()
 	.transform((value) => value || null);
 
-// The service fills the carrier's name and phone, and the line's name and list price.
+// The service fills the carrier's name, phone and username, and the line's name and list price.
 function tripInputSchema<Methods extends readonly [string, ...string[]]>(
 	methods: Methods,
 	message: string
@@ -186,14 +198,15 @@ export const linesInputSchema = z
 
 /** The «Cliente» fields an order and a quote share. */
 export const clientInputShape = {
-	// Null is «Cliente nuevo»: a contact made from the phone and the name typed.
+	// Null is «Cliente nuevo»: a contact made from the name, the phone and the username typed.
 	client_id: z.number('Escoge el cliente').int().positive('Escoge el cliente').nullable(),
 	// The order's own snapshot of the name: it may say more than the contact does.
 	client_name: z
 		.string('Escribe el nombre del cliente')
 		.trim()
 		.min(1, 'Escribe el nombre del cliente'),
-	client_phone: z.string().optional()
+	client_phone: z.string().optional(),
+	client_whatsapp: z.string().optional()
 };
 
 // Any total sent along is ignored: the service works them out.
@@ -353,21 +366,31 @@ async function findRow(db: D1Database, id: number): Promise<OrderRow | null> {
 
 type ResolvedClient = { snapshot: ClientAttributes; newClient: NewClient | null };
 
-type ClientInput = Pick<OrderInput, 'client_id' | 'client_name' | 'client_phone'>;
+type ClientInput = Pick<
+	OrderInput,
+	'client_id' | 'client_name' | 'client_phone' | 'client_whatsapp'
+>;
 
-// «Cliente nuevo» is made from the phone typed, normalized, and the name typed.
+// «Cliente nuevo» is made from the name typed and the phone and username typed, normalized: each
+// optional, and refused only when typed and not valid.
 function newClient(order: ClientInput): ResolvedClient | Refusal {
-	const phone = normalizePhone(order.client_phone ?? '');
-	if (null === phone) {
+	const phone = phoneSchema.safeParse(order.client_phone);
+	if (!phone.success) {
 		return refusal('client_phone', INVALID_PHONE);
 	}
-	const client = { phone, fullName: order.client_name, documentId: generateDocumentId() };
-	return { snapshot: { name: order.client_name, phone }, newClient: client };
+	const whatsapp = whatsappSchema.safeParse(order.client_whatsapp);
+	if (!whatsapp.success) {
+		return refusal('client_whatsapp', INVALID_WHATSAPP);
+	}
+	const contact = { phone: phone.data, whatsapp: whatsapp.data };
+	const client = { ...contact, fullName: order.client_name, documentId: generateDocumentId() };
+	return { snapshot: { name: order.client_name, ...contact }, newClient: client };
 }
 
-// The order keeps the name typed and the phone it was taken with: renaming the contact, or
-// changing its phone, later changes nothing. No existing contact is ever written from here.
-// A quote takes its client the same way.
+// The order keeps the name typed and the phone and username it was taken with: renaming the
+// contact, or changing either, later changes nothing. Picking a contact takes its values, never
+// the typed ones. No existing contact is ever written from here. A quote takes its client the
+// same way.
 export async function resolveClient(
 	db: D1Database,
 	order: ClientInput,
@@ -380,13 +403,13 @@ export async function resolveClient(
 		return { snapshot: { ...current.client, name: order.client_name }, newClient: null };
 	}
 	const contact = await db
-		.prepare('select phone from contacts where id = ?')
+		.prepare('select phone, whatsapp from contacts where id = ?')
 		.bind(order.client_id)
-		.first<{ phone: string }>();
+		.first<{ phone: string | null; whatsapp: string | null }>();
 	if (null === contact) {
 		return refusal('client_id', 'Ese cliente no existe');
 	}
-	return { snapshot: { name: order.client_name, phone: contact.phone }, newClient: null };
+	return { snapshot: { name: order.client_name, ...contact }, newClient: null };
 }
 
 // A JSON key has no foreign key: the carrier must be a contact offering TRANSPORTER. One already
@@ -401,7 +424,7 @@ async function snapshotCarrier(
 	}
 	return db
 		.prepare(
-			`select id, full_name as name, phone from contacts where id = ?
+			`select id, full_name as name, phone, whatsapp from contacts where id = ?
 			and exists (select 1 from json_each(contacts.services) where value = 'TRANSPORTER')`
 		)
 		.bind(carrierId)

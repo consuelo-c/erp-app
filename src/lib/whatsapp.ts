@@ -2,6 +2,8 @@
 // without the `@`, the case as typed, and shown with it. WhatsApp ignores case, and so does every
 // comparison: `CarlosCastro` and `carloscastro` are one username. It's no key: it identifies no one.
 
+import { formatPhone } from './phone';
+
 export const INVALID_WHATSAPP = 'Escriba el usuario como aparece en WhatsApp, por ejemplo @mayc47.';
 
 // WhatsApp's own rules: 3 to 35 English letters, digits, `.` and `_`, at least one letter.
@@ -27,4 +29,19 @@ export function normalizeWhatsapp(typed: string): string | null {
 /** A stored username as people read it: always with its `@`. */
 export function formatWhatsapp(username: string): string {
 	return `@${username}`;
+}
+
+/**
+ * A person as a picker lists them: the name and the phone, or the username when there's no phone,
+ * or the name alone with neither. «Wilson Muñoz · @WilsonMudanzas».
+ */
+export function formatNameAndReach(
+	name: string,
+	phone: string | null,
+	username: string | null
+): string {
+	if (null !== phone) {
+		return `${name} · ${formatPhone(phone)}`;
+	}
+	return null === username ? name : `${name} · ${formatWhatsapp(username)}`;
 }

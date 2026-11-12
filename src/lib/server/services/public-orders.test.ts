@@ -276,7 +276,7 @@ test('events from 30 days past on, with no upper limit', async () => {
 test("a quote is never in the lookup, even with the client's phone and its event date", async () => {
 	database.exec(
 		`insert into quotes (public_token, client_id, event_date, valid_until, rental_days, client_attributes, quote_items, items_total, quote_total, created_at, created_by, updated_at, updated_by)
-		values ('${crypto.randomUUID()}', 1, '2026-10-31', '2026-12-31', 1, '{"name":"Luz Marina Restrepo","phone":"573104428890"}', '[]', 0, 0, ${AUDIT})`
+		values ('${crypto.randomUUID()}', 1, '2026-10-31', '2026-12-31', 1, '{"name":"Luz Marina Restrepo","phone":"573104428890","whatsapp":null}', '[]', 0, 0, ${AUDIT})`
 	);
 	expect(await lookup('3104428890', '2026-10-31')).toEqual([]);
 });

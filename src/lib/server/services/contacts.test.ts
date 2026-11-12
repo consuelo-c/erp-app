@@ -228,7 +228,12 @@ test('Contactos never creates a contact without a real document', async () => {
 /** A contact as «Cliente nuevo» on the order form leaves it: an automatic document. */
 async function newClient(): Promise<{ id: number; automatic: string }> {
 	const automatic = generateDocumentId();
-	const client = { phone: '573104428890', fullName: 'Luz Marina Restrepo', documentId: automatic };
+	const client = {
+		phone: '573104428890',
+		whatsapp: null,
+		fullName: 'Luz Marina Restrepo',
+		documentId: automatic
+	};
 	const [inserted] = await db.batch(newClientStatements(db, sales, client));
 	return { id: inserted.meta.last_row_id, automatic };
 }
@@ -407,6 +412,7 @@ test('the order form finds clients by name, address or phone, by name, with thei
 			id: companyId,
 			fullName: 'Eventos Restrepo S.A.S.',
 			phone: '573104428890',
+			whatsapp: null,
 			address1: null,
 			address2: null
 		},
@@ -414,6 +420,7 @@ test('the order form finds clients by name, address or phone, by name, with thei
 			id: luzMarinaId,
 			fullName: 'Luz Marina Restrepo',
 			phone: '573104428890',
+			whatsapp: null,
 			address1: 'Cra 43A #18-95, El Poblado',
 			address2: 'Piso 2'
 		}
@@ -425,8 +432,12 @@ test('the order form finds clients by name, address or phone, by name, with thei
 	expect(await rejection(searchClients(db, 'luz', actorWith('WAREHOUSE')))).toBe(403);
 });
 
-test('the transporters are the contacts with TRANSPORTER, by name', async () => {
-	await create({ phone: '311 908 5512', full_name: 'Wilson Muñoz', services: ['TRANSPORTER'] });
+test('the transporters are the contacts with TRANSPORTER, by name, with phone and username', async () => {
+	await create({
+		whatsapp: '@WilsonMudanzas',
+		full_name: 'Wilson Muñoz',
+		services: ['TRANSPORTER']
+	});
 	await create({
 		phone: '604 444 1290',
 		full_name: 'Transportes La 80',
@@ -438,4 +449,9 @@ test('the transporters are the contacts with TRANSPORTER, by name', async () => 
 		'Transportes La 80',
 		'Wilson Muñoz'
 	]);
+	expect((await listTransporters(db, sales))[1]).toMatchObject({
+		fullName: 'Wilson Muñoz',
+		phone: null,
+		whatsapp: 'WilsonMudanzas'
+	});
 });

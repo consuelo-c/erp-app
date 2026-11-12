@@ -9,7 +9,9 @@ import {
 	advanceOrder,
 	cancelOrder,
 	checkOrderSchedule,
+	clientAttributesSchema,
 	createExtension,
+	deliveryAttributesSchema,
 	getAvailability,
 	getOrder,
 	getOrderChange,
@@ -296,12 +298,14 @@ test('an external carrier is required, must exist and be a transporter; each dir
 	expect(order.delivery.carrier).toEqual({
 		id: WILSON,
 		name: 'Wilson Muñoz',
-		phone: '573119085512'
+		phone: '573119085512',
+		whatsapp: null
 	});
 	expect(order.pickup.carrier).toEqual({
 		id: ABURRA,
 		name: 'Transportes Aburrá',
-		phone: '573005550101'
+		phone: '573005550101',
+		whatsapp: null
 	});
 });
 
@@ -846,7 +850,7 @@ test('no order at all is one empty page', async () => {
 test('the name search ignores accents, tildes, case and extra spaces, every word in any order', async () => {
 	const [luzMarina, jorge] = await createThree();
 	database.exec(
-		`update orders set client_attributes = '{"name":"ÁNGELA MARÍA NÚÑEZ ARGÜELLO","phone":"573000000000"}' where id = ${luzMarina}`
+		`update orders set client_attributes = '{"name":"ÁNGELA MARÍA NÚÑEZ ARGÜELLO","phone":"573000000000","whatsapp":null}' where id = ${luzMarina}`
 	);
 	expect(await listIds({ text: 'ivan     betancur' })).toEqual([jorge]);
 	expect(await listIds({ text: '  BETANCUR   jorge ' })).toEqual([jorge]);
@@ -1025,7 +1029,8 @@ test("the order's name is the one typed: it may say more than the contact, which
 	const id = await create({ ...order1043, client_name: 'Luz Marina Restrepo — boda Gil' });
 	expect((await read(id)).client).toEqual({
 		name: 'Luz Marina Restrepo — boda Gil',
-		phone: '573104428890'
+		phone: '573104428890',
+		whatsapp: null
 	});
 	const contact = database.prepare('select full_name from contacts where id = 1').get();
 	expect(contact?.full_name).toBe('Luz Marina Restrepo');
@@ -1067,12 +1072,137 @@ test('«Cliente nuevo» makes the contact and the order in one batch, linked by 
 	]);
 });
 
-test('«Cliente nuevo» needs a phone that normalizes, and writes nothing otherwise', async () => {
+test('«Cliente nuevo» needs a typed phone that normalizes, and writes nothing otherwise', async () => {
 	const fresh = { ...order1043, client_id: null, client_name: 'Gloria', client_phone: '12' };
 	const result = await createOrder(db, fresh, sales);
 	expect(result).toMatchObject({ ok: false, errors: { client_phone: expect.any(String) } });
 	expect(database.prepare('select count(*) as count from contacts').get()).toEqual({ count: 4 });
 	expect(database.prepare('select count(*) as count from orders').get()).toEqual({ count: 0 });
+});
+
+test('«Cliente nuevo» saves the typed phone and username on the contact, in the same batch', async () => {
+	const fresh = {
+		...order1043,
+		client_id: null,
+		client_name: 'Gloria Patricia Henao',
+		client_phone: '315 220 7781',
+		client_whatsapp: ' @GloriaH '
+	};
+	const id = await create(fresh);
+	const contact = database
+		.prepare("select id, phone, whatsapp from contacts where full_name = 'Gloria Patricia Henao'")
+		.get();
+	expect(contact).toMatchObject({ phone: '573152207781', whatsapp: 'GloriaH' });
+	expect(await read(id)).toMatchObject({
+		clientId: contact?.id,
+		client: { name: 'Gloria Patricia Henao', phone: '573152207781', whatsapp: 'GloriaH' }
+	});
+});
+
+test('«Cliente nuevo» saves with only a username, or with neither', async () => {
+	const onlyUsername = await create({
+		...order1043,
+		client_id: null,
+		client_name: 'Mayra Castaño',
+		client_phone: '',
+		client_whatsapp: 'wa.me/MayC47'
+	});
+	expect((await read(onlyUsername)).client).toEqual({
+		name: 'Mayra Castaño',
+		phone: null,
+		whatsapp: 'MayC47'
+	});
+	const neither = await create({
+		...order1043,
+		client_id: null,
+		client_name: 'Andrés Gil',
+		client_phone: undefined
+	});
+	expect((await read(neither)).client).toEqual({ name: 'Andrés Gil', phone: null, whatsapp: null });
+	const saved = database
+		.prepare(
+			"select phone, whatsapp from contacts where full_name in ('Mayra Castaño', 'Andrés Gil') order by id"
+		)
+		.all();
+	expect(saved).toEqual([
+		{ phone: null, whatsapp: 'MayC47' },
+		{ phone: null, whatsapp: null }
+	]);
+});
+
+test("«Cliente nuevo» refuses a username that isn't one, and writes nothing", async () => {
+	const fresh = { ...order1043, client_id: null, client_name: 'Gloria', client_whatsapp: 'may-c' };
+	const result = await createOrder(db, fresh, sales);
+	expect(result).toMatchObject({
+		ok: false,
+		errors: { client_whatsapp: 'Escriba el usuario como aparece en WhatsApp, por ejemplo @mayc47.' }
+	});
+	expect(database.prepare('select count(*) as count from contacts').get()).toEqual({ count: 4 });
+});
+
+test("picking a contact freezes its phone and username, not the typed ones, and later edits don't reach the order", async () => {
+	database.exec("update contacts set whatsapp = 'LuzMarinaR' where id = 1");
+	const typed = { ...order1043, client_phone: '300 000 0000', client_whatsapp: '@otro_usuario' };
+	const id = await create(typed);
+	expect((await read(id)).client).toEqual({
+		name: 'Luz Marina Restrepo',
+		phone: '573104428890',
+		whatsapp: 'LuzMarinaR'
+	});
+	database.exec("update contacts set phone = null, whatsapp = 'LuzMa' where id = 1");
+	expect((await read(id)).client).toMatchObject({ phone: '573104428890', whatsapp: 'LuzMarinaR' });
+	expect(await updateOrder(db, { ...typed, id, client_whatsapp: '' }, sales)).toEqual({
+		ok: true,
+		id
+	});
+	expect((await read(id)).client).toMatchObject({ phone: '573104428890', whatsapp: 'LuzMarinaR' });
+});
+
+test("the snapshots' Zod schemas require both the phone and the username, each a string or null", () => {
+	const client = { name: 'Luz Marina Restrepo', phone: null, whatsapp: 'LuzMarinaR' };
+	expect(clientAttributesSchema.safeParse(client).success).toBe(true);
+	expect(clientAttributesSchema.safeParse({ name: 'Luz', phone: '573104428890' }).success).toBe(
+		false
+	);
+	expect(clientAttributesSchema.safeParse({ name: 'Luz', whatsapp: null }).success).toBe(false);
+	const trip = {
+		method: 'EXTERNAL_CARRIER',
+		time: null,
+		address_1: 'Calle 10',
+		address_2: null,
+		notes: null
+	};
+	const carrier = { id: 2, name: 'Wilson Muñoz', phone: null, whatsapp: 'WilsonMudanzas' };
+	expect(deliveryAttributesSchema.safeParse({ ...trip, carrier }).success).toBe(true);
+	const noUsername = { id: 2, name: 'Wilson Muñoz', phone: null };
+	expect(deliveryAttributesSchema.safeParse({ ...trip, carrier: noUsername }).success).toBe(false);
+	const noPhone = { id: 2, name: 'Wilson Muñoz', whatsapp: 'WilsonMudanzas' };
+	expect(deliveryAttributesSchema.safeParse({ ...trip, carrier: noPhone }).success).toBe(false);
+});
+
+test("picking an external carrier freezes his username with his phone, null when he hasn't one", async () => {
+	database.exec(
+		`insert into contacts (phone, whatsapp, full_name, document_id, services, created_at, created_by, updated_at, updated_by)
+		values (null, 'WilsonMudanzas', 'Wilson Mudanzas', '71555444', '["TRANSPORTER"]', ${AUDIT})`
+	);
+	const carrierId = Number(
+		database.prepare("select id from contacts where document_id = '71555444'").get()?.id
+	);
+	const delivery = { ...order1043.delivery_attributes, method: 'EXTERNAL_CARRIER' };
+	const pickup = { ...order1043.pickup_attributes, method: 'EXTERNAL_CARRIER' };
+	const id = await create({
+		...order1043,
+		delivery_attributes: { ...delivery, carrier_id: carrierId },
+		pickup_attributes: { ...pickup, carrier_id: WILSON }
+	});
+	const order = await read(id);
+	expect(order.delivery.carrier).toEqual({
+		id: carrierId,
+		name: 'Wilson Mudanzas',
+		phone: null,
+		whatsapp: 'WilsonMudanzas'
+	});
+	expect(order.pickup.carrier).toMatchObject({ phone: '573119085512', whatsapp: null });
 });
 
 test('«Cliente nuevo» on an edit makes the contact and moves the order to it', async () => {

@@ -61,7 +61,7 @@ function insertQuote({
 	database
 		.prepare(
 			`insert into quotes (public_token, client_id, order_id, event_date, valid_until, rental_days, client_attributes, quote_items, items_total, discount, transport_cost, quote_total, attributes, created_at, created_by, updated_at, updated_by)
-			values (?, 1, ?, '2026-12-12', ?, 1, '{"name":"Postobón S.A.","phone":"576045765100"}', ?, 440000, 40000, ?, ?, '{"address_1":"Hacienda Fizebad","notes":"Montaje desde las 7:00 a.m."}', unixepoch('2026-10-14 15:00:00'), 'ventas', 0, 'ventas')`
+			values (?, 1, ?, '2026-12-12', ?, 1, '{"name":"Postobón S.A.","phone":"576045765100","whatsapp":null}', ?, 440000, 40000, ?, ?, '{"address_1":"Hacienda Fizebad","notes":"Montaje desde las 7:00 a.m."}', unixepoch('2026-10-14 15:00:00'), 'ventas', 0, 'ventas')`
 		)
 		.run(token, orderId ?? null, validUntil, JSON.stringify(ITEMS), transportCost, total);
 	return token;

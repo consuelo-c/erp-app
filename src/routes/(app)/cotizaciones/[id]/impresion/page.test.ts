@@ -25,7 +25,7 @@ const quote = {
 	state: 'VALID',
 	clientId: 1,
 	orderId: null,
-	client: { name: 'Postobón S.A.', phone: '576045765100' },
+	client: { name: 'Postobón S.A.', phone: '576045765100', whatsapp: null },
 	eventDate: null,
 	validUntil: '2026-12-03',
 	rentalDays: 1,

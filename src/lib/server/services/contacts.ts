@@ -534,8 +534,16 @@ export async function listContacts(
 	return { contacts: results.map(toSummary), total, pageCount, filters };
 }
 
-/** A client added from the order form: the phone and the name typed, and an automatic document. */
-export type NewClient = { phone: string; fullName: string; documentId: string };
+/**
+ * A client added from the order form: the name, and the phone and username typed, each optional,
+ * and an automatic document.
+ */
+export type NewClient = {
+	phone: string | null;
+	whatsapp: string | null;
+	fullName: string;
+	documentId: string;
+};
 
 /**
  * The contact's insert and its `CREATED` event, for the order's own `db.batch()`: the order then
@@ -552,6 +560,7 @@ export function newClientStatements(
 		actor,
 		values: {
 			phone: client.phone,
+			whatsapp: client.whatsapp,
 			full_name: client.fullName,
 			document_id: client.documentId,
 			services: '[]',
@@ -565,6 +574,7 @@ export type ClientCandidate = {
 	id: number;
 	fullName: string;
 	phone: string | null;
+	whatsapp: string | null;
 	address1: string | null;
 	address2: string | null;
 };
@@ -599,17 +609,23 @@ export async function searchClients(
 		)
 		.bind(...clause.params, CLIENT_MATCHES)
 		.all<ContactRow>();
-	return results.map(toContact).map(({ id, fullName, phone, address1, address2 }) => ({
+	return results.map(toContact).map(({ id, fullName, phone, whatsapp, address1, address2 }) => ({
 		id,
 		fullName,
 		phone,
+		whatsapp,
 		address1,
 		address2
 	}));
 }
 
 /** A carrier the order form offers: a contact with TRANSPORTER in its services. */
-export type Transporter = { id: number; fullName: string; phone: string };
+export type Transporter = {
+	id: number;
+	fullName: string;
+	phone: string | null;
+	whatsapp: string | null;
+};
 
 /** Every transporter by name, filtered in SQL. Creating one is the manager's, in Contactos. */
 export async function listTransporters(
@@ -619,7 +635,7 @@ export async function listTransporters(
 	requireRole(actor, EDITS_CONTACTS);
 	const { results } = await db
 		.prepare(
-			`select id, full_name as fullName, phone from contacts
+			`select id, full_name as fullName, phone, whatsapp from contacts
 			where exists (select 1 from json_each(contacts.services) where value = 'TRANSPORTER')
 			order by full_name collate nocase, id`
 		)

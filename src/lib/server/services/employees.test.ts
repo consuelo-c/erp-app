@@ -57,6 +57,7 @@ const jorge = { phone: '300 771 2043', full_name: 'Jorge Iván Betancur', docume
 async function newClient(): Promise<void> {
 	const client = {
 		phone: '573007712043',
+		whatsapp: null,
 		fullName: 'Jorge Betancur',
 		documentId: generateDocumentId()
 	};
