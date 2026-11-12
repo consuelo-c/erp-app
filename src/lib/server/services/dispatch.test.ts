@@ -3,7 +3,8 @@ import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
 import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
 import { getDispatchDay } from './dispatch';
-import { advanceOrder, createExtension, createOrder } from './orders';
+import { advanceOrder, cancelOrder, createExtension } from './orders';
+import { createOrder } from '../db/test-orders';
 
 const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
 const driver: Actor = { ...sales, username: 'conductor', roles: ['DRIVER'] };
@@ -93,7 +94,7 @@ test("at 8 p.m. in Bogotá it's still that day: tomorrow's order doesn't show", 
 	expect(day.rows.map((row) => row.id)).toEqual([today]);
 });
 
-test('a day holds every method and every state but a draft or a cancelled one', async () => {
+test('a day holds every method and every state but a cancelled one', async () => {
 	const client = await create('PICKED', { delivery: { method: 'CLIENT_PICKUP', time: '08:00' } });
 	const returned = await create('COMPLETED', {
 		delivery_date: '2026-08-12',
@@ -101,8 +102,9 @@ test('a day holds every method and every state but a draft or a cancelled one', 
 		pickup: { method: 'CLIENT_RETURN', time: '10:00' }
 	});
 	const delivered = await create('DELIVERED');
-	await create('DRAFT', { pickup_date: TODAY });
 	await create('CANCELLED', { pickup_date: TODAY });
+	const onItsWay = await create('OUT_FOR_DELIVERY', { pickup_date: TODAY });
+	await cancelOrder(db, { id: onItsWay, reason: 'Llegó tarde' }, sales);
 	expect(await trips()).toEqual([
 		`delivery ${client}`,
 		`pickup ${returned}`,
@@ -201,7 +203,6 @@ test('another day holds only what is dated on it, none late, whatever its state'
 	const SUNDAY = '2026-08-16';
 	const stillConfirmed = await create('CONFIRMED', { delivery_date: '2026-08-15' });
 	const delivery = await create('CONFIRMED', { delivery_date: SUNDAY, pickup_date: '2026-08-17' });
-	await create('DRAFT', { delivery_date: SUNDAY });
 	await create('CANCELLED', { delivery_date: SUNDAY });
 	await create('CONFIRMED', { delivery_date: '2026-08-13', pickup_date: '2026-08-15' });
 	const day = await getDispatchDay(db, SUNDAY, driver);

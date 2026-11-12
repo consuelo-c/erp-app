@@ -3,7 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
 import type { Actor, Role } from '$lib/server/actor';
 import { createMemoryD1 } from '$lib/server/db/memory-d1';
-import { createOrder } from '$lib/server/services/orders';
+import { createOrder } from '$lib/server/db/test-orders';
 import { handle } from '../../../hooks.server';
 import { load as loadLayout } from './+layout.server';
 import { load } from './+page.server';
@@ -89,12 +89,9 @@ test('an employee goes to the order in the dashboard: sales to Pedidos, the rest
 	}
 });
 
-test("a draft or an event 31 days past: the employee still goes to it, the client doesn't see it", async () => {
-	const draft = await create('DRAFT');
+test("an event 31 days past: the employee still goes to it, the client doesn't see it", async () => {
 	const old = await create('COMPLETED', '2026-09-27');
-	expect(await redirectOf(draft, actor('SALES'))).toBe('/pedidos/1');
-	expect(await redirectOf(old, actor('SALES'))).toBe('/pedidos/2');
-	await expect(open(draft)).rejects.toSatisfy(isUnavailable);
+	expect(await redirectOf(old, actor('SALES'))).toBe('/pedidos/1');
 	await expect(open(old)).rejects.toSatisfy(isUnavailable);
 });
 

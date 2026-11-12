@@ -37,9 +37,10 @@
 
 	// The grid: an expandable compact row per line on a phone, one open at a time; an invoice table
 	// on a desktop. Products are added from a search over the active catalog, accents and case
-	// folded; each variant is its own product. Availability only warns. Ctrl-K jumps to the search,
-	// the arrows move through its results, and Enter adds the first or the focused one and moves on
-	// to its quantity.
+	// folded; each variant is its own product. Availability only warns. On a phone the search climbs
+	// to the top of the screen as it's typed in, its results below it; on a desktop it's a dialog,
+	// also opened with Ctrl+K from any field. The arrows move through the results, and Enter, a click
+	// or a tap adds the first or the chosen one and moves on to its quantity.
 	interface Props {
 		lines: FormLine[];
 		products: CatalogProduct[];
@@ -72,6 +73,7 @@
 	const showsAvailability = $derived(undefined !== availability);
 
 	const SEARCH_ID = 'product-search';
+	const DIALOG_SEARCH_ID = 'product-search-dialog';
 
 	let query = $state('');
 	// The phone's row a product was just added to, or picked again from the search, opens.
@@ -167,36 +169,41 @@
 			: '';
 	}
 
-	let resultList: HTMLElement | undefined = $state();
+	let dialog: HTMLDialogElement | undefined = $state();
 
-	function resultButtons(): Iterable<HTMLElement> {
-		return resultList?.querySelectorAll<HTMLElement>('.result') ?? [];
+	// The results of whichever search is in use: the phone's field or the desktop's dialog.
+	function resultButtons(searchId: string): Iterable<HTMLElement> {
+		const list = document.getElementById(searchId)?.closest('.search-area');
+		return list?.querySelectorAll<HTMLElement>('.result') ?? [];
 	}
 
 	// Enter would submit the order: it adds the first result instead. Down goes to the results.
 	function keyInSearch(event: KeyboardEvent) {
+		const search = event.currentTarget as HTMLElement;
 		if ('Enter' !== event.key) {
-			moveThroughResults(event, event.currentTarget as HTMLElement, resultButtons());
+			moveThroughResults(event, search, resultButtons(search.id));
 			return;
 		}
 		event.preventDefault();
 		if (found.length) {
-			addAndFocus(found[0]);
+			pick(found[0]);
 		}
 	}
 
 	function keyInResults(event: KeyboardEvent, product: CatalogProduct) {
 		if ('Enter' === event.key) {
 			event.preventDefault();
-			addAndFocus(product);
+			pick(product);
 			return;
 		}
-		moveThroughResults(event, document.getElementById(SEARCH_ID), resultButtons());
+		const searchId = dialog?.open ? DIALOG_SEARCH_ID : SEARCH_ID;
+		moveThroughResults(event, document.getElementById(searchId), resultButtons(searchId));
 	}
 
-	// From the keyboard, the added line's quantity takes the focus, in whichever of the phone's
-	// rows or the desktop's table is showing.
-	async function addAndFocus(product: CatalogProduct) {
+	// By mouse, tap or keyboard, the added line's quantity takes the focus, in whichever of the
+	// phone's rows or the desktop's table is showing: on a phone, the number keyboard opens.
+	async function pick(product: CatalogProduct) {
+		dialog?.close();
 		add(product);
 		await tick();
 		const inputs = document.querySelectorAll<HTMLInputElement>(`[data-qty="${product.id}"]`);
@@ -205,11 +212,38 @@
 		shown?.select();
 	}
 
+	function openDialog() {
+		dialog?.showModal();
+		document.getElementById(DIALOG_SEARCH_ID)?.focus();
+	}
+
+	// The phone's field when it's the one showing, else the desktop's dialog.
 	function focusSearch(event: KeyboardEvent) {
-		if (event.ctrlKey && 'k' === event.key.toLowerCase()) {
-			event.preventDefault();
-			document.getElementById(SEARCH_ID)?.focus();
+		if (!event.ctrlKey || 'k' !== event.key.toLowerCase()) {
+			return;
 		}
+		event.preventDefault();
+		const field = document.getElementById(SEARCH_ID);
+		if (null !== field?.offsetParent) {
+			field?.focus();
+		} else {
+			openDialog();
+		}
+	}
+
+	// The phone's results, once there's something typed: the search climbs to the top of the
+	// screen, and the list takes the height left below it, above the keyboard when it's open.
+	function climb(list: HTMLElement) {
+		const area = list.closest<HTMLElement>('.search-area');
+		area?.scrollIntoView({ block: 'start' });
+		const fit = () => {
+			const viewport = window.visualViewport;
+			const bottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
+			list.style.maxHeight = `${Math.max(160, bottom - list.getBoundingClientRect().top - 8)}px`;
+		};
+		fit();
+		window.visualViewport?.addEventListener('resize', fit);
+		return () => window.visualViewport?.removeEventListener('resize', fit);
 	}
 </script>
 
@@ -375,51 +409,101 @@
 	<span>Subtotal</span><span>{formatPesos(pricing.itemsTotal)}</span>
 </div>
 
+{#snippet results()}
+	{#each found as product (product.id)}
+		<button
+			class="result"
+			type="button"
+			onclick={() => pick(product)}
+			onkeydown={(event) => keyInResults(event, product)}
+		>
+			<span class="result__text">
+				<span>{product.name}</span>
+				{#if showsAvailability}
+					<span class="meta">{availabilityText(product.id)}</span>
+				{/if}
+			</span>
+			<span class="result__price">{formatPesos(product.rentalPrice)}</span>
+			<Icon name="plus" size="sm" />
+		</button>
+	{/each}
+{/snippet}
+
+{#snippet count()}
+	<p class="meta results__count">
+		{found.length}
+		{1 === found.length ? 'resultado' : 'resultados'}
+	</p>
+{/snippet}
+
 {#if !original}
-	<label class="search">
-		<Icon name="search" size="sm" />
-		<Input
-			id={SEARCH_ID}
-			type="search"
-			placeholder="Buscar producto para agregar…"
-			aria-label="Buscar producto"
+	<!-- A phone: the field stays below the subtotal, and climbs once something is typed. -->
+	<div class="search-area phone-only">
+		<label class="search">
+			<Icon name="search" size="sm" />
+			<Input
+				id={SEARCH_ID}
+				type="search"
+				placeholder="Buscar producto para agregar…"
+				aria-label="Buscar producto"
+				bind:value={query}
+				onkeydown={keyInSearch}
+			/>
+		</label>
+		{#if isSearching}
+			<div class="results">
+				{@render count()}
+				<div class="results__list" {@attach climb}>{@render results()}</div>
+			</div>
+		{/if}
+	</div>
+
+	<!-- A desktop: a field-shaped button that opens the search in a dialog. -->
+	<div class="desktop-only">
+		<button
+			class="search search--trigger"
+			type="button"
 			aria-keyshortcuts="Control+K"
 			aria-describedby="product-search-hint"
-			bind:value={query}
-			onkeydown={keyInSearch}
-		/>
-	</label>
-	<p class="meta search__hint" id="product-search-hint">
-		Ctrl+K te trae a esta búsqueda desde cualquier campo.
-	</p>
+			onclick={openDialog}
+		>
+			<Icon name="search" size="sm" />
+			<span>Buscar producto para agregar…</span>
+		</button>
+		<p class="meta search__hint" id="product-search-hint">
+			Ctrl+K abre esta búsqueda desde cualquier campo.
+		</p>
+	</div>
 
-	{#if isSearching}
-		<div class="results">
-			<p class="meta results__count">
-				{found.length}
-				{1 === found.length ? 'resultado' : 'resultados'}
-			</p>
-			<div class="results__list" bind:this={resultList}>
-				{#each found as product (product.id)}
-					<button
-						class="result"
-						type="button"
-						onclick={() => add(product)}
-						onkeydown={(event) => keyInResults(event, product)}
-					>
-						<span class="result__text">
-							<span>{product.name}</span>
-							{#if showsAvailability}
-								<span class="meta">{availabilityText(product.id)}</span>
-							{/if}
-						</span>
-						<span class="result__price">{formatPesos(product.rentalPrice)}</span>
-						<Icon name="plus" size="sm" />
-					</button>
-				{/each}
-			</div>
+	<!-- Esc, the close button or a click on the scrim close it and clear the search. -->
+	<dialog
+		class="picker search-area"
+		aria-label="Buscar producto"
+		bind:this={dialog}
+		onclose={() => (query = '')}
+		onclick={(event) => event.target === event.currentTarget && dialog?.close()}
+	>
+		<div class="picker__head">
+			<label class="search picker__search">
+				<Icon name="search" size="sm" />
+				<Input
+					id={DIALOG_SEARCH_ID}
+					type="search"
+					placeholder="Buscar producto…"
+					aria-label="Buscar producto"
+					bind:value={query}
+					onkeydown={keyInSearch}
+				/>
+			</label>
+			<IconButton icon="close" label="Cerrar" onclick={() => dialog?.close()} />
 		</div>
-	{/if}
+		{#if isSearching}
+			{@render count()}
+			<div class="picker__list">{@render results()}</div>
+		{:else}
+			<p class="meta results__count">{products.length} productos en el catálogo</p>
+		{/if}
+	</dialog>
 {/if}
 
 <style>
@@ -490,7 +574,73 @@
 	}
 
 	.results__list {
-		max-height: 288px;
+		overflow: auto;
+		overscroll-behavior: contain;
+	}
+
+	.search--trigger {
+		box-sizing: border-box;
+		display: flex;
+		gap: var(--space-5);
+		align-items: center;
+		width: 100%;
+		min-height: 48px;
+		padding: 0 var(--space-7);
+		font: var(--type-input);
+		color: var(--text-disabled);
+		text-align: left;
+		cursor: text;
+		background: var(--surface-card);
+		border: var(--border-w) solid var(--border-default);
+		border-radius: var(--radius-input);
+	}
+
+	.search--trigger :global(.icon) {
+		position: static;
+		translate: none;
+	}
+
+	/* The desktop's dialog: centred, at most 640 by 640, the results scrolling inside it. */
+	.picker {
+		box-sizing: border-box;
+		display: none;
+		flex-direction: column;
+		width: min(640px, calc(100% - 64px));
+		height: min(640px, 80dvh);
+		padding: 0;
+		margin: auto;
+		overflow: hidden;
+		color: var(--text-body);
+		background: var(--surface-card);
+		border: var(--border-w-strong) solid var(--border-strong);
+		border-radius: var(--radius-dialog);
+		box-shadow: var(--shadow-dialog);
+	}
+
+	.picker[open] {
+		display: flex;
+	}
+
+	.picker::backdrop {
+		background: var(--scrim);
+	}
+
+	.picker__head {
+		display: flex;
+		gap: var(--space-5);
+		align-items: center;
+		padding: var(--space-7);
+		border-bottom: var(--border-w-hair) solid var(--border-default);
+	}
+
+	.picker__search {
+		flex: 1;
+		margin: 0;
+	}
+
+	.picker__list {
+		flex: 1;
+		min-height: 0;
 		overflow: auto;
 	}
 
@@ -747,6 +897,10 @@
 
 		.table.desktop-only {
 			display: table;
+		}
+
+		div.desktop-only {
+			display: block;
 		}
 	}
 </style>

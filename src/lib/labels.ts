@@ -1,6 +1,7 @@
 // Enum values never reach the screen raw: every one goes through its label map.
 
 import type { Role } from './server/actor';
+import type { FeeSource } from './orders';
 import type { DeductionConcept, EarningConcept } from './payroll';
 import type { CashConcept, PaymentMethod } from './server/services/cash';
 import type { ContactKind, Service } from './server/services/contacts';
@@ -30,7 +31,6 @@ export const ROLE_LABELS: Record<Role, string> = {
 };
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
-	DRAFT: 'Borrador',
 	CONFIRMED: 'Confirmado',
 	PICKED: 'Separado',
 	OUT_FOR_DELIVERY: 'En ruta de entrega',
@@ -61,8 +61,15 @@ export const CASH_CONCEPT_LABELS: Record<CashConcept, string> = {
 	DEPOSIT_REFUND: 'Devolución de depósito',
 	PAYROLL: 'Pago de nómina',
 	CARRIER_PAYMENT: 'Pago a transportador',
+	CANCELLATION_FEE: 'Cargo por cancelación',
 	OTHER_INCOME: 'Otro ingreso',
 	OTHER_EXPENSE: 'Otro egreso'
+};
+
+export const FEE_SOURCE_LABELS: Record<FeeSource, string> = {
+	NEW: 'Dinero nuevo',
+	INSTALLMENTS: 'Retener de los pagos',
+	DEPOSIT: 'Retener del depósito'
 };
 
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {

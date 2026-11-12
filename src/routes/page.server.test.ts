@@ -3,7 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
 import type { Actor } from '$lib/server/actor';
 import { createMemoryD1 } from '$lib/server/db/memory-d1';
-import { createOrder } from '$lib/server/services/orders';
+import { createOrder } from '$lib/server/db/test-orders';
 import { SITEVERIFY_URL } from '$lib/server/turnstile';
 import { actions, load } from './+page.server';
 import { load as loadClientPage } from './mi-pedido/[token]/+page.server';
@@ -149,14 +149,12 @@ test('one match opens its page; two or more list, by id', async () => {
 	});
 });
 
-test('every miss is the same answer: wrong phone, wrong date, a draft, an event too old', async () => {
+test('every miss is the same answer: wrong phone, wrong date, an event too old', async () => {
 	await create('CONFIRMED');
-	await create('DRAFT', '2026-11-07');
 	await create('COMPLETED', '2026-09-27');
 	const misses = await Promise.all([
 		lookup('310 442 8891', '2026-10-31'),
 		lookup('310 442 8890', '2026-11-01'),
-		lookup('310 442 8890', '2026-11-07'),
 		lookup('310 442 8890', '2026-09-27')
 	]);
 	for (const miss of misses) {

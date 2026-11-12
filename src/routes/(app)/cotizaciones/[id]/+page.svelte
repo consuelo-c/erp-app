@@ -20,6 +20,23 @@
 	const quote = $derived(data.quote);
 	const id = $derived(String(quote.id));
 	const isOpen = $derived('CONVERTED' !== quote.state);
+
+	// «Copiar enlace del cliente», in every state: the link is copied, never shown; the notice clears
+	// itself. An expired or converted quote's link opens «ya no está disponible».
+	let copyNotice = $state<string | null>(null);
+	let copyTimer: ReturnType<typeof setTimeout> | undefined;
+
+	async function copyClientLink(token: string) {
+		const link = new URL(resolve('/mi-cotizacion/[token]', { token }), page.url.origin);
+		try {
+			await navigator.clipboard.writeText(link.href);
+			copyNotice = 'Enlace copiado';
+		} catch {
+			copyNotice = 'No se pudo copiar el enlace';
+		}
+		clearTimeout(copyTimer);
+		copyTimer = setTimeout(() => (copyNotice = null), 3000);
+	}
 </script>
 
 <svelte:head>
@@ -40,6 +57,14 @@
 					label="Historial"
 					href={resolve('/(app)/cotizaciones/[id]/historial', { id })}
 				/>
+				{#if data.publicToken}
+					{@const token = data.publicToken}
+					<IconButton
+						icon="copy"
+						label="Copiar enlace del cliente"
+						onclick={() => copyClientLink(token)}
+					/>
+				{/if}
 			{/snippet}
 			<Badge tone={QUOTE_STATE_TONES[quote.state]}>{QUOTE_STATE_LABELS[quote.state]}</Badge>
 		</ScreenHeader>
@@ -171,6 +196,10 @@
 			<Button href="{resolve('/pedidos/nuevo')}?cotizacion={id}">Convertir en pedido</Button>
 		{/if}
 	</div>
+
+	{#if copyNotice}
+		<p class="copy-notice" role="status">{copyNotice}</p>
+	{/if}
 </Screen>
 
 <style>
@@ -214,5 +243,19 @@
 
 	.detail-list .meta {
 		display: block;
+	}
+
+	/* As on the order detail: sticks to the bottom of the scrolling body, above the bottom bar. */
+	.copy-notice {
+		position: sticky;
+		bottom: 0;
+		padding: var(--space-6) var(--space-7);
+		margin-top: var(--space-8);
+		font: var(--weight-semibold) var(--text-base) / 1.3 var(--font-sans);
+		color: var(--surface-card);
+		text-align: center;
+		background: var(--text-body);
+		border-radius: var(--radius-input);
+		box-shadow: var(--shadow-dialog);
 	}
 </style>

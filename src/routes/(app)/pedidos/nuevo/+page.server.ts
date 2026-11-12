@@ -1,34 +1,40 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { requireRole } from '$lib/server/actor';
-import { createOrder, getOrderFormOptions } from '$lib/server/services/orders';
+import { getOrderFormOptions } from '$lib/server/services/orders';
 import { convertQuote, getQuoteConversion } from '$lib/server/services/quotes';
 import { readPostedJson } from '../order-form';
 import type { Actions, PageServerLoad } from './$types';
 
 const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
 
-// `?cotizacion=12` is «Convertir en pedido»: the form opens filled from quote #12, and nothing is
-// written until «Guardar pedido». A converted quote goes back to its detail.
+// An order is born only from a quote: `?cotizacion=12` is «Convertir en pedido», the form filled
+// from quote #12, and nothing is written until «Guardar pedido». No quote, an unknown one, or one
+// that's expired or converted shows why, and no form.
 export const load: PageServerLoad = async ({ locals, platform, url }) => {
 	requireRole(locals.user, TAKES_ORDERS);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
 	const db = platform.env.DB;
-	const options = await getOrderFormOptions(db, locals.user);
 	const quoteId = url.searchParams.get('cotizacion');
 	if (null === quoteId) {
-		return { options, conversion: null };
+		return { refusal: 'Un pedido se crea al convertir una cotización.', quoteId: null };
 	}
 	const conversion = await getQuoteConversion(db, quoteId, locals.user);
 	if (null === conversion) {
-		error(404, 'Esa cotización no existe');
+		return { refusal: 'Esa cotización no existe.', quoteId: null };
 	}
-	if ('CONVERTED' === conversion.quote.state) {
-		redirect(303, resolve('/(app)/cotizaciones/[id]', { id: String(conversion.quote.id) }));
+	const { id, state } = conversion.quote;
+	if ('CONVERTED' === state) {
+		return { refusal: `La cotización #${id} ya se convirtió en pedido.`, quoteId: id };
 	}
-	return { options, conversion };
+	if ('EXPIRED' === state) {
+		const refusal = `La cotización #${id} está vencida: edítala con una nueva fecha de vigencia para convertirla.`;
+		return { refusal, quoteId: id };
+	}
+	const options = await getOrderFormOptions(db, locals.user);
+	return { refusal: null, options, conversion };
 };
 
 export const actions: Actions = {
@@ -37,13 +43,11 @@ export const actions: Actions = {
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}
-		const db = platform.env.DB;
-		const order = readPostedJson(await request.formData(), 'order');
-		const quoteId = url.searchParams.get('cotizacion');
-		const result =
-			null === quoteId
-				? await createOrder(db, order, locals.user)
-				: await convertQuote(db, { quote: quoteId, order }, locals.user);
+		const formData = await request.formData();
+		const order = readPostedJson(formData, 'order');
+		const force = '1' === formData.get('force');
+		const quote = url.searchParams.get('cotizacion');
+		const result = await convertQuote(platform.env.DB, { quote, order, force }, locals.user);
 		if (!result.ok) {
 			return fail(400, result);
 		}

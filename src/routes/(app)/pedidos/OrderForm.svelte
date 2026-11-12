@@ -6,12 +6,12 @@
 	import ClockField from '$lib/components/ClockField.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import Input from '$lib/components/Input.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import Select from '$lib/components/Select.svelte';
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import {
 		addDays,
-		formatCivilDate,
 		formatClockTime,
 		formatDayRange,
 		formatLongDay,
@@ -35,7 +35,8 @@
 		OrderDetail,
 		OrderFormOptions,
 		OrderSchedule,
-		ReturnMethod
+		ReturnMethod,
+		Shortage
 	} from '$lib/server/services/orders';
 	import type { QuoteConversion } from '$lib/server/services/quotes';
 	import ClientSearch from './ClientSearch.svelte';
@@ -53,14 +54,20 @@
 		original?: OrderDetail | null;
 		/** «Convertir en pedido»: the quote a new order comes from. */
 		conversion?: QuoteConversion | null;
-		/** A refused save: its message and each field's. */
-		form: { message: string; errors: Record<string, string> } | null | undefined;
+		/** A refused save: its message and each field's, or what's short for a new order's dates. */
+		form:
+			| { message: string; errors: Record<string, string>; shortages?: Shortage[] }
+			| null
+			| undefined;
 	}
 
 	let { options, order, original = null, conversion = null, form }: Props = $props();
 
 	// While the save is on its way, so the button doesn't post it twice.
 	let isSaving = $state(false);
+
+	// A new order's save that found something short: it asks once, and never blocks.
+	let isShortageOpen = $state(false);
 
 	const FORM_ID = 'order-form';
 	const EMPTY_TIME = { hour: '', minute: '', period: 'am' as const };
@@ -224,11 +231,6 @@
 			? 'el descuento y las notas. Faltan las fechas, los métodos y el transporte.'
 			: 'el descuento, el transporte y las notas. Faltan las fechas y los métodos.'
 	);
-
-	// As the printed date reads: `1 dic. 2026`.
-	function expiredOn(validUntil: string): string {
-		return formatCivilDate(validUntil).replace(/ (\d{4})$/, '. $1');
-	}
 
 	function readFields(): Fields {
 		if (null !== original) {
@@ -471,15 +473,17 @@
 	oninput={refreshSchedule}
 	use:enhance={() => {
 		isSaving = true;
-		return async ({ update }) => {
+		isShortageOpen = false;
+		return async ({ result, update }) => {
 			await update({ reset: false });
 			isSaving = false;
+			isShortageOpen = 'failure' === result.type && undefined !== result.data?.shortages;
 		};
 	}}
 >
 	<input type="hidden" name="order" value={payload} />
 
-	{#if form}
+	{#if form?.message}
 		<div class="order__notice"><Notice tone="error">{form.message}</Notice></div>
 	{/if}
 
@@ -492,14 +496,6 @@
 				cliente, las líneas con sus precios, los días, {quoteNote}
 			</Notice>
 		</div>
-		{#if 'EXPIRED' === quote.state}
-			<div class="order__notice">
-				<Notice tone="warning">
-					⚠ Esta cotización venció el {expiredOn(quote.validUntil)}; los precios pueden haber
-					cambiado.
-				</Notice>
-			</div>
-		{/if}
 	{/if}
 
 	{#if original}
@@ -790,6 +786,26 @@
 
 <UnsavedChangesGuard form={FORM_ID} />
 
+{#if form?.shortages}
+	{@const shortages = form.shortages}
+	<Modal bind:open={isShortageOpen} title="Supera el inventario para esas fechas">
+		{#snippet body()}
+			{#each shortages as shortage (shortage.productId)}
+				<span class="shortage">Faltan {shortage.short} {shortage.name}</span>
+			{/each}
+		{/snippet}
+		{#snippet actions()}
+			<Button type="button" variant="secondary" onclick={() => (isShortageOpen = false)}>
+				Volver
+			</Button>
+			<!-- The submitter's name and value post `force`: the same order, saved short. -->
+			<Button type="submit" form={FORM_ID} name="force" value="1" size="md" disabled={isSaving}>
+				Guardar de todos modos
+			</Button>
+		{/snippet}
+	</Modal>
+{/if}
+
 <style>
 	p {
 		margin: 0;
@@ -893,6 +909,10 @@
 	}
 
 	.detail-list .meta {
+		display: block;
+	}
+
+	.shortage {
 		display: block;
 	}
 

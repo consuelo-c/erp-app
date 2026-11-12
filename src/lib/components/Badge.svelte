@@ -15,7 +15,6 @@
 
 	/** Each order status has its own color, the same on every screen. */
 	export const ORDER_STATUS_TONES: Record<OrderStatus, StatusTone> = {
-		DRAFT: 'draft',
 		CONFIRMED: 'confirmed',
 		PICKED: 'picked',
 		OUT_FOR_DELIVERY: 'out-delivery',

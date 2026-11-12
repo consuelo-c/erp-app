@@ -148,11 +148,11 @@ ON CONFLICT (id) DO NOTHING;
 
 -- Forty-eight orders, every delivery and pickup from Thursday 1 to Sunday 18 October 2026, their
 -- statuses read as if today were Wednesday 14: picked up before it `COMPLETED`, out with the client
--- across it `DELIVERED`, its own trips somewhere along the way, after it `CONFIRMED` or `DRAFT`, and a
--- few `CANCELLED`. The Design Brief's #1043 and #1051 keep their weekdays, #1047 is `DELIVERED` to try
+-- across it `DELIVERED`, its own trips somewhere along the way, after it `CONFIRMED`, and a few
+-- `CANCELLED`. The Design Brief's #1043 and #1051 keep their weekdays, #1047 is `DELIVERED` to try
 -- editing and an extension. Busiest Friday to Sunday; the 12th's holiday has trips, #1043 and #1031
--- deliver at the same date and time, and #1039 would overbook the chairs on the 17th if confirmed, so
--- each warning shows. The confirmed ones never overbook. Explicit ids and fixed tokens, so a second
+-- deliver at the same date and time, and the chairs and tables are short on the 16th, so each warning
+-- shows. Explicit ids and fixed tokens, so a second
 -- run finds them. Clients, carriers and products are looked up by document and name, never by a
 -- rowid another seed run may have moved. Each line is `[name, qty]`, priced here from the catalog
 -- with the formula, so the totals can't drift; a client's own trip is at the company's address.
@@ -260,7 +260,7 @@ sample (id, token, document_id, status, event_date, venue, rental_days, discount
 	(1028, NULL, '1036452118', 'DELIVERED', '2026-10-11', 'torre-verde', 2, 0, 0, 50000,
 		'2026-10-10', 'CLIENT_PICKUP', '09:00', NULL, '2026-10-14', 'CLIENT_RETURN', NULL, NULL,
 		'[["Silla Tiffany dorada",30],["Copa para vino tinto",30]]', NULL),
-	(1051, '5d2b8f16-0e3a-4b7c-9d4f-6a8c0e2b1051', '@7Q2M9KXA', 'DRAFT', '2026-10-17', 'laureles', 2, 44000, 60000, 100000,
+	(1051, '5d2b8f16-0e3a-4b7c-9d4f-6a8c0e2b1051', '@7Q2M9KXA', 'CONFIRMED', '2026-10-17', 'laureles', 2, 44000, 60000, 100000,
 		'2026-10-15', 'CLIENT_PICKUP', '08:00', NULL, '2026-10-18', 'EXTERNAL_CARRIER', '09:00', '98552017',
 		'[["Silla Tiffany dorada",60],["Mesa redonda 10 puestos",6]]', 'Recoge en camioneta propia.'),
 	(1029, NULL, '42889016', 'PICKED', '2026-10-16', 'chuscal', 2, 0, 150000, 100000,
@@ -279,7 +279,7 @@ sample (id, token, document_id, status, event_date, venue, rental_days, discount
 	(1032, NULL, '9013345781', 'CONFIRMED', '2026-10-17', 'villa-fernanda', 2, 250000, 250000, 200000,
 		'2026-10-16', 'EXTERNAL_CARRIER', '10:00', '15387620', '2026-10-18', 'EXTERNAL_CARRIER', '08:00', '98552017',
 		'[["Silla Tiffany dorada",150],["Mesa redonda 10 puestos",12],["Mantel blanco 3×3",12],["Copa para vino tinto",150],["Candelabro de piso 5 brazos",10]]', NULL),
-	(1033, NULL, '@C5VB0PZT', 'DRAFT', '2026-10-17', 'estadio', 1, 0, 60000, 50000,
+	(1033, NULL, '@C5VB0PZT', 'CONFIRMED', '2026-10-17', 'estadio', 1, 0, 60000, 50000,
 		'2026-10-16', 'COMPANY_DELIVERY', '16:00', NULL, '2026-10-17', 'COMPANY_PICKUP', '18:00', NULL,
 		'[["Silla Tiffany dorada",20],["Copa para vino tinto",20]]', NULL),
 	(1034, NULL, '8909041236', 'CONFIRMED', '2026-10-16', 'colegio', 1, 0, 40000, 0,
@@ -288,7 +288,7 @@ sample (id, token, document_id, status, event_date, venue, rental_days, discount
 	(1035, NULL, '@2RXF6HMB', 'CONFIRMED', '2026-10-17', 'sabaneta', 1, 0, 60000, 50000,
 		'2026-10-17', 'COMPANY_DELIVERY', '08:00', NULL, '2026-10-18', 'COMPANY_PICKUP', '17:00', NULL,
 		'[["Silla Tiffany dorada",40],["Plato pando 26cm",40],["Tenedor de mesa",40],["Copa para vino tinto",40]]', NULL),
-	(1036, NULL, '@4MZT7QJD', 'DRAFT', '2026-10-18', 'las-palmas', 1, 0, 0, 0,
+	(1036, NULL, '@4MZT7QJD', 'CONFIRMED', '2026-10-18', 'las-palmas', 1, 0, 0, 0,
 		'2026-10-17', 'CLIENT_PICKUP', '10:00', NULL, '2026-10-18', 'CLIENT_RETURN', NULL, NULL,
 		'[["Silla Tiffany dorada",30],["Mantel cuadrado 50×50 — Verde",3]]', NULL),
 	(1037, NULL, '42889016', 'CONFIRMED', '2026-10-17', 'chuscal', 1, 0, 150000, 100000,
@@ -297,16 +297,16 @@ sample (id, token, document_id, status, event_date, venue, rental_days, discount
 	(1038, NULL, '@8KDN4TWR', 'CANCELLED', '2026-10-17', 'salon-laureles', 1, 0, 60000, 50000,
 		'2026-10-17', 'COMPANY_DELIVERY', '09:00', NULL, '2026-10-18', 'COMPANY_PICKUP', '10:00', NULL,
 		'[["Silla Tiffany dorada",50],["Copa para vino tinto",50]]', NULL),
-	(1039, NULL, '1036452118', 'DRAFT', '2026-10-17', 'torre-verde', 1, 0, 220000, 100000,
+	(1039, NULL, '1036452118', 'CANCELLED', '2026-10-17', 'torre-verde', 1, 0, 220000, 100000,
 		'2026-10-17', 'EXTERNAL_CARRIER', '13:00', '98552017', '2026-10-18', 'EXTERNAL_CARRIER', '15:00', '98552017',
 		'[["Silla Tiffany dorada",150],["Copa para vino tinto",150]]', NULL),
-	(1040, NULL, '1152203874', 'DRAFT', '2026-10-18', 'rodeo', 1, 0, 80000, 50000,
+	(1040, NULL, '1152203874', 'CONFIRMED', '2026-10-18', 'rodeo', 1, 0, 80000, 50000,
 		'2026-10-18', 'COMPANY_DELIVERY', '09:00', NULL, '2026-10-18', 'COMPANY_PICKUP', '19:00', NULL,
 		'[["Silla Tiffany dorada",40],["Mantel blanco 3×3",4]]', NULL),
 	(1041, NULL, '9013345781', 'CONFIRMED', '2026-10-18', 'villa-fernanda', 1, 0, 220000, 100000,
 		'2026-10-18', 'COMPANY_DELIVERY', '10:00', NULL, '2026-10-18', 'COMPANY_PICKUP', '20:00', NULL,
 		'[["Silla Tiffany dorada",100],["Mesa redonda 10 puestos",10],["Copa para vino tinto",100]]', NULL),
-	(1042, NULL, '@C5VB0PZT', 'DRAFT', '2026-10-18', 'estadio', 1, 0, 0, 0,
+	(1042, NULL, '@C5VB0PZT', 'CONFIRMED', '2026-10-18', 'estadio', 1, 0, 0, 0,
 		'2026-10-18', 'CLIENT_PICKUP', '11:00', NULL, '2026-10-18', 'CLIENT_RETURN', NULL, NULL,
 		'[["Silla Tiffany dorada",16],["Copa para vino tinto",16]]', NULL),
 	(1060, NULL, '8909039395', 'COMPLETED', '2026-10-06', 'colegio', 1, 0, 120000, 0,
@@ -425,7 +425,8 @@ ORDER BY column1;
 -- warning, the empty transport on the order form and «Duplicar» repricing and leaving a product out;
 -- and #3, #1043's lines and terms, converted into it. Each line is `[name, qty]` priced from the
 -- catalog with the formula, or `[name, qty, unit_price]` when the price was negotiated. created_at
--- is fixed, not unixepoch(): it's the date the quote prints, and «Válida hasta» counts from it.
+-- is fixed, not unixepoch(): it's the date the quote prints, and «Válida hasta» counts from it. Each
+-- has its own fixed token, so «Su cotización» opens at /mi-cotizacion/00000000-0000-4000-9000-000000000001.
 WITH sample (id, document_id, order_id, event_date, valid_until, rental_days, discount, transport_cost, lines, attributes, created_at) AS (VALUES
 	(1, '8909039395', NULL, '2026-12-12', '2027-12-31', 1, 122000, 250000,
 		'[["Silla Tiffany dorada",200],["Mesa redonda 10 puestos",20],["Mantel blanco 3×3",20],["Copa para vino tinto",200],["Samovar rectangular",4]]',
@@ -456,9 +457,9 @@ totalled AS (
 	SELECT priced.*, (SELECT sum(value ->> 'line_total') FROM json_each(quote_items)) AS items_total
 	FROM priced
 )
-INSERT INTO quotes (id, client_id, order_id, event_date, valid_until, rental_days, client_attributes, quote_items, items_total, discount, transport_cost, quote_total, attributes, created_at, created_by, updated_at, updated_by)
+INSERT INTO quotes (id, public_token, client_id, order_id, event_date, valid_until, rental_days, client_attributes, quote_items, items_total, discount, transport_cost, quote_total, attributes, created_at, created_by, updated_at, updated_by)
 SELECT
-	totalled.id, contacts.id, totalled.order_id, totalled.event_date, totalled.valid_until, totalled.rental_days,
+	totalled.id, printf('00000000-0000-4000-9000-%012d', totalled.id), contacts.id, totalled.order_id, totalled.event_date, totalled.valid_until, totalled.rental_days,
 	json_object('name', contacts.full_name, 'phone', contacts.phone),
 	totalled.quote_items, totalled.items_total, totalled.discount, totalled.transport_cost,
 	totalled.items_total - totalled.discount + coalesce(totalled.transport_cost, 0), totalled.attributes,

@@ -1,7 +1,9 @@
 import { expect, test } from 'vitest';
-import type { OrderStatus } from '$lib/server/services/orders';
+import { ORDER_STATUSES, type OrderStatus } from '$lib/server/services/orders';
 import {
 	calculateOrderTotals,
+	isCancelledOnItsWay,
+	isIncidentReportable,
 	isLegalTransition,
 	LINES_PER_PAGE,
 	nextOperationalStatus,
@@ -46,9 +48,8 @@ function isLegal(from: OrderStatus, to: OrderStatus, methods: Methods = company)
 	return isLegalTransition({ from, to, ...methods });
 }
 
-test('the straight route: confirm, pick, and from out for pickup to completed', () => {
+test('the straight route: pick, and from out for pickup to completed', () => {
 	for (const methods of [company, external, client]) {
-		expect(isLegal('DRAFT', 'CONFIRMED', methods)).toBe(true);
 		expect(isLegal('CONFIRMED', 'PICKED', methods)).toBe(true);
 		expect(isLegal('OUT_FOR_DELIVERY', 'DELIVERED', methods)).toBe(true);
 		expect(isLegal('OUT_FOR_PICKUP', 'COMPLETED', methods)).toBe(true);
@@ -80,7 +81,7 @@ test('the two axes are independent: client pickup with a company return', () => 
 });
 
 test('cancelling is legal until the merchandise reaches the client', () => {
-	for (const from of ['DRAFT', 'CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY'] as const) {
+	for (const from of ['CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY'] as const) {
 		expect(isLegal(from, 'CANCELLED')).toBe(true);
 	}
 	for (const from of ['DELIVERED', 'OUT_FOR_PICKUP', 'COMPLETED', 'CANCELLED'] as const) {
@@ -88,27 +89,22 @@ test('cancelling is legal until the merchandise reaches the client', () => {
 	}
 });
 
-test('a cancelled order reopens as a draft, and only as one', () => {
-	expect(isLegal('CANCELLED', 'DRAFT')).toBe(true);
-	for (const to of ['CONFIRMED', 'PICKED', 'DELIVERED', 'COMPLETED'] as const) {
+test('nothing leaves CANCELLED', () => {
+	for (const to of ORDER_STATUSES) {
 		expect(isLegal('CANCELLED', to)).toBe(false);
 	}
 });
 
-test('skipping a state, going back, leaving COMPLETED and moving into DRAFT are illegal', () => {
+test('skipping a state, going back and leaving COMPLETED are illegal', () => {
 	expect(isLegal('CONFIRMED', 'DELIVERED')).toBe(false);
 	expect(isLegal('PICKED', 'CONFIRMED')).toBe(false);
-	expect(isLegal('DRAFT', 'DRAFT')).toBe(false);
-	for (const from of ['CONFIRMED', 'DELIVERED', 'COMPLETED'] as const) {
-		expect(isLegal(from, 'DRAFT')).toBe(false);
-	}
 	for (const to of ['DELIVERED', 'OUT_FOR_PICKUP', 'CONFIRMED'] as const) {
 		expect(isLegal('COMPLETED', to)).toBe(false);
 		expect(isLegal('CANCELLED', to)).toBe(false);
 	}
 });
 
-test("the status button's one target follows the methods; draft, cancelled and completed have none", () => {
+test("the status button's one target follows the methods; cancelled and completed have none", () => {
 	const next = (from: OrderStatus, methods: Methods = company) =>
 		nextOperationalStatus({ from, ...methods });
 	expect(next('CONFIRMED')).toBe('PICKED');
@@ -116,9 +112,24 @@ test("the status button's one target follows the methods; draft, cancelled and c
 	expect(next('PICKED', client)).toBe('DELIVERED');
 	expect(next('DELIVERED')).toBe('OUT_FOR_PICKUP');
 	expect(next('DELIVERED', client)).toBe('COMPLETED');
-	for (const from of ['DRAFT', 'CANCELLED', 'COMPLETED'] as const) {
+	for (const from of ['CANCELLED', 'COMPLETED'] as const) {
 		expect(next(from)).toBeNull();
 	}
+});
+
+test('cancelled on its way: only from OUT_FOR_DELIVERY, read from the cancellation', () => {
+	expect(isCancelledOnItsWay({ cancelledFrom: 'OUT_FOR_DELIVERY' })).toBe(true);
+	expect(isCancelledOnItsWay({ cancelledFrom: 'CONFIRMED' })).toBe(false);
+	expect(isCancelledOnItsWay({ cancelledFrom: 'PICKED' })).toBe(false);
+	expect(isCancelledOnItsWay(null)).toBe(false);
+	const cancelled = (cancelledFrom: OrderStatus) => ({
+		status: 'CANCELLED' as const,
+		cancellation: { cancelledFrom }
+	});
+	expect(isIncidentReportable(cancelled('OUT_FOR_DELIVERY'))).toBe(true);
+	expect(isIncidentReportable(cancelled('PICKED'))).toBe(false);
+	expect(isIncidentReportable({ status: 'DELIVERED', cancellation: null })).toBe(true);
+	expect(isIncidentReportable({ status: 'OUT_FOR_DELIVERY', cancellation: null })).toBe(false);
 });
 
 function linesOf(count: number): number[] {

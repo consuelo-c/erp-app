@@ -64,23 +64,22 @@ export type OrderMove = {
 };
 
 // Once the merchandise is with the client, cancelling no longer undoes anything.
-const CANCELLABLE: readonly OrderStatus[] = ['DRAFT', 'CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY'];
+const CANCELLABLE: readonly OrderStatus[] = ['CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY'];
 
 // The route branches on the methods: nobody drives out when the client picks up at the warehouse,
-// nor goes to fetch what the client brings back. A cancelled order reopens as a draft, often for
-// another date: confirming it again re-checks the availability it released.
+// nor goes to fetch what the client brings back. Nothing leaves CANCELLED: booking it again is a
+// new quote, «Cotizar de nuevo».
 function forwardStatus(move: OrderMove): OrderStatus | null {
 	const isClientPickup = 'CLIENT_PICKUP' === move.deliveryMethod;
 	const isClientReturn = 'CLIENT_RETURN' === move.returnMethod;
 	const next: Record<OrderStatus, OrderStatus | null> = {
-		DRAFT: 'CONFIRMED',
 		CONFIRMED: 'PICKED',
 		PICKED: isClientPickup ? 'DELIVERED' : 'OUT_FOR_DELIVERY',
 		OUT_FOR_DELIVERY: 'DELIVERED',
 		DELIVERED: isClientReturn ? 'COMPLETED' : 'OUT_FOR_PICKUP',
 		OUT_FOR_PICKUP: 'COMPLETED',
 		COMPLETED: null,
-		CANCELLED: 'DRAFT'
+		CANCELLED: null
 	};
 	return next[move.from];
 }
@@ -93,8 +92,8 @@ export function isLegalTransition(move: OrderMove): boolean {
 	return move.to === forwardStatus(move);
 }
 
-// Confirming and cancelling commit the company to the client, or release it: they aren't here,
-// so the operational transitions can't be used to skip their role lock.
+// Cancelling releases the company from the client: it isn't here, so the operational transitions
+// can't be used to skip its role lock.
 export const OPERATIONAL_STATUSES = [
 	'PICKED',
 	'OUT_FOR_DELIVERY',
@@ -105,7 +104,7 @@ export const OPERATIONAL_STATUSES = [
 
 export type OperationalStatus = (typeof OPERATIONAL_STATUSES)[number];
 
-/** The status button's one target, or null: a draft, a cancelled or a completed order has none. */
+/** The status button's one target, or null: a cancelled or a completed order has none. */
 export function nextOperationalStatus(move: Omit<OrderMove, 'to'>): OperationalStatus | null {
 	return OPERATIONAL_STATUSES.find((to) => isLegalTransition({ ...move, to })) ?? null;
 }
@@ -116,29 +115,38 @@ export function isPickupStatus(status: OrderStatus): boolean {
 }
 
 // Once the products are on their way back, or the order was cancelled, it's read-only.
-const EDITABLE: readonly OrderStatus[] = [
-	'DRAFT',
-	'CONFIRMED',
-	'PICKED',
-	'OUT_FOR_DELIVERY',
-	'DELIVERED'
-];
+const EDITABLE: readonly OrderStatus[] = ['CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY', 'DELIVERED'];
 
-/** Whether an order in this state can still be edited: from DRAFT through DELIVERED. */
+/** Whether an order in this state can still be edited: from CONFIRMED through DELIVERED. */
 export function isEditableStatus(status: OrderStatus): boolean {
 	return EDITABLE.includes(status);
 }
 
-// Damage turns up on the return or later, washing: never before the order reaches the client.
+/** The status a cancelled order was cancelled from, read from its CANCELLED event's `before`. */
+export type CancelledFrom = { cancelledFrom: OrderStatus } | null;
+
+/**
+ * The only rule for «cancelled on its way»: cancelled from OUT_FOR_DELIVERY, so the merchandise
+ * went out and came back. From CONFIRMED or PICKED it never left the warehouse.
+ */
+export function isCancelledOnItsWay(cancellation: CancelledFrom): boolean {
+	return 'OUT_FOR_DELIVERY' === cancellation?.cancelledFrom;
+}
+
+// Damage turns up on the return or later, washing: never before the order reaches the client,
+// unless it was cancelled on its way and came back.
 const REPORTABLE: readonly OrderStatus[] = ['DELIVERED', 'OUT_FOR_PICKUP', 'COMPLETED'];
 
 /** Whether an incident can be reported on an order in this state. */
-export function isIncidentReportable(status: OrderStatus): boolean {
-	return REPORTABLE.includes(status);
+export function isIncidentReportable(order: {
+	status: OrderStatus;
+	cancellation: CancelledFrom;
+}): boolean {
+	return REPORTABLE.includes(order.status) || isCancelledOnItsWay(order.cancellation);
 }
 
 // Sales records the money in; only the manager pays it out.
-const ORDER_INFLOWS = ['INSTALLMENT', 'SECURITY_DEPOSIT'] as const;
+const ORDER_INFLOWS = ['INSTALLMENT', 'SECURITY_DEPOSIT', 'CANCELLATION_FEE'] as const;
 const ORDER_OUTFLOWS = ['INSTALLMENT_REFUND', 'DEPOSIT_REFUND', 'CARRIER_PAYMENT'] as const;
 
 /** The movements an order records from its payment entry, in the order the entry offers them. */
@@ -146,10 +154,15 @@ export const ORDER_PAYMENT_CONCEPTS = [...ORDER_INFLOWS, ...ORDER_OUTFLOWS] as c
 
 export type OrderPaymentConcept = (typeof ORDER_PAYMENT_CONCEPTS)[number];
 
-/** Whether the money comes in: the rest goes out, and only the manager records it. */
+/** Whether the money comes in; the rest goes out. Only the manager records money out, and the fee. */
 export function isOrderInflow(concept: OrderPaymentConcept): boolean {
 	return (ORDER_INFLOWS as readonly string[]).includes(concept);
 }
+
+/** Where a «Cargo por cancelación» comes from: new money, or money the order already holds. */
+export const FEE_SOURCES = ['NEW', 'INSTALLMENTS', 'DEPOSIT'] as const;
+
+export type FeeSource = (typeof FEE_SOURCES)[number];
 
 // A half-letter sheet holds this many lines under the order's header. The totals and the
 // signature take the room of `closingLines` of them, and are never split across two sheets.

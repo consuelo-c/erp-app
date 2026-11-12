@@ -29,7 +29,7 @@
 		options: QuoteFormOptions;
 		/** The quote being edited; null for a new one. */
 		quote: Quote | null;
-		/** «Duplicar»: a new quote filled from another's terms, at today's prices. */
+		/** «Duplicar» or «Cotizar de nuevo»: a new quote filled from a quote's or an order's terms, at today's prices. */
 		copy?: QuoteDuplicate | null;
 		/** A refused save: its message and each field's. */
 		form: { message: string; errors: Record<string, string> } | null | undefined;
@@ -224,9 +224,15 @@
 	{/if}
 
 	{#if copy}
+		{@const id = String(copy.source.id)}
 		<Notice tone="info">
-			Copia de la cotización
-			<a href={resolve('/(app)/cotizaciones/[id]', { id: String(copy.from) })}>#{copy.from}</a>
+			{#if 'ORDER' === copy.source.kind}
+				Desde el pedido
+				<a href={resolve('/(app)/pedidos/[id]', { id })}>#{id}</a>
+			{:else}
+				Copia de la cotización
+				<a href={resolve('/(app)/cotizaciones/[id]', { id })}>#{id}</a>
+			{/if}
 			a los precios de hoy: el cliente, el lugar, los días, el descuento, el transporte, las notas y los
 			productos con sus cantidades. La fecha del evento queda vacía y la vigencia empieza de nuevo.
 		</Notice>

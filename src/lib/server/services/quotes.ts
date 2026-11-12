@@ -16,6 +16,7 @@ import {
 	clientAttributesSchema,
 	clientInputShape,
 	clientWrite,
+	getOrder,
 	invalidOrder,
 	jsonColumn,
 	linesInputSchema,
@@ -31,7 +32,8 @@ import {
 	type ClientAttributes,
 	type OrderItem,
 	type Refusal,
-	type SaveResult
+	type SaveResult,
+	type ShortageWarning
 } from './orders';
 import { foldedSql, optional } from './cash';
 import {
@@ -148,18 +150,18 @@ type Columns = {
 	attributes: string;
 };
 
-type QuoteRow = Omit<Columns, 'client_id'> & {
+export type QuoteRow = Omit<Columns, 'client_id'> & {
 	id: number;
 	client_id: number;
 	order_id: number | null;
 	created_at: number;
 };
 
-const SELECT_QUOTE = `select id, client_id, order_id, event_date, valid_until, rental_days,
+export const SELECT_QUOTE = `select id, client_id, order_id, event_date, valid_until, rental_days,
 	client_attributes, quote_items, items_total, discount, transport_cost, quote_total, attributes,
 	created_at from quotes`;
 
-function toQuote(row: QuoteRow): Quote {
+export function toQuote(row: QuoteRow): Quote {
 	const attributes = quoteAttributesSchema.parse(JSON.parse(row.attributes));
 	const validity = { orderId: row.order_id, validUntil: row.valid_until };
 	return {
@@ -284,11 +286,13 @@ async function insertQuote(
 	resolved: ResolvedQuote
 ): Promise<SaveResult> {
 	const { values, computed, clientStatements } = clientWrite(db, actor, resolved);
+	// The client's page key, set once and never changed: like the order's, it stays out of events.
 	const statements = auditedInsert(db, {
 		table: 'quotes',
 		entityType: 'QUOTE',
 		actor,
 		values,
+		unlogged: { public_token: crypto.randomUUID() },
 		computed
 	});
 	const results = await db.batch([...clientStatements, ...statements]);
@@ -602,8 +606,15 @@ export type QuoteDraft = Pick<
 	| 'notes'
 >;
 
-/** «Duplicar»: the new quote's draft, from quote `id`, and the inactive products it left out. */
-export type QuoteDuplicate = { from: number; draft: QuoteDraft; removed: string[] };
+/**
+ * «Duplicar» from a quote, or «Cotizar de nuevo» from an order: the new quote's draft, where it came
+ * from, and the inactive products it left out. The new quote keeps no link to its source.
+ */
+export type QuoteDuplicate = {
+	source: { kind: 'QUOTE' | 'ORDER'; id: number };
+	draft: QuoteDraft;
+	removed: string[];
+};
 
 type CatalogPrice = { id: number; name: string; rental_price: number };
 
@@ -624,7 +635,7 @@ async function readActivePrices(
 
 // Each line at today's catalog name and list price, charged at that price; an inactive product's
 // line is left out and named.
-function repriceLines(quote: Quote, prices: Map<number, CatalogPrice>) {
+function repriceLines(quote: QuoteDraft, prices: Map<number, CatalogPrice>) {
 	const items = quote.items
 		.filter((item) => prices.has(item.product_id))
 		.map((item) => {
@@ -639,11 +650,18 @@ function repriceLines(quote: Quote, prices: Map<number, CatalogPrice>) {
 }
 
 /**
- * A fresh quote at today's prices, for a company that repeats its event: each line takes the
- * catalog's name and list price, and charges that price; what was negotiated isn't carried. An
- * inactive product is left out and named. The event date and «Válida hasta» are the form's: empty,
- * and today's default. Writes nothing: only saving the form creates the copy. Null: no such quote.
+ * The one rule for «Duplicar» and «Cotizar de nuevo»: a fresh quote at today's prices, for a client
+ * who repeats its event or books it again. Each line takes the catalog's name and list price, and
+ * charges that price; what was negotiated isn't carried. An inactive product is left out and named.
+ * The event date and «Válida hasta» are the form's: empty, and today's default. Writes nothing.
  */
+async function freshDraft(db: D1Database, terms: QuoteDraft) {
+	const productIds = terms.items.map((item) => item.product_id);
+	const { items, removed } = repriceLines(terms, await readActivePrices(db, productIds));
+	return { draft: { ...terms, items }, removed };
+}
+
+/** «Duplicar»: quote `id`'s terms, fresh. Null: no such quote. */
 export async function getQuoteDuplicate(
 	db: D1Database,
 	id: unknown,
@@ -653,21 +671,33 @@ export async function getQuoteDuplicate(
 	if (null === quote) {
 		return null;
 	}
-	const productIds = quote.items.map((item) => item.product_id);
-	const { items, removed } = repriceLines(quote, await readActivePrices(db, productIds));
-	const { clientId, client, address1, address2, rentalDays, discount, transportCost, notes } =
+	const { clientId, client, address1, address2, rentalDays, items, discount, transportCost } =
 		quote;
-	const draft = {
-		clientId,
-		client,
-		address1,
-		address2,
-		rentalDays,
-		discount,
-		transportCost,
-		notes
-	};
-	return { from: quote.id, draft: { ...draft, items }, removed };
+	const terms = { clientId, client, address1, address2, rentalDays, items, discount, transportCost };
+	const fresh = await freshDraft(db, { ...terms, notes: quote.notes });
+	return { source: { kind: 'QUOTE', id: quote.id }, ...fresh };
+}
+
+/**
+ * «Cotizar de nuevo»: order `id`'s terms, fresh, in any state: «Lugar del evento» is its delivery
+ * address. Null: no such order.
+ */
+export async function getOrderRequote(
+	db: D1Database,
+	id: unknown,
+	actor: Actor | null
+): Promise<QuoteDuplicate | null> {
+	requireRole(actor, TAKES_QUOTES);
+	const orderId = quoteIdSchema.safeParse(id);
+	const order = orderId.success ? await getOrder(db, orderId.data, actor) : null;
+	if (null === order) {
+		return null;
+	}
+	const { clientId, client, rentalDays, items, discount, transportCost, notes } = order;
+	const { address_1: address1, address_2: address2 } = order.delivery;
+	const terms = { clientId, client, address1, address2, rentalDays, items, discount, notes };
+	const fresh = await freshDraft(db, { ...terms, transportCost });
+	return { source: { kind: 'ORDER', id: order.id }, ...fresh };
 }
 
 /** «Convertir en pedido»: the quote, and its client as the contact is today, for the order form. */
@@ -689,11 +719,21 @@ export async function getQuoteConversion(
 	return { quote, client: { id: quote.clientId, fullName, phone, address1, address2 } };
 }
 
-const conversionInputSchema = z.object({ quote: quoteIdSchema, order: z.unknown() });
+const conversionInputSchema = z.object({
+	quote: quoteIdSchema,
+	order: z.unknown(),
+	force: z.boolean().default(false)
+});
 
 const ALREADY_CONVERTED: Refusal = {
 	ok: false,
 	message: 'Esta cotización ya se convirtió en pedido',
+	errors: {}
+};
+
+const EXPIRED: Refusal = {
+	ok: false,
+	message: 'Esta cotización está vencida: edítala con una nueva fecha de vigencia para convertirla',
 	errors: {}
 };
 
@@ -716,25 +756,30 @@ function linkStatements(db: D1Database, actor: Actor, { row, publicToken }: Link
 }
 
 /**
- * «Guardar pedido» on the form a quote filled: the DRAFT order, its event, and the quote linked to
- * it with its CONVERTED event, in one batch. A converted quote is never converted again.
+ * «Guardar pedido» on the form a quote filled: the only way an order is born, CONFIRMED, with its
+ * CREATED event, and the quote linked to it with its CONVERTED event, in one batch. Only a VALID
+ * quote converts; what's short comes back once, unless `force` («Guardar de todos modos»).
  */
 export async function convertQuote(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult | ShortageWarning> {
 	requireRole(actor, TAKES_QUOTES);
 	const parsed = conversionInputSchema.safeParse(input);
 	const row = parsed.success ? await findRow(db, parsed.data.quote) : null;
 	if (!parsed.success || null === row) {
 		return NOT_FOUND;
 	}
-	if (null !== row.order_id) {
+	const quote = toQuote(row);
+	if ('CONVERTED' === quote.state) {
 		return ALREADY_CONVERTED;
 	}
-	const quotedItems = toQuote(row).items;
-	const order = await prepareQuotedOrder(db, parsed.data.order, { actor, quotedItems });
+	if ('EXPIRED' === quote.state) {
+		return EXPIRED;
+	}
+	const { order: form, force } = parsed.data;
+	const order = await prepareQuotedOrder(db, form, { actor, quotedItems: quote.items, force });
 	if ('ok' in order) {
 		return order;
 	}
@@ -742,6 +787,23 @@ export async function convertQuote(
 	const link = linkStatements(db, actor, { row, publicToken: order.publicToken });
 	const results = await db.batch([...order.statements, ...link]);
 	return { ok: true, id: results[order.insertAt].meta.last_row_id };
+}
+
+/**
+ * The token of the quote's client page, for «Copiar enlace del cliente», in any state. Kept out of
+ * `getQuote`: no staff screen shows it as text.
+ */
+export async function getQuotePublicToken(
+	db: D1Database,
+	id: number,
+	actor: Actor | null
+): Promise<string | null> {
+	requireRole(actor, TAKES_QUOTES);
+	const row = await db
+		.prepare('select public_token from quotes where id = ?')
+		.bind(id)
+		.first<{ public_token: string }>();
+	return row?.public_token ?? null;
 }
 
 /** The quote order `orderId` came from, read through `quotes.order_id`: null for most orders. */

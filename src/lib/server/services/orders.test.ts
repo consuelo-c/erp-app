@@ -4,14 +4,12 @@ import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
 import type { Actor, Role } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
-import { movementStatements } from './cash';
+import { movementStatements, recordOffset } from './cash';
 import {
 	advanceOrder,
 	cancelOrder,
 	checkOrderSchedule,
-	confirmOrder,
 	createExtension,
-	createOrder,
 	getAvailability,
 	getOrder,
 	getOrderChange,
@@ -24,12 +22,11 @@ import {
 	listOrders,
 	ORDERS_PAGE_SIZE,
 	orderItemsSchema,
-	previewConfirmation,
 	offeredPaymentConcepts,
 	recordOrderPayment,
-	reopenOrder,
 	updateOrder
 } from './orders';
+import { createOrder } from '../db/test-orders';
 
 const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
 
@@ -130,7 +127,7 @@ test('creating stores the snapshots and works out the totals, ignoring any sent'
 	const id = await create({ ...order1043, items_total: 1, order_total: 1 });
 	const order = await read(id);
 	expect(order).toMatchObject({
-		status: 'DRAFT',
+		status: 'CONFIRMED',
 		hasIncident: false,
 		client: { name: 'Luz Marina Restrepo', phone: '573104428890' },
 		itemsTotal: 1104000,
@@ -167,17 +164,17 @@ test('the public token is a UUID kept out of the CREATED event', async () => {
 	);
 	const [created] = orderEvents();
 	expect(created).toMatchObject({ action: 'CREATED', before: null });
-	expect(created.after).toMatchObject({ status: 'DRAFT', order_total: 1180000 });
+	expect(created.after).toMatchObject({ status: 'CONFIRMED', order_total: 1180000 });
 	expect(created.after).not.toHaveProperty('public_token');
 	expect(created.after).not.toHaveProperty('has_incident');
 	expect((await read(id)).hasIncident).toBe(false);
 });
 
-test("the client's link token: none for a draft, never for WAREHOUSE or DRIVER", async () => {
+test("the client's link token: in any status, never for WAREHOUSE or DRIVER", async () => {
 	const id = await create();
-	expect(await getPublicToken(db, id, sales)).toBeNull();
-	setStatus(id, 'CANCELLED');
 	const { public_token } = database.prepare('select public_token from orders').get() ?? {};
+	expect(await getPublicToken(db, id, sales)).toBe(public_token);
+	setStatus(id, 'CANCELLED');
 	expect(await getPublicToken(db, id, sales)).toBe(public_token);
 	for (const role of ['WAREHOUSE', 'DRIVER'] satisfies Role[]) {
 		await expect(getPublicToken(db, id, { ...sales, roles: [role] })).rejects.toSatisfy((thrown) =>
@@ -392,8 +389,8 @@ async function chairsAvailable(range: object): Promise<number | undefined> {
 	return availability.find(({ productId }) => 1 === productId)?.available;
 }
 
-test('only orders holding their products subtract: not a draft, a cancelled or a completed one', async () => {
-	for (const status of ['DRAFT', 'CANCELLED', 'COMPLETED']) {
+test('only orders holding their products subtract: not a cancelled or a completed one', async () => {
+	for (const status of ['CANCELLED', 'COMPLETED']) {
 		await book({ status, delivery: '2026-08-14', pickup: '2026-08-16', qty: 100 });
 	}
 	const range = { delivery_date: '2026-08-15', pickup_date: '2026-08-15' };
@@ -554,17 +551,6 @@ async function status(id: number): Promise<string> {
 	return (await read(id)).status;
 }
 
-test('confirming needs no payment, and writes a STATUS_CHANGED event with the status', async () => {
-	const id = await create();
-	expect(await confirmOrder(db, { id }, sales)).toEqual({ ok: true, id });
-	expect(await status(id)).toBe('CONFIRMED');
-	expect(orderEvents()[1]).toEqual({
-		action: 'STATUS_CHANGED',
-		before: { status: 'DRAFT' },
-		after: { status: 'CONFIRMED' }
-	});
-});
-
 test('cancelling asks for a reason, kept in its CANCELLED event; the cancelled order is read-only', async () => {
 	const id = await create();
 	const noReason = await cancelOrder(db, { id, reason: '  ' }, sales);
@@ -578,12 +564,11 @@ test('cancelling asks for a reason, kept in its CANCELLED event; the cancelled o
 		.get();
 	expect(cancelled).toEqual({
 		action: 'CANCELLED',
-		before: '{"status":"DRAFT"}',
+		before: '{"status":"CONFIRMED"}',
 		after: '{"status":"CANCELLED"}',
 		reason: 'El cliente aplazó el evento'
 	});
 	expect(await updateOrder(db, { ...order1043, id }, sales)).toMatchObject({ ok: false });
-	expect(await confirmOrder(db, { id }, sales)).toMatchObject({ ok: false });
 });
 
 test('a delivered order can no longer be cancelled', async () => {
@@ -596,7 +581,6 @@ test('a delivered order can no longer be cancelled', async () => {
 
 test('WAREHOUSE marks PICKED: operational transitions are open to every role', async () => {
 	const id = await create();
-	await confirmOrder(db, { id }, sales);
 	expect(await advanceOrder(db, { id, status: 'PICKED' }, warehouse)).toEqual({ ok: true, id });
 	expect(await advanceOrder(db, { id, status: 'OUT_FOR_DELIVERY' }, driver)).toEqual({
 		ok: true,
@@ -608,29 +592,35 @@ test('WAREHOUSE marks PICKED: operational transitions are open to every role', a
 	});
 });
 
-test('WAREHOUSE and DRIVER cannot confirm or cancel an order', async () => {
+test('WAREHOUSE and DRIVER cannot cancel an order', async () => {
 	const id = await create();
 	for (const actor of [warehouse, driver]) {
-		for (const attempt of [
-			confirmOrder(db, { id }, actor),
-			cancelOrder(db, { id, reason: 'No contesta' }, actor)
-		]) {
-			await expect(attempt).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
-		}
+		const attempt = cancelOrder(db, { id, reason: 'No contesta' }, actor);
+		await expect(attempt).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
 	}
-	expect(await status(id)).toBe('DRAFT');
+	expect(await status(id)).toBe('CONFIRMED');
 });
 
-test('the operational path cannot confirm or cancel, whoever asks', async () => {
+test('the operational path cannot cancel, whoever asks', async () => {
 	const id = await create();
-	for (const target of ['CONFIRMED', 'CANCELLED', 'DRAFT']) {
+	for (const target of ['CONFIRMED', 'CANCELLED']) {
 		const result = await advanceOrder(db, { id, status: target }, admin);
 		expect(result).toMatchObject({ ok: false, errors: { status: expect.any(String) } });
 	}
-	expect(await status(id)).toBe('DRAFT');
+	expect(await status(id)).toBe('CONFIRMED');
 });
 
-test('a cancelled order reopens as a draft that holds nothing until confirmed again', async () => {
+test('an order cancels from CONFIRMED, PICKED and OUT_FOR_DELIVERY', async () => {
+	for (const from of ['CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY']) {
+		const id = await create();
+		setStatus(id, from);
+		const result = await cancelOrder(db, { id, reason: 'El cliente aplazó el evento' }, sales);
+		expect(result).toEqual({ ok: true, id });
+		expect(await status(id)).toBe('CANCELLED');
+	}
+});
+
+test('a cancelled order holds nothing, and nothing takes it out of CANCELLED', async () => {
 	const id = await book({
 		status: 'CONFIRMED',
 		delivery: '2026-08-14',
@@ -638,44 +628,22 @@ test('a cancelled order reopens as a draft that holds nothing until confirmed ag
 		qty: 100
 	});
 	const range = { delivery_date: '2026-08-15', pickup_date: '2026-08-15' };
-	await cancelOrder(db, { id, reason: 'El cliente aplazó el evento' }, sales);
-	expect(await reopenOrder(db, { id: String(id) }, sales)).toEqual({ ok: true, id });
-	expect(orderEvents().at(-1)).toEqual({
-		action: 'STATUS_CHANGED',
-		before: { status: 'CANCELLED' },
-		after: { status: 'DRAFT' }
-	});
-	expect((await getOrderDetail(db, id, sales))?.cancellation).toBeNull();
-	expect(await chairsAvailable(range)).toBe(500);
-	await confirmOrder(db, { id }, sales);
 	expect(await chairsAvailable(range)).toBe(400);
-});
-
-test('only a cancelled order reopens, and only for whoever cancels', async () => {
-	const id = await create();
-	for (const from of ['DRAFT', 'CONFIRMED', 'DELIVERED', 'COMPLETED']) {
-		setStatus(id, from);
-		expect(await reopenOrder(db, { id }, admin)).toMatchObject({ ok: false });
-		expect(await status(id)).toBe(from);
-	}
-	setStatus(id, 'CANCELLED');
-	for (const actor of [warehouse, driver]) {
-		await expect(reopenOrder(db, { id }, actor)).rejects.toSatisfy((thrown) =>
-			isHttpError(thrown, 403)
-		);
+	await cancelOrder(db, { id, reason: 'El cliente aplazó el evento' }, sales);
+	expect(await chairsAvailable(range)).toBe(500);
+	for (const target of ['PICKED', 'CONFIRMED']) {
+		expect(await advanceOrder(db, { id, status: target }, admin)).toMatchObject({ ok: false });
 	}
 	expect(await status(id)).toBe('CANCELLED');
 });
 
 test('an illegal transition fails for every role, and writes nothing', async () => {
 	const id = await create();
-	await confirmOrder(db, { id }, sales);
 	for (const actor of [admin, sales, warehouse]) {
 		expect(await advanceOrder(db, { id, status: 'DELIVERED' }, actor)).toMatchObject({ ok: false });
 	}
-	expect(await confirmOrder(db, { id }, admin)).toMatchObject({ ok: false });
 	expect(await status(id)).toBe('CONFIRMED');
-	expect(orderEvents()).toHaveLength(2);
+	expect(orderEvents()).toHaveLength(1);
 	expect(await advanceOrder(db, { id: 99, status: 'PICKED' }, admin)).toMatchObject({ ok: false });
 });
 
@@ -686,7 +654,6 @@ test('a client pickup and return goes picked → delivered → completed', async
 		delivery_attributes: { ...atWarehouse, method: 'CLIENT_PICKUP' },
 		pickup_attributes: { ...atWarehouse, method: 'CLIENT_RETURN' }
 	});
-	await confirmOrder(db, { id }, sales);
 	await advanceOrder(db, { id, status: 'PICKED', notes: 'Listo en bodega' }, warehouse);
 	const skipped = { id, status: 'OUT_FOR_DELIVERY', notes: 'Salió' };
 	expect(await advanceOrder(db, skipped, driver)).toMatchObject({ ok: false });
@@ -768,34 +735,6 @@ test('two people marking the same transition: the second is illegal and writes n
 	expect(orderEvents()).toHaveLength(2);
 });
 
-function setAdvancePercentage(percentage: number) {
-	database
-		.prepare(
-			`insert into settings (key, value, created_at, created_by, updated_at, updated_by) values ('ORDERS_SUGGESTED_ADVANCE_PCT', ?, ${AUDIT})`
-		)
-		.run(String(percentage));
-}
-
-test('the confirmation names the products short and by how much, and still confirms', async () => {
-	setAdvancePercentage(50);
-	await book({ status: 'CONFIRMED', delivery: '2026-08-15', pickup: '2026-08-15', qty: 430 });
-	const id = await create();
-	expect(await previewConfirmation(db, { id }, sales)).toEqual({
-		shortages: [{ productId: 1, name: 'Silla Tiffany dorada', short: 50 }],
-		suggestedAdvance: 590000
-	});
-	expect(await confirmOrder(db, { id }, sales)).toEqual({ ok: true, id });
-	// Once confirmed, its own lines still don't count against it.
-	expect((await previewConfirmation(db, { id }, sales))?.shortages).toHaveLength(1);
-});
-
-test('the suggested advance rounds to the peso and validates nothing', async () => {
-	setAdvancePercentage(50);
-	const id = await create({ ...order1043, transport_cost: 180001 });
-	expect((await previewConfirmation(db, { id }, sales))?.suggestedAdvance).toBe(590001);
-	expect(await previewConfirmation(db, { id: 99 }, sales)).toBeNull();
-});
-
 // Every delivery date unless the test says otherwise: the list's default is this week's.
 async function listIds(input: Record<string, string> = {}): Promise<number[]> {
 	return (await listOrders(db, { delivery: 'ALL', ...input }, sales)).orders.map(({ id }) => id);
@@ -826,7 +765,7 @@ test('the list shows every order by event date, latest first, with its summary',
 		id: jorge,
 		clientName: 'Jorge Iván Betancur',
 		eventDate: '2026-08-22',
-		status: 'DRAFT',
+		status: 'CONFIRMED',
 		hasIncident: false,
 		deliveryMethod: 'CLIENT_PICKUP',
 		orderTotal: 1284000,
@@ -862,8 +801,8 @@ test('the filters combine, each over the order snapshot', async () => {
 	expect(await listIds({ from: '2026-08-22', to: '2026-08-22' })).toEqual([jorge]);
 	expect(await listIds({ from: '2026-08-16' })).toEqual([september, jorge]);
 	expect(await listIds({ to: '2026-08-31', text: 'luz' })).toEqual([luzMarina]);
-	setStatus(luzMarina, 'CONFIRMED');
-	expect(await listIds({ status: 'CONFIRMED' })).toEqual([luzMarina]);
+	setStatus(luzMarina, 'PICKED');
+	expect(await listIds({ status: 'PICKED' })).toEqual([luzMarina]);
 });
 
 test('incidents only is its own filter, in SQL', async () => {
@@ -1345,36 +1284,22 @@ test('a paid order takes no more «Pago»: its deposit and refunds stay, and a r
 	expect(await recordOrderPayment(db, typedPayment(id), sales)).toMatchObject({ ok: true });
 });
 
-test.each(['INSTALLMENT', 'SECURITY_DEPOSIT'])('a %s confirms a draft', async (concept) => {
-	const id = await create();
-	await recordPayment(id, { concept, amount: '10.000' }, sales);
-	expect(await detail(id)).toMatchObject({ status: 'CONFIRMED' });
-	const event = database
-		.prepare(
-			`select actor_username, json_extract(after, '$.status') as status from events
-			where entity_type = 'ORDER' and entity_id = ? and action = 'STATUS_CHANGED'`
-		)
-		.all(id);
-	expect(event).toEqual([{ actor_username: 'ventas', status: 'CONFIRMED' }]);
-});
-
-test('money out leaves a draft as it is, and a payment only confirms a draft', async () => {
-	const draft = await create();
-	await recordPayment(draft, { concept: 'INSTALLMENT_REFUND', amount: '10.000' });
-	expect(await detail(draft)).toMatchObject({ status: 'DRAFT' });
-
-	const cancelled = await create();
-	await cancelOrder(db, { id: cancelled, reason: 'Cambió de fecha' }, sales);
-	await recordPayment(cancelled, { amount: '10.000' });
-	expect(await detail(cancelled)).toMatchObject({ status: 'CANCELLED' });
-});
-
-test('a refused payment leaves the draft a draft', async () => {
-	const id = await create();
-	const refused = await recordOrderPayment(db, typedPayment(id, { amount: '0' }), sales);
-	expect(refused).toMatchObject({ ok: false });
-	expect(await detail(id)).toMatchObject({ status: 'DRAFT' });
-});
+test.each(['INSTALLMENT', 'SECURITY_DEPOSIT', 'INSTALLMENT_REFUND'])(
+	'a %s never changes the status',
+	async (concept) => {
+		const id = await create();
+		await recordPayment(id, { concept, amount: '10.000' });
+		expect(await detail(id)).toMatchObject({ status: 'CONFIRMED' });
+		const cancelled = await create();
+		await cancelOrder(db, { id: cancelled, reason: 'Cambió de fecha' }, sales);
+		await recordPayment(cancelled, { concept, amount: '10.000' });
+		expect(await detail(cancelled)).toMatchObject({ status: 'CANCELLED' });
+		const changes = database
+			.prepare("select count(*) as count from events where action = 'STATUS_CHANGED'")
+			.get();
+		expect(changes).toEqual({ count: 0 });
+	}
+);
 
 test('the entry offers «Pago» while there is a balance, the deposit until complete, money out to the manager', async () => {
 	const id = await create();
@@ -1386,6 +1311,124 @@ test('the entry offers «Pago» while there is a balance, the deposit until comp
 	await recordPayment(id, { concept: 'SECURITY_DEPOSIT', amount: String(depositAmount) }, sales);
 	expect(await offeredTo(sales)).toEqual([]);
 	expect(await offeredTo(manager)).toEqual(['INSTALLMENT_REFUND', 'DEPOSIT_REFUND']);
+});
+
+// The planning's example: a $1.500.000 order, $800.000 paid and a $300.000 deposit, cancelled.
+async function cancelledWithMoney(): Promise<number> {
+	const id = await create({ ...order1043, transport_cost: 500000 });
+	await recordPayment(id, { amount: '800.000' }, sales);
+	await recordPayment(id, { concept: 'SECURITY_DEPOSIT', amount: '300.000' }, sales);
+	await cancelOrder(db, { id, reason: 'El camión llegó tarde' }, sales);
+	return id;
+}
+
+function movementsOf(id: number) {
+	return database
+		.prepare(
+			"select concept, amount, movement_date, payee, reverses_id from cash_movements where entity_type = 'ORDER' and entity_id = ? order by id"
+		)
+		.all(id);
+}
+
+const fee = (source: string, amount: string) => ({
+	concept: 'CANCELLATION_FEE',
+	fee_source: source,
+	amount
+});
+
+test('owed to the client: payments net of refunds plus the deposit held; a fee from payments lowers it', async () => {
+	const id = await cancelledWithMoney();
+	expect(await detail(id)).toMatchObject({
+		orderTotal: 1500000,
+		balanceDue: 700000,
+		owedToClient: 1100000
+	});
+	await recordPayment(id, fee('INSTALLMENTS', '150.000'));
+	expect((await detail(id)).owedToClient).toBe(950000);
+	await recordPayment(id, { concept: 'INSTALLMENT_REFUND', amount: '650.000' });
+	await recordPayment(id, { concept: 'DEPOSIT_REFUND', amount: '300.000' });
+	expect((await detail(id)).owedToClient).toBe(0);
+});
+
+test('«Retener de los pagos» and «Retener del depósito» write a pair that nets to 0, same date', async () => {
+	const id = await cancelledWithMoney();
+	await recordPayment(id, fee('INSTALLMENTS', '150.000'));
+	await recordPayment(id, fee('DEPOSIT', '100.000'));
+	const pairs = movementsOf(id).slice(2);
+	expect(pairs).toEqual([
+		expect.objectContaining({ concept: 'INSTALLMENT_REFUND', amount: -150000 }),
+		expect.objectContaining({ concept: 'CANCELLATION_FEE', amount: 150000 }),
+		expect.objectContaining({ concept: 'DEPOSIT_REFUND', amount: -100000 }),
+		expect.objectContaining({ concept: 'CANCELLATION_FEE', amount: 100000 })
+	]);
+	expect(pairs.reduce((sum, each) => sum + Number(each.amount), 0)).toBe(0);
+	expect(new Set(pairs.map((each) => each.movement_date))).toEqual(new Set(['2026-08-01']));
+	expect((await detail(id)).depositHeld).toBe(200000);
+});
+
+test('«Dinero nuevo» writes the fee alone, from the client', async () => {
+	const id = await cancelledWithMoney();
+	const written = await recordPayment(id, fee('NEW', '80.000'));
+	expect(written).toMatchObject({
+		concept: 'CANCELLATION_FEE',
+		amount: 80000,
+		payee: 'Luz Marina Restrepo'
+	});
+	expect(movementsOf(id)).toHaveLength(3);
+	expect((await detail(id)).owedToClient).toBe(1100000);
+});
+
+test('a retention above what its side holds is refused, and writes nothing', async () => {
+	const id = await cancelledWithMoney();
+	for (const [source, amount] of [
+		['INSTALLMENTS', '800.001'],
+		['DEPOSIT', '300.001']
+	]) {
+		const result = await recordOrderPayment(db, typedPayment(id, fee(source, amount)), manager);
+		expect(result).toMatchObject({
+			ok: false,
+			errors: { amount: expect.stringContaining('Supera') }
+		});
+	}
+	expect(movementsOf(id)).toHaveLength(2);
+});
+
+test('the fee is only for a cancelled order, and only for the manager', async () => {
+	const confirmed = await create();
+	const onConfirmed = await recordOrderPayment(
+		db,
+		typedPayment(confirmed, fee('NEW', '50.000')),
+		manager
+	);
+	expect(onConfirmed).toMatchObject({ ok: false });
+	const id = await cancelledWithMoney();
+	const bySales = recordOrderPayment(db, typedPayment(id, fee('NEW', '50.000')), sales);
+	await expect(bySales).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
+	expect(offeredPaymentConcepts(await detail(id), manager)).toContain('CANCELLATION_FEE');
+	expect(offeredPaymentConcepts(await detail(id), sales)).not.toContain('CANCELLATION_FEE');
+	expect(offeredPaymentConcepts(await detail(confirmed), manager)).not.toContain(
+		'CANCELLATION_FEE'
+	);
+});
+
+test('each half of a pair is offset on its own from Caja', async () => {
+	const id = await cancelledWithMoney();
+	const feeHalf = await recordPayment(id, fee('INSTALLMENTS', '150.000'));
+	const offset = {
+		reverses_id: String(feeHalf.id),
+		payment_method: 'CASH',
+		movement_date: '2026-08-02'
+	};
+	expect(await recordOffset(db, offset, manager)).toMatchObject({ ok: true });
+	expect(movementsOf(id).slice(2)).toEqual([
+		expect.objectContaining({ concept: 'INSTALLMENT_REFUND', amount: -150000, reverses_id: null }),
+		expect.objectContaining({ concept: 'CANCELLATION_FEE', amount: 150000, reverses_id: null }),
+		expect.objectContaining({
+			concept: 'CANCELLATION_FEE',
+			amount: -150000,
+			reverses_id: feeHalf.id
+		})
+	]);
 });
 
 test('nothing blocks on the amounts: above the balance, what was paid, or the deposit held', async () => {
@@ -1443,7 +1486,7 @@ async function editId(id: number): Promise<number> {
 test("the timeline lists the order's events newest first, who and when, without their fields", async () => {
 	const id = await create();
 	expect(await updateOrder(db, { ...edited1043, id }, sales)).toMatchObject({ ok: true });
-	await confirmOrder(db, { id }, sales);
+	await advanceOrder(db, { id, status: 'PICKED' }, warehouse);
 	await cancelOrder(db, { id, reason: 'El cliente aplazó el evento' }, manager);
 	const entries = await timeline(id);
 	expect(
@@ -1460,9 +1503,9 @@ test("the timeline lists the order's events newest first, who and when, without 
 			reason: 'El cliente aplazó el evento',
 			actorUsername: 'gerente'
 		},
-		{ action: 'STATUS_CHANGED', status: 'CONFIRMED', reason: null, actorUsername: 'ventas' },
+		{ action: 'STATUS_CHANGED', status: 'PICKED', reason: null, actorUsername: 'bodega' },
 		{ action: 'EDITED', status: null, reason: null, actorUsername: 'ventas' },
-		{ action: 'CREATED', status: 'DRAFT', reason: null, actorUsername: 'ventas' }
+		{ action: 'CREATED', status: 'CONFIRMED', reason: null, actorUsername: 'ventas' }
 	]);
 	expect(entries[0].createdAt).toEqual(expect.any(Number));
 	expect(entries[0]).not.toHaveProperty('before');
@@ -1514,7 +1557,7 @@ test('only an edit of that order opens, and only for whoever sees edits', async 
 test('the warehouse and the driver see only status changes and cancellations', async () => {
 	const id = await create();
 	await updateOrder(db, { ...edited1043, id }, sales);
-	await confirmOrder(db, { id }, sales);
+	await advanceOrder(db, { id, status: 'PICKED' }, warehouse);
 	await cancelOrder(db, { id, reason: 'El cliente aplazó el evento' }, sales);
 	for (const actor of [warehouse, driver]) {
 		const actions = (await timeline(id, actor)).map(({ action }) => action);
@@ -1615,7 +1658,7 @@ test('an extension is born DELIVERED the day after the pickup, copying the origi
 
 test('only an order that exists and is DELIVERED gets an extension', async () => {
 	const id = await create();
-	for (const status of ['DRAFT', 'CONFIRMED', 'OUT_FOR_PICKUP', 'COMPLETED', 'CANCELLED']) {
+	for (const status of ['CONFIRMED', 'OUT_FOR_PICKUP', 'COMPLETED', 'CANCELLED']) {
 		setStatus(id, status);
 		expect(await extend(id)).toMatchObject({
 			ok: false,
@@ -1683,7 +1726,6 @@ test('the original lists its extensions, which keep their link when edited; WARE
 
 async function pickedOrder(): Promise<number> {
 	const id = await create();
-	await confirmOrder(db, { id }, sales);
 	await advanceOrder(db, { id, status: 'PICKED' }, warehouse);
 	return id;
 }
@@ -1708,7 +1750,6 @@ function insertEvent({ entityType, entityId, action, after }: RawEvent) {
 
 test('an edit before picking is no modification after staging; one after picking is, with its time', async () => {
 	const before = await create();
-	await confirmOrder(db, { id: before }, sales);
 	await editOrder(before, 3);
 	await advanceOrder(db, { id: before, status: 'PICKED' }, warehouse);
 	expect(await modifiedAfterStagingAt(before)).toBeNull();
@@ -1739,20 +1780,6 @@ test("a later status change with the driver's note, or an incident, isn't a modi
 		.prepare('update orders set status = ?, has_incident = 1 where id = ?')
 		.run('DELIVERED', id);
 	expect(await modifiedAfterStagingAt(id)).toBeNull();
-});
-
-test('a cancelled, reopened and picked again order is measured against its last PICKED', async () => {
-	const id = await pickedOrder();
-	await editOrder(id, 3);
-	await cancelOrder(db, { id, reason: 'El cliente aplazó el evento' }, sales);
-	await reopenOrder(db, { id }, sales);
-	await confirmOrder(db, { id }, sales);
-	// Confirmed again, nothing is staged: the edit before the cancellation no longer counts.
-	expect(await modifiedAfterStagingAt(id)).toBeNull();
-	await advanceOrder(db, { id, status: 'PICKED' }, warehouse);
-	expect(await modifiedAfterStagingAt(id)).toBeNull();
-	await editOrder(id, 4);
-	expect(await modifiedAfterStagingAt(id)).toEqual(expect.any(Number));
 });
 
 test('an extension has no PICKED, and is never modified after staging', async () => {

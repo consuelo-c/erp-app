@@ -1,8 +1,8 @@
 // The client's side of an order, with no session: the lookup by phone and event date, and its page
-// through `public_token`, never the order's id. No actor and no writes: a client isn't a login, and reads aren't logged.
+// through `public_token`, never the order's id; a quote's page too, only through its own token. No actor and no writes: a client isn't a login, and reads aren't logged.
 
 import { z } from 'zod';
-import { addDays, getTodaysDate } from '$lib/datetime';
+import { addDays, getInstantDate, getTodaysDate } from '$lib/datetime';
 import { normalizePhone } from '$lib/phone';
 import {
 	BALANCE_DUE_SQL,
@@ -16,6 +16,7 @@ import {
 	type OrderStatus,
 	type ReturnMethod
 } from './orders';
+import { SELECT_QUOTE, toQuote, type QuoteRow } from './quotes';
 import { readSettings } from './settings';
 
 /** How many days after its event a client still sees the order. A constant, not a setting. */
@@ -114,7 +115,7 @@ function toPublicOrder(row: PublicOrderRow): PublicOrder {
 }
 
 /**
- * The client's page: null for an unknown token, a draft, or an event more than
+ * The client's page: null for an unknown token, or an event more than
  * `LOOKUP_WINDOW_DAYS` past, so a saved link stops showing the order a month after it.
  */
 export async function getPublicOrder(db: D1Database, token: unknown): Promise<PublicOrder | null> {
@@ -128,7 +129,7 @@ export async function getPublicOrder(db: D1Database, token: unknown): Promise<Pu
 			pickup_attributes, order_items, items_total, discount, transport_cost, order_total,
 			deposit_amount, ${BALANCE_DUE_SQL} as balance_due, receivable_id,
 			${ORDER_RECEIVABLE_BALANCE_SQL} as receivable_balance
-			from orders where public_token = ? and status <> 'DRAFT' and event_date >= ?`
+			from orders where public_token = ? and event_date >= ?`
 		)
 		.bind(parsed.data, getLookupWindowStart())
 		.first<PublicOrderRow>();
@@ -137,7 +138,7 @@ export async function getPublicOrder(db: D1Database, token: unknown): Promise<Pu
 
 /**
  * The order a client link names, whatever its status or date, for an employee opening it from
- * the client's WhatsApp: the window and the draft rule protect the client's page, not the staff's.
+ * the client's WhatsApp: the window protects the client's page, not the staff's.
  */
 export async function findOrderIdByToken(db: D1Database, token: unknown): Promise<number | null> {
 	const parsed = tokenSchema.safeParse(token);
@@ -149,6 +150,79 @@ export async function findOrderIdByToken(db: D1Database, token: unknown): Promis
 		.bind(parsed.data)
 		.first<{ id: number }>();
 	return row?.id ?? null;
+}
+
+/**
+ * Exactly what «Su cotización» shows, built here and not trimmed in the page: never the phone, the
+ * document, `client_id`, the list prices, who created or edited it, or its timeline.
+ */
+export type PublicQuote = {
+	id: number;
+	createdOn: string;
+	validUntil: string;
+	clientName: string;
+	eventDate: string | null;
+	address1: string | null;
+	address2: string | null;
+	rentalDays: number;
+	items: PublicItem[];
+	itemsTotal: number;
+	discount: number;
+	/** Null is «por acordar»: the total leaves it out. */
+	transportCost: number | null;
+	quoteTotal: number;
+	notes: string | null;
+};
+
+async function findQuoteByToken(db: D1Database, token: unknown) {
+	const parsed = tokenSchema.safeParse(token);
+	if (!parsed.success) {
+		return null;
+	}
+	const row = await db
+		.prepare(`${SELECT_QUOTE} where public_token = ?`)
+		.bind(parsed.data)
+		.first<QuoteRow>();
+	return null === row ? null : toQuote(row);
+}
+
+/**
+ * The client's quote page: null for an unknown token, or a quote that isn't VALID. Renewing an
+ * expired quote brings the same link back; a converted one never leads to its order.
+ */
+export async function getPublicQuote(db: D1Database, token: unknown): Promise<PublicQuote | null> {
+	const quote = await findQuoteByToken(db, token);
+	if (null === quote || 'VALID' !== quote.state) {
+		return null;
+	}
+	const { id, validUntil, eventDate, address1, address2, rentalDays, notes } = quote;
+	const { itemsTotal, discount, transportCost, quoteTotal } = quote;
+	return {
+		id,
+		createdOn: getInstantDate(quote.createdAt),
+		validUntil,
+		clientName: quote.client.name,
+		eventDate,
+		address1,
+		address2,
+		rentalDays,
+		items: quote.items.map((item) => ({
+			name: item.name,
+			qty: item.qty,
+			unit_price: item.unit_price,
+			line_total: item.line_total
+		})),
+		itemsTotal,
+		discount,
+		transportCost,
+		quoteTotal,
+		notes
+	};
+}
+
+/** The quote a client link names, in any state, for an employee opening it: they go to its detail. */
+export async function findQuoteIdByToken(db: D1Database, token: unknown): Promise<number | null> {
+	return (await findQuoteByToken(db, token))?.id ?? null;
 }
 
 /** The terms and conditions under the order, as Markdown; empty while there are none. */
@@ -187,7 +261,7 @@ export type LookupResult =
 
 /**
  * The orders of a phone and an event date, by `id`: the phone compared whole against the order's
- * own snapshot, never `contacts.phone`; every status but a draft; an event no older than the
+ * own snapshot, never `contacts.phone`; every status; an event no older than the
  * window. No match is the one miss, whatever failed; a field the client mistyped runs no query.
  */
 export async function lookupOrders(db: D1Database, input: unknown): Promise<LookupResult> {
@@ -201,7 +275,7 @@ export async function lookupOrders(db: D1Database, input: unknown): Promise<Look
 	const { results } = await db
 		.prepare(
 			`select id, status, public_token as token from orders
-			where status <> 'DRAFT' and event_date = ? and event_date >= ?
+			where event_date = ? and event_date >= ?
 			and json_extract(client_attributes, '$.phone') = ? order by id`
 		)
 		.bind(parsed.data.event_date, getLookupWindowStart(), parsed.data.phone)

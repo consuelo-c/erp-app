@@ -1,13 +1,19 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { requireRole } from '$lib/server/actor';
-import { createQuote, getQuoteDuplicate, getQuoteFormOptions } from '$lib/server/services/quotes';
+import {
+	createQuote,
+	getOrderRequote,
+	getQuoteDuplicate,
+	getQuoteFormOptions
+} from '$lib/server/services/quotes';
 import { readPostedJson } from '../../pedidos/order-form';
 import type { Actions, PageServerLoad } from './$types';
 
 const TAKES_QUOTES = ['ADMIN', 'MANAGER', 'SALES'] as const;
 
-// `?desde=12` is «Duplicar»: the form opens filled from quote #12, and nothing is written until saved.
+// `?desde=12` is «Duplicar», from quote #12; `?pedido=1060` is «Cotizar de nuevo», from order #1060.
+// The form opens filled, and nothing is written until saved.
 export const load: PageServerLoad = async ({ locals, platform, url }) => {
 	requireRole(locals.user, TAKES_QUOTES);
 	if (undefined === platform) {
@@ -16,6 +22,14 @@ export const load: PageServerLoad = async ({ locals, platform, url }) => {
 	const db = platform.env.DB;
 	const options = await getQuoteFormOptions(db, locals.user);
 	const from = url.searchParams.get('desde');
+	const order = url.searchParams.get('pedido');
+	if (null !== order) {
+		const copy = await getOrderRequote(db, order, locals.user);
+		if (null === copy) {
+			error(404, 'Ese pedido no existe');
+		}
+		return { options, copy };
+	}
 	if (null === from) {
 		return { options, copy: null };
 	}

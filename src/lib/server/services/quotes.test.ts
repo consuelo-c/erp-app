@@ -4,8 +4,9 @@ import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
+import { addDays } from '$lib/datetime';
 import { getQuoteState, QUOTE_STATE_SQL } from '$lib/quotes';
-import { cancelOrder, confirmOrder, getOrder, previewConfirmation } from './orders';
+import { cancelOrder, getOrder, getOrderDetail, offeredPaymentConcepts } from './orders';
 import {
 	convertQuote,
 	createQuote,
@@ -15,7 +16,9 @@ import {
 	getQuote,
 	getQuoteChange,
 	getQuoteDetail,
+	getOrderRequote,
 	getQuoteDuplicate,
+	getQuotePublicToken,
 	getQuoteTimeline,
 	getSourceQuoteId,
 	listQuotes,
@@ -362,7 +365,7 @@ test("a converted quote can't be edited, and a quote that doesn't exist neither"
 	const id = await create();
 	database.exec(
 		`insert into orders (id, public_token, client_id, status, event_date, delivery_date, pickup_date, rental_days, client_attributes, delivery_attributes, pickup_attributes, order_items, items_total, order_total, created_at, created_by, updated_at, updated_by)
-		values (1060, 'token', ${LUZ_MARINA}, 'DRAFT', '2026-12-12', '2026-12-11', '2026-12-13', 2, '{}', '{"method":"COMPANY_DELIVERY"}', '{"method":"COMPANY_PICKUP"}', '[]', 0, 0, ${AUDIT})`
+		values (1060, 'token', ${LUZ_MARINA}, 'CONFIRMED', '2026-12-12', '2026-12-11', '2026-12-13', 2, '{}', '{"method":"COMPANY_DELIVERY"}', '{"method":"COMPANY_PICKUP"}', '[]', 0, 0, ${AUDIT})`
 	);
 	database.exec(`update quotes set order_id = 1060 where id = ${id}`);
 	expect((await read(id)).state).toBe('CONVERTED');
@@ -395,8 +398,8 @@ function insertQuote(
 ) {
 	database
 		.prepare(
-			`insert into quotes (client_id, order_id, valid_until, rental_days, client_attributes, quote_items, items_total, quote_total, created_at, created_by, updated_at, updated_by)
-			values (1, ?, ?, 1, ?, '[]', 0, 0, ${AUDIT})`
+			`insert into quotes (public_token, client_id, order_id, valid_until, rental_days, client_attributes, quote_items, items_total, quote_total, created_at, created_by, updated_at, updated_by)
+			values (lower(hex(randomblob(16))), 1, ?, ?, 1, ?, '[]', 0, 0, ${AUDIT})`
 		)
 		.run(validity.orderId ?? null, validity.validUntil, JSON.stringify({ name, phone }));
 }
@@ -404,7 +407,7 @@ function insertQuote(
 function insertOrder(id: number) {
 	database.exec(
 		`insert into orders (id, public_token, client_id, status, event_date, delivery_date, pickup_date, rental_days, client_attributes, delivery_attributes, pickup_attributes, order_items, items_total, order_total, created_at, created_by, updated_at, updated_by)
-		values (${id}, 'token-${id}', 1, 'DRAFT', '2026-12-12', '2026-12-11', '2026-12-13', 1, '{}', '{"method":"COMPANY_DELIVERY"}', '{"method":"COMPANY_PICKUP"}', '[]', 0, 0, ${AUDIT})`
+		values (${id}, 'token-${id}', 1, 'CONFIRMED', '2026-12-12', '2026-12-11', '2026-12-13', 1, '{}', '{"method":"COMPANY_DELIVERY"}', '{"method":"COMPANY_PICKUP"}', '[]', 0, 0, ${AUDIT})`
 	);
 }
 
@@ -606,7 +609,7 @@ test('«Duplicar» reprices every line from today’s catalog: name, list price 
 		}
 	]);
 	expect(copy).toMatchObject({
-		from: id,
+		source: { kind: 'QUOTE', id },
 		removed: [],
 		draft: {
 			clientId: LUZ_MARINA,
@@ -681,6 +684,27 @@ test('nothing is written until saved; the copy takes the next number and leaves 
 	]);
 });
 
+test('the client link token is set once: editing keeps it, a duplicate gets its own', async () => {
+	const id = await create();
+	const token = await getQuotePublicToken(db, id, sales);
+	expect(String(token)).toMatch(
+		/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+	);
+	expect(await updateQuote(db, { ...quote1043, id, discount: 0 }, sales)).toMatchObject({
+		ok: true
+	});
+	expect(await getQuotePublicToken(db, id, sales)).toBe(token);
+	const copy = await getQuoteDuplicate(db, id, sales);
+	const duplicate = await create(draftInput(copy?.draft as QuoteDraft));
+	expect(await getQuotePublicToken(db, duplicate, sales)).not.toBe(token);
+	const events = database.prepare('select after from events').all();
+	expect(JSON.stringify(events)).not.toContain(String(token));
+	for (const actor of [warehouse, driver]) {
+		const refusal = await getQuotePublicToken(db, id, actor).catch((caught) => caught);
+		expect(isHttpError(refusal, 403)).toBe(true);
+	}
+});
+
 test('WAREHOUSE and DRIVER get a 403 duplicating', async () => {
 	const id = await create();
 	for (const actor of [warehouse, driver]) {
@@ -737,11 +761,11 @@ test('the form opens filled from the quote, with its client as the contact is to
 	expect(await getQuoteConversion(db, 99, sales)).toBeNull();
 });
 
-test('saving creates a DRAFT order and links the quote, with ORDER CREATED and QUOTE CONVERTED', async () => {
+test('saving creates a CONFIRMED order and links the quote, with ORDER CREATED and QUOTE CONVERTED', async () => {
 	const id = await create();
 	const orderId = await convert(id);
 	expect(await getOrder(db, orderId, sales)).toMatchObject({
-		status: 'DRAFT',
+		status: 'CONFIRMED',
 		clientId: LUZ_MARINA,
 		orderTotal: 1180000
 	});
@@ -807,13 +831,54 @@ test("a converted quote, or one that doesn't exist, isn't converted", async () =
 	expect(countOrders()).toEqual({ orders: 1 });
 });
 
-test('the order is an ordinary draft: confirming re-checks availability; cancelling leaves the quote converted', async () => {
+test("the order's CREATED event carries CONFIRMED, and no STATUS_CHANGED follows it", async () => {
+	const orderId = await convert(await create());
+	const events = database
+		.prepare("select action, after from events where entity_type = 'ORDER' and entity_id = ?")
+		.all(orderId);
+	expect(events.map((event) => event.action)).toEqual(['CREATED']);
+	expect(JSON.parse(String(events[0].after))).toMatchObject({ status: 'CONFIRMED' });
+});
+
+test('saving checks availability once: what is short comes back, «Guardar de todos modos» saves', async () => {
+	const id = await create();
+	database.exec('update products set total_quantity = 100 where id = 1');
+	const short = await convertQuote(db, { quote: id, order: orderInput() }, sales);
+	expect(short).toMatchObject({
+		ok: false,
+		shortages: [{ productId: 1, name: 'Silla Tiffany dorada', short: 20 }]
+	});
+	expect(countOrders()).toEqual({ orders: 0 });
+	expect((await read(id)).state).toBe('VALID');
+	const forced = await convertQuote(db, { quote: id, order: orderInput(), force: true }, sales);
+	expect(forced).toMatchObject({ ok: true });
+	expect(countOrders()).toEqual({ orders: 1 });
+});
+
+test('with nothing short it saves at once, and with $0 paid it offers «Registrar pago»', async () => {
+	const result = await convertQuote(db, { quote: await create(), order: orderInput() }, sales);
+	if (!result.ok) {
+		throw new Error(JSON.stringify(result));
+	}
+	const detail = await getOrderDetail(db, result.id, sales);
+	if (null === detail) {
+		throw new Error('No order');
+	}
+	expect(detail).toMatchObject({ status: 'CONFIRMED', paid: 0 });
+	expect(offeredPaymentConcepts(detail, sales)).toContain('INSTALLMENT');
+});
+
+test("an expired quote isn't converted: it's renewed first", async () => {
+	const id = await create();
+	database.exec(`update quotes set valid_until = '2026-01-01' where id = ${id}`);
+	const result = await convertQuote(db, { quote: id, order: orderInput() }, sales);
+	expect(result).toMatchObject({ ok: false, message: expect.stringContaining('vencida') });
+	expect(countOrders()).toEqual({ orders: 0 });
+});
+
+test('cancelling the order leaves the quote converted', async () => {
 	const id = await create();
 	const orderId = await convert(id);
-	database.exec('update products set total_quantity = 100 where id = 1');
-	const preview = await previewConfirmation(db, { id: orderId }, sales);
-	expect(preview?.shortages).toEqual([{ productId: 1, name: 'Silla Tiffany dorada', short: 20 }]);
-	expect(await confirmOrder(db, { id: orderId }, sales)).toEqual({ ok: true, id: orderId });
 	const reason = 'El cliente aplazó el evento';
 	expect(await cancelOrder(db, { id: orderId, reason }, sales)).toMatchObject({ ok: true });
 	expect(await read(id)).toMatchObject({ orderId, state: 'CONVERTED' });
@@ -823,6 +888,100 @@ test('an order that came from no quote has no source quote', async () => {
 	const id = await create();
 	await convert(id);
 	expect(await getSourceQuoteId(db, 99, sales)).toBeNull();
+});
+
+// «Cotizar de nuevo»: order #1 from quote1043, its lines charged below list, then the catalog moves.
+async function requotedOrder(status = 'CONFIRMED') {
+	const lines = [
+		{ product_id: 1, qty: 120, unit_price: 2200 },
+		{ product_id: 2, qty: 12, unit_price: 12000 }
+	];
+	const quote = await create({ ...quote1043, quote_items: lines, discount: 0 });
+	const delivery = { address_1: 'Cra 70 #44-21, Laureles', address_2: 'Salón de eventos' };
+	const orderId = await convert(quote, {
+		order_items: lines,
+		discount: 50000,
+		transport_cost: 90000,
+		notes: 'Entrar por el portón de servicio',
+		delivery_attributes: { ...delivery, method: 'COMPANY_DELIVERY' }
+	});
+	database.exec(`update orders set status = '${status}' where id = ${orderId}`);
+	database.exec("update products set name = 'Silla Tiffany oro', rental_price = 2800 where id = 1");
+	database.exec('update products set active = 0 where id = 2');
+	return orderId;
+}
+
+test('«Cotizar de nuevo» fills the quote from the order at today’s prices, in any state', async () => {
+	for (const status of ['CONFIRMED', 'COMPLETED', 'CANCELLED']) {
+		const orderId = await requotedOrder(status);
+		const copy = await getOrderRequote(db, String(orderId), sales);
+		expect(copy).toEqual({
+			source: { kind: 'ORDER', id: orderId },
+			removed: ['Mesa redonda 10 puestos'],
+			draft: {
+				clientId: LUZ_MARINA,
+				client: { name: 'Luz Marina Restrepo', phone: '573104428890' },
+				address1: 'Cra 70 #44-21, Laureles',
+				address2: 'Salón de eventos',
+				rentalDays: 2,
+				discount: 50000,
+				transportCost: 90000,
+				notes: 'Entrar por el portón de servicio',
+				items: [
+					{
+						product_id: 1,
+						name: 'Silla Tiffany oro',
+						qty: 120,
+						list_price: 2800,
+						unit_price: 2800,
+						line_total: 120 * 2800 * 2
+					}
+				]
+			}
+		});
+		database.exec(
+			"update products set name = 'Silla Tiffany dorada', rental_price = 2500 where id = 1"
+		);
+		database.exec('update products set active = 1 where id = 2');
+	}
+});
+
+test('«Cotizar de nuevo» writes nothing; the saved quote has its own token and no link to the order', async () => {
+	const orderId = await requotedOrder('CANCELLED');
+	const order = database.prepare('select * from orders where id = ?').get(orderId);
+	const before = countRows();
+	const copy = await getOrderRequote(db, orderId, sales);
+	expect(countRows()).toEqual(before);
+	if (null === copy) {
+		throw new Error('No copy');
+	}
+	const id = await create(draftInput(copy.draft));
+	const row = readQuoteRow(id);
+	expect(row?.order_id).toBeNull();
+	expect(row?.event_date).toBeNull();
+	const tokens = database.prepare('select public_token from quotes').all();
+	expect(new Set(tokens.map((each) => each.public_token)).size).toBe(tokens.length);
+	expect(database.prepare('select * from orders where id = ?').get(orderId)).toEqual(order);
+});
+
+test('«Cotizar de nuevo»: no such order is null, and WAREHOUSE and DRIVER get a 403', async () => {
+	expect(await getOrderRequote(db, 99, sales)).toBeNull();
+	expect(await getOrderRequote(db, 'x', sales)).toBeNull();
+	const orderId = await requotedOrder();
+	for (const actor of [warehouse, driver]) {
+		const refusal = await getOrderRequote(db, orderId, actor).catch((caught) => caught);
+		expect(isHttpError(refusal, 403)).toBe(true);
+	}
+});
+
+test('a new quote is valid through Bogotá’s today plus QUOTES_VALIDITY_DAYS, at 11:30 p.m. too', async () => {
+	vi.setSystemTime(new Date('2026-11-01T04:30:00Z')); // 11:30 p.m. on 31 October in Bogotá
+	const setting = database
+		.prepare("select value from settings where key = 'QUOTES_VALIDITY_DAYS'")
+		.get();
+	expect((await getQuoteFormOptions(db, sales)).validUntil).toBe(
+		addDays('2026-10-31', Number(setting?.value))
+	);
 });
 
 test('DRIVER gets a 403 converting a quote; SALES converts it', async () => {

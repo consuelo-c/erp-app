@@ -75,10 +75,6 @@
 	<title>Pedidos · Banquetes Consuelo C</title>
 </svelte:head>
 
-{#snippet newOrder(inline: boolean)}
-	<Button href={resolve('/pedidos/nuevo')} {inline}>Nuevo pedido</Button>
-{/snippet}
-
 {#snippet badges(order: OrderSummary)}
 	<span class="badges">
 		<Badge tone={ORDER_STATUS_TONES[order.status]}>{ORDER_STATUS_LABELS[order.status]}</Badge>
@@ -153,7 +149,7 @@
 	{#if isEmpty}
 		<div class="empty">
 			<p>Aún no hay pedidos.</p>
-			{@render newOrder(true)}
+			<p>Un pedido se crea al convertir una cotización.</p>
 		</div>
 	{:else}
 		<div class="toolbar phone-only">
@@ -257,8 +253,6 @@
 				<Pagination current={filters.page} count={data.pageCount} href={pageHref} />
 			</div>
 		{/if}
-
-		<div class="screen__action">{@render newOrder(false)}</div>
 	{/if}
 </Screen>
 

@@ -3,7 +3,7 @@ import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
 import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
 import { movementStatements } from './cash';
-import { createOrder } from './orders';
+import { createOrder } from '../db/test-orders';
 import {
 	findOrderIdByToken,
 	getClientTerms,
@@ -184,9 +184,8 @@ test('never the carrier, trip dates, times, notes, list prices, phone, incident 
 	}
 });
 
-test('an unknown token, a draft, an event 31 days past or an id: no page', async () => {
+test('an unknown token, an event 31 days past or an id: no page', async () => {
 	expect(await getPublicOrder(db, crypto.randomUUID())).toBeNull();
-	expect(await getPublicOrder(db, await create('DRAFT'))).toBeNull();
 	const thirtyOneDaysAgo = await create('COMPLETED', { event_date: '2026-09-16' });
 	expect(await getPublicOrder(db, thirtyOneDaysAgo)).toBeNull();
 	expect(await getPublicOrder(db, '1')).toBeNull();
@@ -201,11 +200,9 @@ test('an event 30 days past and a cancelled order still open', async () => {
 	});
 });
 
-test("the staff's lookup finds any order by its token, draft or old, never by its id", async () => {
-	const draft = await create('DRAFT');
+test("the staff's lookup finds any order by its token, old included, never by its id", async () => {
 	const old = await create('COMPLETED', { event_date: '2026-01-10' });
-	expect(await findOrderIdByToken(db, draft)).toBe(1);
-	expect(await findOrderIdByToken(db, old)).toBe(2);
+	expect(await findOrderIdByToken(db, old)).toBe(1);
 	expect(await findOrderIdByToken(db, crypto.randomUUID())).toBeNull();
 	expect(await findOrderIdByToken(db, '1')).toBeNull();
 });
@@ -276,9 +273,15 @@ test('events from 30 days past on, with no upper limit', async () => {
 	expect(await lookup('3104428890', '2027-06-12')).toEqual([nextYear]);
 });
 
-test('every status but a draft: a cancelled order is found', async () => {
-	await create('DRAFT', { event_date: '2026-10-31' });
+test("a quote is never in the lookup, even with the client's phone and its event date", async () => {
+	database.exec(
+		`insert into quotes (public_token, client_id, event_date, valid_until, rental_days, client_attributes, quote_items, items_total, quote_total, created_at, created_by, updated_at, updated_by)
+		values ('${crypto.randomUUID()}', 1, '2026-10-31', '2026-12-31', 1, '{"name":"Luz Marina Restrepo","phone":"573104428890"}', '[]', 0, 0, ${AUDIT})`
+	);
 	expect(await lookup('3104428890', '2026-10-31')).toEqual([]);
+});
+
+test('every status: a cancelled order is found', async () => {
 	const cancelled = await create('CANCELLED', { event_date: '2026-11-07' });
 	expect(await lookup('3104428890', '2026-11-07')).toEqual([cancelled]);
 });
