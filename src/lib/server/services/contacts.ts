@@ -451,19 +451,29 @@ export type ContactPage = {
 
 type Clause = { sql: string; params: string[] };
 
+// The text typed, without a leading @, anywhere in the username, ignoring case as WhatsApp does:
+// «luzma» and «@LUZMA» both find LuzMarinaR.
+export function whatsappClause(search: string, whatsappSql = 'whatsapp'): Clause {
+	return {
+		sql: `lower(${whatsappSql}) like ? escape '\\'`,
+		params: [containing(search.trim().replace(/^@/, '').toLowerCase())]
+	};
+}
+
 // Letters search the text (the name, unless told otherwise): every word somewhere in it, in any
-// order, accents and case folded. Otherwise the digits typed, three or more, anywhere in the
-// phone, so «442 8890» finds 573104428890: not the normalizer, a fragment isn't a phone.
+// order, accents and case folded; or the username. Otherwise the digits typed, three or more,
+// anywhere in the phone, so «442 8890» finds 573104428890: not the normalizer, a fragment isn't a
+// phone. A username always has a letter, so digits alone never search it.
 export function searchClause(
 	search: string,
-	textSql = foldedSql('full_name'),
-	phoneSql = 'phone'
+	{ textSql = foldedSql('full_name'), phoneSql = 'phone', whatsappSql = 'whatsapp' } = {}
 ): Clause | null {
 	if (/\p{L}/u.test(search)) {
 		const words = fold(search).split(/\s+/).filter(Boolean);
+		const username = whatsappClause(search, whatsappSql);
 		return {
-			sql: words.map(() => `${textSql} like ? escape '\\'`).join(' and '),
-			params: words.map(containing)
+			sql: `(${words.map(() => `${textSql} like ? escape '\\'`).join(' and ')}) or ${username.sql}`,
+			params: [...words.map(containing), ...username.params]
 		};
 	}
 	const digits = search.replace(/\D/g, '');
@@ -504,7 +514,7 @@ function toSummary(row: SummaryRow): ContactSummary {
 	};
 }
 
-/** One page of contacts sorted by name, narrowed by name or phone and by service or employee. */
+/** One page of contacts sorted by name, narrowed by name, phone or username and by service or employee. */
 export async function listContacts(
 	db: D1Database,
 	input: unknown,
@@ -592,8 +602,8 @@ const CLIENT_TEXT_SQL = foldedSql(
 const CLIENT_MATCHES = 10;
 
 /**
- * The first contacts by name whose name or address has every word typed, or whose phone
- * has the digits typed. None is picked for the salesperson: several may share a phone.
+ * The first contacts by name whose name or address has every word typed, or whose username has
+ * the text, or whose phone has the digits typed. None is picked for the salesperson: several may share a phone.
  */
 export async function searchClients(
 	db: D1Database,
@@ -601,14 +611,16 @@ export async function searchClients(
 	actor: Actor | null
 ): Promise<ClientCandidate[]> {
 	requireRole(actor, EDITS_CONTACTS);
-	const clause = searchClause(z.string().trim().catch('').parse(typed), CLIENT_TEXT_SQL);
+	const clause = searchClause(z.string().trim().catch('').parse(typed), {
+		textSql: CLIENT_TEXT_SQL
+	});
 	if (null === clause) {
 		return [];
 	}
 	const { results } = await db
 		.prepare(
 			`select id, phone, whatsapp, full_name, document_id, services, attributes, 0 as is_employee
-			from contacts where ${clause.sql} order by full_name collate nocase, id limit ?`
+			from contacts where (${clause.sql}) order by full_name collate nocase, id limit ?`
 		)
 		.bind(...clause.params, CLIENT_MATCHES)
 		.all<ContactRow>();

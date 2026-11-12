@@ -90,8 +90,8 @@
 				<Input
 					type="search"
 					name="texto"
-					aria-label="Buscar por nombre o teléfono"
-					placeholder="Nombre o teléfono"
+					aria-label="Buscar por nombre, teléfono o usuario de WhatsApp"
+					placeholder="Nombre, teléfono o usuario (WA)"
 					value={filters.search}
 					oninput={searchSoon}
 				/>

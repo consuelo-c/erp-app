@@ -493,6 +493,16 @@ test("the text filter is the order list's: a name in another word order, or thre
 	expect(await listIds({ state: 'VALID', text: 'restrepo' })).toEqual([]);
 });
 
+test("letters also find the snapshot's username, without the @ and ignoring case", async () => {
+	insertThreeStates();
+	database.exec(
+		`update quotes set client_attributes = json_set(client_attributes, '$.whatsapp', 'LuzMarinaR')
+		where id = 3`
+	);
+	expect(await listIds({ state: 'ALL', text: 'luzma' })).toEqual([3]);
+	expect(await listIds({ state: 'ALL', text: '@LUZMA' })).toEqual([3]);
+});
+
 test('each row carries what the list shows: the state, the event date or none, and a pending transport', async () => {
 	await create({ ...quote1043, transport_cost: null, event_date: '' });
 	const [quote] = (await listQuotes(db, {}, sales)).quotes;

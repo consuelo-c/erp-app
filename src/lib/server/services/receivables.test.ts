@@ -512,6 +512,13 @@ test('?texto= finds the contact by a name in another word order, or digits of th
 	expect(await listIds({ text: 'Betancur' })).toEqual([]);
 });
 
+test("?texto= with letters also finds the contact's username, without the @, ignoring case", async () => {
+	const [postobon] = await issuedForTwoClients();
+	database.exec(`update contacts set whatsapp = 'LuzMarinaR' where id = ${POSTOBON}`);
+	expect(await listIds({ text: 'luzma' })).toEqual([postobon]);
+	expect(await listIds({ text: '@LUZMA' })).toEqual([postobon]);
+});
+
 test('?pendiente=1 keeps a balance above 0, leaving out the paid and the credit', async () => {
 	const [paid, pending] = await issuedForTwoClients();
 	insertOrder(2003, { total: 500000 });

@@ -1211,7 +1211,7 @@ function deliveryClause(period: DeliveryPeriod): Clause | null {
 	return null === range ? null : { sql: 'delivery_date between ? and ?', params: range };
 }
 
-// Each filter in SQL, over the order's own snapshot: never the contact, whose name or phone may
+// Each filter in SQL, over the order's own snapshot: never the contact, whose name, phone or username may
 // have changed since.
 function listClauses(filters: OrderFilters): Clause[] {
 	const candidates: [unknown, Clause][] = [
@@ -1224,7 +1224,11 @@ function listClauses(filters: OrderFilters): Clause[] {
 	const search =
 		undefined === filters.text
 			? null
-			: searchClause(filters.text, FOLDED_NAME_SQL, "json_extract(client_attributes, '$.phone')");
+			: searchClause(filters.text, {
+					textSql: FOLDED_NAME_SQL,
+					phoneSql: "json_extract(client_attributes, '$.phone')",
+					whatsappSql: "json_extract(client_attributes, '$.whatsapp')"
+				});
 	return [...set, deliveryClause(filters.delivery), search].filter((clause) => null !== clause);
 }
 

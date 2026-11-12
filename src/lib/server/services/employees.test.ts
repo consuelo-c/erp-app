@@ -137,6 +137,17 @@ test('without a pick, a shared phone gets a contact of its own', async () => {
 	expect(database.prepare('select contact_id from employees').get()?.contact_id).toBe(2);
 });
 
+test('letters also find the username, without the @ and ignoring case', async () => {
+	const luz = { full_name: 'Mayra Castaño', document_id: '1040338912', whatsapp: 'LuzMarinaR' };
+	await createContact(db, luz, manager);
+	for (const search of ['luzma', '@LUZMA']) {
+		expect(await searchContactCandidates(db, search, manager)).toMatchObject([
+			{ fullName: 'Mayra Castaño', whatsapp: 'LuzMarinaR' }
+		]);
+	}
+	expect(await searchContactCandidates(db, '@luz.ma', manager)).toEqual([]);
+});
+
 test('the search needs three characters and never matches an automatic document', async () => {
 	await newClient();
 	const automatic = String(database.prepare('select document_id from contacts').get()?.document_id);

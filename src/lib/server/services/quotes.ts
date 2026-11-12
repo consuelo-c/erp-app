@@ -425,9 +425,12 @@ type Clause = { sql: string; params: (string | number)[] };
 
 // The order list's rules, over the quote's own snapshot: never the contact's current name or phone.
 function listClauses(filters: QuoteFilters, today: string): Clause[] {
-	const name = foldedSql("json_extract(client_attributes, '$.name')");
-	const phone = "json_extract(client_attributes, '$.phone')";
-	const search = undefined === filters.text ? null : searchClause(filters.text, name, phone);
+	const columns = {
+		textSql: foldedSql("json_extract(client_attributes, '$.name')"),
+		phoneSql: "json_extract(client_attributes, '$.phone')",
+		whatsappSql: "json_extract(client_attributes, '$.whatsapp')"
+	};
+	const search = undefined === filters.text ? null : searchClause(filters.text, columns);
 	const state =
 		'ALL' === filters.state
 			? null

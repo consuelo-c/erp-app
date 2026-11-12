@@ -399,6 +399,19 @@ test('an edit that changes nothing writes nothing', async () => {
 	expect(database.prepare('select count(*) as count from events').get()).toEqual({ count: 1 });
 });
 
+test('letters also find the username, without the @ and ignoring case; digits only the phone', async () => {
+	await create({ full_name: 'Luz Marina', whatsapp: 'LuzMarinaR' });
+	await create({ phone: '310 442 8890', full_name: 'Jorge Betancur', whatsapp: 'jorge442' });
+	const names = async (search: string) =>
+		(await listContacts(db, { search }, sales)).contacts.map((contact) => contact.fullName);
+	expect(await names('luzma')).toEqual(['Luz Marina']);
+	expect(await names('@LUZMA')).toEqual(['Luz Marina']);
+	expect(await names('@jorge')).toEqual(['Jorge Betancur']);
+	expect(await names('442')).toEqual(['Jorge Betancur']);
+	expect(await names('luz_')).toEqual([]);
+	expect(await names('luz marina')).toEqual(['Luz Marina']);
+});
+
 test('Warehouse and Driver have no access to contacts', async () => {
 	for (const role of ['WAREHOUSE', 'DRIVER'] as const) {
 		expect(await rejection(listContacts(db, {}, actorWith(role)))).toBe(403);
@@ -439,6 +452,9 @@ test('the order form finds clients by name, address or phone, by name, with thei
 	expect(await ids('poblado MARINA')).toEqual([luzMarinaId]);
 	expect(await ids('piso 2')).toEqual([luzMarinaId]);
 	expect(await ids('44')).toEqual([]);
+	const username = await create({ full_name: 'Mayra', whatsapp: 'LuzMarinaR' });
+	expect(await ids('luzma')).toEqual([username]);
+	expect(await ids('@LUZMA')).toEqual([username]);
 	expect(await rejection(searchClients(db, 'luz', actorWith('WAREHOUSE')))).toBe(403);
 });
 

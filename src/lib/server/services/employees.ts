@@ -12,6 +12,7 @@ import {
 	invalidForm,
 	isAutoDocument,
 	phoneSchema,
+	whatsappClause,
 	whatsappSchema
 } from './contacts';
 
@@ -212,8 +213,8 @@ const CANDIDATES_SHOWN = 5;
 
 type Clause = { sql: string; params: string[] };
 
-// Name or email by what's typed; the phone by its digits and the document as it's stored, three
-// or more of either, as in Contactos. Never an automatic document.
+// Name or email by what's typed, and the username when it has letters; the phone by its digits and
+// the document as it's stored, three or more of either, as in Contactos. Never an automatic document.
 function candidateClauses(search: string): Clause[] {
 	const text = containing(search);
 	const digits = search.replace(/\D/g, '');
@@ -229,7 +230,8 @@ function candidateClauses(search: string): Clause[] {
 						params: [containing(document)]
 					}
 				]),
-		...(3 > digits.length ? [] : [{ sql: 'contacts.phone like ?', params: [`%${digits}%`] }])
+		...(3 > digits.length ? [] : [{ sql: 'contacts.phone like ?', params: [`%${digits}%`] }]),
+		...(/\p{L}/u.test(search) ? [whatsappClause(search, 'contacts.whatsapp')] : [])
 	];
 }
 

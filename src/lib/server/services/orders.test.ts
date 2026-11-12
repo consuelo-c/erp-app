@@ -809,6 +809,18 @@ test('the filters combine, each over the order snapshot', async () => {
 	expect(await listIds({ status: 'PICKED' })).toEqual([luzMarina]);
 });
 
+test("letters also find the snapshot's username, without the @ and ignoring case", async () => {
+	const [, jorge] = await createThree();
+	database.exec(
+		`update orders set client_attributes = json_set(client_attributes, '$.whatsapp', 'LuzMarinaR')
+		where id = ${jorge}`
+	);
+	database.exec("update contacts set whatsapp = 'LuzMarinaR' where id = 1");
+	expect(await listIds({ text: 'luzma' })).toEqual([jorge]);
+	expect(await listIds({ text: '@LUZMA' })).toEqual([jorge]);
+	expect(await listIds({ text: '@luzmarinar betancur' })).toEqual([]);
+});
+
 test('incidents only is its own filter, in SQL', async () => {
 	const [luzMarina] = await createThree();
 	database.exec(`update orders set has_incident = 1 where id = ${luzMarina}`);
