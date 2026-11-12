@@ -9,18 +9,20 @@ argument-hint: <phase number>
 
 Open Phase $ARGUMENTS. `NN` below is that number, zero-padded (`3` → `03`).
 
-This is a planning session: it writes no code; its only file is the issue script in the session's scratchpad (section 6). The process is `../planning/working-methodology.md` "Opening a phase"; this skill adds only what that section leaves to the session.
+This is a planning session: it writes no code; its only file is the issue script in the session's scratchpad (section 6). The process is `erp-planning:working-methodology.md` "Opening a phase"; this skill adds only what that section leaves to the session.
+
+`erp-planning:` names the planning repository's clone, a sibling of this one: before anything else, find its folder among the siblings by its remote (`git -C <folder> remote get-url origin` ending in `consuelo-c/erp-planning.git`), and use it as `<planning>` below.
 
 ## 1. Preconditions
 
-- `../planning/phase-NN/acceptance.md` exists. If it doesn't, stop: the criteria are written in a planning session in `../planning/` before the phase opens.
-- Phases 00–02 are not opened here: 00 is done by hand, 01–02 use Prompt 0 in `../planning/phase-01/prompts.md`.
+- `erp-planning:phase-NN/acceptance.md` exists. If it doesn't, stop: the criteria are written in a planning session in `erp-planning` before the phase opens.
+- Phases 00–02 are not opened here: 00 is done by hand, 01–02 use Prompt 0 in `erp-planning:phase-01/prompts.md`.
 
 ## 2. Read
 
-- `../planning/working-methodology.md`: "Opening a phase" and section 4 ("The issues").
-- `../planning/phase-NN/acceptance.md` whole, both halves.
-- `../planning/foundations.md` and `../planning/phase-NN/planning.md`, whose _Screens_ section lists the phase's screens.
+- `erp-planning:working-methodology.md`: "Opening a phase" and section 4 ("The issues").
+- `erp-planning:phase-NN/acceptance.md` whole, both halves.
+- `erp-planning:foundations.md` and `erp-planning:phase-NN/planning.md`, whose _Screens_ section lists the phase's screens.
 
 ## 3. Existing issues
 
@@ -33,7 +35,7 @@ An issue that already exists is never proposed again. Unplaced ideas that belong
 
 ## 4. Screens
 
-Follow "Opening a phase" → "Screens first". Read the [Design Project](https://claude.ai/artifact/TBE5f1FaBxQJxkKwncJspg) with the Artifact tool: its page list, `project/compat.json`, then the pages that hold the phase's screens, found by name (`project/_ds/`, `project/uploads/` and `project/old/` aren't screens). Report each screen as **ready**, **missing** or **contradicting the current planning**, and write the design prompt for each one that isn't ready; the developer runs it in the Design Project, in Claude. Units are proposed only once the developer says every screen is ready.
+Follow "Opening a phase" → "Screens first". Read the [canvas](https://claude.ai/artifact/TBE5f1FaBxQJxkKwncJspg) with the Artifact tool: its page list, `project/compat.json`, then the pages that hold the phase's screens, found by name (`project/_ds/`, `project/uploads/` and `project/old/` aren't screens). Report each screen as **ready**, **missing** or **contradicting the current planning**, and write the design prompt for each one that isn't ready; the developer runs it in the canvas's editor, in Claude. Units are proposed only once the developer says every screen is ready.
 
 ## 5. Units
 
@@ -47,7 +49,7 @@ Show the list (title, criteria covered, order) and wait for approval.
 
 Write `phase-NN-issues.sh` in the session's scratchpad: one `create` per unit, in order, so the issue numbers follow it; then the idea placements from section 3. Titles and bodies in Spanish; each body opens with one sentence naming what the unit builds or fixes, so the issue reads on its own, then links the criteria heading and the planning heading it implements, without copying or restating them: a paraphrase drifts from the hard rules and the criteria. Quoted heredocs keep backticks and `$` in the bodies literal.
 
-Planning links are pinned to the commit the session read, so they keep showing the text the issue was written from; `git diff <sha> main -- <file>` in `../planning/` shows what changed since. Get it with `git -C ../planning rev-parse --short HEAD` (GitHub resolves the short hash in `blob/` links), after `git -C ../planning fetch` and `git -C ../planning status -sb` show no changes and no `ahead`; otherwise ask the developer to commit and push the planning first.
+Planning links are pinned to the commit the session read, so they keep showing the text the issue was written from; `git -C <planning> diff <sha> main -- <file>` shows what changed since. Get it with `git -C <planning> rev-parse --short HEAD` (GitHub resolves the short hash in `blob/` links), after `git -C <planning> fetch` and `git -C <planning> status -sb` show no changes and no `ahead`; otherwise ask the developer to commit and push the planning first.
 
 ```bash
 #!/usr/bin/env bash

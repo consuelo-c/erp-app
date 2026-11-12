@@ -1,24 +1,24 @@
 # erp-app
 
-SvelteKit app for Banquetes Consuelo C, a party rental business in Medellín, deployed as a Cloudflare Worker. Planning lives in the sibling repository `../planning/` ([`consuelo-c/erp-planning`](https://github.com/consuelo-c/erp-planning)), never copied here; the screens live in the [Design Project](https://claude.ai/artifact/TBE5f1FaBxQJxkKwncJspg), a Claude artifact read and published to with the Artifact tool (the only artifact Claude publishes to, telling the developer each time). All issues, milestones (`Phase 00`, `Phase 01`, …) and labels live in `consuelo-c/erp-app`: pass `--repo consuelo-c/erp-app` to every `gh` command.
+SvelteKit app for Banquetes Consuelo C, a party rental business in Medellín, deployed as a Cloudflare Worker. Planning lives in the sibling repository [`consuelo-c/erp-planning`](https://github.com/consuelo-c/erp-planning), never copied here, and the brand in [`consuelo-c/branding`](https://github.com/consuelo-c/branding); find a repository's folder by its remote (`git -C <folder> remote get-url origin`); the screens live in the [canvas](https://claude.ai/artifact/TBE5f1FaBxQJxkKwncJspg), a Claude artifact read and published to with the Artifact tool (the only artifact Claude publishes to, telling the developer each time); its terms (page, component page, frame) are in [`erp-planning:GLOSSARY.md`](https://github.com/consuelo-c/erp-planning/blob/main/GLOSSARY.md). All issues, milestones (`Phase 00`, `Phase 01`, …) and labels live in `consuelo-c/erp-app`: pass `--repo consuelo-c/erp-app` to every `gh` command.
 
 ## Always
 
 - **The developer runs every write command** (git add/commit/push, npm install, wrangler create/deploy/apply/secret, gh issue/pr create, gh project item-edit); Claude runs read-only ones, `npm run test`, `lint` and `typecheck` included. When a write command is needed, propose the exact command and wait for the developer to say it ran. Enforced by the deny list in `.claude/settings.json`
 - **Language.** Chat, code and docs in English; `README.md` and user-facing UI in Spanish. Issues, issue comments and pull requests in Spanish (title and body); code identifiers, paths, commands and closing keywords stay as they are: `Closes #N`, never `Cierra #N`
 - **Scope.** Build what the declared unit needs to work end to end, glue included; a feature or screen another unit or a later phase owns gets a stub, not an implementation
-- **No project state here or in Claude Code memory.** The plan lives in `../planning/`, the state in the issues
+- **No project state here or in Claude Code memory.** The plan lives in `erp-planning`, the state in the issues
 - **Search** with `rg` and `fd`, never `grep` or `find`
-- **Planning references** are Markdown links: local path as text, GitHub URL as target. Only `hard-rules.md` is imported (below); every other planning file is read through its link when the moment comes, never `@import`ed
+- **Planning references** are Markdown links: repository and path as text (`` `erp-planning:phase-06/planning.md` ``), GitHub URL as target; never a folder name. Only `hard-rules.md` is imported (below); every other planning file is read through its link when the moment comes, never `@import`ed
 
 ## When to read what
 
-All in [../planning/working-methodology.md](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md) (`methodology`) unless named.
+All in [`erp-planning:working-methodology.md`](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md) (`methodology`) unless named.
 
 - **Opening a session** — `methodology` [§7](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#7-opening-and-closing-a-session): the milestone's open issues, not the planning
-- **Opening a phase** — the developer runs `/start-phase NN` (`.claude/skills/start-phase/`); asked to open a phase without it, suggest it. The process stays in `methodology` [Opening a phase](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#opening-a-phase) (screens first, then one issue per unit); the phase's plan is `../planning/phase-NN/planning.md`, read with [../planning/foundations.md](https://github.com/consuelo-c/erp-planning/blob/main/foundations.md)
-- **Starting a unit** — `methodology` [The cycle](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#the-cycle) (the branch exists, start working: never ask for the move to `Doing` nor wait on it); the phase's whole criteria file, both halves: `../planning/phase-NN/acceptance.md`
-- **Building a screen** — `methodology` [Opening a phase](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#opening-a-phase): only the Design Project pages (`project/<page>`, read with the Artifact tool) of the screens its issue names; ask before reading another of the same phase
+- **Opening a phase** — the developer runs `/start-phase NN` (`.claude/skills/start-phase/`); asked to open a phase without it, suggest it. The process stays in `methodology` [Opening a phase](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#opening-a-phase) (screens first, then one issue per unit); the phase's plan is `erp-planning:phase-NN/planning.md`, read with [`erp-planning:foundations.md`](https://github.com/consuelo-c/erp-planning/blob/main/foundations.md)
+- **Starting a unit** — `methodology` [The cycle](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#the-cycle) (the branch exists, start working: never ask for the move to `Doing` nor wait on it); the phase's whole criteria file, both halves: `erp-planning:phase-NN/acceptance.md`
+- **Building a screen** — `methodology` [Opening a phase](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#opening-a-phase): only the canvas pages (`project/<page>`, read with the Artifact tool) of the screens its issue names; ask before reading another of the same phase
 - **Needing something another unit or phase owns** — `methodology` [Stubs are the way out](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#stubs-are-the-way-out)
 - **Finding a gap, ambiguity, error or contradiction in the planning** — `methodology` [Gaps in the planning](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#gaps-in-the-planning) and [§4](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#4-the-issues)
 - **Writing code** — `methodology` [§13 Code standards](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#13-code-standards)
@@ -83,4 +83,4 @@ Where things live and which helper to reuse. What a screen or service does is re
 
 Imported from the planning, so they are always current. Cited by name, not by number.
 
-@../planning/hard-rules.md
+@../erp-planning/hard-rules.md

@@ -6,7 +6,7 @@
 - Cuenta de GitHub
 - Node y npm (Puede ser a través de un manejador de versiones como mise o nvm)
 - Comando `gh`
-- Cuenta de Claude con acceso a los artifacts del diseño (ver [Diseño](#diseño))
+- Cuenta de Claude con acceso al _canvas_ del diseño (ver [Diseño](#diseño))
 
 ## Cloudflare
 
@@ -350,25 +350,27 @@ Después se hace una revisión en el navegador. Debe hacerse en `https://app.con
 
 ## Diseño
 
-El diseño vive en dos _artifacts_ de Claude, fuera de este repositorio:
+El diseño vive fuera de este repositorio, en tres lugares. Los términos están en el [glosario](https://github.com/consuelo-c/erp-planning/blob/main/GLOSSARY.md).
 
-| Artifact                                                            | Qué tiene                                                                                                        |
-| ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| [Design System](https://claude.ai/artifact/XjkdEpgPWr2CLgadDykdxy)  | Los _tokens_, los componentes, el logo y sus reglas, lo que comparten todas las pantallas y los datos de ejemplo |
-| [Design Project](https://claude.ai/artifact/TBE5f1FaBxQJxkKwncJspg) | Las pantallas y los impresos, una página por sección (`project/2.8 Despachos, Recogidas y Transiciones.dc.html`) |
+| Dónde                                                                                                      | Qué tiene                                                                                                                         |
+| ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| La marca, en [`consuelo-c/branding`](https://github.com/consuelo-c/branding)                               | El logo, los colores, la fuente, los radios, la voz y los mensajes de la empresa                                                  |
+| El Design System, en [`erp-planning:design/`](https://github.com/consuelo-c/erp-planning/tree/main/design) | Los _tokens_ y componentes propios de la app, lo que comparten todas las pantallas y los datos de ejemplo                         |
+| El _canvas_, [Consuelo C ERP Canvas](https://claude.ai/artifact/TBE5f1FaBxQJxkKwncJspg)                    | Las pantallas y los impresos: una página por sección (`project/08 Despachos, Recogidas y Transiciones.dc.html`), con sus _frames_ |
 
-Los dos son privados: los ve la cuenta de Claude que los creó y las personas con quienes se compartan desde el mismo _artifact_.
+El _canvas_ es un _artifact_ privado: lo ve la cuenta de Claude que lo creó y las personas con quienes se comparta desde el mismo _artifact_.
 
 ### Desde el navegador
 
-Se abre el enlace con la sesión de Claude iniciada. En el Design Project se diseñan las pantallas: se abre en Claude y se pide el cambio en el chat, por ejemplo con el _prompt_ que escribe Claude Code al abrir una fase. La galería de _artifacts_ está en <https://claude.ai/code/artifacts>.
+Se abre el enlace con la sesión de Claude iniciada. En el _canvas_ se diseñan las pantallas: se abre en su editor, en Claude, y se pide el cambio en el chat, por ejemplo con el _prompt_ que escribe Claude Code al abrir una fase. La galería de _artifacts_ está en <https://claude.ai/code/artifacts>.
 
 ### Desde Claude Code
 
-Claude Code los lee con la herramienta `Artifact`, con la misma cuenta de Claude con la que se inició sesión en `claude`. No hace falta exportar nada ni abrir un navegador:
+Claude Code lo lee con la herramienta `Artifact`, con la misma cuenta de Claude con la que se inició sesión en `claude`. No hace falta exportar nada ni abrir un navegador:
 
-- El Design Project se lee por rutas: primero la lista de páginas, `project/compat.json`, y luego solo las páginas de las pantallas que nombra el _issue_. Claude Code nunca publica en él.
-- El Design System lo actualiza Claude Code cuando el código lo requiere: lee el _artifact_, cambia solo archivos bajo `project/` y publica. Nada se escribe hasta que el desarrollador aprueba el aviso de publicación.
+- El _canvas_ se lee por rutas: primero la lista de páginas, `project/compat.json`, y luego solo las páginas de las pantallas que nombra el _issue_.
+- Claude Code publica en él solo cuando una página tiene que coincidir con el código, y avisa cada vez. Nada se escribe hasta que el desarrollador aprueba el aviso de publicación.
+- El Design System no es un _artifact_: Claude Code lo edita en `erp-planning:design/` cuando el código lo requiere.
 
 > [!TIP]
 > En la terminal de `claude`, el comando `/artifacts` lista los _artifacts_ de la cuenta: la tecla `o` abre uno en el navegador y la `c` copia su enlace.
