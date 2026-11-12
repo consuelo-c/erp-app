@@ -122,12 +122,27 @@ export function isEditableStatus(status: OrderStatus): boolean {
 	return EDITABLE.includes(status);
 }
 
-// Damage turns up on the return or later, washing: never before the order reaches the client.
+/** The status a cancelled order was cancelled from, read from its CANCELLED event's `before`. */
+export type CancelledFrom = { cancelledFrom: OrderStatus } | null;
+
+/**
+ * The only rule for «cancelled on its way»: cancelled from OUT_FOR_DELIVERY, so the merchandise
+ * went out and came back. From CONFIRMED or PICKED it never left the warehouse.
+ */
+export function isCancelledOnItsWay(cancellation: CancelledFrom): boolean {
+	return 'OUT_FOR_DELIVERY' === cancellation?.cancelledFrom;
+}
+
+// Damage turns up on the return or later, washing: never before the order reaches the client,
+// unless it was cancelled on its way and came back.
 const REPORTABLE: readonly OrderStatus[] = ['DELIVERED', 'OUT_FOR_PICKUP', 'COMPLETED'];
 
 /** Whether an incident can be reported on an order in this state. */
-export function isIncidentReportable(status: OrderStatus): boolean {
-	return REPORTABLE.includes(status);
+export function isIncidentReportable(order: {
+	status: OrderStatus;
+	cancellation: CancelledFrom;
+}): boolean {
+	return REPORTABLE.includes(order.status) || isCancelledOnItsWay(order.cancellation);
 }
 
 // Sales records the money in; only the manager pays it out.

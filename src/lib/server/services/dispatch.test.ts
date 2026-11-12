@@ -3,7 +3,7 @@ import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
 import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
 import { getDispatchDay } from './dispatch';
-import { advanceOrder, createExtension } from './orders';
+import { advanceOrder, cancelOrder, createExtension } from './orders';
 import { createOrder } from '../db/test-orders';
 
 const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
@@ -103,6 +103,8 @@ test('a day holds every method and every state but a cancelled one', async () =>
 	});
 	const delivered = await create('DELIVERED');
 	await create('CANCELLED', { pickup_date: TODAY });
+	const onItsWay = await create('OUT_FOR_DELIVERY', { pickup_date: TODAY });
+	await cancelOrder(db, { id: onItsWay, reason: 'Llegó tarde' }, sales);
 	expect(await trips()).toEqual([
 		`delivery ${client}`,
 		`pickup ${returned}`,

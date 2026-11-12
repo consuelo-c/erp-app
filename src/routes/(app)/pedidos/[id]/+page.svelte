@@ -24,7 +24,12 @@
 		RESPONSIBLE_PARTY_LABELS,
 		RETURN_METHOD_LABELS
 	} from '$lib/labels';
-	import { isEditableStatus, isLegalTransition, readReceivableBalance } from '$lib/orders';
+	import {
+		isCancelledOnItsWay,
+		isEditableStatus,
+		isLegalTransition,
+		readReceivableBalance
+	} from '$lib/orders';
 	import { formatPhone } from '$lib/phone';
 	import type { Incident, ResponsibleParty } from '$lib/server/services/incidents';
 	import type { Carrier } from '$lib/server/services/orders';
@@ -193,8 +198,9 @@
 						onclick={() => copyClientLink(token)}
 					/>
 				{/if}
-				<!-- A cancelled order is never delivered: Despachos has nothing to do with it. -->
-				{#if 'CANCELLED' !== order.status}
+				<!-- A cancelled order is never delivered: Despachos has nothing to do with it, unless it was
+				     cancelled on its way and came back, maybe damaged. -->
+				{#if 'CANCELLED' !== order.status || isCancelledOnItsWay(order.cancellation)}
 					<IconButton
 						icon="truck"
 						label="Ver en Despachos"

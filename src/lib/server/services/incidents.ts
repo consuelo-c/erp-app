@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { isIncidentReportable } from '$lib/orders';
 import { ROLES, requireRole, type Actor, type Role } from '../actor';
 import { auditedInsert, auditedUpdate, nowInSeconds } from '../audit';
-import { orderItemsSchema, type OrderStatus, type SaveResult } from './orders';
+import { CANCELLED_FROM_SQL, orderItemsSchema, type OrderStatus, type SaveResult } from './orders';
 
 export const INCIDENT_OUTCOMES = ['LOST', 'UNRECOVERABLE', 'RECOVERABLE'] as const;
 export const RESPONSIBLE_PARTIES = ['UNDETERMINED', 'CLIENT', 'CARRIER', 'COMPANY'] as const;
@@ -140,16 +140,26 @@ function hasIncidentStatement(db: D1Database, orderId: number): D1PreparedStatem
 		.bind(orderId, orderId);
 }
 
-// The order must be with the client or back; the items, its own lines.
+type ReportedOrder = {
+	status: OrderStatus;
+	order_items: string;
+	cancelled_from: OrderStatus | null;
+};
+
+// The order must be with the client or back, or cancelled on its way; the items, its own lines.
 async function checkReport(db: D1Database, report: ReportInput): Promise<IncidentItem[] | Refusal> {
 	const order = await db
-		.prepare('select status, order_items from orders where id = ?')
+		.prepare(
+			`select status, order_items, ${CANCELLED_FROM_SQL} as cancelled_from from orders where id = ?`
+		)
 		.bind(report.order_id)
-		.first<{ status: OrderStatus; order_items: string }>();
+		.first<ReportedOrder>();
 	if (null === order) {
 		return refusal({}, 'Ese pedido no existe');
 	}
-	if (!isIncidentReportable(order.status)) {
+	const cancellation =
+		null === order.cancelled_from ? null : { cancelledFrom: order.cancelled_from };
+	if (!isIncidentReportable({ status: order.status, cancellation })) {
 		return refusal({}, 'Una novedad se reporta cuando el pedido ya se entregó');
 	}
 	const lines = orderItemsSchema.parse(JSON.parse(order.order_items));
@@ -162,7 +172,8 @@ async function checkReport(db: D1Database, report: ReportInput): Promise<Inciden
 }
 
 /**
- * Logs an incident on a delivered, out-for-pickup or completed order, open to every role. It's
+ * Logs an incident on a delivered, out-for-pickup or completed order, or one cancelled on its way,
+ * open to every role. It's
  * born `UNDETERMINED`: whose fault it was is investigated later. The incident, the inventory it
  * takes, the order's flag and their events go in one batch.
  */

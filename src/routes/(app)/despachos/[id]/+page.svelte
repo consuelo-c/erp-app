@@ -365,7 +365,7 @@
 	{/if}
 
 	<div class="screen__action">
-		{#if isIncidentReportable(order.status)}
+		{#if isIncidentReportable(order)}
 			<Button
 				variant="secondary"
 				href={onlineHref(keepOrigin(resolve('/(app)/despachos/[id]/novedad', { id })))}

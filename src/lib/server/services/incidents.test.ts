@@ -11,7 +11,7 @@ import {
 	setResponsibleParty
 } from './incidents';
 import { approveCount, reverseCount, submitCount } from './inventory';
-import { advanceOrder, getOrderDetail } from './orders';
+import { advanceOrder, cancelOrder, getOrderDetail } from './orders';
 import { createOrder } from '../db/test-orders';
 
 const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
@@ -133,6 +133,27 @@ test('an order not yet with the client, or cancelled, takes no incident', async 
 	}
 	expect(database.prepare('select count(*) as count from incidents').get()).toEqual({ count: 0 });
 	expect(stock(CHAIR)).toBe(500);
+});
+
+async function cancelledFrom(status: string): Promise<number> {
+	const id = await createOrderIn(status);
+	const result = await cancelOrder(db, { id, reason: 'El camión llegó tarde' }, sales);
+	expect(result).toMatchObject({ ok: true });
+	return id;
+}
+
+test('an order cancelled on its way takes an incident like any other; from the warehouse, none', async () => {
+	const onItsWay = await cancelledFrom('OUT_FOR_DELIVERY');
+	const damaged = [{ product_id: CHAIR, qty: 3, outcome: 'UNRECOVERABLE' }];
+	expect(await report(onItsWay, damaged, sales)).toMatchObject({ ok: true });
+	expect(hasIncident(onItsWay)).toBe(1);
+	expect(stock(CHAIR)).toBe(497);
+	for (const status of ['CONFIRMED', 'PICKED']) {
+		const id = await cancelledFrom(status);
+		expect(await report(id, damaged, sales)).toMatchObject({ ok: false });
+	}
+	const detail = await getOrderDetail(db, onItsWay, sales);
+	expect(detail?.cancellation).toMatchObject({ cancelledFrom: 'OUT_FOR_DELIVERY' });
 });
 
 test("only the order's products, up to each line's quantity across outcomes", async () => {

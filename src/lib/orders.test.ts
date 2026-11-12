@@ -2,6 +2,8 @@ import { expect, test } from 'vitest';
 import { ORDER_STATUSES, type OrderStatus } from '$lib/server/services/orders';
 import {
 	calculateOrderTotals,
+	isCancelledOnItsWay,
+	isIncidentReportable,
 	isLegalTransition,
 	LINES_PER_PAGE,
 	nextOperationalStatus,
@@ -113,6 +115,21 @@ test("the status button's one target follows the methods; cancelled and complete
 	for (const from of ['CANCELLED', 'COMPLETED'] as const) {
 		expect(next(from)).toBeNull();
 	}
+});
+
+test('cancelled on its way: only from OUT_FOR_DELIVERY, read from the cancellation', () => {
+	expect(isCancelledOnItsWay({ cancelledFrom: 'OUT_FOR_DELIVERY' })).toBe(true);
+	expect(isCancelledOnItsWay({ cancelledFrom: 'CONFIRMED' })).toBe(false);
+	expect(isCancelledOnItsWay({ cancelledFrom: 'PICKED' })).toBe(false);
+	expect(isCancelledOnItsWay(null)).toBe(false);
+	const cancelled = (cancelledFrom: OrderStatus) => ({
+		status: 'CANCELLED' as const,
+		cancellation: { cancelledFrom }
+	});
+	expect(isIncidentReportable(cancelled('OUT_FOR_DELIVERY'))).toBe(true);
+	expect(isIncidentReportable(cancelled('PICKED'))).toBe(false);
+	expect(isIncidentReportable({ status: 'DELIVERED', cancellation: null })).toBe(true);
+	expect(isIncidentReportable({ status: 'OUT_FOR_DELIVERY', cancellation: null })).toBe(false);
 });
 
 function linesOf(count: number): number[] {

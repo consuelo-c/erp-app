@@ -1316,7 +1316,21 @@ export type OrderPayment = {
 };
 
 /** Who cancelled the order, when, and why: its CANCELLED event. */
-export type Cancellation = { cancelledAt: number; cancelledBy: string; reason: string };
+export type Cancellation = {
+	cancelledAt: number;
+	cancelledBy: string;
+	reason: string;
+	cancelledFrom: OrderStatus;
+};
+
+/**
+ * Over `orders` in the caller's query: its CANCELLED event's `before` status while it's cancelled,
+ * else null. Nothing leaves CANCELLED, so it's the order's one cancellation.
+ */
+export const CANCELLED_FROM_SQL = `(select json_extract(cancelled.before, '$.status') from events cancelled
+	where orders.status = 'CANCELLED' and cancelled.entity_type = 'ORDER'
+	and cancelled.entity_id = orders.id and cancelled.action = 'CANCELLED'
+	order by cancelled.id desc limit 1)`;
 
 /**
  * The order with its money: «Pagado» is what its installments and refunds add up to, the deposit
@@ -1427,7 +1441,8 @@ async function findPayments(db: D1Database, orderId: number): Promise<OrderPayme
 async function findCancellation(db: D1Database, orderId: number): Promise<Cancellation | null> {
 	return db
 		.prepare(
-			`select created_at as cancelledAt, actor_username as cancelledBy, reason from events
+			`select created_at as cancelledAt, actor_username as cancelledBy, reason,
+			json_extract(before, '$.status') as cancelledFrom from events
 			where entity_type = 'ORDER' and entity_id = ?1 and action = 'CANCELLED'
 			and 'CANCELLED' = (select status from orders where id = ?1)
 			order by id desc limit 1`
