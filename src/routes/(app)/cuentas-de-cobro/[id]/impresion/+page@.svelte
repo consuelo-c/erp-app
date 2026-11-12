@@ -18,8 +18,10 @@
 	const contact = $derived(printedContact(client.phone, client.whatsapp));
 	// Cancelled orders aren't in `orders`: an «Anulada» cuenta prints no order block at all.
 	const title = $derived(`CUENTA DE COBRO Nº ${printout.id}${printout.isVoid ? ' — ANULADA' : ''}`);
-	const pages = $derived(splitOrdersIntoPages(printout.orders));
 	const isSingleOrder = $derived(1 === printout.orders.length);
+	// What was paid follows the last total; an «Anulada» cuenta prints no total, so nothing follows.
+	const hasPayments = $derived(0 !== printout.paid && 0 < printout.orders.length);
+	const pages = $derived(splitOrdersIntoPages(printout.orders, hasPayments ? 2 : 0));
 	// As on the paper, a single order's totals sit beside the bank account, unless the closing went
 	// to a sheet of its own: then they stay under the order's last line.
 	const hasTotalsInClosing = $derived(
@@ -48,7 +50,19 @@
 		<div class="print-row print-row--strong">
 			<span>TOTAL</span><span>{formatPesos(order.orderTotal)}</span>
 		</div>
+		{#if isSingleOrder}
+			{@render payments()}
+		{/if}
 	</div>
+{/snippet}
+
+{#snippet payments()}
+	{#if hasPayments}
+		<div class="print-row"><span>ABONOS</span><span>{formatBalance(printout.paid)}</span></div>
+		<div class="print-row print-row--strong">
+			<span>SALDO A PAGAR</span><span>{formatBalance(printout.balance)}</span>
+		</div>
+	{/if}
 {/snippet}
 
 {#snippet opening()}
@@ -84,6 +98,7 @@
 				<div class="print-row print-row--strong">
 					<span>TOTAL A PAGAR</span><span>{formatPesos(printout.total)}</span>
 				</div>
+				{@render payments()}
 			</div>
 		{/if}
 	</div>

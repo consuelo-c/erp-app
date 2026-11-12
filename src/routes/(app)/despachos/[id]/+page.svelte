@@ -26,6 +26,7 @@
 		isIncidentReportable,
 		isPickupStatus,
 		nextOperationalStatus,
+		receivableLine,
 		type OperationalStatus
 	} from '$lib/orders';
 	import type { Carrier, OrderDetail } from '$lib/server/services/orders';
@@ -332,7 +333,7 @@
 		</li>
 		{#if null !== order.receivableId}
 			<li class="detail-list__row--plain">
-				<span>Cuenta de cobro Nº {order.receivableId}</span><span></span>
+				<span>{receivableLine(order)}</span><span></span>
 			</li>
 		{:else}
 			<li class="detail-list__row--plain">

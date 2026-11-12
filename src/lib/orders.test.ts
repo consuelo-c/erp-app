@@ -8,6 +8,7 @@ import {
 	LINES_PER_PAGE,
 	nextOperationalStatus,
 	readReceivableBalance,
+	receivableLine,
 	formatRemisiones,
 	splitIntoPages,
 	splitOrdersIntoPages
@@ -173,6 +174,25 @@ test('lines that leave no room for the closing give it a sheet of its own, their
 	expect(pages).toHaveLength(2);
 	expect(pages[0][0].isClosed).toBe(true);
 	expect(pages[1]).toEqual([]);
+});
+
+test('«ABONOS» and «SALDO A PAGAR» take room: a closing that fitted moves to a sheet of its own', () => {
+	expect(splitOrdersIntoPages([orderOf(1, 13)])).toHaveLength(1);
+	const pages = splitOrdersIntoPages([orderOf(1, 13)], 2);
+	expect(pages).toHaveLength(2);
+	expect(pages[0][0].isClosed).toBe(true);
+	expect(pages[1]).toEqual([]);
+});
+
+test('the driver hands a billed order\'s cuenta over until it is delivered, then only names it', () => {
+	const line = (status: OrderStatus) => receivableLine({ receivableId: 4794, status });
+	for (const status of ['CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY'] as const) {
+		expect(line(status)).toBe('Entregar cuenta de cobro Nº 4794');
+	}
+	for (const status of ['DELIVERED', 'OUT_FOR_PICKUP', 'COMPLETED', 'CANCELLED'] as const) {
+		expect(line(status)).toBe('Cuenta de cobro Nº 4794');
+	}
+	expect(receivableLine({ receivableId: null, status: 'CONFIRMED' })).toBeNull();
 });
 
 test("the concept lists every order's number", () => {

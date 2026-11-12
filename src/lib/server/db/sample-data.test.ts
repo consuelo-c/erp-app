@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import { rolesSchema, type Actor } from '../actor';
 import { verifyPassword } from '../password';
-import { calculateOrderTotals } from '$lib/orders';
+import { calculateOrderTotals, receivableLine } from '$lib/orders';
 import { createMemoryD1 } from './memory-d1';
 import { openWeek } from '../services/payroll';
 import { movementSchema } from '../services/cash';
@@ -19,7 +19,7 @@ import {
 	pickupAttributesSchema
 } from '../services/orders';
 import { quoteAttributesSchema } from '../services/quotes';
-import { getReceivableDetail } from '../services/receivables';
+import { getReceivableDetail, getReceivablePrintout } from '../services/receivables';
 
 const sampleData = readFileSync('scripts/sample-data.sql', 'utf8');
 const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
@@ -237,7 +237,7 @@ function parseOrder(order: Record<string, unknown>) {
 
 test("loads the Design Brief's #1043 and #1051, #1047 delivered, and enough for a third page", () => {
 	const orders = readAll('orders');
-	expect(orders).toHaveLength(51);
+	expect(orders).toHaveLength(52);
 	expect(new Set(orders.map((order) => order.status)).size).toBe(7);
 	expect(orders.every((order) => 0 === order.has_incident)).toBe(true);
 	expect(readAll('incidents')).toEqual([]);
@@ -489,12 +489,24 @@ test("Nº 4795 bills Postobón's cancelled #1073 alone, paid: «Anulada», and #
 	expect(order).toMatchObject({ status: 'CANCELLED', receivableId: 4795, owedToClient: 450000 });
 });
 
-test('the next cuenta after a second run is Nº 4796, with nothing duplicated', () => {
+test("Nº 4796 bills Postobón's CONFIRMED #1074 alone, with its advance paid on the order", async () => {
+	const db = openSeededD1();
+	const receivable = await getReceivableDetail(db, 4796, manager);
+	expect(receivable).toMatchObject({ total: 635000, paid: 300000, balance: 335000, isVoid: false });
+	expect(receivable?.orders.map((order) => order.id)).toEqual([1074]);
+	const printout = await getReceivablePrintout(db, 4796, manager);
+	expect(printout).toMatchObject({ paid: 300000, balance: 335000 });
+	const order = await getOrderDetail(db, 1074, manager);
+	expect(order).toMatchObject({ status: 'CONFIRMED', receivableId: 4796 });
+	expect(order && receivableLine(order)).toBe('Entregar cuenta de cobro Nº 4796');
+});
+
+test('the next cuenta after a second run is Nº 4797, with nothing duplicated', () => {
 	database.exec(sampleData);
-	expect(readAll('receivables')).toHaveLength(2);
+	expect(readAll('receivables')).toHaveLength(3);
 	expect(
 		database.prepare("select seq from sqlite_sequence where name = 'receivables'").get()
-	).toEqual({ seq: 4795 });
+	).toEqual({ seq: 4796 });
 });
 
 test('a second run keeps an order taken out of Nº 4794', () => {

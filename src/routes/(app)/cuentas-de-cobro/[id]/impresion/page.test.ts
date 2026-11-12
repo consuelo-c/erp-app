@@ -36,6 +36,8 @@ const base: ReceivablePrintout = {
 	},
 	orders: [orderOf(1043)],
 	total: 2000,
+	paid: 0,
+	balance: 2000,
 	isVoid: false,
 	company: {
 		COMPANY_NAME: 'Banquetes Consuelo C.',
@@ -94,11 +96,42 @@ test('two orders: each block headed by number, then «TOTAL A PAGAR»', () => {
 	expect(body).toMatch(/TOTAL A PAGAR<\/span><span[^>]*>\$4\.000/);
 });
 
-test('no advance, paid, balance or amount in words', () => {
+test('nothing paid prints as before: no «ABONOS», balance or amount in words', () => {
 	const body = printout();
-	for (const word of ['Anticipo', 'Pagado', 'Saldo', 'pesos']) {
+	for (const word of ['ABONOS', 'SALDO', 'Anticipo', 'Pagado', 'Saldo', 'pesos']) {
 		expect(body).not.toContain(word);
 	}
+});
+
+test('one order with an advance: «ABONOS» and «SALDO A PAGAR» follow its «TOTAL»', () => {
+	const body = printout({ paid: 500, balance: 1500 });
+	expect(body).toMatch(
+		/>TOTAL<\/span><span[^>]*>\$2\.000<[\s\S]*>ABONOS<\/span><span[^>]*>\$500<[\s\S]*>SALDO A PAGAR<\/span><span[^>]*>\$1\.500</
+	);
+	expect(body.match(/ABONOS/g)).toHaveLength(1);
+	expect(body).not.toContain('pesos');
+});
+
+test('several orders with a payment: the rows follow «TOTAL A PAGAR», not each order', () => {
+	const orders = [orderOf(1043), orderOf(1060)];
+	const body = printout({ orders, total: 4000, paid: 4500, balance: -500 });
+	expect(body).toMatch(
+		/TOTAL A PAGAR<\/span><span[^>]*>\$4\.000<[\s\S]*>ABONOS<\/span><span[^>]*>\$4\.500<[\s\S]*>SALDO A PAGAR<\/span><span[^>]*>−\$500</
+	);
+	expect(body.match(/ABONOS/g)).toHaveLength(1);
+});
+
+test("a single order's rows stay with its totals when the closing takes its own sheet", () => {
+	const sheets = sheetsOf(printout({ orders: [orderOf(1043, 13)], paid: 500, balance: 12500 }));
+	expect(sheets).toHaveLength(2);
+	expect(sheets[0]).toMatch(/SUBTOTAL[\s\S]*ABONOS[\s\S]*SALDO A PAGAR/);
+	expect(sheets[1]).not.toContain('ABONOS');
+});
+
+test('an «Anulada» cuenta with payments prints no totals, so no «ABONOS»', () => {
+	const body = printout({ orders: [], total: 0, paid: 450000, balance: -450000, isVoid: true });
+	expect(body).not.toContain('ABONOS');
+	expect(body).not.toContain('SALDO');
 });
 
 test('three orders of 15 lines: two numbered sheets, the closing only on the last', () => {

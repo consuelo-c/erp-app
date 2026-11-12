@@ -510,6 +510,9 @@ export type ReceivablePrintout = {
 	/** The orders that aren't CANCELLED: a cancelled one prints no block and leaves «Concepto». */
 	orders: PrintedOrder[];
 	total: number;
+	/** What was paid on the cuenta: when it isn't 0, «ABONOS» and «SALDO A PAGAR» print. */
+	paid: number;
+	balance: number;
 	/** «Anulada»: every order is CANCELLED, so none prints. */ isVoid: boolean;
 	company: CompanySettings;
 };
@@ -555,17 +558,9 @@ export async function getReceivablePrintout(
 	if (null === row) {
 		return null;
 	}
-	const { id: receivableId, issueDate, paymentTerms, client, total, isVoid } = toDetail(row);
-	return {
-		id: receivableId,
-		issueDate,
-		paymentTerms,
-		client: { ...client, address: toAddress(row.contact_attributes) },
-		orders,
-		total,
-		isVoid,
-		company
-	};
+	const detail = toDetail(row);
+	const client = { ...detail.client, address: toAddress(row.contact_attributes) };
+	return { ...detail, client, orders, company };
 }
 
 export type ReceivableForm = {
