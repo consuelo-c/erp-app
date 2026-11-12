@@ -231,7 +231,8 @@ test('a partly paid CONFIRMED order starts a cuenta, is listed and billed, on is
 	expect(form?.orders.find(({ id }) => 1070 === id)).toEqual({
 		id: 1070,
 		eventDate: '2026-10-10',
-		orderTotal: 500000
+		orderTotal: 500000,
+		isCancelled: false
 	});
 	const id = await issued([1043, 1070]);
 	expect(linkOf(1070)).toBe(id);
@@ -536,7 +537,8 @@ test('the list goes newest first, with the client, date, total and balance of ea
 		clientName: 'Postobón S.A.',
 		issueDate: '2026-11-01',
 		total: 500000,
-		balance: 300000
+		balance: 300000,
+		isVoid: false
 	});
 });
 
@@ -640,6 +642,94 @@ test('the edit form checks the cuenta orders and leaves the other eligible ones 
 	expect(form?.checkedOrderIds).toEqual([1043, 1060]);
 	expect(form?.paymentTerms).toBe('Crédito 30 días');
 	expect(await getReceivableEditForm(db, 99, manager)).toBeNull();
+});
+
+function cancel(orderId: number) {
+	database.exec(`update orders set status = 'CANCELLED' where id = ${orderId}`);
+}
+
+test('the edit form lists a cancelled order of the cuenta checked, as cancelled; one outside, never', async () => {
+	insertOrder(1070, { status: 'CANCELLED' });
+	const id = await issued([1043, 1060]);
+	cancel(1060);
+
+	const form = await getReceivableEditForm(db, id, manager);
+
+	expect(form?.orders).toEqual([
+		expect.objectContaining({ id: 1043, isCancelled: false }),
+		expect.objectContaining({ id: 1060, isCancelled: true }),
+		expect.objectContaining({ id: 1061, isCancelled: false })
+	]);
+	expect(form?.checkedOrderIds).toEqual([1043, 1060]);
+	expect(
+		(await getReceivableIssueForm(db, 1061, manager))?.orders.map(({ id: orderId }) => orderId)
+	).toEqual([1061]);
+});
+
+test('a cancelled order of the cuenta saves checked, and can be unchecked; the last one stays', async () => {
+	const id = await issued([1043, 1060]);
+	cancel(1060);
+	expect(await edit(id, [1043, 1060], 'Crédito 30 días')).toEqual({ ok: true, id });
+	expect(linkOf(1060)).toBe(id);
+	expect(await edit(id, [1060])).toEqual({ ok: true, id });
+	expect([linkOf(1043), linkOf(1060)]).toEqual([null, id]);
+	expect(await edit(id, [])).toMatchObject({ ok: false, errors: { orders: expect.any(String) } });
+	expect(linkOf(1060)).toBe(id);
+	cancel(1043);
+	expect(await edit(id, [1043, 1060])).toMatchObject({ ok: false });
+});
+
+test('a cancelled order adds nothing to the total; its payments still count as paid', async () => {
+	const id = await billedPair();
+	insertMovement({ amount: 200000, entityId: 1071 });
+	cancel(1071);
+	expect(await detailOf(id)).toMatchObject({
+		total: 860000,
+		paid: 200000,
+		balance: 660000,
+		isVoid: false
+	});
+	expect((await detailOf(id)).orders[1]).toMatchObject({ id: 1071, isCancelled: true });
+});
+
+test('a cuenta whose orders are all cancelled reads «Anulada» and takes no payment', async () => {
+	const [voided, open] = await issuedForTwoClients();
+	insertMovement({ amount: 500000, entityType: 'RECEIVABLE', entityId: voided });
+	cancel(2001);
+	expect(await detailOf(voided)).toMatchObject({
+		total: 0,
+		paid: 500000,
+		balance: -500000,
+		isVoid: true
+	});
+	const summaries = (await listReceivables(db, {}, manager)).receivables;
+	expect(summaries.map(({ id, isVoid }) => [id, isVoid])).toEqual([
+		[open, false],
+		[voided, true]
+	]);
+	const refused = await recordReceivablePayment(db, typedPayment(voided), manager);
+	expect(refused).toMatchObject({ ok: false, message: 'Esta cuenta de cobro está anulada.' });
+});
+
+test('the printout leaves a cancelled order out, and an «Anulada» cuenta prints none', async () => {
+	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
+	const id = await billedPair();
+	const lines = [
+		{ product_id: 1, name: 'Silla', qty: 1, list_price: 1, unit_price: 1, line_total: 1 }
+	];
+	database.exec(`update orders set order_items = '${JSON.stringify(lines)}'`);
+	cancel(1071);
+	expect(await getReceivablePrintout(db, id, manager)).toMatchObject({
+		orders: [expect.objectContaining({ id: 1070 })],
+		total: 860000,
+		isVoid: false
+	});
+	cancel(1070);
+	expect(await getReceivablePrintout(db, id, manager)).toMatchObject({
+		orders: [],
+		total: 0,
+		isVoid: true
+	});
 });
 
 test('SALES reads the form; WAREHOUSE and DRIVER get a 403', async () => {

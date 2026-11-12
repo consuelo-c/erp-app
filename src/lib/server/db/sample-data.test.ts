@@ -237,7 +237,7 @@ function parseOrder(order: Record<string, unknown>) {
 
 test("loads the Design Brief's #1043 and #1051, #1047 delivered, and enough for a third page", () => {
 	const orders = readAll('orders');
-	expect(orders).toHaveLength(50);
+	expect(orders).toHaveLength(51);
 	expect(new Set(orders.map((order) => order.status)).size).toBe(7);
 	expect(orders.every((order) => 0 === order.has_incident)).toBe(true);
 	expect(readAll('incidents')).toEqual([]);
@@ -480,12 +480,21 @@ test("#1072 is Postobón's too, COMPLETED and unbilled", () => {
 	expect(unbilled?.client_id).toBe(billed?.client_id);
 });
 
-test('the next cuenta after a second run is Nº 4795, with nothing duplicated', () => {
+test("Nº 4795 bills Postobón's cancelled #1073 alone, paid: «Anulada», and #1073 is owed it", async () => {
+	const db = openSeededD1();
+	const receivable = await getReceivableDetail(db, 4795, manager);
+	expect(receivable).toMatchObject({ total: 0, paid: 450000, balance: -450000, isVoid: true });
+	expect(receivable?.orders).toEqual([expect.objectContaining({ id: 1073, isCancelled: true })]);
+	const order = await getOrderDetail(db, 1073, manager);
+	expect(order).toMatchObject({ status: 'CANCELLED', receivableId: 4795, owedToClient: 450000 });
+});
+
+test('the next cuenta after a second run is Nº 4796, with nothing duplicated', () => {
 	database.exec(sampleData);
-	expect(readAll('receivables')).toHaveLength(1);
+	expect(readAll('receivables')).toHaveLength(2);
 	expect(
 		database.prepare("select seq from sqlite_sequence where name = 'receivables'").get()
-	).toEqual({ seq: 4794 });
+	).toEqual({ seq: 4795 });
 });
 
 test('a second run keeps an order taken out of Nº 4794', () => {

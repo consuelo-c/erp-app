@@ -30,7 +30,8 @@ import {
 	updateOrder
 } from './orders';
 import { createOrder } from '../db/test-orders';
-import { getReceivableDetail, issueReceivable } from './receivables';
+import { readOwedOnReceivable } from '$lib/orders';
+import { getReceivableDetail, issueReceivable, recordReceivablePayment } from './receivables';
 
 const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
 
@@ -1664,6 +1665,72 @@ test('a retention above what its side holds is refused, and writes nothing', asy
 		});
 	}
 	expect(movementsOf(id)).toHaveLength(2);
+});
+
+// The planning's example: #1043, $1.500.000 with a $500.000 advance, alone in its cuenta, the other
+// $1.000.000 paid on the cuenta by transfer, and cancelled on its way.
+async function cancelledInCuenta(): Promise<[number, number]> {
+	const id = await create({ ...order1043, transport_cost: 500000 });
+	await recordPayment(id, { amount: '500.000' }, sales);
+	const issued = await issueReceivable(db, { orders: [id], payment_terms: 'Contado' }, sales);
+	if (!issued.ok) {
+		throw new Error(issued.message);
+	}
+	const payment = { id: String(issued.id), payment_method: 'TRANSFER', amount: '1.000.000' };
+	const paid = await recordReceivablePayment(
+		db,
+		{ ...payment, movement_date: '2026-08-10', notes: '', bank_account: 'Bancolombia' },
+		sales
+	);
+	if (!paid.ok) {
+		throw new Error(paid.message);
+	}
+	expect(await cancelOrder(db, { id, reason: 'Devolvieron el camión' }, sales)).toMatchObject({
+		ok: true
+	});
+	return [id, issued.id];
+}
+
+test('a cancelled billed order stays in its cuenta, «Anulada», and is owed the cuenta credit', async () => {
+	const [id, receivableId] = await cancelledInCuenta();
+	expect(orderRow(id)).toMatchObject({ status: 'CANCELLED', receivable_id: receivableId });
+	expect(await getReceivableDetail(db, receivableId, sales)).toMatchObject({
+		total: 0,
+		paid: 1500000,
+		balance: -1500000,
+		isVoid: true
+	});
+	const order = await detail(id);
+	expect(order.owedToClient).toBe(1500000);
+	expect(readOwedOnReceivable(order)?.text).toBe(
+		`A favor del cliente · cuenta de cobro Nº ${receivableId}: $1.500.000`
+	);
+	await recordPayment(id, { concept: 'SECURITY_DEPOSIT', amount: '200.000' }, sales);
+	expect((await detail(id)).owedToClient).toBe(1700000);
+});
+
+test("«Retener de los pagos» on a billed order goes up to its cuenta's credit", async () => {
+	const [id, receivableId] = await cancelledInCuenta();
+	const over = await recordOrderPayment(
+		db,
+		typedPayment(id, fee('INSTALLMENTS', '1.500.001')),
+		manager
+	);
+	expect(over).toMatchObject({
+		ok: false,
+		errors: { amount: expect.stringContaining(`cuenta de cobro Nº ${receivableId}`) }
+	});
+	await recordPayment(id, fee('INSTALLMENTS', '1.500.000'));
+	expect((await detail(id)).owedToClient).toBe(0);
+	expect((await getReceivableDetail(db, receivableId, sales))?.balance).toBe(0);
+});
+
+test('an unbilled or uncancelled order has no «A favor del cliente» from a cuenta', async () => {
+	const [billedId] = await billed();
+	const unbilled = await cancelledWithMoney();
+	expect(readOwedOnReceivable(await detail(billedId))).toBeNull();
+	expect(readOwedOnReceivable(await detail(unbilled))).toBeNull();
+	expect((await detail(unbilled)).owedToClient).toBe(1100000);
 });
 
 test('the fee is only for a cancelled order, and only for the manager', async () => {

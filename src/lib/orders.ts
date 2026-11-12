@@ -56,6 +56,21 @@ export function readReceivableBalance(order: BilledOrder): ReceivableReading | n
 	return { id, text, label, amount: '', credit };
 }
 
+/**
+ * A cancelled billed order's «A favor del cliente»: its cuenta's credit plus the deposit held,
+ * `owedToClient`, named after the cuenta. Null for an order that isn't both.
+ */
+export function readOwedOnReceivable(
+	order: BilledOrder & { status: OrderStatus; owedToClient: number }
+): { label: string; amount: string; text: string } | null {
+	if ('CANCELLED' !== order.status || null === order.receivableId) {
+		return null;
+	}
+	const label = `A favor del cliente · cuenta de cobro Nº ${order.receivableId}`;
+	const amount = formatPesos(order.owedToClient);
+	return { label, amount, text: `${label}: ${amount}` };
+}
+
 export type OrderMove = {
 	from: OrderStatus;
 	to: OrderStatus;

@@ -16,7 +16,8 @@
 	const client = $derived(printout.client);
 	const company = $derived(printout.company);
 	const contact = $derived(printedContact(client.phone, client.whatsapp));
-	const title = $derived(`CUENTA DE COBRO Nº ${printout.id}`);
+	// Cancelled orders aren't in `orders`: an «Anulada» cuenta prints no order block at all.
+	const title = $derived(`CUENTA DE COBRO Nº ${printout.id}${printout.isVoid ? ' — ANULADA' : ''}`);
 	const pages = $derived(splitOrdersIntoPages(printout.orders));
 	const isSingleOrder = $derived(1 === printout.orders.length);
 	// As on the paper, a single order's totals sit beside the bank account, unless the closing went
@@ -61,7 +62,9 @@
 		{@render field('Dirección', client.address)}
 		{@render field(contact.label, contact.value)}
 	</div>
-	{@render field('Concepto:', formatRemisiones(printout.orders.map(({ id }) => id)))}
+	{#if 0 < printout.orders.length}
+		{@render field('Concepto:', formatRemisiones(printout.orders.map(({ id }) => id)))}
+	{/if}
 	{@render field('Debe a:', company.COMPANY_NAME)}
 	{@render field('Forma de pago:', printout.paymentTerms)}
 {/snippet}
@@ -76,7 +79,7 @@
 		</div>
 		{#if hasTotalsInClosing}
 			{@render totals(printout.orders[0])}
-		{:else if !isSingleOrder}
+		{:else if 1 < printout.orders.length}
 			<div class="print-totals print-totals--grand">
 				<div class="print-row print-row--strong">
 					<span>TOTAL A PAGAR</span><span>{formatPesos(printout.total)}</span>

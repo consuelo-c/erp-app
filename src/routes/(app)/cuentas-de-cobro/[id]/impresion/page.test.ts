@@ -36,6 +36,7 @@ const base: ReceivablePrintout = {
 	},
 	orders: [orderOf(1043)],
 	total: 2000,
+	isVoid: false,
 	company: {
 		COMPANY_NAME: 'Banquetes Consuelo C.',
 		COMPANY_ADDRESS: 'Calle 38a #79-18, Medellín, Colombia',
@@ -64,6 +65,20 @@ test('one order: its date and client, with no block heading and no «TOTAL A PAG
 	expect(body).not.toContain('print-block__title');
 	expect(body).not.toContain('TOTAL A PAGAR');
 	expect(body).not.toContain(' de 1<');
+});
+
+test('an «Anulada» cuenta prints its title so, with no order block, «Concepto» or total', () => {
+	const body = printout({ orders: [], total: 0, isVoid: true });
+	expect(sheetsOf(body)).toHaveLength(1);
+	expect(body).toContain('CUENTA DE COBRO Nº 4794 — ANULADA');
+	expect(body).not.toContain('print-block');
+	expect(body).not.toContain('Concepto:');
+	expect(body).not.toContain('TOTAL');
+	expect(body).toContain('Forma de pago:');
+});
+
+test('a cuenta that is not «Anulada» keeps its plain title', () => {
+	expect(printout()).not.toContain('ANULADA');
 });
 
 test('an automatic document prints no «NIT/C.C.» line', () => {

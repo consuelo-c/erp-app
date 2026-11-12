@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { enhance } from '$app/forms';
+	import Badge from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import Choice from '$lib/components/Choice.svelte';
 	import Field from '$lib/components/Field.svelte';
@@ -13,7 +14,8 @@
 	import { singleReach } from '$lib/whatsapp';
 
 	// Issuing and editing a cuenta de cobro: the client is read-only, and the total follows what's
-	// checked. A cuenta always keeps an order: the last one checked can't be unchecked.
+	// checked. A cuenta always keeps an order: the last one checked can't be unchecked. An order
+	// cancelled once in the cuenta is listed, checked, and adds nothing to the total.
 	interface Props {
 		receivable: ReceivableForm;
 		hint: string;
@@ -32,7 +34,7 @@
 	let checkedIds = $derived(receivable.checkedOrderIds);
 	const total = $derived(
 		receivable.orders
-			.filter((order) => checkedIds.includes(order.id))
+			.filter((order) => checkedIds.includes(order.id) && !order.isCancelled)
 			.reduce((sum, order) => sum + order.orderTotal, 0)
 	);
 
@@ -77,7 +79,12 @@
 						disabled={isLastChecked}
 					/>
 					<span class="client__text">
-						<span class="client__name">Pedido #{order.id}</span>
+						<span class="client__name">
+							Pedido #{order.id}
+							{#if order.isCancelled}
+								<Badge tone="cancelled">Cancelado</Badge>
+							{/if}
+						</span>
 						<span class="meta">
 							{formatCivilDate(order.eventDate)} · {formatPesos(order.orderTotal)}
 						</span>

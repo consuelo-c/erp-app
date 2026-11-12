@@ -28,6 +28,7 @@
 		isCancelledOnItsWay,
 		isEditableStatus,
 		isLegalTransition,
+		readOwedOnReceivable,
 		readReceivableBalance
 	} from '$lib/orders';
 	import type { Incident, ResponsibleParty } from '$lib/server/services/incidents';
@@ -45,6 +46,8 @@
 	const delivery = $derived(order.delivery);
 	const pickup = $derived(order.pickup);
 	const receivable = $derived(readReceivableBalance(order));
+	// Cancelled and billed: what the company holds for the client is its cuenta's credit.
+	const owedOnReceivable = $derived(readOwedOnReceivable(order));
 
 	const canRecordPayment = $derived(0 < data.paymentConcepts.length);
 	const canEdit = $derived(isEditableStatus(order.status));
@@ -376,6 +379,10 @@
 					<span>Saldo</span><span>{formatBalance(order.balanceDue)}</span>
 				</li>
 			{/if}
+		{:else if owedOnReceivable}
+			<li class="detail-list__row--strong">
+				<span>{owedOnReceivable.label}</span><span>{owedOnReceivable.amount}</span>
+			</li>
 		{/if}
 		<li class="detail-list__row--plain deposit">
 			<span>Depósito acordado</span><span>{formatPesos(order.depositAmount)}</span>
@@ -446,7 +453,9 @@
 	<h2 class="section-title">Pagos</h2>
 	<PaymentList payments={order.payments} />
 	{#if receivable}
-		<p class="receivable-balance">{@render receivableLink(receivable.id, receivable.text)}</p>
+		<p class="receivable-balance">
+			{@render receivableLink(receivable.id, owedOnReceivable?.text ?? receivable.text)}
+		</p>
 	{/if}
 
 	<!-- Payments are recorded in any state, a cancelled order's refunds included. -->

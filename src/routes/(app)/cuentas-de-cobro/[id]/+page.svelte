@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
+	import Badge from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import IconButton from '$lib/components/IconButton.svelte';
 	import Notice from '$lib/components/Notice.svelte';
@@ -17,8 +18,9 @@
 
 	const receivable = $derived(data.receivable);
 	const client = $derived(receivable.client);
-	const isPaid = $derived(receivable.balance <= 0);
-	const hasCredit = $derived(receivable.balance < 0);
+	// «Anulada» reads in place of the balance: every order is cancelled, so it takes no payment.
+	const isPaid = $derived(receivable.isVoid || receivable.balance <= 0);
+	const hasCredit = $derived(!receivable.isVoid && receivable.balance < 0);
 
 	// Set by the payment entry's redirect: the payment just recorded, its receipt in «Pagos».
 	const recordedPayment = $derived(
@@ -79,7 +81,12 @@
 	<ul class="detail-list">
 		{#each receivable.orders as order (order.id)}
 			<li>
-				<a href={resolve('/(app)/pedidos/[id]', { id: String(order.id) })}>Pedido #{order.id}</a>
+				<span>
+					<a href={resolve('/(app)/pedidos/[id]', { id: String(order.id) })}>Pedido #{order.id}</a>
+					{#if order.isCancelled}
+						<Badge tone="cancelled">Cancelado</Badge>
+					{/if}
+				</span>
 				<span class="order-money">
 					{formatPesos(order.orderTotal)}
 					<span class="meta">{formatLongDay(order.eventDate)}</span>
@@ -98,7 +105,9 @@
 		</li>
 		<li class="detail-list__row--strong">
 			<span>{hasCredit ? 'Saldo a favor' : 'Saldo'}</span>
-			{#if hasCredit}
+			{#if receivable.isVoid}
+				<span class="void">Anulada</span>
+			{:else if hasCredit}
 				<span class="settled">{formatPesos(-receivable.balance)}</span>
 			{:else if isPaid}
 				<span class="settled">Pagado</span>
@@ -154,5 +163,9 @@
 
 	.settled {
 		color: var(--success-fg);
+	}
+
+	.void {
+		color: var(--text-secondary);
 	}
 </style>

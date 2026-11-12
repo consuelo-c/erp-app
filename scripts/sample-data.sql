@@ -1,7 +1,7 @@
 -- Sample data, development only: the Design Brief's products and a retired one, a few contacts, five
--- employees, a login per role on four of them, their punches from 10 to 18 October 2026, fifty
+-- employees, a login per role on four of them, their punches from 10 to 18 October 2026, fifty-one
 -- orders between 1 and 18 October (the brief's three among them), three counts, the orders' and
--- standalone cash movements, three quotes, and a cuenta de cobro.
+-- standalone cash movements, three quotes, and two cuentas de cobro.
 -- `npm run db:seed` loads it into the local D1 after settings-defaults.sql; deploy.yml never applies
 -- it. Idempotent: a product whose name exists, a contact whose document exists, an employee whose
 -- contact exists, a login whose username exists, a punch whose employee and day exist, or an order,
@@ -149,15 +149,18 @@ FROM (VALUES
 WHERE true -- SQLite reads ON CONFLICT after a SELECT only past a WHERE
 ON CONFLICT (employee_id, work_date) DO NOTHING;
 
--- Cuenta de cobro Nº 4794, Postobón's, ahead of the orders that point to it: #1060 and #1061 bill in
--- it, #1072 is left to try «Emitir cuenta de cobro» and «Editar». Its explicit id leaves the sequence
--- as if it had been set to 4793 and this were the first one issued, so the next is Nº 4795.
+-- Cuentas de cobro, Postobón's, ahead of the orders that point to them: #1060 and #1061 bill in Nº
+-- 4794, #1072 is left to try «Emitir cuenta de cobro» and «Editar»; #1073 alone in Nº 4795, paid on
+-- it and then cancelled, so it reads «Anulada». Their explicit ids leave the sequence as if it had
+-- been set to 4793 and these were the first ones issued, so the next is Nº 4796.
 INSERT INTO receivables (id, client_id, issue_date, attributes, created_at, created_by, updated_at, updated_by)
-SELECT 4794, id, '2026-10-13', '{"payment_terms":"Contado"}', unixepoch(), 'system', unixepoch(), 'system'
-FROM contacts WHERE document_id = '8909039395'
+SELECT column1, contacts.id, column2, '{"payment_terms":"Contado"}', unixepoch(), 'system', unixepoch(), 'system'
+FROM (VALUES (4794, '2026-10-13'), (4795, '2026-10-09')) AS sample
+JOIN contacts ON contacts.document_id = '8909039395'
+WHERE true -- SQLite reads ON CONFLICT after a SELECT only past a WHERE
 ON CONFLICT (id) DO NOTHING;
 
--- Forty-eight orders, every delivery and pickup from Thursday 1 to Sunday 18 October 2026, their
+-- Fifty-one orders, every delivery and pickup from Thursday 1 to Sunday 18 October 2026, their
 -- statuses read as if today were Wednesday 14: picked up before it `COMPLETED`, out with the client
 -- across it `DELIVERED`, its own trips somewhere along the way, after it `CONFIRMED`, and a few
 -- `CANCELLED`. The Design Brief's #1043 and #1051 keep their weekdays, #1047 is `DELIVERED` to try
@@ -334,7 +337,10 @@ sample (id, token, document_id, status, event_date, venue, rental_days, discount
 		'[["Silla Tiffany dorada",120],["Mesa redonda 10 puestos",10]]', NULL),
 	(1072, NULL, '8909039395', 'COMPLETED', '2026-10-11', 'colegio', 1, 0, 100000, 0,
 		'2026-10-10', 'COMPANY_DELIVERY', '14:00', NULL, '2026-10-13', 'COMPANY_PICKUP', '10:00', NULL,
-		'[["Silla Tiffany dorada",80],["Mesa redonda 10 puestos",5]]', NULL)
+		'[["Silla Tiffany dorada",80],["Mesa redonda 10 puestos",5]]', NULL),
+	(1073, NULL, '8909039395', 'CANCELLED', '2026-10-17', 'colegio', 1, 0, 80000, 0,
+		'2026-10-16', 'COMPANY_DELIVERY', '09:00', NULL, '2026-10-18', 'COMPANY_PICKUP', '10:00', NULL,
+		'[["Silla Tiffany dorada",100],["Mesa redonda 10 puestos",10]]', NULL)
 ),
 priced AS (
 	SELECT sample.*, (
@@ -370,7 +376,7 @@ SELECT
 	totalled.order_items, totalled.items_total, totalled.discount, totalled.transport_cost,
 	totalled.items_total - totalled.discount + totalled.transport_cost, totalled.deposit_amount,
 	iif(totalled.notes IS NULL, '{}', json_object('notes', totalled.notes)),
-	iif(totalled.id IN (1060, 1061), 4794, NULL),
+	CASE WHEN totalled.id IN (1060, 1061) THEN 4794 WHEN 1073 = totalled.id THEN 4795 END,
 	unixepoch(), 'system', unixepoch(), 'system'
 FROM totalled
 JOIN contacts ON contacts.document_id = totalled.document_id
@@ -407,7 +413,8 @@ ON CONFLICT (id) DO NOTHING;
 -- $680.000, holds a $200.000 deposit); #1051 pays its carrier; four more orders: an advance on
 -- #1035, #1009 paid in two, #1012 paid with its deposit given back, #1004 cancelled and refunded.
 -- October's standalone ones include an expense typed as $850.000, its offset and the right one.
--- Nº 4794 has no payment: a cuenta de cobro is paid once and in full, so it's left to try it.
+-- Nº 4794 has no payment: a cuenta de cobro is paid once and in full, so it's left to try it. Nº
+-- 4795 was paid in full by transfer before #1073 was cancelled: the client's credit.
 -- `receipt_number` per sign as the cash service's INSERT works it out, each sign's highest plus one,
 -- here in id order; explicit ids, so a second run finds them and `reverses_id` can name its original.
 INSERT INTO cash_movements (id, concept, payment_method, amount, movement_date, entity_type, entity_id, payee, attributes, reverses_id, receipt_number, created_at, created_by, updated_at, updated_by)
@@ -432,7 +439,8 @@ FROM (VALUES
 	(14, 'OTHER_EXPENSE', 'CASH', -850000, '2026-10-08', NULL, NULL, 'Ferretería Laureles', '{"description":"Bombillos y extensiones para la bodega"}', NULL),
 	(15, 'OTHER_EXPENSE', 'CASH', 850000, '2026-10-08', NULL, NULL, 'Ferretería Laureles', '{"description":"Bombillos y extensiones para la bodega","notes":"El valor era $85.000"}', 14),
 	(16, 'OTHER_EXPENSE', 'CASH', -85000, '2026-10-08', NULL, NULL, 'Ferretería Laureles', '{"description":"Bombillos y extensiones para la bodega"}', NULL),
-	(17, 'OTHER_EXPENSE', 'TRANSFER', -320000, '2026-10-20', NULL, NULL, 'EPM', '{"description":"Servicios públicos de la bodega, septiembre","bank_account":"Convenio EPM 0045821"}', NULL)
+	(17, 'OTHER_EXPENSE', 'TRANSFER', -320000, '2026-10-20', NULL, NULL, 'EPM', '{"description":"Servicios públicos de la bodega, septiembre","bank_account":"Convenio EPM 0045821"}', NULL),
+	(18, 'INSTALLMENT', 'TRANSFER', 450000, '2026-10-12', 'RECEIVABLE', 4795, 'Postobón S.A.', '{"bank_account":"Bancolombia"}', NULL)
 ) AS sample
 WHERE NOT EXISTS (SELECT 1 FROM cash_movements WHERE cash_movements.id = sample.column1)
 ORDER BY column1;

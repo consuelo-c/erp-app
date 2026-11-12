@@ -1320,8 +1320,9 @@ export const RECEIVABLE_PAID_MOVEMENT_SQL = `((entity_type = 'ORDER'
 	and entity_id in (select id from orders where receivable_id = receivables.id))
 	or (entity_type = 'RECEIVABLE' and concept = 'INSTALLMENT' and entity_id = receivables.id))`;
 
+// A CANCELLED order stays in its cuenta but adds nothing to it; its payments still count as paid.
 export const RECEIVABLE_TOTAL_SQL = `coalesce((select sum(order_total) from orders
-	where receivable_id = receivables.id), 0)`;
+	where receivable_id = receivables.id and status <> 'CANCELLED'), 0)`;
 
 export const RECEIVABLE_PAID_SQL = `coalesce((select sum(amount) from cash_movements
 	where ${RECEIVABLE_PAID_MOVEMENT_SQL}), 0)`;
@@ -1396,13 +1397,16 @@ const DEPOSIT_HELD_SQL = `coalesce((select sum(amount) from cash_movements
 
 /**
  * The only rule for what a CANCELLED order owes its client, over `orders` in the caller's query: its
- * installments net of their refunds, plus the deposit held. A CANCELLATION_FEE isn't in it: a fee
- * kept from the payments already lowered it through its refund half. The company owes the client
- * when it's above 0.
+ * installments net of their refunds, plus the deposit held. A billed order's payments are its
+ * cuenta's, so it reads the cuenta's credit, `−receivable_balance`, in their place. A
+ * CANCELLATION_FEE isn't in it: a fee kept from the payments already lowered it through its refund
+ * half. The company owes the client when it's above 0.
  */
-export const OWED_TO_CLIENT_SQL = `coalesce((select sum(amount) from cash_movements
+export const OWED_TO_CLIENT_SQL = `iif(orders.receivable_id is null,
+	coalesce((select sum(amount) from cash_movements
 	where entity_type = 'ORDER' and entity_id = orders.id
-	and concept in ('INSTALLMENT', 'INSTALLMENT_REFUND')), 0) + ${DEPOSIT_HELD_SQL}`;
+	and concept in ('INSTALLMENT', 'INSTALLMENT_REFUND')), 0),
+	-${ORDER_RECEIVABLE_BALANCE_SQL}) + ${DEPOSIT_HELD_SQL}`;
 
 /** One of the order's movements, as its detail lists it. */
 export type OrderPayment = {
@@ -1751,8 +1755,12 @@ async function feeRetention(
 		const message = `Supera el depósito recibido (${formatPesos(depositHeld)}).`;
 		return { concept: 'DEPOSIT_REFUND', available: depositHeld, message };
 	}
+	// A billed order's payments are its cuenta's: the fee is kept up to the cuenta's credit.
 	const paid = owedToClient - depositHeld;
-	const message = `Supera lo pagado (${formatPesos(paid)}).`;
+	const message =
+		null === order.receivableId
+			? `Supera lo pagado (${formatPesos(paid)}).`
+			: `Supera el saldo a favor de la cuenta de cobro Nº ${order.receivableId} (${formatPesos(paid)}).`;
 	return { concept: 'INSTALLMENT_REFUND', available: paid, message };
 }
 

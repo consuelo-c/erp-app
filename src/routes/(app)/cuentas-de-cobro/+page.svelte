@@ -145,7 +145,9 @@
 						<p class="meta">{receivable.clientName} · {formatLongDay(receivable.issueDate)}</p>
 						<div class="card__amounts">
 							<span class="card__amount">{formatPesos(receivable.total)}</span>
-							{#if receivable.balance < 0}
+							{#if receivable.isVoid}
+								<span class="meta">Anulada</span>
+							{:else if receivable.balance < 0}
 								<span class="meta credit">Saldo a favor {formatPesos(-receivable.balance)}</span>
 							{:else if 0 === receivable.balance}
 								<span class="meta">Pagado</span>
@@ -181,7 +183,9 @@
 							<td>{receivable.clientName}</td>
 							<td class="nowrap">{formatLongDay(receivable.issueDate)}</td>
 							<td class="num nowrap"><b>{formatPesos(receivable.total)}</b></td>
-							{#if receivable.balance < 0}
+							{#if receivable.isVoid}
+								<td class="num nowrap secondary">Anulada</td>
+							{:else if receivable.balance < 0}
 								<td class="num nowrap credit">A favor {formatPesos(-receivable.balance)}</td>
 							{:else if 0 === receivable.balance}
 								<td class="num nowrap secondary">Pagado</td>
