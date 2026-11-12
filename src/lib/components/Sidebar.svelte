@@ -85,6 +85,10 @@
 		flex-direction: column;
 		width: var(--sidebar-w);
 		height: 100%;
+
+		/* A window shorter than the menu scrolls the rail itself: overflowing, it would make the
+		   page scroll past the rail's dark background. */
+		overflow-y: auto;
 		background: var(--surface-sidebar);
 	}
 
