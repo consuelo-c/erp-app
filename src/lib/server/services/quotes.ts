@@ -16,6 +16,7 @@ import {
 	clientAttributesSchema,
 	clientInputShape,
 	clientWrite,
+	getOrder,
 	invalidOrder,
 	jsonColumn,
 	linesInputSchema,
@@ -605,8 +606,15 @@ export type QuoteDraft = Pick<
 	| 'notes'
 >;
 
-/** «Duplicar»: the new quote's draft, from quote `id`, and the inactive products it left out. */
-export type QuoteDuplicate = { from: number; draft: QuoteDraft; removed: string[] };
+/**
+ * «Duplicar» from a quote, or «Cotizar de nuevo» from an order: the new quote's draft, where it came
+ * from, and the inactive products it left out. The new quote keeps no link to its source.
+ */
+export type QuoteDuplicate = {
+	source: { kind: 'QUOTE' | 'ORDER'; id: number };
+	draft: QuoteDraft;
+	removed: string[];
+};
 
 type CatalogPrice = { id: number; name: string; rental_price: number };
 
@@ -627,7 +635,7 @@ async function readActivePrices(
 
 // Each line at today's catalog name and list price, charged at that price; an inactive product's
 // line is left out and named.
-function repriceLines(quote: Quote, prices: Map<number, CatalogPrice>) {
+function repriceLines(quote: QuoteDraft, prices: Map<number, CatalogPrice>) {
 	const items = quote.items
 		.filter((item) => prices.has(item.product_id))
 		.map((item) => {
@@ -642,11 +650,18 @@ function repriceLines(quote: Quote, prices: Map<number, CatalogPrice>) {
 }
 
 /**
- * A fresh quote at today's prices, for a company that repeats its event: each line takes the
- * catalog's name and list price, and charges that price; what was negotiated isn't carried. An
- * inactive product is left out and named. The event date and «Válida hasta» are the form's: empty,
- * and today's default. Writes nothing: only saving the form creates the copy. Null: no such quote.
+ * The one rule for «Duplicar» and «Cotizar de nuevo»: a fresh quote at today's prices, for a client
+ * who repeats its event or books it again. Each line takes the catalog's name and list price, and
+ * charges that price; what was negotiated isn't carried. An inactive product is left out and named.
+ * The event date and «Válida hasta» are the form's: empty, and today's default. Writes nothing.
  */
+async function freshDraft(db: D1Database, terms: QuoteDraft) {
+	const productIds = terms.items.map((item) => item.product_id);
+	const { items, removed } = repriceLines(terms, await readActivePrices(db, productIds));
+	return { draft: { ...terms, items }, removed };
+}
+
+/** «Duplicar»: quote `id`'s terms, fresh. Null: no such quote. */
 export async function getQuoteDuplicate(
 	db: D1Database,
 	id: unknown,
@@ -656,21 +671,33 @@ export async function getQuoteDuplicate(
 	if (null === quote) {
 		return null;
 	}
-	const productIds = quote.items.map((item) => item.product_id);
-	const { items, removed } = repriceLines(quote, await readActivePrices(db, productIds));
-	const { clientId, client, address1, address2, rentalDays, discount, transportCost, notes } =
+	const { clientId, client, address1, address2, rentalDays, items, discount, transportCost } =
 		quote;
-	const draft = {
-		clientId,
-		client,
-		address1,
-		address2,
-		rentalDays,
-		discount,
-		transportCost,
-		notes
-	};
-	return { from: quote.id, draft: { ...draft, items }, removed };
+	const terms = { clientId, client, address1, address2, rentalDays, items, discount, transportCost };
+	const fresh = await freshDraft(db, { ...terms, notes: quote.notes });
+	return { source: { kind: 'QUOTE', id: quote.id }, ...fresh };
+}
+
+/**
+ * «Cotizar de nuevo»: order `id`'s terms, fresh, in any state: «Lugar del evento» is its delivery
+ * address. Null: no such order.
+ */
+export async function getOrderRequote(
+	db: D1Database,
+	id: unknown,
+	actor: Actor | null
+): Promise<QuoteDuplicate | null> {
+	requireRole(actor, TAKES_QUOTES);
+	const orderId = quoteIdSchema.safeParse(id);
+	const order = orderId.success ? await getOrder(db, orderId.data, actor) : null;
+	if (null === order) {
+		return null;
+	}
+	const { clientId, client, rentalDays, items, discount, transportCost, notes } = order;
+	const { address_1: address1, address_2: address2 } = order.delivery;
+	const terms = { clientId, client, address1, address2, rentalDays, items, discount, notes };
+	const fresh = await freshDraft(db, { ...terms, transportCost });
+	return { source: { kind: 'ORDER', id: order.id }, ...fresh };
 }
 
 /** «Convertir en pedido»: the quote, and its client as the contact is today, for the order form. */

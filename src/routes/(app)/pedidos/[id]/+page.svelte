@@ -474,6 +474,10 @@
 				<Button variant="secondary" onclick={startCancel}>Cancelar pedido</Button>
 			</span>
 		{/if}
+		<!-- In any state: a cancelled order booked again, or a past event repeated, is a new quote. -->
+		<Button variant="secondary" href="{resolve('/(app)/cotizaciones/nueva')}?pedido={order.id}">
+			Cotizar de nuevo
+		</Button>
 		{#if data.canIssueReceivable}
 			<Button
 				variant="secondary"

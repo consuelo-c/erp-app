@@ -4,6 +4,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
+import { addDays } from '$lib/datetime';
 import { getQuoteState, QUOTE_STATE_SQL } from '$lib/quotes';
 import { cancelOrder, getOrder, getOrderDetail, offeredPaymentConcepts } from './orders';
 import {
@@ -15,6 +16,7 @@ import {
 	getQuote,
 	getQuoteChange,
 	getQuoteDetail,
+	getOrderRequote,
 	getQuoteDuplicate,
 	getQuoteTimeline,
 	getSourceQuoteId,
@@ -606,7 +608,7 @@ test('«Duplicar» reprices every line from today’s catalog: name, list price 
 		}
 	]);
 	expect(copy).toMatchObject({
-		from: id,
+		source: { kind: 'QUOTE', id },
 		removed: [],
 		draft: {
 			clientId: LUZ_MARINA,
@@ -864,6 +866,100 @@ test('an order that came from no quote has no source quote', async () => {
 	const id = await create();
 	await convert(id);
 	expect(await getSourceQuoteId(db, 99, sales)).toBeNull();
+});
+
+// «Cotizar de nuevo»: order #1 from quote1043, its lines charged below list, then the catalog moves.
+async function requotedOrder(status = 'CONFIRMED') {
+	const lines = [
+		{ product_id: 1, qty: 120, unit_price: 2200 },
+		{ product_id: 2, qty: 12, unit_price: 12000 }
+	];
+	const quote = await create({ ...quote1043, quote_items: lines, discount: 0 });
+	const delivery = { address_1: 'Cra 70 #44-21, Laureles', address_2: 'Salón de eventos' };
+	const orderId = await convert(quote, {
+		order_items: lines,
+		discount: 50000,
+		transport_cost: 90000,
+		notes: 'Entrar por el portón de servicio',
+		delivery_attributes: { ...delivery, method: 'COMPANY_DELIVERY' }
+	});
+	database.exec(`update orders set status = '${status}' where id = ${orderId}`);
+	database.exec("update products set name = 'Silla Tiffany oro', rental_price = 2800 where id = 1");
+	database.exec('update products set active = 0 where id = 2');
+	return orderId;
+}
+
+test('«Cotizar de nuevo» fills the quote from the order at today’s prices, in any state', async () => {
+	for (const status of ['CONFIRMED', 'COMPLETED', 'CANCELLED']) {
+		const orderId = await requotedOrder(status);
+		const copy = await getOrderRequote(db, String(orderId), sales);
+		expect(copy).toEqual({
+			source: { kind: 'ORDER', id: orderId },
+			removed: ['Mesa redonda 10 puestos'],
+			draft: {
+				clientId: LUZ_MARINA,
+				client: { name: 'Luz Marina Restrepo', phone: '573104428890' },
+				address1: 'Cra 70 #44-21, Laureles',
+				address2: 'Salón de eventos',
+				rentalDays: 2,
+				discount: 50000,
+				transportCost: 90000,
+				notes: 'Entrar por el portón de servicio',
+				items: [
+					{
+						product_id: 1,
+						name: 'Silla Tiffany oro',
+						qty: 120,
+						list_price: 2800,
+						unit_price: 2800,
+						line_total: 120 * 2800 * 2
+					}
+				]
+			}
+		});
+		database.exec(
+			"update products set name = 'Silla Tiffany dorada', rental_price = 2500 where id = 1"
+		);
+		database.exec('update products set active = 1 where id = 2');
+	}
+});
+
+test('«Cotizar de nuevo» writes nothing; the saved quote has its own token and no link to the order', async () => {
+	const orderId = await requotedOrder('CANCELLED');
+	const order = database.prepare('select * from orders where id = ?').get(orderId);
+	const before = countRows();
+	const copy = await getOrderRequote(db, orderId, sales);
+	expect(countRows()).toEqual(before);
+	if (null === copy) {
+		throw new Error('No copy');
+	}
+	const id = await create(draftInput(copy.draft));
+	const row = readQuoteRow(id);
+	expect(row?.order_id).toBeNull();
+	expect(row?.event_date).toBeNull();
+	const tokens = database.prepare('select public_token from quotes').all();
+	expect(new Set(tokens.map((each) => each.public_token)).size).toBe(tokens.length);
+	expect(database.prepare('select * from orders where id = ?').get(orderId)).toEqual(order);
+});
+
+test('«Cotizar de nuevo»: no such order is null, and WAREHOUSE and DRIVER get a 403', async () => {
+	expect(await getOrderRequote(db, 99, sales)).toBeNull();
+	expect(await getOrderRequote(db, 'x', sales)).toBeNull();
+	const orderId = await requotedOrder();
+	for (const actor of [warehouse, driver]) {
+		const refusal = await getOrderRequote(db, orderId, actor).catch((caught) => caught);
+		expect(isHttpError(refusal, 403)).toBe(true);
+	}
+});
+
+test('a new quote is valid through Bogotá’s today plus QUOTES_VALIDITY_DAYS, at 11:30 p.m. too', async () => {
+	vi.setSystemTime(new Date('2026-11-01T04:30:00Z')); // 11:30 p.m. on 31 October in Bogotá
+	const setting = database
+		.prepare("select value from settings where key = 'QUOTES_VALIDITY_DAYS'")
+		.get();
+	expect((await getQuoteFormOptions(db, sales)).validUntil).toBe(
+		addDays('2026-10-31', Number(setting?.value))
+	);
 });
 
 test('DRIVER gets a 403 converting a quote; SALES converts it', async () => {
