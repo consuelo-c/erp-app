@@ -1,4 +1,4 @@
-// Cuentas de cobro: a charge for one or more COMPLETED orders of one client. It stores its number,
+// Cuentas de cobro: a charge for one or more orders of one client, any that isn't CANCELLED. It stores its number,
 // client, issue date and «Forma de pago»; its lines and totals are read live from its orders. Never
 // deleted or voided: one issued with the wrong orders is fixed by editing them.
 
@@ -11,7 +11,6 @@ import { auditedInsert, auditedUpdate, type Diff } from '../audit';
 import { optional, recordLinkedMovement } from './cash';
 import { contactAttributesSchema, isAutoDocument, searchClause } from './contacts';
 import {
-	BALANCE_DUE_SQL,
 	invalidOrder,
 	orderItemsSchema,
 	RECEIVABLE_BALANCE_SQL,
@@ -54,7 +53,6 @@ type EligibleOrder = {
 	receivable_id: number | null;
 	event_date: string;
 	order_total: number;
-	balance_due: number;
 };
 
 type ReceivableRow = { id: number; client_id: number; attributes: string };
@@ -62,7 +60,7 @@ type ReceivableRow = { id: number; client_id: number; attributes: string };
 const NOT_FOUND: Refusal = { ok: false, message: 'Esa cuenta de cobro no existe', errors: {} };
 
 const NOT_ELIGIBLE_MESSAGE =
-	'Solo se incluyen pedidos completados de este cliente, sin pagos parciales ni otra cuenta de cobro';
+	'Solo se incluyen pedidos de este cliente que no estén cancelados ni en otra cuenta de cobro';
 
 const NOT_ELIGIBLE: Refusal = {
 	ok: false,
@@ -71,8 +69,8 @@ const NOT_ELIGIBLE: Refusal = {
 };
 
 /**
- * The client's COMPLETED orders with no cuenta, or already in `receivableId`, which is null when
- * issuing a new one. `canJoin` says which of them a cuenta de cobro can bill.
+ * The client's orders a cuenta de cobro can bill: the ones `canJoin` lets in, and those already in
+ * `receivableId`, which is null when issuing a new one.
  */
 async function findEligibleOrders(
 	db: D1Database,
@@ -80,9 +78,8 @@ async function findEligibleOrders(
 ): Promise<EligibleOrder[]> {
 	const { results } = await db
 		.prepare(
-			`select id, client_id, status, receivable_id, event_date, order_total,
-			${BALANCE_DUE_SQL} as balance_due from orders
-			where client_id = ? and status = 'COMPLETED' and (receivable_id is null or receivable_id = ?)
+			`select id, client_id, status, receivable_id, event_date, order_total from orders
+			where client_id = ? and status <> 'CANCELLED' and (receivable_id is null or receivable_id = ?)
 			order by event_date, id`
 		)
 		.bind(clientId, receivableId)
@@ -90,14 +87,23 @@ async function findEligibleOrders(
 	return results;
 }
 
-// An order joins unpaid or fully paid, never partly paid; one already in the cuenta stays.
-function canJoin(order: EligibleOrder): boolean {
-	const isPartlyPaid = 0 < order.balance_due && order.balance_due < order.order_total;
-	return null !== order.receivable_id || !isPartlyPaid;
+/**
+ * An order joins a cuenta when it isn't CANCELLED and has no `receivable_id`, from CONFIRMED on and
+ * whatever was paid on it; one already in `receivableId` stays.
+ */
+function canJoin(order: EligibleOrder, receivableId: number | null): boolean {
+	const isInThisCuenta = null !== receivableId && receivableId === order.receivable_id;
+	return isInThisCuenta || ('CANCELLED' !== order.status && null === order.receivable_id);
 }
 
-function isEveryOrderEligible(orderIds: number[], eligible: EligibleOrder[]): boolean {
-	return orderIds.every((id) => eligible.some((order) => order.id === id && canJoin(order)));
+function isEveryOrderEligible(
+	orderIds: number[],
+	eligible: EligibleOrder[],
+	receivableId: number | null
+): boolean {
+	return orderIds.every((id) =>
+		eligible.some((order) => order.id === id && canJoin(order, receivableId))
+	);
 }
 
 async function findClientOf(db: D1Database, orderId: number): Promise<number | null> {
@@ -174,7 +180,7 @@ export async function issueReceivable(
 		return NOT_ELIGIBLE;
 	}
 	const eligible = await findEligibleOrders(db, { clientId, receivableId: null });
-	if (!isEveryOrderEligible(orderIds, eligible)) {
+	if (!isEveryOrderEligible(orderIds, eligible, null)) {
 		return NOT_ELIGIBLE;
 	}
 	const orders = eligible.filter(({ id }) => orderIds.includes(id));
@@ -274,7 +280,7 @@ export async function updateReceivable(
 		return NOT_FOUND;
 	}
 	const eligible = await findEligibleOrders(db, { clientId: row.client_id, receivableId: id });
-	if (!isEveryOrderEligible(orderIds, eligible)) {
+	if (!isEveryOrderEligible(orderIds, eligible, id)) {
 		return NOT_ELIGIBLE;
 	}
 	const edit = planEdit(row, { orderIds, paymentTerms, eligible });
@@ -540,12 +546,9 @@ export async function getReceivablePrintout(
 	};
 }
 
-/** A row of the form's checklist: one that can't join reads as such, and can't be checked. */
-export type ReceivableFormOrder = ReceivableOrder & { canJoin: boolean };
-
 export type ReceivableForm = {
 	client: ReceivableClient;
-	/** The checklist, by event date. */ orders: ReceivableFormOrder[];
+	/** The checklist, by event date. */ orders: ReceivableOrder[];
 	checkedOrderIds: number[];
 	paymentTerms: string;
 };
@@ -561,18 +564,17 @@ async function findClient(db: D1Database, clientId: number): Promise<ReceivableC
 	return toClient(row);
 }
 
-function toFormOrder(order: EligibleOrder): ReceivableFormOrder {
+function toFormOrder(order: EligibleOrder): ReceivableOrder {
 	return {
 		id: order.id,
 		eventDate: order.event_date,
-		orderTotal: order.order_total,
-		canJoin: canJoin(order)
+		orderTotal: order.order_total
 	};
 }
 
 /**
  * The form to issue a cuenta from an order, which comes checked. Null when that order can't start
- * one: it doesn't exist, isn't COMPLETED, is partly paid or is already billed.
+ * one: it doesn't exist, is CANCELLED or is already billed.
  */
 export async function getReceivableIssueForm(
 	db: D1Database,
@@ -589,7 +591,7 @@ export async function getReceivableIssueForm(
 		return null;
 	}
 	const eligible = await findEligibleOrders(db, { clientId, receivableId: null });
-	if (!isEveryOrderEligible([parsedId.data], eligible)) {
+	if (!isEveryOrderEligible([parsedId.data], eligible, null)) {
 		return null;
 	}
 	return {

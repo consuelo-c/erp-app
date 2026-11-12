@@ -166,7 +166,7 @@ test("the issue date is Bogotá's: 11:30 p.m. on 30 November, already December i
 	expect(readReceivable(id)?.issue_date).toBe('2026-11-30');
 });
 
-test('an extension bills with its original once COMPLETED', async () => {
+test('an extension bills with its original', async () => {
 	insertOrder(1070, { attributes: '{"parent_order_id":1043}' });
 	const id = await issued([1043, 1070]);
 	expect(linkOf(1070)).toBe(id);
@@ -180,9 +180,27 @@ test('an order checked twice joins once', async () => {
 const NOT_ELIGIBLE_ORDERS: [string, number, OrderSeed | null][] = [
 	["that doesn't exist", 9999, null],
 	["of another client's", 1100, { clientId: LUZ_MARINA }],
-	['DELIVERED', 1101, { status: 'DELIVERED' }],
-	['OUT_FOR_PICKUP', 1102, { status: 'OUT_FOR_PICKUP' }]
+	['CANCELLED', 1101, { status: 'CANCELLED' }]
 ];
+
+const BILLABLE_STATUSES = [
+	'CONFIRMED',
+	'PICKED',
+	'OUT_FOR_DELIVERY',
+	'DELIVERED',
+	'OUT_FOR_PICKUP',
+	'COMPLETED'
+];
+
+test.each(BILLABLE_STATUSES)('a %s order is billed, on issue and on edit', async (status) => {
+	insertOrder(1070, { status });
+	insertOrder(1071, { status });
+	expect(await getReceivableIssueForm(db, 1070, manager)).not.toBeNull();
+	const id = await issued([1070]);
+	expect(linkOf(1070)).toBe(id);
+	expect(await edit(id, [1070, 1071])).toEqual({ ok: true, id });
+	expect(linkOf(1071)).toBe(id);
+});
 
 test.each(NOT_ELIGIBLE_ORDERS)('issuing with an order %s is refused', async (_, id, seed) => {
 	if (null !== seed) {
@@ -203,19 +221,22 @@ test.each(NOT_ELIGIBLE_ORDERS)('editing with an order %s is refused', async (_, 
 	expect(events('RECEIVABLE')).toHaveLength(1);
 });
 
-test('a partly paid order can be neither checked nor billed; an unpaid or fully paid one can', async () => {
-	insertOrder(1070, { total: 500000 });
-	insertOrder(1071, { total: 500000 });
+test('a partly paid CONFIRMED order starts a cuenta, is listed and billed, on issue and on edit', async () => {
+	insertOrder(1070, { status: 'CONFIRMED', total: 500000 });
+	insertOrder(1071, { status: 'CONFIRMED', total: 500000 });
 	insertMovement({ amount: 100000, entityId: 1070 });
-	insertMovement({ amount: 500000, entityId: 1071 });
-	expect(await getReceivableIssueForm(db, 1070, manager)).toBeNull();
-	const form = await getReceivableIssueForm(db, 1071, manager);
-	const joining = form?.orders.filter((order) => order.canJoin).map((order) => order.id);
-	expect(joining).toEqual([1043, 1060, 1061, 1071]);
-	expect(form?.orders.find((order) => 1070 === order.id)?.canJoin).toBe(false);
-	expect(await issue([1043, 1070])).toMatchObject({ ok: false });
-	const id = await issued([1043, 1071]);
-	expect(await edit(id, [1043, 1070])).toMatchObject({ ok: false });
+	insertMovement({ amount: 200000, entityId: 1071 });
+	const form = await getReceivableIssueForm(db, 1070, manager);
+	expect(form?.orders.map(({ id }) => id)).toEqual([1043, 1060, 1061, 1070, 1071]);
+	expect(form?.orders.find(({ id }) => 1070 === id)).toEqual({
+		id: 1070,
+		eventDate: '2026-10-10',
+		orderTotal: 500000
+	});
+	const id = await issued([1043, 1070]);
+	expect(linkOf(1070)).toBe(id);
+	expect(await edit(id, [1043, 1070, 1071])).toEqual({ ok: true, id });
+	expect(linkOf(1071)).toBe(id);
 });
 
 test('an order partly paid once in the cuenta stays in it', async () => {
@@ -224,14 +245,14 @@ test('an order partly paid once in the cuenta stays in it', async () => {
 	expect(await edit(id, [1070, 1071], 'A 30 días')).toEqual({ ok: true, id });
 });
 
-test('issuing starting from an order that does not exist or is not COMPLETED is refused', async () => {
-	insertOrder(1101, { status: 'DELIVERED' });
+test('issuing starting from an order that does not exist or is CANCELLED is refused', async () => {
+	insertOrder(1101, { status: 'CANCELLED' });
 	expect(await issue([9999, 1043])).toMatchObject({ ok: false });
 	expect(await issue([1101, 1043])).toMatchObject({ ok: false });
 	expect(linkOf(1043)).toBeNull();
 });
 
-test('a stale form that checks an order billed meanwhile is refused, on issue and on edit', async () => {
+test('an order already in another cuenta, billed meanwhile, is refused on issue and on edit', async () => {
 	const first = await issued([1043]);
 	const second = await issued([1060]);
 	expect(await issue([1043, 1061])).toMatchObject({ ok: false });
@@ -343,16 +364,22 @@ test('updated_by comes from the actor, on the cuenta and on its orders', async (
 	expect(order).toEqual({ updated_by: 'admin2' });
 });
 
-test('billing an order writes no ORDER EDITED and leaves it unmodified after staging', async () => {
+test('billing a PICKED order writes no ORDER EDITED and leaves it unmodified after staging', async () => {
+	insertOrder(1070, { status: 'PICKED' });
 	database.exec(
 		`insert into events (entity_type, entity_id, action, actor_username, actor_kind, after, created_at)
-		values ('ORDER', 1043, 'STATUS_CHANGED', 'bodega', 'user', '{"status":"PICKED"}', 0)`
+		values ('ORDER', 1070, 'STATUS_CHANGED', 'bodega', 'user', '{"status":"PICKED"}', 0)`
 	);
-	const id = await issued([1043]);
-	await edit(id, [1060]);
+	const id = await issued([1070]);
+	await edit(id, [1043]);
 	expect(events('ORDER', 'EDITED')).toHaveLength(0);
+	expect(events('ORDER', 'RECEIVABLE_LINKED')).toMatchObject([
+		{ entity_id: 1070 },
+		{ entity_id: 1043 }
+	]);
+	expect(events('ORDER', 'RECEIVABLE_UNLINKED')).toMatchObject([{ entity_id: 1070 }]);
 	const row = database
-		.prepare(`select ${MODIFIED_AFTER_STAGING_AT} as at from orders where id = 1043`)
+		.prepare(`select ${MODIFIED_AFTER_STAGING_AT} as at from orders where id = 1070`)
 		.get();
 	expect(row).toEqual({ at: null });
 });
@@ -579,11 +606,12 @@ test('the issue form lists the client eligible orders with the starting one chec
 	insertOrder(1070, { total: 360000 });
 	insertOrder(1071, { status: 'DELIVERED' });
 	insertOrder(1072, { clientId: LUZ_MARINA });
+	insertOrder(1073, { status: 'CANCELLED' });
 	await issued([1043]);
 
 	const form = await getReceivableIssueForm(db, '1061', manager);
 
-	expect(form?.orders.map(({ id }) => id)).toEqual([1060, 1061, 1070]);
+	expect(form?.orders.map(({ id }) => id)).toEqual([1060, 1061, 1070, 1071]);
 	expect(form?.orders[2]).toMatchObject({ id: 1070, eventDate: '2026-10-10', orderTotal: 360000 });
 	expect(form?.checkedOrderIds).toEqual([1061]);
 	expect(form?.paymentTerms).toBe('Contado');
@@ -592,11 +620,10 @@ test('the issue form lists the client eligible orders with the starting one chec
 });
 
 test('an order that cannot start a cuenta has no issue form', async () => {
-	insertOrder(1070, { status: 'DELIVERED' });
-	insertOrder(1071, { status: 'OUT_FOR_PICKUP' });
+	insertOrder(1070, { status: 'CANCELLED' });
 	await issued([1043]);
 
-	for (const orderId of [1043, 1070, 1071, 99, null, '', 'abc']) {
+	for (const orderId of [1043, 1070, 99, null, '', 'abc']) {
 		expect(await getReceivableIssueForm(db, orderId, manager), String(orderId)).toBeNull();
 	}
 });

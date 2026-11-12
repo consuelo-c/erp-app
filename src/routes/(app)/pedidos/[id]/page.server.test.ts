@@ -10,7 +10,7 @@ const AUDIT = "0, 'admin', 0, 'admin'";
 const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
 const address = { address_1: 'Calle 10 # 43-12, El Poblado', address_2: null };
 
-// A completed order, billable today, of a client with a document.
+// A CONFIRMED order, as it's born, of a client with a document, with a $10.000 advance.
 async function billableOrder() {
 	const { db, database } = createMemoryD1();
 	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
@@ -39,8 +39,11 @@ async function billableOrder() {
 	if (!created.ok) {
 		throw new Error(JSON.stringify(created.errors));
 	}
-	database.exec(`update orders set status = 'COMPLETED' where id = ${created.id}`);
-	return { db, id: created.id };
+	database.exec(
+		`insert into cash_movements (concept, payment_method, amount, movement_date, entity_type, entity_id, payee, receipt_number, created_at, created_by, updated_at, updated_by)
+		values ('INSTALLMENT', 'CASH', 10000, '2026-08-10', 'ORDER', ${created.id}, 'Postobón S.A.', 1, ${AUDIT})`
+	);
+	return { db, database, id: created.id };
 }
 
 function loadAs(db: D1Database, id: number, user: Actor) {
@@ -48,10 +51,16 @@ function loadAs(db: D1Database, id: number, user: Actor) {
 	return load(event as never) as Promise<{ canIssueReceivable: boolean }>;
 }
 
-test('SALES is offered «Emitir cuenta de cobro» on an order that can start one, and not once billed', async () => {
+test('SALES is offered «Emitir cuenta de cobro» on a partly paid CONFIRMED order, and not once billed', async () => {
 	const { db, id } = await billableOrder();
 	expect((await loadAs(db, id, sales)).canIssueReceivable).toBe(true);
 	const issued = await issueReceivable(db, { orders: [id], payment_terms: 'Contado' }, sales);
 	expect(issued).toMatchObject({ ok: true });
+	expect((await loadAs(db, id, sales)).canIssueReceivable).toBe(false);
+});
+
+test('a CANCELLED order is not offered «Emitir cuenta de cobro»', async () => {
+	const { db, database, id } = await billableOrder();
+	database.exec(`update orders set status = 'CANCELLED' where id = ${id}`);
 	expect((await loadAs(db, id, sales)).canIssueReceivable).toBe(false);
 });

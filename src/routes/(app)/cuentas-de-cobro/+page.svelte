@@ -94,7 +94,7 @@
 	{#if isEmpty}
 		<div class="empty">
 			<p>Aún no hay cuentas de cobro.</p>
-			<p class="meta">Se emiten desde un pedido completado.</p>
+			<p class="meta">Se emiten desde el detalle de un pedido.</p>
 		</div>
 	{:else}
 		<div class="toolbar phone-only">
