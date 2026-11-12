@@ -11,7 +11,8 @@ import {
 	setResponsibleParty
 } from './incidents';
 import { approveCount, reverseCount, submitCount } from './inventory';
-import { advanceOrder, confirmOrder, createOrder, getOrderDetail } from './orders';
+import { advanceOrder, getOrderDetail } from './orders';
+import { createOrder } from '../db/test-orders';
 
 const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
 const warehouse: Actor = { ...sales, username: 'bodega', roles: ['WAREHOUSE'] };
@@ -124,7 +125,7 @@ test('the items: at least one, whole quantities, known outcomes and keys, a prod
 });
 
 test('an order not yet with the client, or cancelled, takes no incident', async () => {
-	for (const status of ['DRAFT', 'CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY', 'CANCELLED']) {
+	for (const status of ['CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY', 'CANCELLED']) {
 		const id = await createOrderIn(status);
 		const result = await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }]);
 		expect(result).toMatchObject({ ok: false });
@@ -231,8 +232,7 @@ test('a deactivated product is still reported, and inventory may go negative', a
 });
 
 test('an incident on a staged order is no edit: it never reads as modified after staging', async () => {
-	const id = await createOrderIn('DRAFT');
-	await confirmOrder(db, { id }, sales);
+	const id = await createOrderIn('CONFIRMED');
 	for (const status of ['PICKED', 'OUT_FOR_DELIVERY', 'DELIVERED']) {
 		await advanceOrder(db, { id, status }, driver);
 	}

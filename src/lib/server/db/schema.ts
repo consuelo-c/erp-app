@@ -231,7 +231,7 @@ export const orders = sqliteTable(
 		index('orders_receivable_id').on(table.receivableId),
 		check(
 			'orders_status',
-			sql`${table.status} IN ('DRAFT', 'CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'OUT_FOR_PICKUP', 'COMPLETED', 'CANCELLED')`
+			sql`${table.status} IN ('CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'OUT_FOR_PICKUP', 'COMPLETED', 'CANCELLED')`
 		),
 		// coalesce: a missing method makes json_extract NULL, and a CHECK that evaluates to NULL passes.
 		check(
@@ -270,6 +270,7 @@ export const quotes = sqliteTable(
 	'quotes',
 	{
 		id: integer('id').primaryKey({ autoIncrement: true }),
+		publicToken: text('public_token').notNull().unique(), // crypto.randomUUID(), never changed
 		clientId: integer('client_id')
 			.notNull()
 			.references(() => contacts.id),
@@ -388,7 +389,7 @@ export const cashMovements = sqliteTable(
 			'cash_movements_concept_link',
 			sql`CASE
 				WHEN ${table.concept} = 'INSTALLMENT' THEN coalesce(${table.entityType}, '') IN ('ORDER', 'RECEIVABLE') AND (${table.amount} > 0) = (${table.reversesId} IS NULL)
-				WHEN ${table.concept} = 'SECURITY_DEPOSIT' THEN ${table.entityType} IS 'ORDER' AND (${table.amount} > 0) = (${table.reversesId} IS NULL)
+				WHEN ${table.concept} IN ('SECURITY_DEPOSIT', 'CANCELLATION_FEE') THEN ${table.entityType} IS 'ORDER' AND (${table.amount} > 0) = (${table.reversesId} IS NULL)
 				WHEN ${table.concept} IN ('INSTALLMENT_REFUND', 'DEPOSIT_REFUND', 'CARRIER_PAYMENT') THEN ${table.entityType} IS 'ORDER' AND (${table.amount} < 0) = (${table.reversesId} IS NULL)
 				WHEN ${table.concept} = 'PAYROLL' THEN ${table.entityType} IS 'PAYROLL_RUN' AND (${table.amount} < 0) = (${table.reversesId} IS NULL)
 				WHEN ${table.concept} = 'OTHER_INCOME' THEN ${table.entityType} IS NULL AND (${table.amount} > 0) = (${table.reversesId} IS NULL)

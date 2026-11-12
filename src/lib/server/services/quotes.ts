@@ -31,7 +31,8 @@ import {
 	type ClientAttributes,
 	type OrderItem,
 	type Refusal,
-	type SaveResult
+	type SaveResult,
+	type ShortageWarning
 } from './orders';
 import { foldedSql, optional } from './cash';
 import {
@@ -284,11 +285,13 @@ async function insertQuote(
 	resolved: ResolvedQuote
 ): Promise<SaveResult> {
 	const { values, computed, clientStatements } = clientWrite(db, actor, resolved);
+	// The client's page key, set once and never changed: like the order's, it stays out of events.
 	const statements = auditedInsert(db, {
 		table: 'quotes',
 		entityType: 'QUOTE',
 		actor,
 		values,
+		unlogged: { public_token: crypto.randomUUID() },
 		computed
 	});
 	const results = await db.batch([...clientStatements, ...statements]);
@@ -689,11 +692,21 @@ export async function getQuoteConversion(
 	return { quote, client: { id: quote.clientId, fullName, phone, address1, address2 } };
 }
 
-const conversionInputSchema = z.object({ quote: quoteIdSchema, order: z.unknown() });
+const conversionInputSchema = z.object({
+	quote: quoteIdSchema,
+	order: z.unknown(),
+	force: z.boolean().default(false)
+});
 
 const ALREADY_CONVERTED: Refusal = {
 	ok: false,
 	message: 'Esta cotización ya se convirtió en pedido',
+	errors: {}
+};
+
+const EXPIRED: Refusal = {
+	ok: false,
+	message: 'Esta cotización está vencida: edítala con una nueva fecha de vigencia para convertirla',
 	errors: {}
 };
 
@@ -716,25 +729,30 @@ function linkStatements(db: D1Database, actor: Actor, { row, publicToken }: Link
 }
 
 /**
- * «Guardar pedido» on the form a quote filled: the DRAFT order, its event, and the quote linked to
- * it with its CONVERTED event, in one batch. A converted quote is never converted again.
+ * «Guardar pedido» on the form a quote filled: the only way an order is born, CONFIRMED, with its
+ * CREATED event, and the quote linked to it with its CONVERTED event, in one batch. Only a VALID
+ * quote converts; what's short comes back once, unless `force` («Guardar de todos modos»).
  */
 export async function convertQuote(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult | ShortageWarning> {
 	requireRole(actor, TAKES_QUOTES);
 	const parsed = conversionInputSchema.safeParse(input);
 	const row = parsed.success ? await findRow(db, parsed.data.quote) : null;
 	if (!parsed.success || null === row) {
 		return NOT_FOUND;
 	}
-	if (null !== row.order_id) {
+	const quote = toQuote(row);
+	if ('CONVERTED' === quote.state) {
 		return ALREADY_CONVERTED;
 	}
-	const quotedItems = toQuote(row).items;
-	const order = await prepareQuotedOrder(db, parsed.data.order, { actor, quotedItems });
+	if ('EXPIRED' === quote.state) {
+		return EXPIRED;
+	}
+	const { order: form, force } = parsed.data;
+	const order = await prepareQuotedOrder(db, form, { actor, quotedItems: quote.items, force });
 	if ('ok' in order) {
 		return order;
 	}

@@ -18,7 +18,7 @@ import {
 	submitAndApproveCount,
 	submitCount
 } from './inventory';
-import { createOrder } from './orders';
+import { createOrder } from '../db/test-orders';
 
 const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
 const warehouse: Actor = { ...sales, username: 'bodega', roles: ['WAREHOUSE'] };

@@ -7,12 +7,9 @@ import {
 } from '$lib/server/services/incidents';
 import {
 	cancelOrder,
-	confirmOrder,
 	getOrderDetail,
 	getPublicToken,
 	offeredPaymentConcepts,
-	previewConfirmation,
-	reopenOrder,
 	type OrderDetail
 } from '$lib/server/services/orders';
 import { getSourceQuoteId } from '$lib/server/services/quotes';
@@ -34,9 +31,7 @@ async function getPaymentActions(db: D1Database, order: OrderDetail, actor: Acto
 	return { paymentConcepts, canOpenReceivable: true, canIssueReceivable: null !== form };
 }
 
-// A draft brings what its «Confirmar» dialog shows: the suggested advance and any shortage.
 // «Novedades» only for ADMIN and MANAGER: null hides the section for everyone else.
-// The client's page token is null for a draft, which hides «Copiar enlace del cliente».
 // The quote it was converted from, if any, for «Desde la cotización #N».
 export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	requireRole(locals.user, TAKES_ORDERS);
@@ -48,28 +43,16 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	if (null === order) {
 		error(404, 'Ese pedido no existe');
 	}
-	const isDraft = 'DRAFT' === order.status;
-	const confirmation = isDraft
-		? await previewConfirmation(db, { id: order.id }, locals.user)
-		: null;
 	const incidents = isAdminOrManager(locals.user)
 		? await listIncidents(db, order.id, locals.user)
 		: null;
 	const publicToken = await getPublicToken(db, order.id, locals.user);
 	const quoteId = await getSourceQuoteId(db, order.id, locals.user);
 	const paymentActions = await getPaymentActions(db, order, locals.user);
-	return { order, confirmation, incidents, publicToken, quoteId, ...paymentActions };
+	return { order, incidents, publicToken, quoteId, ...paymentActions };
 };
 
 export const actions: Actions = {
-	confirmar: async ({ locals, params, platform }) => {
-		requireRole(locals.user, TAKES_ORDERS);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
-		const result = await confirmOrder(platform.env.DB, { id: params.id }, locals.user);
-		return result.ok ? { confirmed: true } : fail(400, { confirmMessage: result.message });
-	},
 	cancelar: async ({ locals, params, platform, request }) => {
 		requireRole(locals.user, TAKES_ORDERS);
 		if (undefined === platform) {
@@ -82,14 +65,6 @@ export const actions: Actions = {
 			return { cancelled: true };
 		}
 		return fail(400, { cancelMessage: result.errors.reason ?? result.message });
-	},
-	reabrir: async ({ locals, params, platform }) => {
-		requireRole(locals.user, TAKES_ORDERS);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
-		const result = await reopenOrder(platform.env.DB, { id: params.id }, locals.user);
-		return result.ok ? { reopened: true } : fail(400, { reopenMessage: result.message });
 	},
 	revertir: async ({ locals, platform, request }) => {
 		requireRole(locals.user, MANAGES_INCIDENTS);

@@ -18,7 +18,7 @@ const orderItems = JSON.stringify([
 ]);
 
 const events = [
-	{ id: 1, action: 'CREATED', before: null, after: '{"status":"DRAFT","order_total":900000}' },
+	{ id: 1, action: 'CREATED', before: null, after: '{"status":"CONFIRMED","order_total":900000}' },
 	{ id: 2, action: 'EDITED', before: '{"discount":0}', after: '{"discount":50000}' },
 	{
 		id: 3,

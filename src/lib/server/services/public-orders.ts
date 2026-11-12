@@ -114,7 +114,7 @@ function toPublicOrder(row: PublicOrderRow): PublicOrder {
 }
 
 /**
- * The client's page: null for an unknown token, a draft, or an event more than
+ * The client's page: null for an unknown token, or an event more than
  * `LOOKUP_WINDOW_DAYS` past, so a saved link stops showing the order a month after it.
  */
 export async function getPublicOrder(db: D1Database, token: unknown): Promise<PublicOrder | null> {
@@ -128,7 +128,7 @@ export async function getPublicOrder(db: D1Database, token: unknown): Promise<Pu
 			pickup_attributes, order_items, items_total, discount, transport_cost, order_total,
 			deposit_amount, ${BALANCE_DUE_SQL} as balance_due, receivable_id,
 			${ORDER_RECEIVABLE_BALANCE_SQL} as receivable_balance
-			from orders where public_token = ? and status <> 'DRAFT' and event_date >= ?`
+			from orders where public_token = ? and event_date >= ?`
 		)
 		.bind(parsed.data, getLookupWindowStart())
 		.first<PublicOrderRow>();
@@ -137,7 +137,7 @@ export async function getPublicOrder(db: D1Database, token: unknown): Promise<Pu
 
 /**
  * The order a client link names, whatever its status or date, for an employee opening it from
- * the client's WhatsApp: the window and the draft rule protect the client's page, not the staff's.
+ * the client's WhatsApp: the window protects the client's page, not the staff's.
  */
 export async function findOrderIdByToken(db: D1Database, token: unknown): Promise<number | null> {
 	const parsed = tokenSchema.safeParse(token);
@@ -187,7 +187,7 @@ export type LookupResult =
 
 /**
  * The orders of a phone and an event date, by `id`: the phone compared whole against the order's
- * own snapshot, never `contacts.phone`; every status but a draft; an event no older than the
+ * own snapshot, never `contacts.phone`; every status; an event no older than the
  * window. No match is the one miss, whatever failed; a field the client mistyped runs no query.
  */
 export async function lookupOrders(db: D1Database, input: unknown): Promise<LookupResult> {
@@ -201,7 +201,7 @@ export async function lookupOrders(db: D1Database, input: unknown): Promise<Look
 	const { results } = await db
 		.prepare(
 			`select id, status, public_token as token from orders
-			where status <> 'DRAFT' and event_date = ? and event_date >= ?
+			where event_date = ? and event_date >= ?
 			and json_extract(client_attributes, '$.phone') = ? order by id`
 		)
 		.bind(parsed.data.event_date, getLookupWindowStart(), parsed.data.phone)

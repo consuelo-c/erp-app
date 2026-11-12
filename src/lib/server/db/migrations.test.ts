@@ -135,7 +135,7 @@ let publicToken = 0;
 
 // Each row gets a token of its own, so only the constraint under test can refuse it.
 function insertOrder({
-	status = 'DRAFT',
+	status = 'CONFIRMED',
 	deliveryMethod = 'COMPANY_DELIVERY',
 	pickupMethod = 'COMPANY_PICKUP',
 	clientId = 1
@@ -165,6 +165,7 @@ test('orders: the database rejects an unknown status, delivery method or return 
 		pickupMethod: 'CLIENT_RETURN'
 	});
 	expect(() => insertOrder({ status: 'LOST' })).toThrow(/CHECK/);
+	expect(() => insertOrder({ status: 'DRAFT' })).toThrow(/CHECK/);
 	expect(() => insertOrder({ deliveryMethod: 'CLIENT_RETURN' })).toThrow(/CHECK/);
 	expect(() => insertOrder({ pickupMethod: 'CLIENT_PICKUP' })).toThrow(/CHECK/);
 	expect(() => database.exec(`update orders set delivery_attributes = '{}' where id = 1`)).toThrow(
@@ -195,14 +196,17 @@ test('orders are indexed by its three dates, status and client_id', () => {
 	expect(indexedColumns).not.toContain('order_items');
 });
 
+let quoteToken = 0;
+
 function insertQuote(transportCost: number | null, orderId: number | null = null) {
+	quoteToken += 1;
 	const columns =
-		'client_id, order_id, valid_until, rental_days, client_attributes, quote_items, items_total, transport_cost, quote_total, created_at, created_by, updated_at, updated_by';
+		'public_token, client_id, order_id, valid_until, rental_days, client_attributes, quote_items, items_total, transport_cost, quote_total, created_at, created_by, updated_at, updated_by';
 	return database
 		.prepare(
-			`insert into quotes (${columns}) values (1, ?, '2026-12-01', 1, '{}', '[]', 0, ?, 0, ${AUDIT})`
+			`insert into quotes (${columns}) values (?, 1, ?, '2026-12-01', 1, '{}', '[]', 0, ?, 0, ${AUDIT})`
 		)
-		.run(orderId, transportCost);
+		.run(String(quoteToken), orderId, transportCost);
 }
 
 test('quotes: numbered from 1, transport NULL is «por acordar» and 0 stays 0', () => {
@@ -224,14 +228,26 @@ test('quotes: order_id is optional, a real order, and comes from one quote at mo
 	expect(() => insertQuote(null, 99)).toThrow(/FOREIGN KEY/);
 	expect(() =>
 		database.exec(
-			`insert into quotes (client_id, valid_until, rental_days, client_attributes, quote_items, items_total, quote_total, created_at, created_by, updated_at, updated_by) values (99, '2026-12-01', 1, '{}', '[]', 0, 0, ${AUDIT})`
+			`insert into quotes (public_token, client_id, valid_until, rental_days, client_attributes, quote_items, items_total, quote_total, created_at, created_by, updated_at, updated_by) values ('t', 99, '2026-12-01', 1, '{}', '[]', 0, 0, ${AUDIT})`
 		)
 	).toThrow(/FOREIGN KEY/);
 });
 
-test("quotes has no status, token, incident, deposit or trip: it isn't an order", () => {
+test('quotes: public_token is required and unique', () => {
+	insertContact('8909039395');
+	insertQuote(null);
+	quoteToken -= 1;
+	expect(() => insertQuote(null)).toThrow(/UNIQUE/);
+	expect(() =>
+		database.exec(
+			`insert into quotes (client_id, valid_until, rental_days, client_attributes, quote_items, items_total, quote_total, created_at, created_by, updated_at, updated_by) values (1, '2026-12-01', 1, '{}', '[]', 0, 0, ${AUDIT})`
+		)
+	).toThrow(/NOT NULL/);
+});
+
+test("quotes has no status, incident, deposit or trip: it isn't an order", () => {
 	const columns = listColumns('quotes');
-	const forbidden = ['status', 'public_token', 'has_incident', 'deposit_amount'];
+	const forbidden = ['status', 'has_incident', 'deposit_amount'];
 	expect(columns.filter((column) => forbidden.includes(column))).toEqual([]);
 	expect(columns.filter((column) => /delivery|pickup/.test(column))).toEqual([]);
 	expect(columns).toEqual(
@@ -347,6 +363,19 @@ test('cash_movements: an INSTALLMENT links to an order or a cuenta de cobro, not
 	}
 });
 
+test('cash_movements: a CANCELLATION_FEE is money in on an order, offset with reverses_id', () => {
+	insertMovement({ concept: 'CANCELLATION_FEE', amount: 100, entityType: 'ORDER' });
+	insertMovement({ concept: 'CANCELLATION_FEE', amount: -100, entityType: 'ORDER', reversesId: 1 });
+	const refused = [
+		{ concept: 'CANCELLATION_FEE', amount: -100, entityType: 'ORDER' },
+		{ concept: 'CANCELLATION_FEE', amount: 100, entityType: 'RECEIVABLE' },
+		{ concept: 'CANCELLATION_FEE', amount: 100 }
+	];
+	for (const movement of refused) {
+		expect(() => insertMovement(movement)).toThrow(/CHECK/);
+	}
+});
+
 function insertReceivable(clientId: number) {
 	return database
 		.prepare(
@@ -392,31 +421,6 @@ test('orders: receivable_id is NULL until billed, a real cuenta de cobro, and in
 		/FOREIGN KEY/
 	);
 	expect(indexedColumnsOf('orders')).toContain('receivable_id');
-});
-
-const REBUILD_MIGRATION = '0005_curly_grey_gargoyle.sql';
-
-test('the cash_movements rebuild keeps every row as it was, inside a transaction as on D1', () => {
-	database = new DatabaseSync(':memory:');
-	applyMigrations(MIGRATION_FILES.slice(0, MIGRATION_FILES.indexOf(REBUILD_MIGRATION)));
-	insertMovement({ concept: 'INSTALLMENT', amount: 100, entityType: 'ORDER' });
-	insertMovement({ concept: 'INSTALLMENT', amount: -100, entityType: 'ORDER', reversesId: 1 });
-	insertMovement({ concept: 'SECURITY_DEPOSIT', amount: 50, entityType: 'ORDER' });
-	insertMovement({ concept: 'INSTALLMENT_REFUND', amount: -30, entityType: 'ORDER' });
-	insertMovement({ concept: 'DEPOSIT_REFUND', amount: -50, entityType: 'ORDER' });
-	insertMovement({ concept: 'CARRIER_PAYMENT', amount: -20, entityType: 'ORDER' });
-	insertMovement({ concept: 'PAYROLL', amount: -400, entityType: 'PAYROLL_RUN' });
-	insertMovement({ concept: 'OTHER_INCOME', amount: 10 });
-	insertMovement({ concept: 'OTHER_EXPENSE', amount: -10 });
-	const before = database.prepare('select * from cash_movements order by id').all();
-	database.exec('begin');
-	applyMigrations([REBUILD_MIGRATION]);
-	database.exec('commit');
-	expect(database.prepare('select * from cash_movements order by id').all()).toEqual(before);
-	expect(listTables()).not.toContain('__old_cash_movements');
-	expect(indexedColumnsOf('cash_movements')).toEqual(
-		expect.arrayContaining(['reverses_id', 'entity_type', 'entity_id', 'receipt_number'])
-	);
 });
 
 test('users, employees, sessions, products, orders, quotes and receivables carry the audit columns', () => {

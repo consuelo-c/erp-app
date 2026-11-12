@@ -30,7 +30,6 @@ export const ROLE_LABELS: Record<Role, string> = {
 };
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
-	DRAFT: 'Borrador',
 	CONFIRMED: 'Confirmado',
 	PICKED: 'Separado',
 	OUT_FOR_DELIVERY: 'En ruta de entrega',

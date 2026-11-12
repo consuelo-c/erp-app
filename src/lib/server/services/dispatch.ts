@@ -17,8 +17,8 @@ import {
 	type ReturnMethod
 } from './orders';
 
-// A day shows every trip dated on it, whatever its state, but a draft's or a cancelled one's.
-const ACTIVE = ORDER_STATUSES.filter((status) => 'DRAFT' !== status && 'CANCELLED' !== status);
+// A day shows every trip dated on it, whatever its state, but a cancelled one's.
+const ACTIVE = ORDER_STATUSES.filter((status) => 'CANCELLED' !== status);
 
 // Today also shows what's still pending from the days before: a delivery until it's delivered, a
 // pickup until it's back.

@@ -40,7 +40,6 @@
 	const pickup = $derived(order.pickup);
 	const receivable = $derived(readReceivableBalance(order));
 
-	const isDraft = $derived('DRAFT' === order.status);
 	const canRecordPayment = $derived(0 < data.paymentConcepts.length);
 	const canEdit = $derived(isEditableStatus(order.status));
 	const canCancel = $derived(
@@ -51,20 +50,11 @@
 			returnMethod: pickup.method
 		})
 	);
-	const canReopen = $derived(
-		isLegalTransition({
-			from: order.status,
-			to: 'DRAFT',
-			deliveryMethod: delivery.method,
-			returnMethod: pickup.method
-		})
-	);
 	// The pickup address only when the products come back from somewhere else.
 	const isPickupElsewhere = $derived(
 		delivery.address_1 !== pickup.address_1 || delivery.address_2 !== pickup.address_2
 	);
 
-	let isConfirmOpen = $state(false);
 	let isCancelOpen = $state(false);
 	let reason = $state('');
 
@@ -78,10 +68,8 @@
 		return `https://www.google.com/maps/search/?api=1&${new URLSearchParams({ query: address })}`;
 	}
 
-	// Paying is the usual next step, unless the order has its own: «Confirmar» or «Reabrir pedido».
-	const isPaymentNext = $derived(
-		data.paymentConcepts.includes('INSTALLMENT') && !isDraft && !canReopen
-	);
+	// Paying is the usual next step while there's a balance.
+	const isPaymentNext = $derived(data.paymentConcepts.includes('INSTALLMENT'));
 
 	// Set by the payment entry's redirect: the payment just recorded, its receipt next.
 	const recordedPayment = $derived(
@@ -272,20 +260,9 @@
 		<div class="lead-notice">
 			<Notice tone="info">
 				Cancelado el {formatInstant(order.cancellation.cancelledAt)} por {order.cancellation
-					.cancelledBy}: {order.cancellation.reason}. Se puede reabrir como borrador o registrar
-				pagos.
+					.cancelledBy}: {order.cancellation.reason}. Se pueden seguir registrando pagos.
 			</Notice>
 		</div>
-	{/if}
-
-	{#if form?.reopened}
-		<div class="lead-notice">
-			<Notice tone="success">Pedido reabierto como borrador: edítalo y confírmalo de nuevo.</Notice>
-		</div>
-	{/if}
-
-	{#if form?.reopenMessage}
-		<div class="lead-notice"><Notice tone="error">{form.reopenMessage}</Notice></div>
 	{/if}
 
 	<h2 class="section-title client">{order.client.name}</h2>
@@ -513,15 +490,6 @@
 				Registrar pago
 			</Button>
 		{/if}
-		{#if isDraft}
-			<Button onclick={() => (isConfirmOpen = true)}>Confirmar</Button>
-		{/if}
-		<!-- Back to a draft, often for another date: confirming it again holds the products. -->
-		{#if canReopen}
-			<form method="POST" action="?/reabrir" use:enhance>
-				<Button type="submit">Reabrir pedido</Button>
-			</form>
-		{/if}
 	</div>
 
 	{#if copyNotice}
@@ -529,48 +497,11 @@
 	{/if}
 </Screen>
 
-{#if isDraft && data.confirmation}
-	{@const confirmation = data.confirmation}
-	<Modal bind:open={isConfirmOpen} title="Confirmar pedido #{order.id}">
-		{#snippet body()}
-			Anticipo sugerido: <b>{formatPesos(confirmation.suggestedAdvance)}</b>
-		{/snippet}
-		<form
-			id="confirm"
-			class="form-stack"
-			method="POST"
-			action="?/confirmar"
-			use:enhance={closeOnSuccess(() => (isConfirmOpen = false))}
-		>
-			<p class="note">Solo de referencia: no hace falta un pago para confirmar.</p>
-			<!-- Overbooking warns and never blocks: the order confirms anyway. -->
-			{#if confirmation.shortages.length}
-				<Notice tone="warning">
-					Supera el inventario para esas fechas:
-					{#each confirmation.shortages as shortage (shortage.productId)}
-						<span class="shortage">{shortage.name}: faltan {shortage.short}</span>
-					{/each}
-					<span class="shortage">Puedes confirmar igual.</span>
-				</Notice>
-			{/if}
-			{#if form?.confirmMessage}
-				<Notice tone="error">{form.confirmMessage}</Notice>
-			{/if}
-		</form>
-		{#snippet actions()}
-			<Button type="button" variant="secondary" onclick={() => (isConfirmOpen = false)}>
-				Cancelar
-			</Button>
-			<Button type="submit" form="confirm" size="md">Confirmar</Button>
-		{/snippet}
-	</Modal>
-{/if}
-
 {#if canCancel}
 	<Modal
 		bind:open={isCancelOpen}
 		title="Cancelar pedido #{order.id}"
-		body="El pedido queda cancelado y solo de lectura hasta que se reabra como borrador; se pueden seguir registrando pagos."
+		body="El pedido queda cancelado y solo de lectura; se pueden seguir registrando pagos. Para reservarlo otra vez, «Cotizar de nuevo»."
 	>
 		<form
 			id="cancel"
@@ -799,11 +730,6 @@
 	.given-back {
 		padding-left: var(--space-8);
 		margin: 0;
-	}
-
-	.shortage {
-		display: block;
-		margin-top: var(--space-2);
 	}
 
 	.reason {

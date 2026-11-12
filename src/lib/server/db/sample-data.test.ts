@@ -236,14 +236,14 @@ function parseOrder(order: Record<string, unknown>) {
 test("loads the Design Brief's #1043 and #1051, #1047 delivered, and enough for a third page", () => {
 	const orders = readAll('orders');
 	expect(orders).toHaveLength(48);
-	expect(new Set(orders.map((order) => order.status)).size).toBe(8);
+	expect(new Set(orders.map((order) => order.status)).size).toBe(7);
 	expect(orders.every((order) => 0 === order.has_incident)).toBe(true);
 	expect(readAll('incidents')).toEqual([]);
 	const byId = (id: number) => orders.find((order) => id === order.id) ?? {};
 	expect([1043, 1047, 1051].map((id) => byId(id).status)).toEqual([
 		'CONFIRMED',
 		'DELIVERED',
-		'DRAFT'
+		'CONFIRMED'
 	]);
 	const [order1043, order1051] = [byId(1043), byId(1051)].map(parseOrder);
 	expect(order1043.client.name).toBe('Luz Marina Restrepo');
@@ -300,7 +300,6 @@ test('every trip falls from 1 to 18 October, each status as if today were Wednes
 			true
 		]);
 		const fits = {
-			DRAFT: today < delivery,
 			CONFIRMED: today <= delivery,
 			PICKED: today <= delivery,
 			OUT_FOR_DELIVERY: today === delivery,
@@ -398,7 +397,12 @@ test('every quote passes the Zod schemas and follows the totals formula, «por a
 		});
 		expect(items.map((item) => item.line_total)).toEqual(totals.lineTotals);
 		expect([quote.items_total, quote.quote_total]).toEqual([totals.itemsTotal, totals.orderTotal]);
+		expect(String(quote.public_token)).toMatch(
+			/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+		);
 	}
+	const tokens = readAll('quotes').map((quote) => quote.public_token);
+	expect(new Set(tokens).size).toBe(tokens.length);
 });
 
 test("loads Postobón's open #1 and expired #2, and #3 converted into #1043 with its lines", () => {

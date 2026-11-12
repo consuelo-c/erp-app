@@ -1,5 +1,5 @@
-// Pedidos: an order, its client's snapshot, its two trips and its lines. Created on an existing
-// client, edited from DRAFT through DELIVERED, never deleted. Availability and the form's warnings
+// Pedidos: an order, its client's snapshot, its two trips and its lines. Born CONFIRMED from a
+// quote, edited from CONFIRMED through DELIVERED, never deleted. Availability and the form's warnings
 // only inform: nothing here blocks on them.
 
 import { z } from 'zod';
@@ -48,7 +48,6 @@ const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
 const PAYS_OUT = ['ADMIN', 'MANAGER'] as const;
 
 export const ORDER_STATUSES = [
-	'DRAFT',
 	'CONFIRMED',
 	'PICKED',
 	'OUT_FOR_DELIVERY',
@@ -626,21 +625,6 @@ async function insertOrder(db: D1Database, actor: Actor, order: NewOrder): Promi
 	return { ok: true, id: results[insertAt].meta.last_row_id };
 }
 
-/** A new order, on a client picked or a new one, born a draft: confirming is a step of its own. */
-export async function createOrder(
-	db: D1Database,
-	input: unknown,
-	actor: Actor | null
-): Promise<SaveResult> {
-	requireRole(actor, TAKES_ORDERS);
-	const parsed = orderInputSchema.safeParse(input);
-	if (!parsed.success) {
-		return invalidOrder(parsed.error);
-	}
-	const resolved = await resolveColumns(db, parsed.data, { current: null, frozenItems: [] });
-	return 'ok' in resolved ? resolved : insertOrder(db, actor, { resolved, status: 'DRAFT' });
-}
-
 // A quote's «por acordar» transport arrives empty: the order never gets it free because nobody
 // typed it. 0 is typed.
 const quotedOrderInputSchema = orderInputSchema.safeExtend({
@@ -650,16 +634,22 @@ const quotedOrderInputSchema = orderInputSchema.safeExtend({
 		.min(0, 'No puede ser negativo')
 });
 
+/** «Guardar pedido» held back once to show what's short; «Guardar de todos modos» sends `force`. */
+export type ShortageWarning = Refusal & { shortages: Shortage[] };
+
+type QuotedOrder = { actor: Actor | null; quotedItems: OrderItem[]; force: boolean };
+
 /**
- * A quote's order, a draft, not yet written: its statements, for the batch that also links the
+ * A quote's order, born CONFIRMED, not yet written: its statements, for the batch that also links the
  * quote. The lines quoted keep their name and list price, an inactive product's too: the quote is
- * what the company holds on paper. A line added on the form takes today's catalog.
+ * what the company holds on paper. A line added on the form takes today's catalog. Availability is
+ * checked as it's saved and never blocks: what's short comes back once, unless `force`.
  */
 export async function prepareQuotedOrder(
 	db: D1Database,
 	input: unknown,
-	{ actor, quotedItems }: { actor: Actor | null; quotedItems: OrderItem[] }
-): Promise<OrderStatements | Refusal> {
+	{ actor, quotedItems, force }: QuotedOrder
+): Promise<OrderStatements | Refusal | ShortageWarning> {
 	requireRole(actor, TAKES_ORDERS);
 	const parsed = quotedOrderInputSchema.safeParse(input);
 	if (!parsed.success) {
@@ -667,7 +657,14 @@ export async function prepareQuotedOrder(
 	}
 	const basis = { current: null, frozenItems: quotedItems };
 	const resolved = await resolveColumns(db, parsed.data, basis);
-	return 'ok' in resolved ? resolved : orderStatements(db, actor, { resolved, status: 'DRAFT' });
+	if ('ok' in resolved) {
+		return resolved;
+	}
+	const shortages = force ? [] : await findShortages(db, resolved.columns);
+	if (0 < shortages.length) {
+		return { ok: false, message: '', errors: {}, shortages };
+	}
+	return orderStatements(db, actor, { resolved, status: 'CONFIRMED' });
 }
 
 const NOT_FOUND: Refusal = { ok: false, message: 'Ese pedido no existe', errors: {} };
@@ -700,7 +697,7 @@ async function applyEdit(
 	return { ok: true, id: row.id };
 }
 
-/** The whole form, from DRAFT through DELIVERED. Lines already on it keep their frozen name and price. */
+/** The whole form, from CONFIRMED through DELIVERED. Lines already on it keep their frozen name and price. */
 export async function updateOrder(
 	db: D1Database,
 	input: unknown,
@@ -799,8 +796,8 @@ export async function createExtension(
 	return 'ok' in resolved ? resolved : insertOrder(db, actor, { resolved, status: 'DELIVERED' });
 }
 
-// The orders whose products are out of the warehouse, or promised: a draft doesn't hold them yet,
-// and a cancelled or completed order no longer does, so cancelling releases them on its own.
+// The orders whose products are out of the warehouse, or promised: a cancelled or completed order
+// no longer holds them, so cancelling releases them on its own.
 const RESERVING_STATUSES: readonly OrderStatus[] = [
 	'CONFIRMED',
 	'PICKED',
@@ -1062,21 +1059,6 @@ async function applyTransition(
 	return { ok: true, id: transition.id };
 }
 
-/** A draft becomes a commitment. No advance is required: the salesperson confirms with $0 paid. */
-export async function confirmOrder(
-	db: D1Database,
-	input: unknown,
-	actor: Actor | null
-): Promise<SaveResult> {
-	requireRole(actor, TAKES_ORDERS);
-	const parsed = transitionSchema.safeParse(input);
-	if (!parsed.success) {
-		return invalidOrder(parsed.error);
-	}
-	const transition = { id: parsed.data.id, to: 'CONFIRMED' as const, action: 'STATUS_CHANGED' };
-	return applyTransition(db, actor, transition);
-}
-
 /**
  * Up to the delivery, with a required reason kept in the event. It releases the inventory on its
  * own: availability only counts the reserving states. Payments already made are refunded by hand.
@@ -1093,23 +1075,6 @@ export async function cancelOrder(
 	}
 	const { id, reason } = parsed.data;
 	return applyTransition(db, actor, { id, to: 'CANCELLED', action: 'CANCELLED', reason });
-}
-
-/**
- * A cancelled order back to a draft, often for another date, instead of taking it again. It holds
- * nothing until it's confirmed again; its payments and refunds stay as they were recorded.
- */
-export async function reopenOrder(
-	db: D1Database,
-	input: unknown,
-	actor: Actor | null
-): Promise<SaveResult> {
-	requireRole(actor, TAKES_ORDERS);
-	const parsed = transitionSchema.safeParse(input);
-	if (!parsed.success) {
-		return invalidOrder(parsed.error);
-	}
-	return applyTransition(db, actor, { id: parsed.data.id, to: 'DRAFT', action: 'STATUS_CHANGED' });
 }
 
 /**
@@ -1133,10 +1098,15 @@ export async function advanceOrder(
 /** A line the order asks more of than its range has left. */
 export type Shortage = { productId: number; name: string; short: number };
 
-/** What the confirmation shows. Neither blocks: the order confirms overbooked and with $0 paid. */
-export type ConfirmationPreview = { shortages: Shortage[]; suggestedAdvance: number };
-
-function findShortages(items: OrderItem[], availability: Availability[]): Shortage[] {
+/** What a new order's lines ask more of than its dates have left, checked as it's saved. */
+async function findShortages(db: D1Database, columns: Columns): Promise<Shortage[]> {
+	const items = orderItemsSchema.parse(JSON.parse(columns.order_items));
+	const availability = await queryAvailability(db, {
+		order_id: null,
+		delivery_date: columns.delivery_date,
+		pickup_date: columns.pickup_date,
+		product_ids: items.map((item) => item.product_id)
+	});
 	const available = new Map(availability.map((each) => [each.productId, each.available]));
 	return items
 		.map((item) => ({
@@ -1145,31 +1115,6 @@ function findShortages(items: OrderItem[], availability: Availability[]): Shorta
 			short: item.qty - (available.get(item.product_id) ?? 0)
 		}))
 		.filter((shortage) => shortage.short > 0);
-}
-
-/** Re-checks availability for the confirmation, and works out the suggested advance as a reference. */
-export async function previewConfirmation(
-	db: D1Database,
-	input: unknown,
-	actor: Actor | null
-): Promise<ConfirmationPreview | null> {
-	requireRole(actor, TAKES_ORDERS);
-	const row = await findRow(db, transitionSchema.parse(input).id);
-	if (null === row) {
-		return null;
-	}
-	const order = toOrder(row);
-	const availability = await queryAvailability(db, {
-		order_id: order.id,
-		delivery_date: order.deliveryDate,
-		pickup_date: order.pickupDate,
-		product_ids: order.items.map((item) => item.product_id)
-	});
-	const { ORDERS_SUGGESTED_ADVANCE_PCT: percentage } = await readSettings(db, [
-		'ORDERS_SUGGESTED_ADVANCE_PCT'
-	]);
-	const suggestedAdvance = Math.round((order.orderTotal * percentage) / 100);
-	return { shortages: findShortages(order.items, availability), suggestedAdvance };
 }
 
 /** A page of the order list: it never loads the whole table. */
@@ -1377,8 +1322,7 @@ export type OrderDetail = Order & {
 	modifiedAfterStagingAt: number | null;
 };
 
-// Staged from PICKED on. A cancelled order reopened and confirmed again holds nothing staged until
-// it's picked again, which its status already says.
+// Staged from PICKED on.
 const STAGED = ['PICKED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'OUT_FOR_PICKUP', 'COMPLETED'] as const;
 
 // ponytail: events has no (entity_type, entity_id) index, so each order scans it; add one if the
@@ -1463,7 +1407,7 @@ async function findPayments(db: D1Database, orderId: number): Promise<OrderPayme
 	return results.map(toPayment);
 }
 
-// Only while it's cancelled: a reopened order's cancellation stays in its timeline.
+// Only while it's cancelled: nothing leaves CANCELLED, so it's the order's one cancellation.
 async function findCancellation(db: D1Database, orderId: number): Promise<Cancellation | null> {
 	return db
 		.prepare(
@@ -1526,8 +1470,7 @@ export async function getOrderDetail(
 }
 
 /**
- * The token of the client's page, for «Copiar enlace del cliente»: null for a draft, which the page
- * doesn't open. Kept out of `getOrderDetail`, which Despachos reads too: warehouse and the driver
+ * The token of the client's page, for «Copiar enlace del cliente». Kept out of `getOrderDetail`, which Despachos reads too: warehouse and the driver
  * don't send links.
  */
 export async function getPublicToken(
@@ -1537,7 +1480,7 @@ export async function getPublicToken(
 ): Promise<string | null> {
 	requireRole(actor, TAKES_ORDERS);
 	const row = await db
-		.prepare(`select public_token from orders where id = ? and status <> 'DRAFT'`)
+		.prepare('select public_token from orders where id = ?')
 		.bind(id)
 		.first<{ public_token: string }>();
 	return row?.public_token ?? null;
@@ -1640,23 +1583,10 @@ async function installmentRefusal(db: D1Database, order: Order): Promise<Refusal
 	return 0 < balanceDue ? null : { ok: false, message: 'Este pedido ya está pagado.', errors: {} };
 }
 
-// Money in commits a draft, the same as «Confirmar»; money out leaves it a draft.
-function confirmationByPayment(
-	db: D1Database,
-	actor: Actor,
-	{ row, concept }: { row: OrderRow; concept: OrderPaymentConcept }
-): D1PreparedStatement[] {
-	if (!isOrderInflow(concept) || !isLegalFrom(row, 'CONFIRMED')) {
-		return [];
-	}
-	const transition = { id: row.id, to: 'CONFIRMED' as const, action: 'STATUS_CHANGED' };
-	return transitionStatements(db, actor, { row, transition });
-}
-
 /**
  * Records one of the order's movements, in any state, cancelled included. «Pago» needs a balance
  * to pay, but never blocks on going over it. Valor is typed positive; the concept gives the sign.
- * Money in on a draft confirms it, in the movement's same batch.
+ * It never changes the order's status.
  */
 export async function recordOrderPayment(
 	db: D1Database,
@@ -1683,8 +1613,7 @@ export async function recordOrderPayment(
 	if ('string' !== typeof payee) {
 		return payee;
 	}
-	const alongside = confirmationByPayment(db, actor, { row, concept });
-	const link = { concept, entityType: 'ORDER', entityId: order.id, payee, alongside };
+	const link = { concept, entityType: 'ORDER', entityId: order.id, payee };
 	return recordLinkedMovement(db, { form: input, ...link }, actor);
 }
 

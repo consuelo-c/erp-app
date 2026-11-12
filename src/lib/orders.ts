@@ -64,23 +64,22 @@ export type OrderMove = {
 };
 
 // Once the merchandise is with the client, cancelling no longer undoes anything.
-const CANCELLABLE: readonly OrderStatus[] = ['DRAFT', 'CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY'];
+const CANCELLABLE: readonly OrderStatus[] = ['CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY'];
 
 // The route branches on the methods: nobody drives out when the client picks up at the warehouse,
-// nor goes to fetch what the client brings back. A cancelled order reopens as a draft, often for
-// another date: confirming it again re-checks the availability it released.
+// nor goes to fetch what the client brings back. Nothing leaves CANCELLED: booking it again is a
+// new quote, «Cotizar de nuevo».
 function forwardStatus(move: OrderMove): OrderStatus | null {
 	const isClientPickup = 'CLIENT_PICKUP' === move.deliveryMethod;
 	const isClientReturn = 'CLIENT_RETURN' === move.returnMethod;
 	const next: Record<OrderStatus, OrderStatus | null> = {
-		DRAFT: 'CONFIRMED',
 		CONFIRMED: 'PICKED',
 		PICKED: isClientPickup ? 'DELIVERED' : 'OUT_FOR_DELIVERY',
 		OUT_FOR_DELIVERY: 'DELIVERED',
 		DELIVERED: isClientReturn ? 'COMPLETED' : 'OUT_FOR_PICKUP',
 		OUT_FOR_PICKUP: 'COMPLETED',
 		COMPLETED: null,
-		CANCELLED: 'DRAFT'
+		CANCELLED: null
 	};
 	return next[move.from];
 }
@@ -93,8 +92,8 @@ export function isLegalTransition(move: OrderMove): boolean {
 	return move.to === forwardStatus(move);
 }
 
-// Confirming and cancelling commit the company to the client, or release it: they aren't here,
-// so the operational transitions can't be used to skip their role lock.
+// Cancelling releases the company from the client: it isn't here, so the operational transitions
+// can't be used to skip its role lock.
 export const OPERATIONAL_STATUSES = [
 	'PICKED',
 	'OUT_FOR_DELIVERY',
@@ -105,7 +104,7 @@ export const OPERATIONAL_STATUSES = [
 
 export type OperationalStatus = (typeof OPERATIONAL_STATUSES)[number];
 
-/** The status button's one target, or null: a draft, a cancelled or a completed order has none. */
+/** The status button's one target, or null: a cancelled or a completed order has none. */
 export function nextOperationalStatus(move: Omit<OrderMove, 'to'>): OperationalStatus | null {
 	return OPERATIONAL_STATUSES.find((to) => isLegalTransition({ ...move, to })) ?? null;
 }
@@ -117,14 +116,13 @@ export function isPickupStatus(status: OrderStatus): boolean {
 
 // Once the products are on their way back, or the order was cancelled, it's read-only.
 const EDITABLE: readonly OrderStatus[] = [
-	'DRAFT',
 	'CONFIRMED',
 	'PICKED',
 	'OUT_FOR_DELIVERY',
 	'DELIVERED'
 ];
 
-/** Whether an order in this state can still be edited: from DRAFT through DELIVERED. */
+/** Whether an order in this state can still be edited: from CONFIRMED through DELIVERED. */
 export function isEditableStatus(status: OrderStatus): boolean {
 	return EDITABLE.includes(status);
 }
