@@ -4,8 +4,8 @@
 	import { formatSpelledDate } from '$lib/datetime';
 	import { formatBalance, formatIdNumber, formatPesos } from '$lib/format';
 	import { formatRemisiones, splitOrdersIntoPages } from '$lib/orders';
-	import { formatPhone } from '$lib/phone';
 	import type { PrintedOrder } from '$lib/server/services/receivables';
+	import { printedContact } from '$lib/whatsapp';
 	import type { PageProps } from './$types';
 
 	// Outside the app's shell, the letter sheets that copy the company's paper. The fixed texts are
@@ -15,9 +15,13 @@
 	const printout = $derived(data.printout);
 	const client = $derived(printout.client);
 	const company = $derived(printout.company);
-	const title = $derived(`CUENTA DE COBRO Nº ${printout.id}`);
-	const pages = $derived(splitOrdersIntoPages(printout.orders));
+	const contact = $derived(printedContact(client.phone, client.whatsapp));
+	// Cancelled orders aren't in `orders`: an «Anulada» cuenta prints no order block at all.
+	const title = $derived(`CUENTA DE COBRO Nº ${printout.id}${printout.isVoid ? ' — ANULADA' : ''}`);
 	const isSingleOrder = $derived(1 === printout.orders.length);
+	// What was paid follows the last total; an «Anulada» cuenta prints no total, so nothing follows.
+	const hasPayments = $derived(0 !== printout.paid && 0 < printout.orders.length);
+	const pages = $derived(splitOrdersIntoPages(printout.orders, hasPayments ? 2 : 0));
 	// As on the paper, a single order's totals sit beside the bank account, unless the closing went
 	// to a sheet of its own: then they stay under the order's last line.
 	const hasTotalsInClosing = $derived(
@@ -46,7 +50,19 @@
 		<div class="print-row print-row--strong">
 			<span>TOTAL</span><span>{formatPesos(order.orderTotal)}</span>
 		</div>
+		{#if isSingleOrder}
+			{@render payments()}
+		{/if}
 	</div>
+{/snippet}
+
+{#snippet payments()}
+	{#if hasPayments}
+		<div class="print-row"><span>ABONOS</span><span>{formatBalance(printout.paid)}</span></div>
+		<div class="print-row print-row--strong">
+			<span>SALDO A PAGAR</span><span>{formatBalance(printout.balance)}</span>
+		</div>
+	{/if}
 {/snippet}
 
 {#snippet opening()}
@@ -58,9 +74,11 @@
 			{@render field('NIT/C.C.', formatIdNumber(client.documentId))}
 		{/if}
 		{@render field('Dirección', client.address)}
-		{@render field('Teléfono', formatPhone(client.phone))}
+		{@render field(contact.label, contact.value)}
 	</div>
-	{@render field('Concepto:', formatRemisiones(printout.orders.map(({ id }) => id)))}
+	{#if 0 < printout.orders.length}
+		{@render field('Concepto:', formatRemisiones(printout.orders.map(({ id }) => id)))}
+	{/if}
 	{@render field('Debe a:', company.COMPANY_NAME)}
 	{@render field('Forma de pago:', printout.paymentTerms)}
 {/snippet}
@@ -75,11 +93,12 @@
 		</div>
 		{#if hasTotalsInClosing}
 			{@render totals(printout.orders[0])}
-		{:else if !isSingleOrder}
+		{:else if 1 < printout.orders.length}
 			<div class="print-totals print-totals--grand">
 				<div class="print-row print-row--strong">
 					<span>TOTAL A PAGAR</span><span>{formatPesos(printout.total)}</span>
 				</div>
+				{@render payments()}
 			</div>
 		{/if}
 	</div>

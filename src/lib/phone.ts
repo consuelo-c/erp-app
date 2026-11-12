@@ -23,8 +23,14 @@ export function normalizePhone(typed: string): string | null {
 	return typed.trim().startsWith('+') ? normalizeInternational(digits) : normalizeColombian(digits);
 }
 
-/** A stored phone as people read it: `310 442 8890`, or `+13055550142` from another country. */
-export function formatPhone(phone: string): string {
+/**
+ * A stored phone as people read it: `310 442 8890`, or `+13055550142` from another country; a
+ * contact may have none, which reads as nothing.
+ */
+export function formatPhone(phone: string | null): string {
+	if (null === phone) {
+		return '';
+	}
 	if (!phone.startsWith(COLOMBIA)) {
 		return `+${phone}`;
 	}

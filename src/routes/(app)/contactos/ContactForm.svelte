@@ -9,6 +9,8 @@
 	import { SERVICE_LABELS } from '$lib/labels';
 	import { formatPhone, normalizePhone } from '$lib/phone';
 	import type { Contact } from '$lib/server/services/contacts';
+	import { formatWhatsapp } from '$lib/whatsapp';
+	import WhatsappField from '../WhatsappField.svelte';
 
 	// A failed save: its message, each field's error, what was typed.
 	type Submitted = {
@@ -31,18 +33,34 @@
 		String(form?.values[name] ?? saved ?? '');
 	const errorOf = (name: string): string | undefined => form?.errors[name];
 
+	// Shown with its `@`, as every username is; typing overrides it until the next load.
+	let whatsapp = $derived(
+		value('whatsapp', contact?.whatsapp ? formatWhatsapp(contact.whatsapp) : null)
+	);
+
 	const chosen = $derived(
 		Array.isArray(form?.values.services) ? form.values.services : (contact?.services ?? [])
 	);
 
-	// For Sales, a set account is the manager's to change, and so is the ID number, always: it's the
+	// For Sales, a set account is the manager's to change, and so is a real ID number: it's the
 	// contact's key. A locked field still posts its saved value: the service rejects a save that
 	// changes it.
 	const isAccountLocked = $derived(!isManager && null !== (contact?.bankAccount ?? null));
+	const hasRealDocument = $derived(null !== contact && !contact.hasAutoDocument);
+	const isDocumentLocked = $derived(!isManager && hasRealDocument);
 
 	// What Sales fills in once stays: the hint says so before it's saved.
 	const ONCE = 'Cuando la guardes, solo Gerente o Administrador la cambian.';
-	const AUTO_HINT = 'Si queda vacío, se asigna uno automático que empieza con @.';
+	// An automatic one isn't shown in the field: the real one is still to be typed.
+	const documentHint = $derived.by(() => {
+		if (isDocumentLocked) {
+			return lockedHint;
+		}
+		const hint = contact?.hasAutoDocument
+			? `Tiene uno automático, ${contact.documentId}: escribe el real para guardar.`
+			: '';
+		return isManager ? hint || undefined : `${hint} ${ONCE}`.trim();
+	});
 	const accountHint = $derived.by(() => {
 		if (isAccountLocked) {
 			return lockedHint;
@@ -71,8 +89,33 @@
 
 <!-- The submit button sits in the screen's action bar and reaches this form through its `form` attribute. -->
 <form id="contact" class="form-stack" method="POST">
+	<Field label="Nombre" id="full_name" error={errorOf('full_name')}>
+		<Input
+			id="full_name"
+			name="full_name"
+			value={value('full_name', contact?.fullName)}
+			placeholder="Ej. Luz Marina Restrepo"
+			aria-invalid={undefined !== errorOf('full_name')}
+			required
+		/>
+	</Field>
+	<Field label="Cédula o NIT" id="document_id" hint={documentHint} error={errorOf('document_id')}>
+		{#if isDocumentLocked}
+			{@render locked('document_id', contact?.documentId ?? '')}
+			<input type="hidden" name="document_id" value={contact?.documentId} />
+		{:else}
+			<Input
+				id="document_id"
+				name="document_id"
+				value={value('document_id', hasRealDocument ? contact?.documentId : null)}
+				placeholder="Ej. C.C. 71.234.567 o NIT 900.456.123-4"
+				aria-invalid={undefined !== errorOf('document_id')}
+				required
+			/>
+		{/if}
+	</Field>
 	<Field
-		label="Teléfono"
+		label="Teléfono (opcional)"
 		id="phone"
 		hint="Si es de otro país, escríbelo con + y el indicativo: +13055550142."
 		error={errorOf('phone')}
@@ -86,38 +129,9 @@
 			placeholder="Ej. 310 442 8890"
 			onblur={tidyPhone}
 			aria-invalid={undefined !== errorOf('phone')}
-			required
 		/>
 	</Field>
-	<Field label="Nombre" id="full_name" error={errorOf('full_name')}>
-		<Input
-			id="full_name"
-			name="full_name"
-			value={value('full_name', contact?.fullName)}
-			placeholder="Ej. Luz Marina Restrepo"
-			aria-invalid={undefined !== errorOf('full_name')}
-			required
-		/>
-	</Field>
-	<Field
-		label="Cédula o NIT (opcional)"
-		id="document_id"
-		hint={isManager ? AUTO_HINT : lockedHint}
-		error={errorOf('document_id')}
-	>
-		{#if !isManager}
-			{@render locked('document_id', contact?.documentId ?? 'Se asigna uno automático')}
-			<input type="hidden" name="document_id" value={contact?.documentId ?? ''} />
-		{:else}
-			<Input
-				id="document_id"
-				name="document_id"
-				value={value('document_id', contact?.documentId)}
-				placeholder="Ej. C.C. 71.234.567 o NIT 900.456.123-4"
-				aria-invalid={undefined !== errorOf('document_id')}
-			/>
-		{/if}
-	</Field>
+	<WhatsappField bind:value={whatsapp} exceptId={contact?.id ?? null} error={errorOf('whatsapp')} />
 	<Field label="Correo (opcional)" id="email" error={errorOf('email')}>
 		<Input
 			id="email"

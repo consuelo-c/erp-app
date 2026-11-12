@@ -28,12 +28,14 @@
 		isCancelledOnItsWay,
 		isEditableStatus,
 		isLegalTransition,
+		readOwedOnReceivable,
 		readReceivableBalance
 	} from '$lib/orders';
-	import { formatPhone } from '$lib/phone';
 	import type { Incident, ResponsibleParty } from '$lib/server/services/incidents';
 	import type { Carrier } from '$lib/server/services/orders';
+	import { singleReach } from '$lib/whatsapp';
 	import PaymentList from '../../PaymentList.svelte';
+	import ReachLines from '../../ReachLines.svelte';
 	import type { PageProps } from './$types';
 
 	// The order as everyone at the office reads it: who, where, when, what, and its money. The
@@ -44,6 +46,8 @@
 	const delivery = $derived(order.delivery);
 	const pickup = $derived(order.pickup);
 	const receivable = $derived(readReceivableBalance(order));
+	// Cancelled and billed: what the company holds for the client is its cuenta's credit.
+	const owedOnReceivable = $derived(readOwedOnReceivable(order));
 
 	const canRecordPayment = $derived(0 < data.paymentConcepts.length);
 	const canEdit = $derived(isEditableStatus(order.status));
@@ -142,11 +146,14 @@
 </svelte:head>
 
 {#snippet carrierRow(carrier: Carrier)}
+	{@const reach = singleReach(carrier.phone, carrier.whatsapp)}
 	<li class="detail-list__row--plain">
 		<span>Transportador</span>
 		<span
-			>{carrier.name} ·
-			<a href="https://wa.me/{carrier.phone}">{formatPhone(carrier.phone)}</a></span
+			>{carrier.name}{#if reach}
+				·
+				<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- an external wa.me link -->
+				<a href={reach.href}>{reach.text}</a>{/if}</span
 		>
 	</li>
 {/snippet}
@@ -169,11 +176,7 @@
 {/snippet}
 
 {#snippet receivableLink(id: number, text: string)}
-	{#if data.canOpenReceivable}
-		<a href={resolve('/(app)/cuentas-de-cobro/[id]', { id: String(id) })}>{text}</a>
-	{:else}
-		{text}
-	{/if}
+	<a href={resolve('/(app)/cuentas-de-cobro/[id]', { id: String(id) })}>{text}</a>
 {/snippet}
 
 <Screen>
@@ -273,21 +276,7 @@
 
 	<h2 class="section-title client">{order.client.name}</h2>
 	<div class="reach">
-		<span>{formatPhone(order.client.phone)}</span>
-		<IconButton
-			icon="phone"
-			size="lg"
-			label="Llamar a {order.client.name}"
-			href="tel:+{order.client.phone}"
-		/>
-		<IconButton
-			icon="whatsapp"
-			size="lg"
-			label="Escribir por WhatsApp a {order.client.name}"
-			href="https://wa.me/{order.client.phone}"
-			target="_blank"
-			rel="noopener"
-		/>
+		<ReachLines phone={order.client.phone} whatsapp={order.client.whatsapp} />
 	</div>
 	<div class="delivery-address">{@render address(delivery.address_1, delivery.address_2)}</div>
 
@@ -390,6 +379,10 @@
 					<span>Saldo</span><span>{formatBalance(order.balanceDue)}</span>
 				</li>
 			{/if}
+		{:else if owedOnReceivable}
+			<li class="detail-list__row--strong">
+				<span>{owedOnReceivable.label}</span><span>{owedOnReceivable.amount}</span>
+			</li>
 		{/if}
 		<li class="detail-list__row--plain deposit">
 			<span>Depósito acordado</span><span>{formatPesos(order.depositAmount)}</span>
@@ -460,7 +453,9 @@
 	<h2 class="section-title">Pagos</h2>
 	<PaymentList payments={order.payments} />
 	{#if receivable}
-		<p class="receivable-balance">{@render receivableLink(receivable.id, receivable.text)}</p>
+		<p class="receivable-balance">
+			{@render receivableLink(receivable.id, owedOnReceivable?.text ?? receivable.text)}
+		</p>
 	{/if}
 
 	<!-- Payments are recorded in any state, a cancelled order's refunds included. -->
@@ -654,27 +649,17 @@
 		margin-bottom: var(--space-2);
 	}
 
-	.reach,
 	.address {
 		display: flex;
 		gap: var(--space-2);
 		align-items: center;
+		line-height: 1.35;
 		color: var(--link);
+		text-align: left;
 	}
 
-	.reach > span,
 	.address > span {
 		color: var(--text-body);
-	}
-
-	/* 24px apart: each icon's 48px hit area overhangs its glyph by 11px on either side. */
-	.reach {
-		gap: var(--space-12);
-	}
-
-	.address {
-		line-height: 1.35;
-		text-align: left;
 	}
 
 	.address .meta {

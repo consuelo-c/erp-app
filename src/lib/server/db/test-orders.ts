@@ -12,7 +12,7 @@ export async function createOrder(db: D1Database, input: object, actor: Actor | 
 			`insert into quotes (public_token, client_id, valid_until, rental_days, client_attributes,
 			quote_items, items_total, quote_total, created_at, created_by, updated_at, updated_by)
 			select ?, coalesce(?, (select min(id) from contacts)), '2099-12-31', 1,
-				'{"name":"-","phone":"-"}',
+				'{"name":"-","phone":"-","whatsapp":null}',
 				json_array(json_object('product_id', id, 'name', name, 'qty', 1, 'list_price', rental_price,
 					'unit_price', rental_price, 'line_total', rental_price)),
 				rental_price, rental_price, 0, 'test', 0, 'test'

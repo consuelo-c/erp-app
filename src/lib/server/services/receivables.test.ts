@@ -166,7 +166,7 @@ test("the issue date is Bogotá's: 11:30 p.m. on 30 November, already December i
 	expect(readReceivable(id)?.issue_date).toBe('2026-11-30');
 });
 
-test('an extension bills with its original once COMPLETED', async () => {
+test('an extension bills with its original', async () => {
 	insertOrder(1070, { attributes: '{"parent_order_id":1043}' });
 	const id = await issued([1043, 1070]);
 	expect(linkOf(1070)).toBe(id);
@@ -180,9 +180,27 @@ test('an order checked twice joins once', async () => {
 const NOT_ELIGIBLE_ORDERS: [string, number, OrderSeed | null][] = [
 	["that doesn't exist", 9999, null],
 	["of another client's", 1100, { clientId: LUZ_MARINA }],
-	['DELIVERED', 1101, { status: 'DELIVERED' }],
-	['OUT_FOR_PICKUP', 1102, { status: 'OUT_FOR_PICKUP' }]
+	['CANCELLED', 1101, { status: 'CANCELLED' }]
 ];
+
+const BILLABLE_STATUSES = [
+	'CONFIRMED',
+	'PICKED',
+	'OUT_FOR_DELIVERY',
+	'DELIVERED',
+	'OUT_FOR_PICKUP',
+	'COMPLETED'
+];
+
+test.each(BILLABLE_STATUSES)('a %s order is billed, on issue and on edit', async (status) => {
+	insertOrder(1070, { status });
+	insertOrder(1071, { status });
+	expect(await getReceivableIssueForm(db, 1070, manager)).not.toBeNull();
+	const id = await issued([1070]);
+	expect(linkOf(1070)).toBe(id);
+	expect(await edit(id, [1070, 1071])).toEqual({ ok: true, id });
+	expect(linkOf(1071)).toBe(id);
+});
 
 test.each(NOT_ELIGIBLE_ORDERS)('issuing with an order %s is refused', async (_, id, seed) => {
 	if (null !== seed) {
@@ -203,19 +221,23 @@ test.each(NOT_ELIGIBLE_ORDERS)('editing with an order %s is refused', async (_, 
 	expect(events('RECEIVABLE')).toHaveLength(1);
 });
 
-test('a partly paid order can be neither checked nor billed; an unpaid or fully paid one can', async () => {
-	insertOrder(1070, { total: 500000 });
-	insertOrder(1071, { total: 500000 });
+test('a partly paid CONFIRMED order starts a cuenta, is listed and billed, on issue and on edit', async () => {
+	insertOrder(1070, { status: 'CONFIRMED', total: 500000 });
+	insertOrder(1071, { status: 'CONFIRMED', total: 500000 });
 	insertMovement({ amount: 100000, entityId: 1070 });
-	insertMovement({ amount: 500000, entityId: 1071 });
-	expect(await getReceivableIssueForm(db, 1070, manager)).toBeNull();
-	const form = await getReceivableIssueForm(db, 1071, manager);
-	const joining = form?.orders.filter((order) => order.canJoin).map((order) => order.id);
-	expect(joining).toEqual([1043, 1060, 1061, 1071]);
-	expect(form?.orders.find((order) => 1070 === order.id)?.canJoin).toBe(false);
-	expect(await issue([1043, 1070])).toMatchObject({ ok: false });
-	const id = await issued([1043, 1071]);
-	expect(await edit(id, [1043, 1070])).toMatchObject({ ok: false });
+	insertMovement({ amount: 200000, entityId: 1071 });
+	const form = await getReceivableIssueForm(db, 1070, manager);
+	expect(form?.orders.map(({ id }) => id)).toEqual([1043, 1060, 1061, 1070, 1071]);
+	expect(form?.orders.find(({ id }) => 1070 === id)).toEqual({
+		id: 1070,
+		eventDate: '2026-10-10',
+		orderTotal: 500000,
+		isCancelled: false
+	});
+	const id = await issued([1043, 1070]);
+	expect(linkOf(1070)).toBe(id);
+	expect(await edit(id, [1043, 1070, 1071])).toEqual({ ok: true, id });
+	expect(linkOf(1071)).toBe(id);
 });
 
 test('an order partly paid once in the cuenta stays in it', async () => {
@@ -224,14 +246,14 @@ test('an order partly paid once in the cuenta stays in it', async () => {
 	expect(await edit(id, [1070, 1071], 'A 30 días')).toEqual({ ok: true, id });
 });
 
-test('issuing starting from an order that does not exist or is not COMPLETED is refused', async () => {
-	insertOrder(1101, { status: 'DELIVERED' });
+test('issuing starting from an order that does not exist or is CANCELLED is refused', async () => {
+	insertOrder(1101, { status: 'CANCELLED' });
 	expect(await issue([9999, 1043])).toMatchObject({ ok: false });
 	expect(await issue([1101, 1043])).toMatchObject({ ok: false });
 	expect(linkOf(1043)).toBeNull();
 });
 
-test('a stale form that checks an order billed meanwhile is refused, on issue and on edit', async () => {
+test('an order already in another cuenta, billed meanwhile, is refused on issue and on edit', async () => {
 	const first = await issued([1043]);
 	const second = await issued([1060]);
 	expect(await issue([1043, 1061])).toMatchObject({ ok: false });
@@ -343,16 +365,22 @@ test('updated_by comes from the actor, on the cuenta and on its orders', async (
 	expect(order).toEqual({ updated_by: 'admin2' });
 });
 
-test('billing an order writes no ORDER EDITED and leaves it unmodified after staging', async () => {
+test('billing a PICKED order writes no ORDER EDITED and leaves it unmodified after staging', async () => {
+	insertOrder(1070, { status: 'PICKED' });
 	database.exec(
 		`insert into events (entity_type, entity_id, action, actor_username, actor_kind, after, created_at)
-		values ('ORDER', 1043, 'STATUS_CHANGED', 'bodega', 'user', '{"status":"PICKED"}', 0)`
+		values ('ORDER', 1070, 'STATUS_CHANGED', 'bodega', 'user', '{"status":"PICKED"}', 0)`
 	);
-	const id = await issued([1043]);
-	await edit(id, [1060]);
+	const id = await issued([1070]);
+	await edit(id, [1043]);
 	expect(events('ORDER', 'EDITED')).toHaveLength(0);
+	expect(events('ORDER', 'RECEIVABLE_LINKED')).toMatchObject([
+		{ entity_id: 1070 },
+		{ entity_id: 1043 }
+	]);
+	expect(events('ORDER', 'RECEIVABLE_UNLINKED')).toMatchObject([{ entity_id: 1070 }]);
 	const row = database
-		.prepare(`select ${MODIFIED_AFTER_STAGING_AT} as at from orders where id = 1043`)
+		.prepare(`select ${MODIFIED_AFTER_STAGING_AT} as at from orders where id = 1070`)
 		.get();
 	expect(row).toEqual({ at: null });
 });
@@ -370,18 +398,26 @@ test('the timeline names the cuenta an order joined and left, for those who see 
 	expect(await getOrderTimeline(db, 1043, driver)).toEqual([]);
 });
 
-test('SALES gets a 403 issuing and editing; MANAGER passes', async () => {
+test('SALES issues and edits a cuenta; WAREHOUSE and DRIVER get a 403', async () => {
 	const id = await issued([1043]);
 	const input = { orders: [1060], payment_terms: 'Contado' };
-	const attempts = [
-		issueReceivable(db, input, sales),
-		updateReceivable(db, { ...input, id }, sales)
-	];
-	for (const attempt of attempts) {
-		expect(isHttpError(await attempt.catch((caught) => caught), 403)).toBe(true);
+	for (const actor of [warehouse, driver]) {
+		const attempts = [
+			issueReceivable(db, input, actor),
+			updateReceivable(db, { ...input, id }, actor)
+		];
+		for (const attempt of attempts) {
+			const caught = await attempt.catch((error) => error);
+			expect(isHttpError(caught, 403), actor.username).toBe(true);
+		}
 	}
 	expect(linkOf(1060)).toBeNull();
-	expect(await updateReceivable(db, { ...input, id }, manager)).toEqual({ ok: true, id });
+	const own = await issueReceivable(db, input, sales);
+	expect(own).toMatchObject({ ok: true });
+	expect(linkOf(1060)).toBe(own.ok ? own.id : null);
+	const edited = { id, orders: [1043], payment_terms: 'Crédito 30 días' };
+	expect(await updateReceivable(db, edited, sales)).toEqual({ ok: true, id });
+	expect(readReceivable(id)?.attributes).toContain('Crédito 30 días');
 });
 
 test("the balance is the orders' total less their advance and the cuenta's payment", async () => {
@@ -448,7 +484,7 @@ test('the detail carries its fields and orders, and hides an automatic document'
 		id,
 		issueDate: '2026-11-01',
 		paymentTerms: 'Contado',
-		client: { name: 'Postobón S.A.', phone: '573000000001', documentId: null },
+		client: { name: 'Postobón S.A.', phone: '573000000001', whatsapp: null, documentId: null },
 		orders: [
 			{ id: 1070, eventDate: '2026-10-10', orderTotal: 860000 },
 			{ id: 1071, eventDate: '2026-10-10', orderTotal: 500000 }
@@ -458,18 +494,25 @@ test('the detail carries its fields and orders, and hides an automatic document'
 	expect((await detailOf(id)).client.documentId).toBe('8909039395');
 });
 
+test("the detail reads the client's username live from the contact, phone or not", async () => {
+	const id = await billedPair();
+	database.exec(`update contacts set phone = null, whatsapp = 'PostobonSA' where id = ${POSTOBON}`);
+	expect((await detailOf(id)).client).toMatchObject({ phone: null, whatsapp: 'PostobonSA' });
+});
+
 test('a cuenta that does not exist, or a tampered id, reads as none', async () => {
 	expect(await getReceivableDetail(db, 4794, manager)).toBeNull();
 	expect(await getReceivableDetail(db, 'abc', manager)).toBeNull();
 });
 
-test('SALES, WAREHOUSE and DRIVER get a 403 reading the detail; MANAGER passes', async () => {
+test('WAREHOUSE and DRIVER get a 403 reading the detail; SALES and MANAGER pass', async () => {
 	const id = await issued([1043]);
-	for (const actor of [sales, warehouse, driver]) {
+	for (const actor of [warehouse, driver]) {
 		const caught = await getReceivableDetail(db, id, actor).catch((error) => error);
 		expect(isHttpError(caught, 403), actor.username).toBe(true);
 	}
 	expect((await detailOf(id)).id).toBe(id);
+	expect((await getReceivableDetail(db, id, sales))?.id).toBe(id);
 });
 
 async function listIds(input: Record<string, string> = {}): Promise<number[]> {
@@ -494,7 +537,8 @@ test('the list goes newest first, with the client, date, total and balance of ea
 		clientName: 'Postobón S.A.',
 		issueDate: '2026-11-01',
 		total: 500000,
-		balance: 300000
+		balance: 300000,
+		isVoid: false
 	});
 });
 
@@ -504,6 +548,13 @@ test('?texto= finds the contact by a name in another word order, or digits of th
 	expect(await listIds({ text: 'postobon' })).toEqual([postobon]);
 	expect(await listIds({ text: '002' })).toEqual([luzMarina]);
 	expect(await listIds({ text: 'Betancur' })).toEqual([]);
+});
+
+test("?texto= with letters also finds the contact's username, without the @, ignoring case", async () => {
+	const [postobon] = await issuedForTwoClients();
+	database.exec(`update contacts set whatsapp = 'LuzMarinaR' where id = ${POSTOBON}`);
+	expect(await listIds({ text: 'luzma' })).toEqual([postobon]);
+	expect(await listIds({ text: '@LUZMA' })).toEqual([postobon]);
 });
 
 test('?pendiente=1 keeps a balance above 0, leaving out the paid and the credit', async () => {
@@ -545,22 +596,24 @@ test('an empty list has one page', async () => {
 	});
 });
 
-test('SALES, WAREHOUSE and DRIVER get a 403 on the list', async () => {
-	for (const actor of [sales, warehouse, driver]) {
+test('WAREHOUSE and DRIVER get a 403 on the list; SALES reads it', async () => {
+	for (const actor of [warehouse, driver]) {
 		const caught = await listReceivables(db, {}, actor).catch((error) => error);
 		expect(isHttpError(caught, 403), actor.username).toBe(true);
 	}
+	expect((await listReceivables(db, {}, sales)).receivables).toEqual([]);
 });
 
 test('the issue form lists the client eligible orders with the starting one checked', async () => {
 	insertOrder(1070, { total: 360000 });
 	insertOrder(1071, { status: 'DELIVERED' });
 	insertOrder(1072, { clientId: LUZ_MARINA });
+	insertOrder(1073, { status: 'CANCELLED' });
 	await issued([1043]);
 
 	const form = await getReceivableIssueForm(db, '1061', manager);
 
-	expect(form?.orders.map(({ id }) => id)).toEqual([1060, 1061, 1070]);
+	expect(form?.orders.map(({ id }) => id)).toEqual([1060, 1061, 1070, 1071]);
 	expect(form?.orders[2]).toMatchObject({ id: 1070, eventDate: '2026-10-10', orderTotal: 360000 });
 	expect(form?.checkedOrderIds).toEqual([1061]);
 	expect(form?.paymentTerms).toBe('Contado');
@@ -569,11 +622,10 @@ test('the issue form lists the client eligible orders with the starting one chec
 });
 
 test('an order that cannot start a cuenta has no issue form', async () => {
-	insertOrder(1070, { status: 'DELIVERED' });
-	insertOrder(1071, { status: 'OUT_FOR_PICKUP' });
+	insertOrder(1070, { status: 'CANCELLED' });
 	await issued([1043]);
 
-	for (const orderId of [1043, 1070, 1071, 99, null, '', 'abc']) {
+	for (const orderId of [1043, 1070, 99, null, '', 'abc']) {
 		expect(await getReceivableIssueForm(db, orderId, manager), String(orderId)).toBeNull();
 	}
 });
@@ -592,8 +644,99 @@ test('the edit form checks the cuenta orders and leaves the other eligible ones 
 	expect(await getReceivableEditForm(db, 99, manager)).toBeNull();
 });
 
-test('only ADMIN and MANAGER read the form', async () => {
-	for (const actor of [sales, warehouse, driver]) {
+function cancel(orderId: number) {
+	database.exec(`update orders set status = 'CANCELLED' where id = ${orderId}`);
+}
+
+test('the edit form lists a cancelled order of the cuenta checked, as cancelled; one outside, never', async () => {
+	insertOrder(1070, { status: 'CANCELLED' });
+	const id = await issued([1043, 1060]);
+	cancel(1060);
+
+	const form = await getReceivableEditForm(db, id, manager);
+
+	expect(form?.orders).toEqual([
+		expect.objectContaining({ id: 1043, isCancelled: false }),
+		expect.objectContaining({ id: 1060, isCancelled: true }),
+		expect.objectContaining({ id: 1061, isCancelled: false })
+	]);
+	expect(form?.checkedOrderIds).toEqual([1043, 1060]);
+	expect(
+		(await getReceivableIssueForm(db, 1061, manager))?.orders.map(({ id: orderId }) => orderId)
+	).toEqual([1061]);
+});
+
+test('a cancelled order of the cuenta saves checked, and can be unchecked; the last one stays', async () => {
+	const id = await issued([1043, 1060]);
+	cancel(1060);
+	expect(await edit(id, [1043, 1060], 'Crédito 30 días')).toEqual({ ok: true, id });
+	expect(linkOf(1060)).toBe(id);
+	expect(await edit(id, [1060])).toEqual({ ok: true, id });
+	expect([linkOf(1043), linkOf(1060)]).toEqual([null, id]);
+	expect(await edit(id, [])).toMatchObject({ ok: false, errors: { orders: expect.any(String) } });
+	expect(linkOf(1060)).toBe(id);
+	cancel(1043);
+	expect(await edit(id, [1043, 1060])).toMatchObject({ ok: false });
+});
+
+test('a cancelled order adds nothing to the total; its payments still count as paid', async () => {
+	const id = await billedPair();
+	insertMovement({ amount: 200000, entityId: 1071 });
+	cancel(1071);
+	expect(await detailOf(id)).toMatchObject({
+		total: 860000,
+		paid: 200000,
+		balance: 660000,
+		isVoid: false
+	});
+	expect((await detailOf(id)).orders[1]).toMatchObject({ id: 1071, isCancelled: true });
+});
+
+test('a cuenta whose orders are all cancelled reads «Anulada» and takes no payment', async () => {
+	const [voided, open] = await issuedForTwoClients();
+	insertMovement({ amount: 500000, entityType: 'RECEIVABLE', entityId: voided });
+	cancel(2001);
+	expect(await detailOf(voided)).toMatchObject({
+		total: 0,
+		paid: 500000,
+		balance: -500000,
+		isVoid: true
+	});
+	const summaries = (await listReceivables(db, {}, manager)).receivables;
+	expect(summaries.map(({ id, isVoid }) => [id, isVoid])).toEqual([
+		[open, false],
+		[voided, true]
+	]);
+	const refused = await recordReceivablePayment(db, typedPayment(voided), manager);
+	expect(refused).toMatchObject({ ok: false, message: 'Esta cuenta de cobro está anulada.' });
+});
+
+test('the printout leaves a cancelled order out, and an «Anulada» cuenta prints none', async () => {
+	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
+	const id = await billedPair();
+	const lines = [
+		{ product_id: 1, name: 'Silla', qty: 1, list_price: 1, unit_price: 1, line_total: 1 }
+	];
+	database.exec(`update orders set order_items = '${JSON.stringify(lines)}'`);
+	cancel(1071);
+	expect(await getReceivablePrintout(db, id, manager)).toMatchObject({
+		orders: [expect.objectContaining({ id: 1070 })],
+		total: 860000,
+		isVoid: false
+	});
+	cancel(1070);
+	expect(await getReceivablePrintout(db, id, manager)).toMatchObject({
+		orders: [],
+		total: 0,
+		isVoid: true
+	});
+});
+
+test('SALES reads the form; WAREHOUSE and DRIVER get a 403', async () => {
+	const id = await issued([1043]);
+	expect((await getReceivableIssueForm(db, 1060, sales))?.checkedOrderIds).toEqual([1060]);
+	expect((await getReceivableEditForm(db, id, sales))?.checkedOrderIds).toEqual([1043]);
+	for (const actor of [warehouse, driver]) {
 		for (const read of [getReceivableIssueForm, getReceivableEditForm]) {
 			const caught = await read(db, 1, actor).catch((error) => error);
 			expect(isHttpError(caught, 403), actor.username).toBe(true);
@@ -674,9 +817,9 @@ test("a payment takes the entry's checks, and a cuenta that exists", async () =>
 	expect(await recordReceivablePayment(db, typedPayment(99), manager)).toMatchObject({ ok: false });
 });
 
-test('only MANAGER and ADMIN record a payment on a cuenta', async () => {
+test('SALES, MANAGER and ADMIN record a payment on a cuenta; WAREHOUSE and DRIVER get a 403', async () => {
 	const id = await billedPair();
-	for (const actor of [sales, warehouse, driver]) {
+	for (const actor of [warehouse, driver]) {
 		const caught = await recordReceivablePayment(db, typedPayment(id), actor).catch(
 			(error) => error
 		);
@@ -684,6 +827,28 @@ test('only MANAGER and ADMIN record a payment on a cuenta', async () => {
 	}
 	const admin: Actor = { ...manager, roles: ['ADMIN'] };
 	expect(await recordReceivablePayment(db, typedPayment(id), admin)).toMatchObject({ ok: true });
+});
+
+test('SALES records a cuenta payment with any method', async () => {
+	const methods: Record<string, string>[] = [
+		{ payment_method: 'CASH' },
+		{ payment_method: 'TRANSFER' },
+		{ payment_method: 'OTHER', other_method: 'Nequi' }
+	];
+	for (const [index, fields] of methods.entries()) {
+		insertOrder(1080 + index, { total: 1360000 });
+		const id = await issued([1080 + index]);
+		const result = await recordReceivablePayment(db, typedPayment(id, fields), sales);
+		if (!result.ok) {
+			throw new Error(JSON.stringify(result));
+		}
+		expect(readMovement(result.id), fields.payment_method).toMatchObject({
+			payment_method: fields.payment_method,
+			entity_type: 'RECEIVABLE',
+			entity_id: id,
+			created_by: 'ventas'
+		});
+	}
 });
 
 test("the cash book links a cuenta's movement, found by its client and not by «Pedido»", async () => {
@@ -696,16 +861,32 @@ test("the cash book links a cuenta's movement, found by its client and not by «
 	expect(byOrder.entries).toEqual([]);
 });
 
-test("a cuenta's receipt names its orders, for the manager and never for SALES", async () => {
+test("a cuenta's receipt names its orders, for the manager and SALES; never WAREHOUSE", async () => {
 	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
 	const id = await billedPair();
 	const movementId = await paid(id);
-	expect(await getReceipt(db, movementId, manager)).toMatchObject({
-		movement: { receivableId: id, orderId: null },
-		receivableOrderIds: [1070, 1071]
-	});
-	const caught = await getReceipt(db, movementId, sales).catch((error) => error);
+	for (const actor of [manager, sales]) {
+		expect(await getReceipt(db, movementId, actor), actor.username).toMatchObject({
+			movement: { receivableId: id, orderId: null },
+			receivableOrderIds: [1070, 1071]
+		});
+	}
+	const caught = await getReceipt(db, movementId, warehouse).catch((error) => error);
 	expect(isHttpError(caught, 403)).toBe(true);
+});
+
+test("SALES can't offset a cuenta's payment: Caja's money out stays the manager's", async () => {
+	const id = await billedPair();
+	const movementId = await paid(id);
+	const offset = {
+		reverses_id: String(movementId),
+		payment_method: 'CASH',
+		movement_date: '2026-11-01'
+	};
+	const caught = await recordOffset(db, offset, sales).catch((error) => error);
+	expect(isHttpError(caught, 403)).toBe(true);
+	const book = await getCashBook(db, {}, sales).catch((error) => error);
+	expect(isHttpError(book, 403)).toBe(true);
 });
 
 test("the cuenta's offsetting movement, made from Caja, keeps its link and cancels it", async () => {
@@ -757,10 +938,11 @@ test('the printout reads the client live, and each order with its lines, by numb
 	expect(printout?.total).toBe(800);
 });
 
-test('the printout of a cuenta that does not exist is null, and SALES is refused', async () => {
+test('the printout of a cuenta that does not exist is null, and WAREHOUSE is refused', async () => {
 	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
 	expect(await getReceivablePrintout(db, 999, manager)).toBeNull();
-	await expect(getReceivablePrintout(db, 999, sales)).rejects.toSatisfy((thrown) =>
+	expect(await getReceivablePrintout(db, 999, sales)).toBeNull();
+	await expect(getReceivablePrintout(db, 999, warehouse)).rejects.toSatisfy((thrown) =>
 		isHttpError(thrown, 403)
 	);
 });

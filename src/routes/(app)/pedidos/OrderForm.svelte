@@ -26,9 +26,10 @@
 		PAYMENT_METHOD_LABELS,
 		RETURN_METHOD_LABELS
 	} from '$lib/labels';
-	import { calculateOrderTotals } from '$lib/orders';
+	import { calculateOrderTotals, clientLockedMessage } from '$lib/orders';
 	import { parsePesos, parseQuantity } from '$lib/payroll';
 	import { formatPhone } from '$lib/phone';
+	import { formatNameAndReach, formatWhatsapp } from '$lib/whatsapp';
 	import type { ClientCandidate } from '$lib/server/services/contacts';
 	import type {
 		DeliveryMethod,
@@ -36,9 +37,11 @@
 		OrderFormOptions,
 		OrderSchedule,
 		ReturnMethod,
+		Billing,
 		Shortage
 	} from '$lib/server/services/orders';
 	import type { QuoteConversion } from '$lib/server/services/quotes';
+	import WhatsappField from '../WhatsappField.svelte';
 	import ClientSearch from './ClientSearch.svelte';
 	import OrderLines, { toFormLine, type FormLine } from './OrderLines.svelte';
 	import OrderTotals from './OrderTotals.svelte';
@@ -54,6 +57,8 @@
 		original?: OrderDetail | null;
 		/** «Convertir en pedido»: the quote a new order comes from. */
 		conversion?: QuoteConversion | null;
+		/** A billed order's cuenta de cobro: a warning above «Guardar», and «Cliente» locked when it bills others. */
+		billing?: Billing | null;
 		/** A refused save: its message and each field's, or what's short for a new order's dates. */
 		form:
 			| { message: string; errors: Record<string, string>; shortages?: Shortage[] }
@@ -61,7 +66,14 @@
 			| undefined;
 	}
 
-	let { options, order, original = null, conversion = null, form }: Props = $props();
+	let {
+		options,
+		order,
+		original = null,
+		conversion = null,
+		billing = null,
+		form
+	}: Props = $props();
 
 	// While the save is on its way, so the button doesn't post it twice.
 	let isSaving = $state(false);
@@ -99,16 +111,22 @@
 
 	// The order's client as its snapshot: the contact may have changed since.
 	function ownClient(saved: OrderDetail): ClientCandidate {
-		const { name: fullName, phone } = saved.client;
-		return { id: saved.clientId, fullName, phone, address1: null, address2: null };
+		const { name: fullName, phone, whatsapp } = saved.client;
+		return { id: saved.clientId, fullName, phone, whatsapp, address1: null, address2: null };
 	}
 
 	function pesosOf(amount: number): string {
 		return 0 === amount ? '' : formatPesos(amount);
 	}
 
+	// A username as the field shows it: with its `@`, or empty.
+	function whatsappOf(username: string | null): string {
+		return null === username ? '' : formatWhatsapp(username);
+	}
+
 	type Fields = {
 		phone: string;
+		whatsapp: string;
 		eventDate: string;
 		choice: ClientChoice;
 		picked: ClientCandidate | null;
@@ -135,6 +153,7 @@
 	// A new order starts empty, billed for one day.
 	const NEW_ORDER: Fields = {
 		phone: '',
+		whatsapp: '',
 		eventDate: '',
 		choice: null,
 		picked: null,
@@ -161,6 +180,7 @@
 		const { delivery: trip, pickup: back } = saved;
 		return {
 			phone: formatPhone(saved.client.phone),
+			whatsapp: whatsappOf(saved.client.whatsapp),
 			eventDate: saved.eventDate,
 			choice: saved.clientId,
 			picked: ownClient(saved),
@@ -211,6 +231,7 @@
 		return {
 			...structuredClone(NEW_ORDER),
 			phone: formatPhone(client.phone),
+			whatsapp: whatsappOf(client.whatsapp),
 			eventDate: quote.eventDate ?? '',
 			choice: client.id,
 			picked: client,
@@ -245,6 +266,7 @@
 	// Read once: a refused save keeps this state, so what was typed is still there.
 	const fields = readFields();
 	let phone = $state(fields.phone);
+	let whatsapp = $state(fields.whatsapp);
 	let eventDate = $state(fields.eventDate);
 	let choice = $state(fields.choice);
 	let clientName = $state(fields.clientName);
@@ -314,6 +336,7 @@
 			client_id: 'new' === choice ? null : (choice ?? undefined),
 			client_name: clientName,
 			client_phone: phone,
+			client_whatsapp: whatsapp,
 			event_date: eventDate,
 			delivery_date: deliveryDate,
 			pickup_date: pickupDate,
@@ -378,17 +401,22 @@
 	// An order being edited already has dates: its warnings show at once.
 	onMount(refreshSchedule);
 
-	// Under the phone and the address, when picking a client changed them; typing there clears it.
+	// Under the phone, the username and the address, when picking a client changed them; typing
+	// there clears it.
 	let phoneNote = $state('');
+	let whatsappNote = $state('');
 	let addressNote = $state('');
 
-	// The client's phone and address fill the order's, each with a note when it changed.
+	// The client's phone, username and address fill the order's, each with a note when it changed.
 	function pick(candidate: ClientCandidate) {
 		clientName = candidate.fullName;
 		const note = `Cambió al escoger a ${candidate.fullName}.`;
 		const newPhone = formatPhone(candidate.phone);
 		phoneNote = newPhone === phone ? '' : note;
 		phone = newPhone;
+		const newWhatsapp = whatsappOf(candidate.whatsapp);
+		whatsappNote = newWhatsapp === whatsapp ? '' : note;
+		whatsapp = newWhatsapp;
 		addressNote = '';
 		if ('CLIENT_PICKUP' !== deliveryMethod && null !== candidate.address1) {
 			const address2 = candidate.address2 ?? '';
@@ -399,11 +427,14 @@
 		}
 	}
 
-	// A new client starts blank: name, phone and the delivery address, unless it's the warehouse's.
+	// A new client starts blank: name, phone, username and the delivery address, unless it's the
+	// warehouse's.
 	function pickNewClient() {
 		clientName = '';
 		phone = '';
+		whatsapp = '';
 		phoneNote = '';
+		whatsappNote = '';
 		addressNote = '';
 		if ('CLIENT_PICKUP' !== deliveryMethod) {
 			delivery.address1 = '';
@@ -454,12 +485,14 @@
 			<option value="">Selecciona un transportador</option>
 			{#each options.transporters as transporter (transporter.id)}
 				<option value={String(transporter.id)}>
-					{transporter.fullName} · {formatPhone(transporter.phone)}
+					{formatNameAndReach(transporter.fullName, transporter.phone, transporter.whatsapp)}
 				</option>
 			{/each}
 			<!-- A carrier no longer listed stays on the order it was picked for. -->
 			{#if current && !options.transporters.some((each) => current.id === each.id)}
-				<option value={String(current.id)}>{current.name} · {formatPhone(current.phone)}</option>
+				<option value={String(current.id)}>
+					{formatNameAndReach(current.name, current.phone, current.whatsapp)}
+				</option>
 			{/if}
 		</Select>
 	</Field>
@@ -515,6 +548,7 @@
 			bind:picked
 			onpick={pick}
 			onnew={pickNewClient}
+			lockedNote={billing?.hasOtherOrders ? clientLockedMessage(billing.receivableId) : ''}
 			error={errorOf('client_id')}
 		/>
 
@@ -538,6 +572,15 @@
 					oninput={() => (phoneNote = '')}
 				/>
 			</Field>
+			<WhatsappField
+				label="Usuario de WhatsApp"
+				bind:value={whatsapp}
+				exceptId={null}
+				checksOwner={'new' === choice}
+				note={whatsappNote}
+				error={errorOf('client_whatsapp')}
+				ontype={() => (whatsappNote = '')}
+			/>
 		</div>
 
 		<section class="section">
@@ -776,6 +819,15 @@
 			<p class="note">Los pagos se registran cuando el pedido esté guardado.</p>
 		{/if}
 
+		{#if billing}
+			<div class="order__billed">
+				<Notice tone="warning">
+					Este pedido está en la cuenta de cobro Nº {billing.receivableId}: reimprímala si ya la
+					entregó.
+				</Notice>
+			</div>
+		{/if}
+
 		<div class="order__save">
 			<Button type="submit" disabled={isSaving}>
 				{original ? 'Guardar extensión' : 'Guardar pedido'}
@@ -829,6 +881,7 @@
 		margin-bottom: calc(-1 * var(--space-4));
 	}
 
+	.order__billed,
 	.order__save {
 		margin-top: var(--space-4);
 	}

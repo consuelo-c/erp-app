@@ -340,7 +340,7 @@ curl -sI https://app.consueloc.com | head -n 1
 Después se hace una revisión en el navegador. Debe hacerse en `https://app.consueloc.com` y no en la URL de `workers.dev`, porque el _widget_ de Turnstile solo está autorizado para ese dominio.
 
 - [ ] La página `/` carga y muestra el _widget_ de Turnstile
-- [ ] Una consulta con cualquier teléfono y fecha responde «No encontramos un pedido con ese teléfono y esa fecha.». Si en cambio responde «No pudimos verificar la consulta. Intente de nuevo.», hay que revisar `TURNSTILE_SECRET_KEY` y el _widget_
+- [ ] Una consulta con cualquier teléfono y fecha responde «No encontramos un pedido con esos datos y esa fecha.». Si en cambio responde «No pudimos verificar la consulta. Intente de nuevo.», hay que revisar `TURNSTILE_SECRET_KEY` y el _widget_
 - [ ] La página `/login` permite entrar con el usuario `admin` y la contraseña guardada en `ADMIN_PASSWORD`
 - [ ] _Productos_ muestra el catálogo importado
 - [ ] _Configuración_ muestra los datos de la empresa

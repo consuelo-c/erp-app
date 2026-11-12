@@ -56,6 +56,41 @@ export function readReceivableBalance(order: BilledOrder): ReceivableReading | n
 	return { id, text, label, amount: '', credit };
 }
 
+/**
+ * A cancelled billed order's «A favor del cliente»: its cuenta's credit plus the deposit held,
+ * `owedToClient`, named after the cuenta. Null for an order that isn't both.
+ */
+export function readOwedOnReceivable(
+	order: BilledOrder & { status: OrderStatus; owedToClient: number }
+): { label: string; amount: string; text: string } | null {
+	if ('CANCELLED' !== order.status || null === order.receivableId) {
+		return null;
+	}
+	const label = `A favor del cliente · cuenta de cobro Nº ${order.receivableId}`;
+	const amount = formatPesos(order.owedToClient);
+	return { label, amount, text: `${label}: ${amount}` };
+}
+
+// The cuenta travels with the truck: until the order is delivered, the driver hands it over.
+const BEFORE_DELIVERY: readonly OrderStatus[] = ['CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY'];
+
+/**
+ * A billed order's line on the operational detail: «Entregar cuenta de cobro Nº N» before
+ * DELIVERED, «Cuenta de cobro Nº N» from it on. Null for an unbilled order. Never a balance: the
+ * driver doesn't collect the cuenta.
+ */
+export function receivableLine(order: {
+	receivableId: number | null;
+	status: OrderStatus;
+}): string | null {
+	if (null === order.receivableId) {
+		return null;
+	}
+	return BEFORE_DELIVERY.includes(order.status)
+		? `Entregar cuenta de cobro Nº ${order.receivableId}`
+		: `Cuenta de cobro Nº ${order.receivableId}`;
+}
+
 export type OrderMove = {
 	from: OrderStatus;
 	to: OrderStatus;
@@ -235,11 +270,6 @@ function toPrintedLines<Order extends PrintedOrder>(order: Order): PrintedLine<O
 	}));
 }
 
-// The head rides on an order's first line and the totals on its last: neither is left alone.
-function linesOfPrinted<Order extends PrintedOrder>(line: PrintedLine<Order>): number {
-	return 1 + (line.isFirst ? BLOCK_HEAD_LINES : 0) + (line.isLast ? BLOCK_TOTALS_LINES : 0);
-}
-
 function toBlocks<Order extends PrintedOrder>(lines: PrintedLine<Order>[]): OrderBlock<Order>[] {
 	const blocks: OrderBlock<Order>[] = [];
 	for (const { order, item, isLast } of lines) {
@@ -254,12 +284,21 @@ function toBlocks<Order extends PrintedOrder>(lines: PrintedLine<Order>[]): Orde
 	return blocks;
 }
 
-/** A cuenta de cobro's orders, sheet by sheet on letter paper. */
+/**
+ * A cuenta de cobro's orders, sheet by sheet on letter paper. `paidLines` are the rows that follow
+ * the last total, «ABONOS» and «SALDO A PAGAR»: in the closing, and under a single order's totals
+ * when they stay with its last line.
+ */
 export function splitOrdersIntoPages<Order extends PrintedOrder>(
-	orders: Order[]
+	orders: Order[],
+	paidLines = 0
 ): OrderBlock<Order>[][] {
 	const lines = orders.flatMap((order) => toPrintedLines(order));
-	return splitIntoPages(lines, LETTER_SHEET, linesOfPrinted).map(toBlocks);
+	const totalsLines = BLOCK_TOTALS_LINES + (1 === orders.length ? paidLines : 0);
+	const linesOf = (line: PrintedLine<Order>) =>
+		1 + (line.isFirst ? BLOCK_HEAD_LINES : 0) + (line.isLast ? totalsLines : 0);
+	const sheet = { ...LETTER_SHEET, closingLines: LETTER_SHEET.closingLines + paidLines };
+	return splitIntoPages(lines, sheet, linesOf).map(toBlocks);
 }
 
 const orderNumbers = new Intl.ListFormat('es');
@@ -268,4 +307,9 @@ const orderNumbers = new Intl.ListFormat('es');
 export function formatRemisiones(orderIds: number[]): string {
 	const noun = 1 === orderIds.length ? 'Remisión' : 'Remisiones';
 	return `${noun} ${orderNumbers.format(orderIds.map(String))}`;
+}
+
+/** Why a billed order's client can't change: its cuenta de cobro bills other orders too. */
+export function clientLockedMessage(receivableId: number): string {
+	return `Retire el pedido de la cuenta de cobro Nº ${receivableId} antes de cambiar el cliente.`;
 }

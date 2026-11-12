@@ -6,10 +6,12 @@ import { createMemoryD1 } from '../db/memory-d1';
 import {
 	contactAttributesSchema,
 	createContact,
+	findWhatsappOwner,
 	generateDocumentId,
 	getContact,
 	listContacts,
 	listTransporters,
+	newClientStatements,
 	searchClients,
 	servicesSchema,
 	updateContact
@@ -32,8 +34,16 @@ beforeEach(() => {
 
 const luzMarina = { phone: '310 442 8890', full_name: 'Luz Marina Restrepo' };
 
+// Contactos always asks for one: each contact a test creates gets its own unless it types one.
+let documents = 0;
+
 async function create(input: Record<string, unknown>, actor: Actor = manager): Promise<number> {
-	const result = await createContact(db, input, actor);
+	documents += 1;
+	const result = await createContact(
+		db,
+		{ document_id: String(70000000 + documents), ...input },
+		actor
+	);
 	if (!result.ok) {
 		throw new Error(result.message);
 	}
@@ -75,6 +85,7 @@ test('a contact saves its phone normalized and its optional fields in attributes
 	expect(await getContact(db, id, sales)).toEqual({
 		id,
 		phone: '573104428890',
+		whatsapp: null,
 		fullName: 'Luz Marina Restrepo',
 		documentId: '1036452118',
 		services: ['DECORATOR'],
@@ -83,6 +94,7 @@ test('a contact saves its phone normalized and its optional fields in attributes
 		address2: null,
 		bankAccount: null,
 		notes: null,
+		hasAutoDocument: false,
 		isEmployee: false
 	});
 	expect(database.prepare('select action, before from events').all()).toMatchObject([
@@ -101,10 +113,59 @@ test('a phone that is not valid, or a missing name, comes back on its field', as
 	});
 });
 
+test.each([
+	['a phone only', { phone: '310 442 8890' }, { phone: '573104428890', whatsapp: null }],
+	['a username only', { whatsapp: '@LuzMarinaR' }, { phone: null, whatsapp: 'LuzMarinaR' }],
+	[
+		'both',
+		{ phone: '310 442 8890', whatsapp: 'wa.me/LuzMarinaR' },
+		{ phone: '573104428890', whatsapp: 'LuzMarinaR' }
+	],
+	['neither', { phone: '', whatsapp: ' ' }, { phone: null, whatsapp: null }]
+])('a contact saves with %s', async (_, typed, saved) => {
+	const id = await create({ full_name: 'Luz Marina Restrepo', ...typed });
+	expect(await getContact(db, id, sales)).toMatchObject(saved);
+});
+
+test('a username that is not valid comes back on its field', async () => {
+	const result = await createContact(db, { ...luzMarina, whatsapp: 'mayc.com' }, sales);
+	expect(result).toMatchObject({
+		ok: false,
+		errors: { whatsapp: 'Escriba el usuario como aparece en WhatsApp, por ejemplo @mayc47.' }
+	});
+});
+
+test('a username another contact has, in any case, is named for the warning and still saves', async () => {
+	const luz = await create({ ...luzMarina, whatsapp: 'LuzMarinaR' });
+	const input = { whatsapp: '@luzmarinar', exceptId: null };
+	expect(await findWhatsappOwner(db, input, sales)).toBe('Luz Marina Restrepo');
+	const other = await create({ full_name: 'Luz Marina Arango', whatsapp: 'luzmarinar' });
+	expect(await getContact(db, other, sales)).toMatchObject({ whatsapp: 'luzmarinar' });
+	// The contact's own username doesn't count; an invalid or missing one names no one.
+	expect(await findWhatsappOwner(db, { whatsapp: 'LuzMarinaR', exceptId: other }, sales)).toBe(
+		'Luz Marina Restrepo'
+	);
+	expect(await findWhatsappOwner(db, { whatsapp: 'nadie', exceptId: luz }, sales)).toBeNull();
+	expect(await findWhatsappOwner(db, { whatsapp: 'may..c', exceptId: null }, sales)).toBeNull();
+	expect(await findWhatsappOwner(db, { whatsapp: null, exceptId: null }, sales)).toBeNull();
+	const driver = actorWith('DRIVER');
+	expect(await rejection(findWhatsappOwner(db, input, driver))).toBe(403);
+});
+
+test("changing a contact's username logs it with before and after", async () => {
+	const id = await create({ ...luzMarina, document_id: '1036452118', whatsapp: 'LuzMarinaR' });
+	const edit = { ...luzMarina, id, document_id: '1036452118', whatsapp: '@LuzMarina_R' };
+	expect(await updateContact(db, edit, sales)).toEqual({ ok: true, id });
+	const edited = database.prepare("select before, after from events where action = 'EDITED'").get();
+	expect(JSON.parse(String(edited?.before))).toEqual({ whatsapp: 'LuzMarinaR' });
+	expect(JSON.parse(String(edited?.after))).toEqual({ whatsapp: 'LuzMarina_R' });
+});
+
 test('the email is validated only when it has a value', async () => {
-	const result = await createContact(db, { ...luzMarina, email: 'luzmarina' }, sales);
+	const typed = { ...luzMarina, document_id: '1036452118' };
+	const result = await createContact(db, { ...typed, email: 'luzmarina' }, sales);
 	expect(result).toMatchObject({ ok: false, errors: { email: expect.any(String) } });
-	expect((await createContact(db, { ...luzMarina, email: '' }, sales)).ok).toBe(true);
+	expect((await createContact(db, { ...typed, email: '' }, sales)).ok).toBe(true);
 });
 
 test("a company's branches share its switchboard: two contacts can have one phone", async () => {
@@ -117,12 +178,22 @@ test("a company's branches share its switchboard: two contacts can have one phon
 	expect((await listContacts(db, { search: '442 8890' }, sales)).contacts).toHaveLength(2);
 });
 
+test("the list carries each contact's phone and username, either one null", async () => {
+	await create({ full_name: 'Mayra Castaño', whatsapp: '@MayC47' });
+	await create(luzMarina);
+	const { contacts } = await listContacts(db, {}, sales);
+	expect(contacts.map(({ phone, whatsapp }) => ({ phone, whatsapp }))).toEqual([
+		{ phone: '573104428890', whatsapp: null },
+		{ phone: null, whatsapp: 'MayC47' }
+	]);
+});
+
 test('the automatic document is @ and 8 symbols of Crockford base32', () => {
 	expect(generateDocumentId()).toMatch(/^@[0-9A-HJKMNP-TV-Z]{8}$/);
 	expect(generateDocumentId()).not.toBe(generateDocumentId());
 });
 
-test('one document per contact; one not given is made up, and not typed as such', async () => {
+test('one document per contact, never typed as an automatic one', async () => {
 	await create({ ...luzMarina, document_id: '1.036.452.118' });
 	const result = await createContact(
 		db,
@@ -133,15 +204,6 @@ test('one document per contact; one not given is made up, and not typed as such'
 		ok: false,
 		errors: { document_id: 'Esa cédula o NIT ya es de Luz Marina Restrepo' }
 	});
-	const jorge = await create({ phone: '300 771 2043', full_name: 'Jorge Iván Betancur' });
-	const wilson = await create({
-		phone: '311 908 5512',
-		full_name: 'Wilson Muñoz',
-		document_id: ''
-	});
-	const documentOf = async (id: number) => (await getContact(db, id, sales))?.documentId;
-	expect(await documentOf(jorge)).toMatch(/^@.{8}$/);
-	expect(await documentOf(jorge)).not.toBe(await documentOf(wilson));
 	expect(
 		await createContact(db, { ...luzMarina, document_id: '@ABCDEFGH' }, manager)
 	).toMatchObject({ ok: false, errors: { document_id: expect.stringContaining('automáticos') } });
@@ -161,6 +223,85 @@ test('one document per contact; one not given is made up, and not typed as such'
 			)
 			.run()
 	).toThrow(/NOT NULL/);
+});
+
+const DOCUMENT_REQUIRED = { ok: false, errors: { document_id: 'Escribe la cédula o NIT' } };
+
+test('Contactos never creates a contact without a real document', async () => {
+	for (const documentId of [undefined, '', ' . - ']) {
+		const typed = { ...luzMarina, document_id: documentId };
+		expect(await createContact(db, typed, manager)).toMatchObject(DOCUMENT_REQUIRED);
+	}
+	expect(database.prepare('select count(*) as count from contacts').get()).toEqual({ count: 0 });
+});
+
+/** A contact as «Cliente nuevo» on the order form leaves it: an automatic document. */
+async function newClient(): Promise<{ id: number; automatic: string }> {
+	const automatic = generateDocumentId();
+	const client = {
+		phone: '573104428890',
+		whatsapp: null,
+		fullName: 'Luz Marina Restrepo',
+		documentId: automatic
+	};
+	const [inserted] = await db.batch(newClientStatements(db, sales, client));
+	return { id: inserted.meta.last_row_id, automatic };
+}
+
+test('Contactos never saves an edit that leaves the document empty or still automatic', async () => {
+	const { id, automatic } = await newClient();
+	expect(await getContact(db, id, sales)).toMatchObject({ hasAutoDocument: true });
+	for (const documentId of ['', automatic]) {
+		for (const actor of [sales, manager]) {
+			const typed = { ...luzMarina, document_id: documentId, id };
+			expect(await updateContact(db, typed, actor)).toMatchObject(
+				'' === documentId
+					? DOCUMENT_REQUIRED
+					: { ok: false, errors: { document_id: expect.stringContaining('automático') } }
+			);
+		}
+	}
+	const real = await create({ ...luzMarina, document_id: '1036452118' });
+	expect(
+		await updateContact(db, { ...luzMarina, document_id: '', id: real }, manager)
+	).toMatchObject(DOCUMENT_REQUIRED);
+	expect((await getContact(db, real, manager))?.documentId).toBe('1036452118');
+});
+
+test('Sales types the real document over an automatic one, and on a new contact', async () => {
+	const { id } = await newClient();
+	const typed = { ...luzMarina, document_id: '1.036.452.118', id };
+	expect(await updateContact(db, typed, sales)).toEqual({ ok: true, id });
+	expect(await getContact(db, id, sales)).toMatchObject({
+		documentId: '1036452118',
+		hasAutoDocument: false
+	});
+	const edited = database.prepare("select before, after from events where action = 'EDITED'").get();
+	expect(JSON.parse(String(edited?.after))).toEqual({ document_id: '1036452118' });
+	const jorge = {
+		phone: '300 771 2043',
+		full_name: 'Jorge Iván Betancur',
+		document_id: '71234567'
+	};
+	const created = await createContact(db, jorge, sales);
+	expect(created).toMatchObject({ ok: true });
+});
+
+test('once real, only Manager and Admin change the document: Sales gets a 403', async () => {
+	const id = await create({ ...luzMarina, document_id: '1036452118' }, sales);
+	const kept = { ...luzMarina, document_id: '1.036.452.118', bank_account: 'Nequi 310 442 8890' };
+	expect(await updateContact(db, { ...kept, id }, sales)).toEqual({ ok: true, id });
+	expect(await rejection(updateContact(db, { ...kept, document_id: '71384902', id }, sales))).toBe(
+		403
+	);
+	for (const [actor, documentId] of [
+		[manager, '71384902'],
+		[actorWith('ADMIN'), '900.312.554-1']
+	] as const) {
+		const changed = { ...kept, document_id: documentId, id };
+		expect(await updateContact(db, changed, actor)).toEqual({ ok: true, id });
+	}
+	expect((await getContact(db, id, manager))?.documentId).toBe('9003125541');
 });
 
 test('search by name or by three digits of the phone, with the service filter, a page at a time', async () => {
@@ -213,33 +354,6 @@ test('Sales is rejected changing services, a set bank account or the document', 
 	);
 });
 
-test('Sales fills in an empty bank account but never assigns a document', async () => {
-	const id = await create(luzMarina, sales);
-	const automatic = (await getContact(db, id, sales))!.documentId;
-	const kept = { ...luzMarina, document_id: automatic, bank_account: 'Nequi 310 442 8890' };
-	expect(await updateContact(db, { ...kept, id }, sales)).toEqual({ ok: true, id });
-	expect(
-		await rejection(updateContact(db, { ...kept, document_id: '1036452118', id }, sales))
-	).toBe(403);
-	expect(
-		await rejection(createContact(db, { ...luzMarina, document_id: '1036452118' }, sales))
-	).toBe(403);
-});
-
-test('Manager assigns a real document over the automatic one, and clearing it makes a new one', async () => {
-	const id = await create(luzMarina);
-	const automatic = (await getContact(db, id, manager))!.documentId;
-	await updateContact(db, { ...luzMarina, document_id: automatic, id }, manager);
-	expect((await getContact(db, id, manager))?.documentId).toBe(automatic);
-	await updateContact(db, { ...luzMarina, document_id: '1.036.452.118', id }, manager);
-	expect((await getContact(db, id, manager))?.documentId).toBe('1036452118');
-	await updateContact(db, { ...luzMarina, document_id: '', bank_account: '', id }, manager);
-	expect(await getContact(db, id, manager)).toMatchObject({
-		documentId: expect.stringMatching(/^@/),
-		bankAccount: null
-	});
-});
-
 test("an employee's document is Manager's and Admin's, and never left empty", async () => {
 	const ana = { phone: '310 442 8890', full_name: 'Ana Pérez', document_id: '1036452118' };
 	const hired = { ...ana, monthly_salary: '1750905', position: 'Bodega', start: '2026-07-01' };
@@ -256,10 +370,9 @@ test("an employee's document is Manager's and Admin's, and never left empty", as
 		ok: true,
 		id
 	});
-	expect(await updateContact(db, { ...ana, document_id: '', id }, manager)).toMatchObject({
-		ok: false,
-		errors: { document_id: 'Es empleado: la cédula no puede quedar vacía' }
-	});
+	expect(await updateContact(db, { ...ana, document_id: '', id }, manager)).toMatchObject(
+		DOCUMENT_REQUIRED
+	);
 });
 
 test('an edit logs only the changed attributes key, old and new', async () => {
@@ -286,6 +399,19 @@ test('an edit that changes nothing writes nothing', async () => {
 	expect(database.prepare('select count(*) as count from events').get()).toEqual({ count: 1 });
 });
 
+test('letters also find the username, without the @ and ignoring case; digits only the phone', async () => {
+	await create({ full_name: 'Luz Marina', whatsapp: 'LuzMarinaR' });
+	await create({ phone: '310 442 8890', full_name: 'Jorge Betancur', whatsapp: 'jorge442' });
+	const names = async (search: string) =>
+		(await listContacts(db, { search }, sales)).contacts.map((contact) => contact.fullName);
+	expect(await names('luzma')).toEqual(['Luz Marina']);
+	expect(await names('@LUZMA')).toEqual(['Luz Marina']);
+	expect(await names('@jorge')).toEqual(['Jorge Betancur']);
+	expect(await names('442')).toEqual(['Jorge Betancur']);
+	expect(await names('luz_')).toEqual([]);
+	expect(await names('luz marina')).toEqual(['Luz Marina']);
+});
+
 test('Warehouse and Driver have no access to contacts', async () => {
 	for (const role of ['WAREHOUSE', 'DRIVER'] as const) {
 		expect(await rejection(listContacts(db, {}, actorWith(role)))).toBe(403);
@@ -309,6 +435,7 @@ test('the order form finds clients by name, address or phone, by name, with thei
 			id: companyId,
 			fullName: 'Eventos Restrepo S.A.S.',
 			phone: '573104428890',
+			whatsapp: null,
 			address1: null,
 			address2: null
 		},
@@ -316,6 +443,7 @@ test('the order form finds clients by name, address or phone, by name, with thei
 			id: luzMarinaId,
 			fullName: 'Luz Marina Restrepo',
 			phone: '573104428890',
+			whatsapp: null,
 			address1: 'Cra 43A #18-95, El Poblado',
 			address2: 'Piso 2'
 		}
@@ -324,11 +452,18 @@ test('the order form finds clients by name, address or phone, by name, with thei
 	expect(await ids('poblado MARINA')).toEqual([luzMarinaId]);
 	expect(await ids('piso 2')).toEqual([luzMarinaId]);
 	expect(await ids('44')).toEqual([]);
+	const username = await create({ full_name: 'Mayra', whatsapp: 'LuzMarinaR' });
+	expect(await ids('luzma')).toEqual([username]);
+	expect(await ids('@LUZMA')).toEqual([username]);
 	expect(await rejection(searchClients(db, 'luz', actorWith('WAREHOUSE')))).toBe(403);
 });
 
-test('the transporters are the contacts with TRANSPORTER, by name', async () => {
-	await create({ phone: '311 908 5512', full_name: 'Wilson Muñoz', services: ['TRANSPORTER'] });
+test('the transporters are the contacts with TRANSPORTER, by name, with phone and username', async () => {
+	await create({
+		whatsapp: '@WilsonMudanzas',
+		full_name: 'Wilson Muñoz',
+		services: ['TRANSPORTER']
+	});
 	await create({
 		phone: '604 444 1290',
 		full_name: 'Transportes La 80',
@@ -340,4 +475,9 @@ test('the transporters are the contacts with TRANSPORTER, by name', async () => 
 		'Transportes La 80',
 		'Wilson Muñoz'
 	]);
+	expect((await listTransporters(db, sales))[1]).toMatchObject({
+		fullName: 'Wilson Muñoz',
+		phone: null,
+		whatsapp: 'WilsonMudanzas'
+	});
 });

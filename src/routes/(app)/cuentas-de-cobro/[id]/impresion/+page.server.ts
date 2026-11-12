@@ -5,7 +5,7 @@ import type { PageServerLoad } from './$types';
 
 // The cuenta's letter sheets, printed from its detail.
 export const load: PageServerLoad = async ({ locals, params, platform }) => {
-	requireRole(locals.user, ['ADMIN', 'MANAGER']);
+	requireRole(locals.user, ['ADMIN', 'MANAGER', 'SALES']);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}

@@ -61,7 +61,7 @@ function insertQuote({
 	database
 		.prepare(
 			`insert into quotes (public_token, client_id, order_id, event_date, valid_until, rental_days, client_attributes, quote_items, items_total, discount, transport_cost, quote_total, attributes, created_at, created_by, updated_at, updated_by)
-			values (?, 1, ?, '2026-12-12', ?, 1, '{"name":"Postobón S.A.","phone":"576045765100"}', ?, 440000, 40000, ?, ?, '{"address_1":"Hacienda Fizebad","notes":"Montaje desde las 7:00 a.m."}', unixepoch('2026-10-14 15:00:00'), 'ventas', 0, 'ventas')`
+			values (?, 1, ?, '2026-12-12', ?, 1, '{"name":"Postobón S.A.","phone":"576045765100","whatsapp":null}', ?, 440000, 40000, ?, ?, '{"address_1":"Hacienda Fizebad","notes":"Montaje desde las 7:00 a.m."}', unixepoch('2026-10-14 15:00:00'), 'ventas', 0, 'ventas')`
 		)
 		.run(token, orderId ?? null, validUntil, JSON.stringify(ITEMS), transportCost, total);
 	return token;
@@ -117,6 +117,38 @@ test('a valid quote shows, with no session, built for the client: no phone, docu
 	expect(Object.keys(data.quote)).not.toEqual(
 		expect.arrayContaining(['timeline', 'createdBy', 'updatedBy', 'clientId'])
 	);
+});
+
+test("the load sends neither the client's phone nor username: its keys, listed", async () => {
+	const token = insertQuote();
+	database.exec(
+		`update quotes set client_attributes = json_set(client_attributes, '$.whatsapp', 'PostobonEventos');
+		update contacts set whatsapp = 'PostobonEventos'`
+	);
+	const data = await open(token);
+	expect(Object.keys(data).sort()).toEqual(['changesHref', 'confirmHref', 'quote', 'terms']);
+	expect(Object.keys(data.quote).sort()).toEqual(
+		[
+			'id',
+			'createdOn',
+			'validUntil',
+			'clientName',
+			'eventDate',
+			'address1',
+			'address2',
+			'rentalDays',
+			'items',
+			'itemsTotal',
+			'discount',
+			'transportCost',
+			'quoteTotal',
+			'notes'
+		].sort()
+	);
+	const shown = JSON.stringify(data.quote).toLowerCase();
+	for (const hidden of ['576045765100', 'postoboneventos', 'whatsapp', 'phone']) {
+		expect(shown).not.toContain(hidden);
+	}
 });
 
 test('«por acordar» transport: no price, and the total leaves it out', async () => {

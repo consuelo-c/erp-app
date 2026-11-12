@@ -1,10 +1,12 @@
 // Contactos: the company's clients, providers and employees in one table, one document each; a phone
-// may be shared. Never deleted: orders and employees point to them.
+// or a WhatsApp username may be shared, and either may be missing. Never deleted: orders and
+// employees point to them.
 
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { fold } from '$lib/format';
 import { normalizePhone } from '$lib/phone';
+import { INVALID_WHATSAPP, normalizeWhatsapp } from '$lib/whatsapp';
 import { isAdminOrManager, requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
 import { containing, foldedSql } from './cash';
@@ -44,10 +46,14 @@ type Attributes = z.infer<typeof contactAttributesSchema>;
 
 export type Contact = {
 	id: number;
-	phone: string;
+	phone: string | null;
+	/** The WhatsApp username, without its `@`. */
+	whatsapp: string | null;
 	fullName: string;
-	/** A real one, or the automatic one when none was given: `@` and 8 characters. */
+	/** A real one, or the automatic one «Cliente nuevo» gives: `@` and 8 characters. */
 	documentId: string;
+	/** Still the automatic one: Contactos asks for the real one, and Sales may type it. */
+	hasAutoDocument: boolean;
 	services: Service[];
 	email: string | null;
 	address1: string | null;
@@ -61,9 +67,10 @@ export type Contact = {
 export type SaveResult =
 	{ ok: true; id: number } | { ok: false; message: string; errors: Record<string, string> };
 
-/** The columns as typed: `document_id` is null until the automatic one fills a blank. */
+/** The columns as typed: `document_id` is null only on a contact not saved yet. */
 type Columns = {
-	phone: string;
+	phone: string | null;
+	whatsapp: string | null;
 	full_name: string;
 	document_id: string | null;
 	services: string;
@@ -88,15 +95,30 @@ const blankable = z
 	.optional()
 	.transform((value) => value || undefined);
 
-/** The typed phone, stored normalized; the employee form takes it the same way. */
-export const phoneSchema = requiredText('Escribe el teléfono').transform((typed, context) => {
-	const phone = normalizePhone(typed);
-	if (null === phone) {
-		context.addIssue({ code: 'custom', message: INVALID_PHONE });
-		return z.NEVER;
-	}
-	return phone;
-});
+// A blank optional value is null; anything typed must pass its normalizer.
+function normalizedOrNull(normalize: (typed: string) => string | null, message: string) {
+	return z
+		.string()
+		.trim()
+		.optional()
+		.transform((typed, context) => {
+			if (!typed) {
+				return null;
+			}
+			const normalized = normalize(typed);
+			if (null === normalized) {
+				context.addIssue({ code: 'custom', message });
+				return z.NEVER;
+			}
+			return normalized;
+		});
+}
+
+/** The typed phone, stored normalized, or null; the employee form takes it the same way. */
+export const phoneSchema = normalizedOrNull(normalizePhone, INVALID_PHONE);
+
+/** The typed WhatsApp username, stored without its `@`, or null; the employee form's too. */
+export const whatsappSchema = normalizedOrNull(normalizeWhatsapp, INVALID_WHATSAPP);
 
 /** Spaces, dots and hyphens are how it's typed: «1.036.452.118» and «1036452118» are one document. */
 export const documentIdSchema = z
@@ -121,10 +143,15 @@ export function generateDocumentId(): string {
 	return AUTO_DOCUMENT_PREFIX + symbols.join('');
 }
 
+const DOCUMENT_REQUIRED = 'Escribe la cédula o NIT';
+
+// Contactos always saves a real one: only «Cliente nuevo» leaves an automatic one, so a call isn't
+// held up.
 const formSchema = z.object({
 	phone: phoneSchema,
+	whatsapp: whatsappSchema,
 	full_name: requiredText('Escribe el nombre'),
-	document_id: documentIdSchema,
+	document_id: documentIdSchema.pipe(z.string(DOCUMENT_REQUIRED)),
 	email: blankable.pipe(z.email('Revisa el correo: le falta la @ o el dominio').optional()),
 	address_1: blankable,
 	address_2: blankable,
@@ -149,9 +176,10 @@ function attributesJson(attributes: Attributes): string {
 }
 
 function toColumns(form: Form): Columns {
-	const { phone, full_name, document_id, services, ...attributes } = form;
+	const { phone, whatsapp, full_name, document_id, services, ...attributes } = form;
 	return {
 		phone,
+		whatsapp,
 		full_name,
 		document_id,
 		services: servicesJson(services),
@@ -164,8 +192,10 @@ function toContact(row: ContactRow): Contact {
 	return {
 		id: row.id,
 		phone: row.phone,
+		whatsapp: row.whatsapp,
 		fullName: row.full_name,
 		documentId: row.document_id,
+		hasAutoDocument: isAutoDocument(row.document_id),
 		services: servicesSchema.parse(JSON.parse(row.services)),
 		email: attributes.email ?? null,
 		address1: attributes.address_1 ?? null,
@@ -177,7 +207,8 @@ function toContact(row: ContactRow): Contact {
 }
 
 const NEW_CONTACT: Columns = {
-	phone: '',
+	phone: null,
+	whatsapp: null,
 	full_name: '',
 	document_id: null,
 	services: '[]',
@@ -192,13 +223,20 @@ function isOverwritten(current: string | null, next: string | null): boolean {
 	return null !== current && current !== next;
 }
 
+// What Sales may write over: nothing yet, or the automatic one «Cliente nuevo» left.
+function realDocumentOf(columns: Columns): string | null {
+	const documentId = columns.document_id;
+	return null === documentId || isAutoDocument(documentId) ? null : documentId;
+}
+
 // Redirected money: whoever pays copies the saved account without checking it, so changing one
 // that's set is the manager's, and so is a provider's services. The ID number goes with a refund
-// and is the contact's key: only the manager assigns it. Sales fills in an empty account.
+// and is the contact's key: Sales fills in an empty or automatic one, as it fills an empty account,
+// and only the manager changes a real one.
 function changesLockedField(current: Columns, next: Columns): boolean {
 	return (
 		current.services !== next.services ||
-		current.document_id !== next.document_id ||
+		isOverwritten(realDocumentOf(current), next.document_id) ||
 		isOverwritten(bankAccountOf(current), bankAccountOf(next))
 	);
 }
@@ -236,42 +274,28 @@ export async function documentTakenRefusal(
 	return null === owner ? null : documentRefusal(`Esa cédula o NIT ya es de ${owner.full_name}`);
 }
 
+// A typed `@` would pass for an automatic document, and the automatic one already saved isn't a
+// real one: either way the real one is still to be typed.
 const AUTO_DOCUMENT_TYPED = documentRefusal(
-	`Un documento no empieza con ${AUTO_DOCUMENT_PREFIX}: así empiezan los automáticos`
+	`Escribe la cédula o NIT real: los que empiezan con ${AUTO_DOCUMENT_PREFIX} son automáticos`
 );
 
-// Payroll prints it on every receipt: an employee's contact always has a real one.
-const EMPLOYEE_DOCUMENT_REQUIRED = documentRefusal('Es empleado: la cédula no puede quedar vacía');
-
-// A typed `@` would pass for an automatic document; the one already saved comes back as it was.
-function isForgedAutoDocument(typed: string | null, current: string | null): boolean {
-	return null !== typed && isAutoDocument(typed) && typed !== current;
-}
-
-// A blank keeps the automatic document there is, or makes one up.
-function documentOrAuto(typed: string | null, current: string | null): string {
-	if (null !== typed) {
-		return typed;
-	}
-	return null !== current && isAutoDocument(current) ? current : generateDocumentId();
-}
-
-/** The document to save on a contact whose current one is `current`, or why it can't be saved. */
-async function resolveDocument(
+/** Why the typed document can't be saved on contact `exceptId`, or null when it can. */
+async function documentRefusalOf(
 	db: D1Database,
-	{ typed, current, exceptId }: { typed: string | null; current: string | null; exceptId: number }
-): Promise<string | SaveResult> {
-	if (isForgedAutoDocument(typed, current)) {
+	documentId: string,
+	exceptId: number
+): Promise<SaveResult | null> {
+	if (isAutoDocument(documentId)) {
 		return AUTO_DOCUMENT_TYPED;
 	}
-	const documentId = documentOrAuto(typed, current);
-	return (await documentTakenRefusal(db, documentId, exceptId)) ?? documentId;
+	return documentTakenRefusal(db, documentId, exceptId);
 }
 
 async function findRow(db: D1Database, id: number): Promise<ContactRow | null> {
 	return db
 		.prepare(
-			`select id, phone, full_name, document_id, services, attributes,
+			`select id, phone, whatsapp, full_name, document_id, services, attributes,
 			exists (select 1 from employees where contact_id = contacts.id) as is_employee
 			from contacts where id = ?`
 		)
@@ -301,19 +325,15 @@ export async function createContact(
 	}
 	const columns = toColumns(parsed.data);
 	requireLockedFieldsKept(actor, NEW_CONTACT, columns);
-	const documentId = await resolveDocument(db, {
-		typed: columns.document_id,
-		current: null,
-		exceptId: 0
-	});
-	if ('string' !== typeof documentId) {
-		return documentId;
+	const refusal = await documentRefusalOf(db, parsed.data.document_id, 0);
+	if (null !== refusal) {
+		return refusal;
 	}
 	const statements = auditedInsert(db, {
 		table: 'contacts',
 		entityType: 'CONTACT',
 		actor,
-		values: { ...columns, document_id: documentId }
+		values: columns
 	});
 	const [inserted] = await db.batch(statements);
 	return { ok: true, id: inserted.meta.last_row_id };
@@ -360,18 +380,38 @@ export async function updateContact(
 	}
 	const columns = toColumns(form);
 	requireLockedFieldsKept(actor, row, columns);
-	if (1 === row.is_employee && null === columns.document_id) {
-		return EMPLOYEE_DOCUMENT_REQUIRED;
+	const refusal = await documentRefusalOf(db, form.document_id, id);
+	return refusal ?? applyEdit(db, actor, { row, columns });
+}
+
+/**
+ * The name of another contact with this username, any case, for the forms to warn under the field;
+ * null when none has it or it isn't a valid one. It never stops a save: a username is no key.
+ */
+export async function findWhatsappOwner(
+	db: D1Database,
+	input: { whatsapp: unknown; exceptId: unknown },
+	actor: Actor | null
+): Promise<string | null> {
+	requireRole(actor, EDITS_CONTACTS);
+	const whatsapp = normalizeWhatsapp(z.string().catch('').parse(input.whatsapp));
+	if (null === whatsapp) {
+		return null;
 	}
-	const documentId = await resolveDocument(db, {
-		typed: columns.document_id,
-		current: row.document_id,
-		exceptId: id
-	});
-	if ('string' !== typeof documentId) {
-		return documentId;
-	}
-	return applyEdit(db, actor, { row, columns: { ...columns, document_id: documentId } });
+	const exceptId = z.coerce
+		.number()
+		.int()
+		.catch(0)
+		.parse(input.exceptId ?? 0);
+	// Usernames are ASCII, so nocase folds them whole.
+	const owner = await db
+		.prepare(
+			`select full_name from contacts where whatsapp = ? collate nocase and id != ?
+			order by full_name collate nocase, id limit 1`
+		)
+		.bind(whatsapp, exceptId)
+		.first<{ full_name: string }>();
+	return owner?.full_name ?? null;
 }
 
 /** One page of the list; it never loads the whole table. */
@@ -393,7 +433,8 @@ const listSchema = z.object({
 export type ContactSummary = {
 	id: number;
 	fullName: string;
-	phone: string;
+	phone: string | null;
+	whatsapp: string | null;
 	services: Service[];
 	isEmployee: boolean;
 };
@@ -410,19 +451,29 @@ export type ContactPage = {
 
 type Clause = { sql: string; params: string[] };
 
+// The text typed, without a leading @, anywhere in the username, ignoring case as WhatsApp does:
+// «luzma» and «@LUZMA» both find LuzMarinaR.
+export function whatsappClause(search: string, whatsappSql = 'whatsapp'): Clause {
+	return {
+		sql: `lower(${whatsappSql}) like ? escape '\\'`,
+		params: [containing(search.trim().replace(/^@/, '').toLowerCase())]
+	};
+}
+
 // Letters search the text (the name, unless told otherwise): every word somewhere in it, in any
-// order, accents and case folded. Otherwise the digits typed, three or more, anywhere in the
-// phone, so «442 8890» finds 573104428890: not the normalizer, a fragment isn't a phone.
+// order, accents and case folded; or the username. Otherwise the digits typed, three or more,
+// anywhere in the phone, so «442 8890» finds 573104428890: not the normalizer, a fragment isn't a
+// phone. A username always has a letter, so digits alone never search it.
 export function searchClause(
 	search: string,
-	textSql = foldedSql('full_name'),
-	phoneSql = 'phone'
+	{ textSql = foldedSql('full_name'), phoneSql = 'phone', whatsappSql = 'whatsapp' } = {}
 ): Clause | null {
 	if (/\p{L}/u.test(search)) {
 		const words = fold(search).split(/\s+/).filter(Boolean);
+		const username = whatsappClause(search, whatsappSql);
 		return {
-			sql: words.map(() => `${textSql} like ? escape '\\'`).join(' and '),
-			params: words.map(containing)
+			sql: `(${words.map(() => `${textSql} like ? escape '\\'`).join(' and ')}) or ${username.sql}`,
+			params: [...words.map(containing), ...username.params]
 		};
 	}
 	const digits = search.replace(/\D/g, '');
@@ -446,7 +497,8 @@ function serviceClause(service: ContactKind | undefined): Clause | null {
 type SummaryRow = {
 	id: number;
 	full_name: string;
-	phone: string;
+	phone: string | null;
+	whatsapp: string | null;
 	services: string;
 	is_employee: number;
 };
@@ -456,12 +508,13 @@ function toSummary(row: SummaryRow): ContactSummary {
 		id: row.id,
 		fullName: row.full_name,
 		phone: row.phone,
+		whatsapp: row.whatsapp,
 		services: servicesSchema.parse(JSON.parse(row.services)),
 		isEmployee: 1 === row.is_employee
 	};
 }
 
-/** One page of contacts sorted by name, narrowed by name or phone and by service or employee. */
+/** One page of contacts sorted by name, narrowed by name, phone or username and by service or employee. */
 export async function listContacts(
 	db: D1Database,
 	input: unknown,
@@ -485,7 +538,7 @@ export async function listContacts(
 	// ponytail: nocase folds ASCII only, so «Ángela» sorts after Z; a sort key column if it bothers.
 	const { results } = await db
 		.prepare(
-			`select contacts.id, full_name, phone, services, employees.id is not null as is_employee
+			`select contacts.id, full_name, phone, contacts.whatsapp, services, employees.id is not null as is_employee
 			${from} where ${where}
 			order by full_name collate nocase, contacts.id limit ? offset ?`
 		)
@@ -494,8 +547,16 @@ export async function listContacts(
 	return { contacts: results.map(toSummary), total, pageCount, filters };
 }
 
-/** A client added from the order form: the phone and the name typed, and an automatic document. */
-export type NewClient = { phone: string; fullName: string; documentId: string };
+/**
+ * A client added from the order form: the name, and the phone and username typed, each optional,
+ * and an automatic document.
+ */
+export type NewClient = {
+	phone: string | null;
+	whatsapp: string | null;
+	fullName: string;
+	documentId: string;
+};
 
 /**
  * The contact's insert and its `CREATED` event, for the order's own `db.batch()`: the order then
@@ -512,6 +573,7 @@ export function newClientStatements(
 		actor,
 		values: {
 			phone: client.phone,
+			whatsapp: client.whatsapp,
 			full_name: client.fullName,
 			document_id: client.documentId,
 			services: '[]',
@@ -524,7 +586,8 @@ export function newClientStatements(
 export type ClientCandidate = {
 	id: number;
 	fullName: string;
-	phone: string;
+	phone: string | null;
+	whatsapp: string | null;
 	address1: string | null;
 	address2: string | null;
 };
@@ -539,8 +602,8 @@ const CLIENT_TEXT_SQL = foldedSql(
 const CLIENT_MATCHES = 10;
 
 /**
- * The first contacts by name whose name or address has every word typed, or whose phone
- * has the digits typed. None is picked for the salesperson: several may share a phone.
+ * The first contacts by name whose name or address has every word typed, or whose username has
+ * the text, or whose phone has the digits typed. None is picked for the salesperson: several may share a phone.
  */
 export async function searchClients(
 	db: D1Database,
@@ -548,28 +611,36 @@ export async function searchClients(
 	actor: Actor | null
 ): Promise<ClientCandidate[]> {
 	requireRole(actor, EDITS_CONTACTS);
-	const clause = searchClause(z.string().trim().catch('').parse(typed), CLIENT_TEXT_SQL);
+	const clause = searchClause(z.string().trim().catch('').parse(typed), {
+		textSql: CLIENT_TEXT_SQL
+	});
 	if (null === clause) {
 		return [];
 	}
 	const { results } = await db
 		.prepare(
-			`select id, phone, full_name, document_id, services, attributes, 0 as is_employee
-			from contacts where ${clause.sql} order by full_name collate nocase, id limit ?`
+			`select id, phone, whatsapp, full_name, document_id, services, attributes, 0 as is_employee
+			from contacts where (${clause.sql}) order by full_name collate nocase, id limit ?`
 		)
 		.bind(...clause.params, CLIENT_MATCHES)
 		.all<ContactRow>();
-	return results.map(toContact).map(({ id, fullName, phone, address1, address2 }) => ({
+	return results.map(toContact).map(({ id, fullName, phone, whatsapp, address1, address2 }) => ({
 		id,
 		fullName,
 		phone,
+		whatsapp,
 		address1,
 		address2
 	}));
 }
 
 /** A carrier the order form offers: a contact with TRANSPORTER in its services. */
-export type Transporter = { id: number; fullName: string; phone: string };
+export type Transporter = {
+	id: number;
+	fullName: string;
+	phone: string | null;
+	whatsapp: string | null;
+};
 
 /** Every transporter by name, filtered in SQL. Creating one is the manager's, in Contactos. */
 export async function listTransporters(
@@ -579,7 +650,7 @@ export async function listTransporters(
 	requireRole(actor, EDITS_CONTACTS);
 	const { results } = await db
 		.prepare(
-			`select id, full_name as fullName, phone from contacts
+			`select id, full_name as fullName, phone, whatsapp from contacts
 			where exists (select 1 from json_each(contacts.services) where value = 'TRANSPORTER')
 			order by full_name collate nocase, id`
 		)

@@ -425,9 +425,12 @@ type Clause = { sql: string; params: (string | number)[] };
 
 // The order list's rules, over the quote's own snapshot: never the contact's current name or phone.
 function listClauses(filters: QuoteFilters, today: string): Clause[] {
-	const name = foldedSql("json_extract(client_attributes, '$.name')");
-	const phone = "json_extract(client_attributes, '$.phone')";
-	const search = undefined === filters.text ? null : searchClause(filters.text, name, phone);
+	const columns = {
+		textSql: foldedSql("json_extract(client_attributes, '$.name')"),
+		phoneSql: "json_extract(client_attributes, '$.phone')",
+		whatsappSql: "json_extract(client_attributes, '$.whatsapp')"
+	};
+	const search = undefined === filters.text ? null : searchClause(filters.text, columns);
 	const state =
 		'ALL' === filters.state
 			? null
@@ -673,7 +676,16 @@ export async function getQuoteDuplicate(
 	}
 	const { clientId, client, address1, address2, rentalDays, items, discount, transportCost } =
 		quote;
-	const terms = { clientId, client, address1, address2, rentalDays, items, discount, transportCost };
+	const terms = {
+		clientId,
+		client,
+		address1,
+		address2,
+		rentalDays,
+		items,
+		discount,
+		transportCost
+	};
 	const fresh = await freshDraft(db, { ...terms, notes: quote.notes });
 	return { source: { kind: 'QUOTE', id: quote.id }, ...fresh };
 }
@@ -715,8 +727,9 @@ export async function getQuoteConversion(
 	}
 	// The contact is the quote's foreign key: it's always there.
 	const contact = await getContact(db, quote.clientId, actor);
-	const { fullName, phone, address1, address2 } = contact as ClientCandidate;
-	return { quote, client: { id: quote.clientId, fullName, phone, address1, address2 } };
+	const { fullName, phone, whatsapp, address1, address2 } = contact as ClientCandidate;
+	const client = { id: quote.clientId, fullName, phone, whatsapp, address1, address2 };
+	return { quote, client };
 }
 
 const conversionInputSchema = z.object({

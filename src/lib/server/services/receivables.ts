@@ -1,6 +1,7 @@
-// Cuentas de cobro: a charge for one or more COMPLETED orders of one client. It stores its number,
+// Cuentas de cobro: a charge for one or more orders of one client, any that isn't CANCELLED. It stores its number,
 // client, issue date and «Forma de pago»; its lines and totals are read live from its orders. Never
-// deleted or voided: one issued with the wrong orders is fixed by editing them.
+// deleted: one issued with the wrong orders is fixed by editing them. An order cancelled once billed
+// stays in it, adding nothing; when every order is, it reads «Anulada», derived and never stored.
 
 import { z } from 'zod';
 import { getTodaysDate } from '$lib/datetime';
@@ -11,7 +12,6 @@ import { auditedInsert, auditedUpdate, type Diff } from '../audit';
 import { optional, recordLinkedMovement } from './cash';
 import { contactAttributesSchema, isAutoDocument, searchClause } from './contacts';
 import {
-	BALANCE_DUE_SQL,
 	invalidOrder,
 	orderItemsSchema,
 	RECEIVABLE_BALANCE_SQL,
@@ -28,7 +28,8 @@ import {
 } from './orders';
 import { COMPANY_SETTINGS, readSettings, type CompanySettings } from './settings';
 
-const MANAGES_RECEIVABLES = ['ADMIN', 'MANAGER'] as const;
+// Sales works cuentas de cobro as the manager does: issues them and records their payments.
+const MANAGES_RECEIVABLES = ['ADMIN', 'MANAGER', 'SALES'] as const;
 
 const paymentTermsSchema = z.string().trim().min(1, 'Escribe la forma de pago');
 
@@ -53,7 +54,6 @@ type EligibleOrder = {
 	receivable_id: number | null;
 	event_date: string;
 	order_total: number;
-	balance_due: number;
 };
 
 type ReceivableRow = { id: number; client_id: number; attributes: string };
@@ -61,7 +61,7 @@ type ReceivableRow = { id: number; client_id: number; attributes: string };
 const NOT_FOUND: Refusal = { ok: false, message: 'Esa cuenta de cobro no existe', errors: {} };
 
 const NOT_ELIGIBLE_MESSAGE =
-	'Solo se incluyen pedidos completados de este cliente, sin pagos parciales ni otra cuenta de cobro';
+	'Solo se incluyen pedidos de este cliente que no estén cancelados ni en otra cuenta de cobro';
 
 const NOT_ELIGIBLE: Refusal = {
 	ok: false,
@@ -70,8 +70,8 @@ const NOT_ELIGIBLE: Refusal = {
 };
 
 /**
- * The client's COMPLETED orders with no cuenta, or already in `receivableId`, which is null when
- * issuing a new one. `canJoin` says which of them a cuenta de cobro can bill.
+ * The client's orders a cuenta de cobro can bill: the ones `canJoin` lets in, and those already in
+ * `receivableId`, which is null when issuing a new one, cancelled ones included.
  */
 async function findEligibleOrders(
 	db: D1Database,
@@ -79,9 +79,9 @@ async function findEligibleOrders(
 ): Promise<EligibleOrder[]> {
 	const { results } = await db
 		.prepare(
-			`select id, client_id, status, receivable_id, event_date, order_total,
-			${BALANCE_DUE_SQL} as balance_due from orders
-			where client_id = ? and status = 'COMPLETED' and (receivable_id is null or receivable_id = ?)
+			`select id, client_id, status, receivable_id, event_date, order_total from orders
+			where client_id = ?
+			and ((status <> 'CANCELLED' and receivable_id is null) or receivable_id = ?)
 			order by event_date, id`
 		)
 		.bind(clientId, receivableId)
@@ -89,14 +89,23 @@ async function findEligibleOrders(
 	return results;
 }
 
-// An order joins unpaid or fully paid, never partly paid; one already in the cuenta stays.
-function canJoin(order: EligibleOrder): boolean {
-	const isPartlyPaid = 0 < order.balance_due && order.balance_due < order.order_total;
-	return null !== order.receivable_id || !isPartlyPaid;
+/**
+ * An order joins a cuenta when it isn't CANCELLED and has no `receivable_id`, from CONFIRMED on and
+ * whatever was paid on it; one already in `receivableId` stays.
+ */
+function canJoin(order: EligibleOrder, receivableId: number | null): boolean {
+	const isInThisCuenta = null !== receivableId && receivableId === order.receivable_id;
+	return isInThisCuenta || ('CANCELLED' !== order.status && null === order.receivable_id);
 }
 
-function isEveryOrderEligible(orderIds: number[], eligible: EligibleOrder[]): boolean {
-	return orderIds.every((id) => eligible.some((order) => order.id === id && canJoin(order)));
+function isEveryOrderEligible(
+	orderIds: number[],
+	eligible: EligibleOrder[],
+	receivableId: number | null
+): boolean {
+	return orderIds.every((id) =>
+		eligible.some((order) => order.id === id && canJoin(order, receivableId))
+	);
 }
 
 async function findClientOf(db: D1Database, orderId: number): Promise<number | null> {
@@ -173,7 +182,7 @@ export async function issueReceivable(
 		return NOT_ELIGIBLE;
 	}
 	const eligible = await findEligibleOrders(db, { clientId, receivableId: null });
-	if (!isEveryOrderEligible(orderIds, eligible)) {
+	if (!isEveryOrderEligible(orderIds, eligible, null)) {
 		return NOT_ELIGIBLE;
 	}
 	const orders = eligible.filter(({ id }) => orderIds.includes(id));
@@ -273,7 +282,7 @@ export async function updateReceivable(
 		return NOT_FOUND;
 	}
 	const eligible = await findEligibleOrders(db, { clientId: row.client_id, receivableId: id });
-	if (!isEveryOrderEligible(orderIds, eligible)) {
+	if (!isEveryOrderEligible(orderIds, eligible, id)) {
 		return NOT_ELIGIBLE;
 	}
 	const edit = planEdit(row, { orderIds, paymentTerms, eligible });
@@ -293,10 +302,16 @@ async function paymentRefusal(
 	typedAmount: string
 ): Promise<Refusal | null> {
 	const row = await db
-		.prepare(`select ${RECEIVABLE_BALANCE_SQL} as balance from receivables where id = ?`)
+		.prepare(
+			`select ${RECEIVABLE_BALANCE_SQL} as balance, ${RECEIVABLE_VOID_SQL} as is_void
+			from receivables where id = ?`
+		)
 		.bind(receivableId)
-		.first<{ balance: number }>();
+		.first<{ balance: number; is_void: number }>();
 	const balance = row?.balance ?? 0;
+	if (1 === row?.is_void) {
+		return { ok: false, message: 'Esta cuenta de cobro está anulada.', errors: {} };
+	}
 	if (balance <= 0) {
 		return { ok: false, message: 'Esta cuenta de cobro ya está pagada.', errors: {} };
 	}
@@ -344,11 +359,21 @@ export type ReceivablePayment = OrderPayment & {
 	orderId: number | null;
 };
 
-export type ReceivableOrder = { id: number; eventDate: string; orderTotal: number };
+export type ReceivableOrder = {
+	id: number;
+	eventDate: string;
+	orderTotal: number;
+	/** Cancelled once billed: it stays, adding nothing to the total. */ isCancelled: boolean;
+};
+
+/** Over `receivables` in the caller's query: 1 when every one of its orders is CANCELLED, «Anulada». */
+const RECEIVABLE_VOID_SQL = `not exists (select 1 from orders
+	where receivable_id = receivables.id and status <> 'CANCELLED')`;
 
 export type ReceivableClient = {
 	name: string;
-	phone: string;
+	phone: string | null;
+	whatsapp: string | null;
 	/** Null when it's automatic. */ documentId: string | null;
 };
 
@@ -362,9 +387,15 @@ export type ReceivableDetail = {
 	total: number;
 	paid: number;
 	balance: number;
+	/** «Anulada»: every order is CANCELLED. */ isVoid: boolean;
 };
 
-type ClientRow = { full_name: string; phone: string; document_id: string };
+type ClientRow = {
+	full_name: string;
+	phone: string | null;
+	whatsapp: string | null;
+	document_id: string;
+};
 
 type DetailRow = ClientRow & {
 	id: number;
@@ -374,15 +405,16 @@ type DetailRow = ClientRow & {
 	total: number;
 	paid: number;
 	balance: number;
+	is_void: number;
 };
 
 async function findDetailRow(db: D1Database, id: number): Promise<DetailRow | null> {
 	return db
 		.prepare(
-			`select receivables.id, issue_date, receivables.attributes, full_name, phone, document_id,
+			`select receivables.id, issue_date, receivables.attributes, full_name, phone, whatsapp, document_id,
 			contacts.attributes as contact_attributes,
 			${RECEIVABLE_TOTAL_SQL} as total, ${RECEIVABLE_PAID_SQL} as paid,
-			${RECEIVABLE_BALANCE_SQL} as balance
+			${RECEIVABLE_BALANCE_SQL} as balance, ${RECEIVABLE_VOID_SQL} as is_void
 			from receivables join contacts on contacts.id = receivables.client_id
 			where receivables.id = ?`
 		)
@@ -393,12 +425,11 @@ async function findDetailRow(db: D1Database, id: number): Promise<DetailRow | nu
 async function findOrders(db: D1Database, id: number): Promise<ReceivableOrder[]> {
 	const { results } = await db
 		.prepare(
-			`select id, event_date as eventDate, order_total as orderTotal from orders
-			where receivable_id = ? order by id`
+			`select id, event_date, order_total, status from orders where receivable_id = ? order by id`
 		)
 		.bind(id)
-		.all<ReceivableOrder>();
-	return results;
+		.all<OrderLine>();
+	return results.map(toFormOrder);
 }
 
 async function findPayments(db: D1Database, id: number): Promise<ReceivablePayment[]> {
@@ -420,6 +451,7 @@ function toClient(row: ClientRow): ReceivableClient {
 	return {
 		name: row.full_name,
 		phone: row.phone,
+		whatsapp: row.whatsapp,
 		documentId: isAutoDocument(row.document_id) ? null : row.document_id
 	};
 }
@@ -433,7 +465,8 @@ function toDetail(row: DetailRow): Omit<ReceivableDetail, 'orders' | 'payments'>
 		client: toClient(row),
 		total: row.total,
 		paid: row.paid,
-		balance: row.balance
+		balance: row.balance,
+		isVoid: 1 === row.is_void
 	};
 }
 
@@ -474,8 +507,13 @@ export type ReceivablePrintout = {
 	issueDate: string;
 	paymentTerms: string;
 	client: ReceivableClient & { address: string };
+	/** The orders that aren't CANCELLED: a cancelled one prints no block and leaves «Concepto». */
 	orders: PrintedOrder[];
 	total: number;
+	/** What was paid on the cuenta: when it isn't 0, «ABONOS» and «SALDO A PAGAR» print. */
+	paid: number;
+	balance: number;
+	/** «Anulada»: every order is CANCELLED, so none prints. */ isVoid: boolean;
 	company: CompanySettings;
 };
 
@@ -486,7 +524,7 @@ async function findPrintedOrders(db: D1Database, id: number): Promise<PrintedOrd
 		.prepare(
 			`select id, order_items, items_total as itemsTotal, rental_days as rentalDays, discount,
 			transport_cost as transportCost, order_total as orderTotal from orders
-			where receivable_id = ? order by id`
+			where receivable_id = ? and status <> 'CANCELLED' order by id`
 		)
 		.bind(id)
 		.all<PrintedOrderRow>();
@@ -520,31 +558,21 @@ export async function getReceivablePrintout(
 	if (null === row) {
 		return null;
 	}
-	const { id: receivableId, issueDate, paymentTerms, client, total } = toDetail(row);
-	return {
-		id: receivableId,
-		issueDate,
-		paymentTerms,
-		client: { ...client, address: toAddress(row.contact_attributes) },
-		orders,
-		total,
-		company
-	};
+	const detail = toDetail(row);
+	const client = { ...detail.client, address: toAddress(row.contact_attributes) };
+	return { ...detail, client, orders, company };
 }
-
-/** A row of the form's checklist: one that can't join reads as such, and can't be checked. */
-export type ReceivableFormOrder = ReceivableOrder & { canJoin: boolean };
 
 export type ReceivableForm = {
 	client: ReceivableClient;
-	/** The checklist, by event date. */ orders: ReceivableFormOrder[];
+	/** The checklist, by event date. */ orders: ReceivableOrder[];
 	checkedOrderIds: number[];
 	paymentTerms: string;
 };
 
 async function findClient(db: D1Database, clientId: number): Promise<ReceivableClient> {
 	const row = await db
-		.prepare('select full_name, phone, document_id from contacts where id = ?')
+		.prepare('select full_name, phone, whatsapp, document_id from contacts where id = ?')
 		.bind(clientId)
 		.first<ClientRow>();
 	if (null === row) {
@@ -553,18 +581,20 @@ async function findClient(db: D1Database, clientId: number): Promise<ReceivableC
 	return toClient(row);
 }
 
-function toFormOrder(order: EligibleOrder): ReceivableFormOrder {
+type OrderLine = Pick<EligibleOrder, 'id' | 'event_date' | 'order_total' | 'status'>;
+
+function toFormOrder(order: OrderLine): ReceivableOrder {
 	return {
 		id: order.id,
 		eventDate: order.event_date,
 		orderTotal: order.order_total,
-		canJoin: canJoin(order)
+		isCancelled: 'CANCELLED' === order.status
 	};
 }
 
 /**
  * The form to issue a cuenta from an order, which comes checked. Null when that order can't start
- * one: it doesn't exist, isn't COMPLETED, is partly paid or is already billed.
+ * one: it doesn't exist, is CANCELLED or is already billed.
  */
 export async function getReceivableIssueForm(
 	db: D1Database,
@@ -581,7 +611,7 @@ export async function getReceivableIssueForm(
 		return null;
 	}
 	const eligible = await findEligibleOrders(db, { clientId, receivableId: null });
-	if (!isEveryOrderEligible([parsedId.data], eligible)) {
+	if (!isEveryOrderEligible([parsedId.data], eligible, null)) {
 		return null;
 	}
 	return {
@@ -592,7 +622,10 @@ export async function getReceivableIssueForm(
 	};
 }
 
-/** The form to edit a cuenta: its orders checked, the client's other eligible ones not. */
+/**
+ * The form to edit a cuenta: its orders checked, a cancelled one included, and the client's other
+ * eligible ones not.
+ */
 export async function getReceivableEditForm(
 	db: D1Database,
 	id: unknown,
@@ -640,6 +673,7 @@ export type ReceivableSummary = {
 	total: number;
 	/** Negative is the client's credit. */
 	balance: number;
+	/** «Anulada», read in place of the balance. */ isVoid: boolean;
 };
 
 /** The filters come back parsed, `page` clamped: what the screen shows is what was applied. */
@@ -657,6 +691,10 @@ function listClauses(filters: ReceivableFilters) {
 		? { sql: `(${RECEIVABLE_BALANCE_SQL}) > 0`, params: [] }
 		: null;
 	return [search, pending].filter((clause) => null !== clause);
+}
+
+function toSummary(row: Omit<ReceivableSummary, 'isVoid'> & { isVoid: number }): ReceivableSummary {
+	return { ...row, isVoid: 1 === row.isVoid };
 }
 
 /** One page of cuentas de cobro, newest first, narrowed by every filter at once. */
@@ -682,10 +720,11 @@ export async function listReceivables(
 	const { results } = await db
 		.prepare(
 			`select receivables.id, full_name as clientName, issue_date as issueDate,
-			${RECEIVABLE_TOTAL_SQL} as total, ${RECEIVABLE_BALANCE_SQL} as balance
+			${RECEIVABLE_TOTAL_SQL} as total, ${RECEIVABLE_BALANCE_SQL} as balance,
+			${RECEIVABLE_VOID_SQL} as isVoid
 			${source} order by receivables.id desc limit ? offset ?`
 		)
 		.bind(...params, RECEIVABLES_PAGE_SIZE, (filters.page - 1) * RECEIVABLES_PAGE_SIZE)
-		.all<ReceivableSummary>();
-	return { receivables: results, total, pageCount, filters };
+		.all<Omit<ReceivableSummary, 'isVoid'> & { isVoid: number }>();
+	return { receivables: results.map(toSummary), total, pageCount, filters };
 }

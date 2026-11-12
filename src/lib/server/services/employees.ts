@@ -1,6 +1,6 @@
 // The people on payroll. A row per person: leaving closes the last employment period and rehiring
-// appends a new one, so the history stays on the same row. Each is a contact: name, phone and ID
-// number live there, so they read the same in Contactos.
+// appends a new one, so the history stays on the same row. Each is a contact: name, ID number, phone
+// and WhatsApp username live there, so they read the same in Contactos.
 
 import { z } from 'zod';
 import { requireRole, type Actor } from '../actor';
@@ -11,7 +11,9 @@ import {
 	documentTakenRefusal,
 	invalidForm,
 	isAutoDocument,
-	phoneSchema
+	phoneSchema,
+	whatsappClause,
+	whatsappSchema
 } from './contacts';
 
 // Salaries live here, so only the ones who settle payroll see or touch employees.
@@ -52,7 +54,11 @@ type Period = z.infer<typeof periodSchema>;
 
 export type Employee = {
 	id: number;
-	phone: string;
+	/** Its contact's: the username warning leaves the employee's own out. */
+	contactId: number;
+	phone: string | null;
+	/** The WhatsApp username, without its `@`. */
+	whatsapp: string | null;
 	fullName: string;
 	idNumber: string;
 	monthlySalary: number;
@@ -68,19 +74,21 @@ export type Result =
 type EmployeeRow = {
 	id: number;
 	contact_id: number;
-	phone: string;
+	phone: string | null;
+	whatsapp: string | null;
 	full_name: string;
 	document_id: string;
 	attributes: string;
 };
 
 // Every read of an employee's name goes through its contact.
-const EMPLOYEE_SELECT = `select employees.id, employees.contact_id, contacts.phone, contacts.full_name,
-	contacts.document_id, employees.attributes
+const EMPLOYEE_SELECT = `select employees.id, employees.contact_id, contacts.phone, contacts.whatsapp,
+	contacts.full_name, contacts.document_id, employees.attributes
 	from employees join contacts on contacts.id = employees.contact_id`;
 
 const detailsSchema = z.object({
 	phone: phoneSchema,
+	whatsapp: whatsappSchema,
 	full_name: z.string().trim().min(1, 'Escribe el nombre completo'),
 	// Optional on a contact, required and real on an employee: payroll prints it.
 	document_id: documentIdSchema.pipe(
@@ -133,7 +141,9 @@ function toEmployee(row: EmployeeRow): Employee {
 	const attributes = employeeAttributesSchema.parse(JSON.parse(row.attributes));
 	return {
 		id: row.id,
+		contactId: row.contact_id,
 		phone: row.phone,
+		whatsapp: row.whatsapp,
 		fullName: row.full_name,
 		idNumber: row.document_id,
 		monthlySalary: attributes.monthly_salary,
@@ -174,13 +184,14 @@ export async function getEmployee(
 type CandidateRow = {
 	id: number;
 	full_name: string;
-	phone: string;
+	phone: string | null;
+	whatsapp: string | null;
 	document_id: string;
 	employee_id: number | null;
 };
 
-const CANDIDATE_SELECT = `select contacts.id, contacts.full_name, contacts.phone, contacts.document_id,
-	employees.id as employee_id
+const CANDIDATE_SELECT = `select contacts.id, contacts.full_name, contacts.phone, contacts.whatsapp,
+	contacts.document_id, employees.id as employee_id
 	from contacts left join employees on employees.contact_id = contacts.id`;
 
 async function findCandidate(db: D1Database, id: number): Promise<CandidateRow | null> {
@@ -190,7 +201,8 @@ async function findCandidate(db: D1Database, id: number): Promise<CandidateRow |
 export type ContactCandidate = {
 	id: number;
 	fullName: string;
-	phone: string;
+	phone: string | null;
+	whatsapp: string | null;
 	/** Null when it's the automatic one: an employee's has to be typed. */
 	documentId: string | null;
 	isEmployee: boolean;
@@ -201,8 +213,8 @@ const CANDIDATES_SHOWN = 5;
 
 type Clause = { sql: string; params: string[] };
 
-// Name or email by what's typed; the phone by its digits and the document as it's stored, three
-// or more of either, as in Contactos. Never an automatic document.
+// Name or email by what's typed, and the username when it has letters; the phone by its digits and
+// the document as it's stored, three or more of either, as in Contactos. Never an automatic document.
 function candidateClauses(search: string): Clause[] {
 	const text = containing(search);
 	const digits = search.replace(/\D/g, '');
@@ -218,7 +230,8 @@ function candidateClauses(search: string): Clause[] {
 						params: [containing(document)]
 					}
 				]),
-		...(3 > digits.length ? [] : [{ sql: 'contacts.phone like ?', params: [`%${digits}%`] }])
+		...(3 > digits.length ? [] : [{ sql: 'contacts.phone like ?', params: [`%${digits}%`] }]),
+		...(/\p{L}/u.test(search) ? [whatsappClause(search, 'contacts.whatsapp')] : [])
 	];
 }
 
@@ -248,6 +261,7 @@ export async function searchContactCandidates(
 		id: row.id,
 		fullName: row.full_name,
 		phone: row.phone,
+		whatsapp: row.whatsapp,
 		documentId: isAutoDocument(row.document_id) ? null : row.document_id,
 		isEmployee: null !== row.employee_id
 	}));
@@ -292,7 +306,7 @@ export async function createEmployee(
 	if (!parsed.success) {
 		return invalidForm(parsed.error);
 	}
-	const { contact_id, phone, full_name, document_id, start, ...details } = parsed.data;
+	const { contact_id, phone, whatsapp, full_name, document_id, start, ...details } = parsed.data;
 	const { picked, refusal } = await pickedContact(db, contact_id);
 	const taken = refusal ?? (await documentTakenRefusal(db, document_id, picked?.id ?? 0));
 	if (null !== taken) {
@@ -300,13 +314,18 @@ export async function createEmployee(
 	}
 	const attributes = attributesJson({ ...details, employment: [{ start, end: null }] });
 	const results = await db.batch([
-		...contactWrite(db, actor, { picked, contact: { phone, full_name, document_id } }),
+		...contactWrite(db, actor, { picked, contact: { phone, whatsapp, full_name, document_id } }),
 		...employeeInsert(db, actor, { documentId: document_id, attributes })
 	]);
 	return { ok: true, id: results.at(-2)!.meta.last_row_id };
 }
 
-type ContactColumns = { phone: string; full_name: string; document_id: string };
+type ContactColumns = {
+	phone: string | null;
+	whatsapp: string | null;
+	full_name: string;
+	document_id: string;
+};
 
 const CONTACT = { table: 'contacts', entityType: 'CONTACT' };
 
@@ -365,7 +384,7 @@ async function run(db: D1Database, statements: D1PreparedStatement[], id: number
 const NOT_FOUND: Result = { ok: false, message: 'Ese empleado no existe' };
 
 /**
- * Phone, name and ID number, saved on the employee's own contact (never relinked to another), and
+ * Name, ID number, phone and WhatsApp username, saved on the employee's own contact (never relinked to another), and
  * salary, position and payroll account; the employment periods change only by ending or rehiring.
  */
 export async function updateEmployee(
@@ -378,7 +397,7 @@ export async function updateEmployee(
 	if (!parsed.success) {
 		return invalidForm(parsed.error);
 	}
-	const { id, phone, full_name, document_id, ...details } = parsed.data;
+	const { id, phone, whatsapp, full_name, document_id, ...details } = parsed.data;
 	const row = await findRow(db, id);
 	if (null === row) {
 		return NOT_FOUND;
@@ -393,7 +412,7 @@ export async function updateEmployee(
 		actor,
 		id: row.contact_id,
 		current: row,
-		changes: { phone, full_name, document_id }
+		changes: { phone, whatsapp, full_name, document_id }
 	});
 	const attributes = { ...details, employment };
 	return run(db, [...contact, ...attributesUpdate(db, actor, { row, attributes })], id);

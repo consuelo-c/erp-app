@@ -302,6 +302,31 @@ test('«Cliente nuevo» creates its contact, automatic document, in the same bat
 	expect(Object.keys(errorsOf(refused))).toEqual(['client_phone']);
 });
 
+test("a quote freezes the picked contact's username, not the typed one; «Cliente nuevo» saves the typed one", async () => {
+	database.exec(`update contacts set whatsapp = 'LuzMarinaR' where id = ${LUZ_MARINA}`);
+	const picked = await create({ ...quote1043, client_whatsapp: '@otro_usuario' });
+	expect((await read(picked)).client).toMatchObject({
+		phone: '573104428890',
+		whatsapp: 'LuzMarinaR'
+	});
+	const fresh = await create({
+		...quote1043,
+		client_id: null,
+		client_name: 'Colegio San José',
+		client_phone: '',
+		client_whatsapp: '@ColegioSJ'
+	});
+	expect((await read(fresh)).client).toEqual({
+		name: 'Colegio San José',
+		phone: null,
+		whatsapp: 'ColegioSJ'
+	});
+	const contact = database
+		.prepare("select phone, whatsapp from contacts where full_name = 'Colegio San José'")
+		.get();
+	expect(contact).toEqual({ phone: null, whatsapp: 'ColegioSJ' });
+});
+
 test("the client's name and phone are the quote's snapshot: renaming the contact changes nothing", async () => {
 	const id = await create({ ...quote1043, client_name: 'Luz Marina Restrepo (mamá de la novia)' });
 	database.exec(
@@ -309,7 +334,8 @@ test("the client's name and phone are the quote's snapshot: renaming the contact
 	);
 	expect((await read(id)).client).toEqual({
 		name: 'Luz Marina Restrepo (mamá de la novia)',
-		phone: '573104428890'
+		phone: '573104428890',
+		whatsapp: null
 	});
 	const contact = database.prepare(`select full_name from contacts where id = ${LUZ_MARINA}`).get();
 	expect(contact).toEqual({ full_name: 'Luz M. Restrepo' });
@@ -401,7 +427,11 @@ function insertQuote(
 			`insert into quotes (public_token, client_id, order_id, valid_until, rental_days, client_attributes, quote_items, items_total, quote_total, created_at, created_by, updated_at, updated_by)
 			values (lower(hex(randomblob(16))), 1, ?, ?, 1, ?, '[]', 0, 0, ${AUDIT})`
 		)
-		.run(validity.orderId ?? null, validity.validUntil, JSON.stringify({ name, phone }));
+		.run(
+			validity.orderId ?? null,
+			validity.validUntil,
+			JSON.stringify({ name, phone, whatsapp: null })
+		);
 }
 
 function insertOrder(id: number) {
@@ -461,6 +491,16 @@ test("the text filter is the order list's: a name in another word order, or thre
 	expect(await listIds({ state: 'ALL', text: '576 5' })).toEqual([1]);
 	expect(await listIds({ state: 'ALL', text: 'betancur', page: '1' })).toEqual([3]);
 	expect(await listIds({ state: 'VALID', text: 'restrepo' })).toEqual([]);
+});
+
+test("letters also find the snapshot's username, without the @ and ignoring case", async () => {
+	insertThreeStates();
+	database.exec(
+		`update quotes set client_attributes = json_set(client_attributes, '$.whatsapp', 'LuzMarinaR')
+		where id = 3`
+	);
+	expect(await listIds({ state: 'ALL', text: 'luzma' })).toEqual([3]);
+	expect(await listIds({ state: 'ALL', text: '@LUZMA' })).toEqual([3]);
 });
 
 test('each row carries what the list shows: the state, the event date or none, and a pending transport', async () => {
@@ -920,7 +960,7 @@ test('«Cotizar de nuevo» fills the quote from the order at today’s prices, i
 			removed: ['Mesa redonda 10 puestos'],
 			draft: {
 				clientId: LUZ_MARINA,
-				client: { name: 'Luz Marina Restrepo', phone: '573104428890' },
+				client: { name: 'Luz Marina Restrepo', phone: '573104428890', whatsapp: null },
 				address1: 'Cra 70 #44-21, Laureles',
 				address2: 'Salón de eventos',
 				rentalDays: 2,

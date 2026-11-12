@@ -8,8 +8,8 @@
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import { formatClockTime, formatInstantTime, formatLongDay, formatShortDay } from '$lib/datetime';
 	import { DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, RETURN_METHOD_LABELS } from '$lib/labels';
-	import { formatPhone } from '$lib/phone';
 	import type { DispatchRow } from '$lib/server/services/dispatch';
+	import { formatNameAndReach } from '$lib/whatsapp';
 	import type { PageProps } from './$types';
 
 	// One day's deliveries and pickups, mixed by time, whoever moves them: today's late ones first,
@@ -112,7 +112,9 @@
 				{#if row.address2}<p class="meta">{row.address2}</p>{/if}
 			{:else if row.carrier}
 				<!-- Text, not a link: the whole row is one. The detail has the links. -->
-				<p class="meta row__carrier">{row.carrier.name} · {formatPhone(row.carrier.phone)}</p>
+				<p class="meta row__carrier">
+					{formatNameAndReach(row.carrier.name, row.carrier.phone, row.carrier.whatsapp)}
+				</p>
 			{/if}
 			{#each row.extensionIds as extensionId (extensionId)}
 				<p class="row__extension">Sigue en el pedido #{extensionId}</p>

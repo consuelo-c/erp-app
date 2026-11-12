@@ -93,7 +93,7 @@
 
 {#snippet fields(prefix: string)}
 	<div class="filters">
-		<Field label="Nombre o teléfono" id="{prefix}texto">
+		<Field label="Nombre, teléfono o usuario (WA)" id="{prefix}texto">
 			<Input
 				id="{prefix}texto"
 				name="texto"

@@ -11,6 +11,7 @@
 	import { describeRemovedProducts } from '$lib/quotes';
 	import { parsePesos, parseQuantity } from '$lib/payroll';
 	import { formatPhone } from '$lib/phone';
+	import { formatWhatsapp } from '$lib/whatsapp';
 	import type { ClientCandidate } from '$lib/server/services/contacts';
 	import type {
 		Quote,
@@ -18,6 +19,7 @@
 		QuoteDuplicate,
 		QuoteFormOptions
 	} from '$lib/server/services/quotes';
+	import WhatsappField from '../WhatsappField.svelte';
 	import ClientSearch from '../pedidos/ClientSearch.svelte';
 	import OrderLines, { toFormLine, type FormLine } from '../pedidos/OrderLines.svelte';
 	import OrderTotals from '../pedidos/OrderTotals.svelte';
@@ -48,6 +50,7 @@
 		picked: ClientCandidate | null;
 		clientName: string;
 		phone: string;
+		whatsapp: string;
 		eventDate: string;
 		validUntil: string;
 		address1: string;
@@ -66,14 +69,20 @@
 
 	type Dates = Pick<Fields, 'eventDate' | 'validUntil'>;
 
+	// A username as the field shows it: with its `@`, or empty.
+	function whatsappOf(username: string | null): string {
+		return null === username ? '' : formatWhatsapp(username);
+	}
+
 	// A quote's terms as the form holds them; its client as its snapshot.
 	function savedFields(saved: QuoteDraft, { eventDate, validUntil }: Dates): Fields {
-		const { name: fullName, phone } = saved.client;
+		const { name: fullName, phone, whatsapp } = saved.client;
 		return {
 			choice: saved.clientId,
-			picked: { id: saved.clientId, fullName, phone, address1: null, address2: null },
+			picked: { id: saved.clientId, fullName, phone, whatsapp, address1: null, address2: null },
 			clientName: fullName,
 			phone: formatPhone(phone),
+			whatsapp: whatsappOf(whatsapp),
 			eventDate,
 			validUntil,
 			address1: saved.address1 ?? '',
@@ -100,6 +109,7 @@
 			picked: null,
 			clientName: '',
 			phone: '',
+			whatsapp: '',
 			eventDate: '',
 			validUntil: options.validUntil,
 			address1: '',
@@ -118,6 +128,7 @@
 	let picked = $state(fields.picked);
 	let clientName = $state(fields.clientName);
 	let phone = $state(fields.phone);
+	let whatsapp = $state(fields.whatsapp);
 	let eventDate = $state(fields.eventDate);
 	let validUntil = $state(fields.validUntil);
 	let address1 = $state(fields.address1);
@@ -156,6 +167,7 @@
 			client_id: 'new' === choice ? null : (choice ?? undefined),
 			client_name: clientName,
 			client_phone: phone,
+			client_whatsapp: whatsapp,
 			event_date: eventDate,
 			valid_until: validUntil,
 			address_1: address1,
@@ -172,17 +184,22 @@
 		})
 	);
 
-	// Under the phone and the place, when picking a client changed them; typing there clears it.
+	// Under the phone, the username and the place, when picking a client changed them; typing there
+	// clears it.
 	let phoneNote = $state('');
+	let whatsappNote = $state('');
 	let addressNote = $state('');
 
-	// The client's phone and address fill the quote's, each with a note when it changed.
+	// The client's phone, username and address fill the quote's, each with a note when it changed.
 	function pick(candidate: ClientCandidate) {
 		clientName = candidate.fullName;
 		const note = `Cambió al escoger a ${candidate.fullName}.`;
 		const newPhone = formatPhone(candidate.phone);
 		phoneNote = newPhone === phone ? '' : note;
 		phone = newPhone;
+		const newWhatsapp = whatsappOf(candidate.whatsapp);
+		whatsappNote = newWhatsapp === whatsapp ? '' : note;
+		whatsapp = newWhatsapp;
 		addressNote = '';
 		if (null !== candidate.address1) {
 			const newAddress2 = candidate.address2 ?? '';
@@ -193,13 +210,15 @@
 		}
 	}
 
-	// A new client starts blank: name, phone and the place.
+	// A new client starts blank: name, phone, username and the place.
 	function pickNewClient() {
 		clientName = '';
 		phone = '';
+		whatsapp = '';
 		address1 = '';
 		address2 = '';
 		phoneNote = '';
+		whatsappNote = '';
 		addressNote = '';
 	}
 </script>
@@ -249,15 +268,17 @@
 			error={errorOf('client_id')}
 		/>
 
+		<Field label="Nombre" id="client-name" error={errorOf('client_name')}>
+			<Input
+				id="client-name"
+				placeholder="Ej. Postobón S.A."
+				aria-invalid={undefined !== errorOf('client_name')}
+				bind:value={clientName}
+			/>
+		</Field>
+
+		<!-- Two side by side even on a phone; with the name a third, they'd be cut off. -->
 		<div class="field-row">
-			<Field label="Nombre" id="client-name" error={errorOf('client_name')}>
-				<Input
-					id="client-name"
-					placeholder="Ej. Postobón S.A."
-					aria-invalid={undefined !== errorOf('client_name')}
-					bind:value={clientName}
-				/>
-			</Field>
 			<Field label="Teléfono" id="phone" error={errorOf('client_phone')} hint={phoneNote}>
 				<Input
 					id="phone"
@@ -269,6 +290,15 @@
 					oninput={() => (phoneNote = '')}
 				/>
 			</Field>
+			<WhatsappField
+				label="Usuario de WhatsApp"
+				bind:value={whatsapp}
+				exceptId={null}
+				checksOwner={'new' === choice}
+				note={whatsappNote}
+				error={errorOf('client_whatsapp')}
+				ontype={() => (whatsappNote = '')}
+			/>
 		</div>
 
 		<div class="field-row">

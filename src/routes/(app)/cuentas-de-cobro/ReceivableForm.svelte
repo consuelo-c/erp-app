@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { enhance } from '$app/forms';
+	import Badge from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import Choice from '$lib/components/Choice.svelte';
 	import Field from '$lib/components/Field.svelte';
@@ -9,12 +10,12 @@
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import { formatCivilDate } from '$lib/datetime';
 	import { formatIdNumber, formatPesos } from '$lib/format';
-	import { formatPhone } from '$lib/phone';
 	import type { ReceivableForm } from '$lib/server/services/receivables';
+	import { singleReach } from '$lib/whatsapp';
 
 	// Issuing and editing a cuenta de cobro: the client is read-only, and the total follows what's
-	// checked. A cuenta always keeps an order: the last one checked can't be unchecked. A partly paid
-	// order reads as such and can't be checked.
+	// checked. A cuenta always keeps an order: the last one checked can't be unchecked. An order
+	// cancelled once in the cuenta is listed, checked, and adds nothing to the total.
 	interface Props {
 		receivable: ReceivableForm;
 		hint: string;
@@ -25,13 +26,15 @@
 	let { receivable, hint, submitLabel, failure }: Props = $props();
 
 	const client = $derived(receivable.client);
+	// The phone, or the username when there's no phone.
+	const reach = $derived(singleReach(client.phone, client.whatsapp));
 	const paymentTermsError = $derived(failure?.errors.payment_terms);
 	const message = $derived(failure?.errors.orders ?? failure?.message);
 
 	let checkedIds = $derived(receivable.checkedOrderIds);
 	const total = $derived(
 		receivable.orders
-			.filter((order) => checkedIds.includes(order.id))
+			.filter((order) => checkedIds.includes(order.id) && !order.isCancelled)
 			.reduce((sum, order) => sum + order.orderTotal, 0)
 	);
 
@@ -52,7 +55,9 @@
 		{#if null !== client.documentId}
 			<p class="meta client-line">NIT/C.C. {formatIdNumber(client.documentId)}</p>
 		{/if}
-		<p class="meta client-line">{formatPhone(client.phone)}</p>
+		{#if reach}
+			<p class="meta client-line">{reach.text}</p>
+		{/if}
 	</div>
 
 	{#if null === client.documentId}
@@ -71,13 +76,17 @@
 						name="orders"
 						value={order.id}
 						bind:group={checkedIds}
-						disabled={isLastChecked || !order.canJoin}
+						disabled={isLastChecked}
 					/>
 					<span class="client__text">
-						<span class="client__name">Pedido #{order.id}</span>
+						<span class="client__name">
+							Pedido #{order.id}
+							{#if order.isCancelled}
+								<Badge tone="cancelled">Cancelado</Badge>
+							{/if}
+						</span>
 						<span class="meta">
 							{formatCivilDate(order.eventDate)} · {formatPesos(order.orderTotal)}
-							{#if !order.canJoin}· Con pago parcial{/if}
 						</span>
 					</span>
 				</label>

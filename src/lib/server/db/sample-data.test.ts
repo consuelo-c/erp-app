@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import { rolesSchema, type Actor } from '../actor';
 import { verifyPassword } from '../password';
-import { calculateOrderTotals } from '$lib/orders';
+import { calculateOrderTotals, receivableLine } from '$lib/orders';
 import { createMemoryD1 } from './memory-d1';
 import { openWeek } from '../services/payroll';
 import { movementSchema } from '../services/cash';
@@ -19,7 +19,7 @@ import {
 	pickupAttributesSchema
 } from '../services/orders';
 import { quoteAttributesSchema } from '../services/quotes';
-import { getReceivableDetail } from '../services/receivables';
+import { getReceivableDetail, getReceivablePrintout } from '../services/receivables';
 
 const sampleData = readFileSync('scripts/sample-data.sql', 'utf8');
 const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
@@ -83,7 +83,9 @@ test('loads clients, two transporters, a decorator, one of each newer service an
 		['Valentina Arango', '573158841203', '["WEDDING_PLANNER"]'],
 		['Mateo Londoño', '573176630492', '["BARTENDER","BARISTA"]'],
 		['Natalia Cardona', '573189952074', '["BARISTA"]'],
-		['Postobón S.A.', '576045765100', '[]']
+		['Postobón S.A.', '576045765100', '[]'],
+		['Mayra Castaño', null, '[]'],
+		['Daniela Ospina', '573014456720', '[]']
 	]);
 	for (const contact of contacts) {
 		expect(servicesSchema.safeParse(JSON.parse(String(contact.services))).success).toBe(true);
@@ -235,7 +237,7 @@ function parseOrder(order: Record<string, unknown>) {
 
 test("loads the Design Brief's #1043 and #1051, #1047 delivered, and enough for a third page", () => {
 	const orders = readAll('orders');
-	expect(orders).toHaveLength(48);
+	expect(orders).toHaveLength(52);
 	expect(new Set(orders.map((order) => order.status)).size).toBe(7);
 	expect(orders.every((order) => 0 === order.has_incident)).toBe(true);
 	expect(readAll('incidents')).toEqual([]);
@@ -257,6 +259,29 @@ test("loads the Design Brief's #1043 and #1051, #1047 delivered, and enough for 
 		method: 'EXTERNAL_CARRIER',
 		carrier: { name: 'Wilson Muñoz', phone: '573119085512' }
 	});
+});
+
+test('a client with only a WhatsApp username and one with both, each with an order that froze them', () => {
+	const contacts = database
+		.prepare(
+			'select id, phone, whatsapp, document_id from contacts where whatsapp is not null order by id'
+		)
+		.all();
+	expect(contacts.map(({ phone, whatsapp }) => [phone, whatsapp])).toEqual([
+		[null, 'MayC47'],
+		['573014456720', 'DaniOspina']
+	]);
+	expect(isAutoDocument(String(contacts[0].document_id))).toBe(true);
+	const clients = contacts.map((contact) => {
+		const order = database
+			.prepare('select client_attributes from orders where client_id = ?')
+			.get(Number(contact.id));
+		return clientAttributesSchema.parse(JSON.parse(String(order?.client_attributes)));
+	});
+	expect(clients).toEqual([
+		{ name: 'Mayra Castaño', phone: null, whatsapp: 'MayC47' },
+		{ name: 'Daniela Ospina', phone: '573014456720', whatsapp: 'DaniOspina' }
+	]);
 });
 
 test('every order passes the Zod schemas, points to real rows and follows the totals formula', () => {
@@ -455,12 +480,33 @@ test("#1072 is Postobón's too, COMPLETED and unbilled", () => {
 	expect(unbilled?.client_id).toBe(billed?.client_id);
 });
 
-test('the next cuenta after a second run is Nº 4795, with nothing duplicated', () => {
+test("Nº 4795 bills Postobón's cancelled #1073 alone, paid: «Anulada», and #1073 is owed it", async () => {
+	const db = openSeededD1();
+	const receivable = await getReceivableDetail(db, 4795, manager);
+	expect(receivable).toMatchObject({ total: 0, paid: 450000, balance: -450000, isVoid: true });
+	expect(receivable?.orders).toEqual([expect.objectContaining({ id: 1073, isCancelled: true })]);
+	const order = await getOrderDetail(db, 1073, manager);
+	expect(order).toMatchObject({ status: 'CANCELLED', receivableId: 4795, owedToClient: 450000 });
+});
+
+test("Nº 4796 bills Postobón's CONFIRMED #1074 alone, with its advance paid on the order", async () => {
+	const db = openSeededD1();
+	const receivable = await getReceivableDetail(db, 4796, manager);
+	expect(receivable).toMatchObject({ total: 635000, paid: 300000, balance: 335000, isVoid: false });
+	expect(receivable?.orders.map((order) => order.id)).toEqual([1074]);
+	const printout = await getReceivablePrintout(db, 4796, manager);
+	expect(printout).toMatchObject({ paid: 300000, balance: 335000 });
+	const order = await getOrderDetail(db, 1074, manager);
+	expect(order).toMatchObject({ status: 'CONFIRMED', receivableId: 4796 });
+	expect(order && receivableLine(order)).toBe('Entregar cuenta de cobro Nº 4796');
+});
+
+test('the next cuenta after a second run is Nº 4797, with nothing duplicated', () => {
 	database.exec(sampleData);
-	expect(readAll('receivables')).toHaveLength(1);
+	expect(readAll('receivables')).toHaveLength(3);
 	expect(
 		database.prepare("select seq from sqlite_sequence where name = 'receivables'").get()
-	).toEqual({ seq: 4794 });
+	).toEqual({ seq: 4796 });
 });
 
 test('a second run keeps an order taken out of Nº 4794', () => {

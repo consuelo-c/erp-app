@@ -96,21 +96,22 @@
 		<form class="form-stack" method="POST" use:enhance={lookup}>
 			<h1 class="landing__title">Consulte su pedido</h1>
 			<Field
-				label="Teléfono"
-				id="phone"
-				hint="El teléfono con el que hizo el pedido."
-				error={form?.errors?.phone}
+				label="Teléfono o usuario de WhatsApp"
+				id="phone_or_username"
+				hint="El teléfono o el usuario de WhatsApp con el que hizo el pedido."
+				error={form?.errors?.phone_or_username}
 			>
 				<Input
-					id="phone"
-					name="phone"
-					type="tel"
-					inputmode="tel"
-					autocomplete="tel"
-					placeholder="Ej. 310 442 8890"
-					value={form?.phone ?? ''}
+					id="phone_or_username"
+					name="phone_or_username"
+					type="text"
+					autocomplete="off"
+					autocapitalize="none"
+					spellcheck="false"
+					placeholder="Ej. 310 442 8890 o @mayc47"
+					value={form?.phone_or_username ?? ''}
 					required
-					aria-invalid={undefined !== form?.errors?.phone}
+					aria-invalid={undefined !== form?.errors?.phone_or_username}
 				/>
 			</Field>
 			<Field label="Fecha del evento" id="event_date" error={form?.errors?.event_date}>

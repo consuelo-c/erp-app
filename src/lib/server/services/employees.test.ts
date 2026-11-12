@@ -3,7 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import type { Actor, Role } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
-import { createContact } from './contacts';
+import { createContact, generateDocumentId, newClientStatements } from './contacts';
 import {
 	createEmployee,
 	employmentSchema,
@@ -53,11 +53,24 @@ function count(table: string) {
 
 const jorge = { phone: '300 771 2043', full_name: 'Jorge Iván Betancur', document_id: '71234567' };
 
+// Jorge as «Cliente nuevo» on the order form leaves him: an automatic document.
+async function newClient(): Promise<void> {
+	const client = {
+		phone: '573007712043',
+		whatsapp: null,
+		fullName: 'Jorge Betancur',
+		documentId: generateDocumentId()
+	};
+	await db.batch(newClientStatements(db, manager, client));
+}
+
 test('without a picked contact, the contact and the employee in one batch, each with its CREATED event', async () => {
 	const id = await hire();
 	expect(await getEmployee(db, id, manager)).toEqual({
 		id,
+		contactId: 1,
 		phone: '573152847710',
+		whatsapp: null,
 		fullName: 'Carlos Vélez',
 		idNumber: '71384902',
 		monthlySalary: 1423500,
@@ -76,12 +89,13 @@ test('without a picked contact, the contact and the employee in one batch, each 
 });
 
 test('a contact picked from the search is reused, its phone, name and ID number as typed', async () => {
-	const jorgeContact = { phone: jorge.phone, full_name: 'Jorge Betancur', email: 'jorge@b.co' };
-	await createContact(db, jorgeContact, manager);
+	await newClient();
+	database.prepare(`update contacts set attributes = '{"email":"jorge@b.co"}'`).run();
 	const candidate = {
 		id: 1,
 		fullName: 'Jorge Betancur',
 		phone: '573007712043',
+		whatsapp: null,
 		documentId: null,
 		isEmployee: false
 	};
@@ -116,14 +130,26 @@ test("a contact that's already another employee's is refused naming them", async
 });
 
 test('without a pick, a shared phone gets a contact of its own', async () => {
-	await createContact(db, { phone: carlos.phone, full_name: 'Bodega Central' }, manager);
+	const bodega = { phone: carlos.phone, full_name: 'Bodega Central', document_id: '900111222' };
+	await createContact(db, bodega, manager);
 	await hire();
 	expect(count('contacts')).toBe(2);
 	expect(database.prepare('select contact_id from employees').get()?.contact_id).toBe(2);
 });
 
+test('letters also find the username, without the @ and ignoring case', async () => {
+	const luz = { full_name: 'Mayra Castaño', document_id: '1040338912', whatsapp: 'LuzMarinaR' };
+	await createContact(db, luz, manager);
+	for (const search of ['luzma', '@LUZMA']) {
+		expect(await searchContactCandidates(db, search, manager)).toMatchObject([
+			{ fullName: 'Mayra Castaño', whatsapp: 'LuzMarinaR' }
+		]);
+	}
+	expect(await searchContactCandidates(db, '@luz.ma', manager)).toEqual([]);
+});
+
 test('the search needs three characters and never matches an automatic document', async () => {
-	await createContact(db, { phone: jorge.phone, full_name: 'Jorge Betancur' }, manager);
+	await newClient();
 	const automatic = String(database.prepare('select document_id from contacts').get()?.document_id);
 	expect(await searchContactCandidates(db, 'jo', manager)).toEqual([]);
 	expect(await searchContactCandidates(db, null, manager)).toEqual([]);
@@ -150,20 +176,52 @@ test('an ID number another contact has is refused naming that contact', async ()
 	expect(count('contacts')).toBe(1);
 });
 
-test('phone, name and ID number are required', async () => {
+test('name and ID number are required; the phone and the username are not', async () => {
 	const result = await createEmployee(
 		db,
 		{ ...carlos, phone: '', full_name: ' ', document_id: '' },
 		manager
 	);
-	expect(result).toMatchObject({
+	expect(result).toEqual({
 		ok: false,
+		message: expect.any(String),
 		errors: {
-			phone: 'Escribe el teléfono',
 			full_name: 'Escribe el nombre completo',
 			document_id: 'Escribe la cédula'
 		}
 	});
+	const id = await hire({ ...carlos, phone: '', whatsapp: '' });
+	expect(await getEmployee(db, id, manager)).toMatchObject({ phone: null, whatsapp: null });
+});
+
+test("the username is saved on the employee's contact, its change logged with before and after", async () => {
+	const id = await hire({ ...carlos, whatsapp: '@CarlosVelez' });
+	expect(await getEmployee(db, id, manager)).toMatchObject({ whatsapp: 'CarlosVelez' });
+	await updateEmployee(db, { ...carlos, id, whatsapp: 'wa.me/CVelez_' }, manager);
+	expect(await getEmployee(db, id, manager)).toMatchObject({ whatsapp: 'CVelez_' });
+	const edited = events().at(-1)!;
+	expect(edited).toMatchObject({ entity_type: 'CONTACT', action: 'EDITED' });
+	expect(JSON.parse(String(edited.before))).toEqual({ whatsapp: 'CarlosVelez' });
+	expect(JSON.parse(String(edited.after))).toEqual({ whatsapp: 'CVelez_' });
+});
+
+test('an invalid username is a field error on the employee form', async () => {
+	const result = await createEmployee(db, { ...carlos, whatsapp: 'may..c' }, manager);
+	expect(result).toMatchObject({
+		ok: false,
+		errors: { whatsapp: 'Escriba el usuario como aparece en WhatsApp, por ejemplo @mayc47.' }
+	});
+});
+
+test('picking a contact fills in its username', async () => {
+	await createContact(
+		db,
+		{ full_name: 'Jorge Betancur', whatsapp: '@JorgeB', document_id: '71234567' },
+		manager
+	);
+	expect(await searchContactCandidates(db, 'betan', manager)).toMatchObject([
+		{ phone: null, whatsapp: 'JorgeB' }
+	]);
 });
 
 test('editing name, phone or ID number changes the contact, logged as CONTACT EDITED', async () => {

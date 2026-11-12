@@ -2,7 +2,7 @@
 	import { resolve } from '$app/paths';
 	import { formatLongDay, getInstantDate } from '$lib/datetime';
 	import { formatPesos } from '$lib/format';
-	import { formatPhone } from '$lib/phone';
+	import { printedContact } from '$lib/whatsapp';
 	import HalfLetterPrintout from '../../../pedidos/HalfLetterPrintout.svelte';
 	import type { PageProps } from './$types';
 
@@ -13,6 +13,7 @@
 
 	const { quote, document, company } = $derived(data.printout);
 	const isTransportPending = $derived(null === quote.transportCost);
+	const contact = $derived(printedContact(quote.client.phone, quote.client.whatsapp));
 </script>
 
 {#snippet opening()}
@@ -26,7 +27,7 @@
 	<div class="print-group">
 		<div class="print-row"><span>Cliente</span><span>{quote.client.name}</span></div>
 		<div class="print-row">
-			<span>Teléfono</span><span>{formatPhone(quote.client.phone)}</span>
+			<span>{contact.label}</span><span>{contact.value}</span>
 		</div>
 		{#if document}
 			<div class="print-row"><span>NIT / C.C.</span><span>{document}</span></div>

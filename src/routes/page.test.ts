@@ -14,7 +14,8 @@ test('the landing shows the logo, an icon link to /login named Empleados, and th
 	expect(body).toContain('src="/banquetes-consuelo-c-logo.svg"');
 	expect(body).toMatch(/<a[^>]*href="\/login"[^>]*aria-label="Empleados"/);
 	expect(body).toContain('Consulte su pedido');
-	expect(body).toMatch(/<input[^>]*name="phone"[^>]*type="tel"/);
+	expect(body).toContain('Teléfono o usuario de WhatsApp');
+	expect(body).toMatch(/<input[^>]*name="phone_or_username"[^>]*type="text"/);
 	expect(body).toMatch(/<input[^>]*name="event_date"[^>]*type="date"[^>]*min="2026-10-21"/);
 	expect(body).toContain('Consultar');
 	expect(body).not.toContain('tel:');
@@ -34,7 +35,9 @@ test('two or more matches list below the form, each opening its page', () => {
 		{ id: 1043, status: 'CONFIRMED', token: 'a1' },
 		{ id: 1060, status: 'DELIVERED', token: 'b2' }
 	];
-	const body = landing({ form: { phone: '3104428890', event_date: '2026-10-31', matches } });
+	const body = landing({
+		form: { phone_or_username: '3104428890', event_date: '2026-10-31', matches }
+	});
 	expect(body).toMatch(/href="\/mi-pedido\/a1"[\s\S]*Pedido #1043 · Confirmado/);
 	expect(body).toMatch(/href="\/mi-pedido\/b2"[\s\S]*Pedido #1060 · Entregado/);
 	expect(body).toContain('value="3104428890"');

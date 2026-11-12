@@ -2,8 +2,8 @@
 	import { formatClockTime, formatLongDay, formatShortDay } from '$lib/datetime';
 	import { formatBalance, formatPesos } from '$lib/format';
 	import { readReceivableBalance } from '$lib/orders';
-	import { formatPhone } from '$lib/phone';
 	import type { OrderPrintout } from '$lib/server/services/orders';
+	import { printedContact } from '$lib/whatsapp';
 	import HalfLetterPrintout from './HalfLetterPrintout.svelte';
 
 	// The half-letter sheets the client signs on receiving the order: the client's data opens the
@@ -15,6 +15,7 @@
 	const delivery = $derived(order.delivery);
 	const pickup = $derived(order.pickup);
 	const receivable = $derived(readReceivableBalance(order));
+	const contact = $derived(printedContact(order.client.phone, order.client.whatsapp));
 	// The pickup address only when the products come back from somewhere else.
 	const isPickupElsewhere = $derived(
 		delivery.address_1 !== pickup.address_1 || delivery.address_2 !== pickup.address_2
@@ -37,7 +38,7 @@
 {#snippet opening()}
 	<div class="print-row"><span>Cliente</span><span>{order.client.name}</span></div>
 	<div class="print-row">
-		<span>Teléfono</span><span>{formatPhone(order.client.phone)}</span>
+		<span>{contact.label}</span><span>{contact.value}</span>
 	</div>
 	<div class="print-row">
 		<span>Dirección de entrega</span>

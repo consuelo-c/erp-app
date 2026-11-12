@@ -32,13 +32,13 @@
 		<p class="meta lead">Desde el pedido #{startingOrderId}</p>
 		<ReceivableForm
 			receivable={data.receivable}
-			hint="Los pedidos completados del cliente que no están en otra cuenta de cobro. Debe quedar al menos uno marcado."
+			hint="Los pedidos del cliente que no están cancelados ni en otra cuenta de cobro. Debe quedar al menos uno marcado."
 			submitLabel="Emitir cuenta de cobro"
 			failure={form}
 		/>
 	{:else}
 		<Notice tone="error">
-			La cuenta de cobro se emite desde un pedido completado que no esté en otra cuenta.
+			La cuenta de cobro se emite desde un pedido que no esté cancelado ni en otra cuenta.
 		</Notice>
 	{/if}
 </Screen>

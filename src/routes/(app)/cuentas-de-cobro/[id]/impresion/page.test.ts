@@ -30,11 +30,15 @@ const base: ReceivablePrintout = {
 	client: {
 		name: 'Postobón S.A.',
 		phone: '576045765100',
+		whatsapp: null,
 		documentId: '8909039395',
 		address: 'Calle 52 #47-42, Medellín'
 	},
 	orders: [orderOf(1043)],
 	total: 2000,
+	paid: 0,
+	balance: 2000,
+	isVoid: false,
 	company: {
 		COMPANY_NAME: 'Banquetes Consuelo C.',
 		COMPANY_ADDRESS: 'Calle 38a #79-18, Medellín, Colombia',
@@ -65,6 +69,20 @@ test('one order: its date and client, with no block heading and no «TOTAL A PAG
 	expect(body).not.toContain(' de 1<');
 });
 
+test('an «Anulada» cuenta prints its title so, with no order block, «Concepto» or total', () => {
+	const body = printout({ orders: [], total: 0, isVoid: true });
+	expect(sheetsOf(body)).toHaveLength(1);
+	expect(body).toContain('CUENTA DE COBRO Nº 4794 — ANULADA');
+	expect(body).not.toContain('print-block');
+	expect(body).not.toContain('Concepto:');
+	expect(body).not.toContain('TOTAL');
+	expect(body).toContain('Forma de pago:');
+});
+
+test('a cuenta that is not «Anulada» keeps its plain title', () => {
+	expect(printout()).not.toContain('ANULADA');
+});
+
 test('an automatic document prints no «NIT/C.C.» line', () => {
 	const body = printout({ client: { ...base.client, documentId: null } });
 	expect(body).not.toContain('NIT/C.C.');
@@ -78,11 +96,42 @@ test('two orders: each block headed by number, then «TOTAL A PAGAR»', () => {
 	expect(body).toMatch(/TOTAL A PAGAR<\/span><span[^>]*>\$4\.000/);
 });
 
-test('no advance, paid, balance or amount in words', () => {
+test('nothing paid prints as before: no «ABONOS», balance or amount in words', () => {
 	const body = printout();
-	for (const word of ['Anticipo', 'Pagado', 'Saldo', 'pesos']) {
+	for (const word of ['ABONOS', 'SALDO', 'Anticipo', 'Pagado', 'Saldo', 'pesos']) {
 		expect(body).not.toContain(word);
 	}
+});
+
+test('one order with an advance: «ABONOS» and «SALDO A PAGAR» follow its «TOTAL»', () => {
+	const body = printout({ paid: 500, balance: 1500 });
+	expect(body).toMatch(
+		/>TOTAL<\/span><span[^>]*>\$2\.000<[\s\S]*>ABONOS<\/span><span[^>]*>\$500<[\s\S]*>SALDO A PAGAR<\/span><span[^>]*>\$1\.500</
+	);
+	expect(body.match(/ABONOS/g)).toHaveLength(1);
+	expect(body).not.toContain('pesos');
+});
+
+test('several orders with a payment: the rows follow «TOTAL A PAGAR», not each order', () => {
+	const orders = [orderOf(1043), orderOf(1060)];
+	const body = printout({ orders, total: 4000, paid: 4500, balance: -500 });
+	expect(body).toMatch(
+		/TOTAL A PAGAR<\/span><span[^>]*>\$4\.000<[\s\S]*>ABONOS<\/span><span[^>]*>\$4\.500<[\s\S]*>SALDO A PAGAR<\/span><span[^>]*>−\$500</
+	);
+	expect(body.match(/ABONOS/g)).toHaveLength(1);
+});
+
+test("a single order's rows stay with its totals when the closing takes its own sheet", () => {
+	const sheets = sheetsOf(printout({ orders: [orderOf(1043, 13)], paid: 500, balance: 12500 }));
+	expect(sheets).toHaveLength(2);
+	expect(sheets[0]).toMatch(/SUBTOTAL[\s\S]*ABONOS[\s\S]*SALDO A PAGAR/);
+	expect(sheets[1]).not.toContain('ABONOS');
+});
+
+test('an «Anulada» cuenta with payments prints no totals, so no «ABONOS»', () => {
+	const body = printout({ orders: [], total: 0, paid: 450000, balance: -450000, isVoid: true });
+	expect(body).not.toContain('ABONOS');
+	expect(body).not.toContain('SALDO');
 });
 
 test('three orders of 15 lines: two numbered sheets, the closing only on the last', () => {
@@ -113,4 +162,15 @@ test("a single order's totals stay with its last line when the closing takes its
 	expect(sheets[0]).toContain('SUBTOTAL');
 	expect(sheets[1]).not.toContain('SUBTOTAL');
 	expect(sheets[1]).toContain('Bancolombia');
+});
+
+test('one contact line: the phone, the username without one, or a blank «Teléfono»', () => {
+	const both = printout({ client: { ...base.client, whatsapp: 'mayc47' } });
+	expect(both).toMatch(/>Teléfono<\/span><span[^>]*>604 576 5100</);
+	expect(both).not.toContain('WhatsApp');
+	const username = printout({ client: { ...base.client, phone: null, whatsapp: 'mayc47' } });
+	expect(username).toMatch(/>WhatsApp<\/span><span[^>]*>@mayc47</);
+	expect(username).not.toContain('Teléfono');
+	const neither = printout({ client: { ...base.client, phone: null } });
+	expect(neither).toMatch(/>Teléfono<\/span><span[^>]*><\/span>/);
 });

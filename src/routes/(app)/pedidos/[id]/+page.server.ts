@@ -20,15 +20,12 @@ const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
 const MANAGES_INCIDENTS = ['ADMIN', 'MANAGER'] as const;
 
 // What the order offers for its money: the payment entry's concepts, which hide «Registrar pago»
-// when empty. Only ADMIN and MANAGER open a cuenta de cobro, whose link everyone else reads as text,
-// or issue one from an order that can start it.
+// when empty, and whether the order can start a cuenta de cobro. Everyone who opens an order also
+// works cuentas de cobro, so its cuenta is always a link.
 async function getPaymentActions(db: D1Database, order: OrderDetail, actor: Actor) {
 	const paymentConcepts = offeredPaymentConcepts(order, actor);
-	if (!isAdminOrManager(actor)) {
-		return { paymentConcepts, canOpenReceivable: false, canIssueReceivable: false };
-	}
 	const form = await getReceivableIssueForm(db, order.id, actor);
-	return { paymentConcepts, canOpenReceivable: true, canIssueReceivable: null !== form };
+	return { paymentConcepts, canIssueReceivable: null !== form };
 }
 
 // «Novedades» only for ADMIN and MANAGER: null hides the section for everyone else.

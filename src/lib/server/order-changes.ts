@@ -6,6 +6,7 @@ import { formatCivilDate, formatClockTime } from '$lib/datetime';
 import { formatInteger, formatPesos } from '$lib/format';
 import { DELIVERY_METHOD_LABELS, RETURN_METHOD_LABELS } from '$lib/labels';
 import { formatPhone } from '$lib/phone';
+import { formatWhatsapp } from '$lib/whatsapp';
 import type {
 	Carrier,
 	ClientAttributes,
@@ -36,7 +37,8 @@ const carrier = orBlank((value: Carrier) => value.name);
 
 const CLIENT_FIELDS: Fields<ClientAttributes> = {
 	name: { label: 'Cliente', format: text },
-	phone: { label: 'Teléfono', format: orBlank(formatPhone) }
+	phone: { label: 'Teléfono', format: orBlank(formatPhone) },
+	whatsapp: { label: 'Usuario de WhatsApp', format: orBlank(formatWhatsapp) }
 };
 
 type Schedule = Pick<EditedFields, 'event_date' | 'delivery_date' | 'pickup_date' | 'rental_days'>;

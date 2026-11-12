@@ -5,9 +5,10 @@
 import { z } from 'zod';
 import { addDays, getTodaysDate, getWeekStart } from '$lib/datetime';
 import { formatPesos } from '$lib/format';
-import { normalizePhone } from '$lib/phone';
+import { INVALID_WHATSAPP } from '$lib/whatsapp';
 import {
 	calculateOrderTotals,
+	clientLockedMessage,
 	FEE_SOURCES,
 	isEditableStatus,
 	isLegalTransition,
@@ -39,7 +40,9 @@ import {
 	INVALID_PHONE,
 	listTransporters,
 	newClientStatements,
+	phoneSchema,
 	searchClause,
+	whatsappSchema,
 	type NewClient,
 	type Transporter
 } from './contacts';
@@ -80,9 +83,19 @@ const textSchema = z.string().min(1);
 const clockTimeSchema = z.iso.time({ precision: -1 });
 
 // SQLite validates nothing: each JSON is checked on write and on read. A new key is a code change.
-export const clientAttributesSchema = z.strictObject({ name: textSchema, phone: textSchema });
+// The phone and the WhatsApp username are each null when not given, and both keys are required.
+export const clientAttributesSchema = z.strictObject({
+	name: textSchema,
+	phone: textSchema.nullable(),
+	whatsapp: textSchema.nullable()
+});
 
-const carrierSchema = z.strictObject({ id: idSchema, name: textSchema, phone: textSchema });
+const carrierSchema = z.strictObject({
+	id: idSchema,
+	name: textSchema,
+	phone: textSchema.nullable(),
+	whatsapp: textSchema.nullable()
+});
 
 function tripSchema<Methods extends readonly [string, ...string[]]>(methods: Methods) {
 	return z
@@ -150,7 +163,7 @@ export const blankable = z
 	.nullish()
 	.transform((value) => value || null);
 
-// The service fills the carrier's name and phone, and the line's name and list price.
+// The service fills the carrier's name, phone and username, and the line's name and list price.
 function tripInputSchema<Methods extends readonly [string, ...string[]]>(
 	methods: Methods,
 	message: string
@@ -186,14 +199,15 @@ export const linesInputSchema = z
 
 /** The «Cliente» fields an order and a quote share. */
 export const clientInputShape = {
-	// Null is «Cliente nuevo»: a contact made from the phone and the name typed.
+	// Null is «Cliente nuevo»: a contact made from the name, the phone and the username typed.
 	client_id: z.number('Escoge el cliente').int().positive('Escoge el cliente').nullable(),
 	// The order's own snapshot of the name: it may say more than the contact does.
 	client_name: z
 		.string('Escribe el nombre del cliente')
 		.trim()
 		.min(1, 'Escribe el nombre del cliente'),
-	client_phone: z.string().optional()
+	client_phone: z.string().optional(),
+	client_whatsapp: z.string().optional()
 };
 
 // Any total sent along is ignored: the service works them out.
@@ -353,21 +367,31 @@ async function findRow(db: D1Database, id: number): Promise<OrderRow | null> {
 
 type ResolvedClient = { snapshot: ClientAttributes; newClient: NewClient | null };
 
-type ClientInput = Pick<OrderInput, 'client_id' | 'client_name' | 'client_phone'>;
+type ClientInput = Pick<
+	OrderInput,
+	'client_id' | 'client_name' | 'client_phone' | 'client_whatsapp'
+>;
 
-// «Cliente nuevo» is made from the phone typed, normalized, and the name typed.
+// «Cliente nuevo» is made from the name typed and the phone and username typed, normalized: each
+// optional, and refused only when typed and not valid.
 function newClient(order: ClientInput): ResolvedClient | Refusal {
-	const phone = normalizePhone(order.client_phone ?? '');
-	if (null === phone) {
+	const phone = phoneSchema.safeParse(order.client_phone);
+	if (!phone.success) {
 		return refusal('client_phone', INVALID_PHONE);
 	}
-	const client = { phone, fullName: order.client_name, documentId: generateDocumentId() };
-	return { snapshot: { name: order.client_name, phone }, newClient: client };
+	const whatsapp = whatsappSchema.safeParse(order.client_whatsapp);
+	if (!whatsapp.success) {
+		return refusal('client_whatsapp', INVALID_WHATSAPP);
+	}
+	const contact = { phone: phone.data, whatsapp: whatsapp.data };
+	const client = { ...contact, fullName: order.client_name, documentId: generateDocumentId() };
+	return { snapshot: { name: order.client_name, ...contact }, newClient: client };
 }
 
-// The order keeps the name typed and the phone it was taken with: renaming the contact, or
-// changing its phone, later changes nothing. No existing contact is ever written from here.
-// A quote takes its client the same way.
+// The order keeps the name typed and the phone and username it was taken with: renaming the
+// contact, or changing either, later changes nothing. Picking a contact takes its values, never
+// the typed ones. No existing contact is ever written from here. A quote takes its client the
+// same way.
 export async function resolveClient(
 	db: D1Database,
 	order: ClientInput,
@@ -380,13 +404,13 @@ export async function resolveClient(
 		return { snapshot: { ...current.client, name: order.client_name }, newClient: null };
 	}
 	const contact = await db
-		.prepare('select phone from contacts where id = ?')
+		.prepare('select phone, whatsapp from contacts where id = ?')
 		.bind(order.client_id)
-		.first<{ phone: string }>();
+		.first<{ phone: string | null; whatsapp: string | null }>();
 	if (null === contact) {
 		return refusal('client_id', 'Ese cliente no existe');
 	}
-	return { snapshot: { name: order.client_name, phone: contact.phone }, newClient: null };
+	return { snapshot: { name: order.client_name, ...contact }, newClient: null };
 }
 
 // A JSON key has no foreign key: the carrier must be a contact offering TRANSPORTER. One already
@@ -401,7 +425,7 @@ async function snapshotCarrier(
 	}
 	return db
 		.prepare(
-			`select id, full_name as name, phone from contacts where id = ?
+			`select id, full_name as name, phone, whatsapp from contacts where id = ?
 			and exists (select 1 from json_each(contacts.services) where value = 'TRANSPORTER')`
 		)
 		.bind(carrierId)
@@ -679,29 +703,100 @@ const NOT_EDITABLE: Refusal = {
 	errors: {}
 };
 
+/** The cuenta de cobro billing an order: its number, its client, and whether it bills other orders. */
+export type Billing = { receivableId: number; clientId: number; hasOtherOrders: boolean };
+
+async function findBilling(
+	db: D1Database,
+	{ id, receivable_id: receivableId }: Pick<OrderRow, 'id' | 'receivable_id'>
+): Promise<Billing | null> {
+	if (null === receivableId) {
+		return null;
+	}
+	const row = await db
+		.prepare(
+			`select client_id as clientId, exists (select 1 from orders
+			where receivable_id = receivables.id and id <> ?) as hasOtherOrders
+			from receivables where id = ?`
+		)
+		.bind(id, receivableId)
+		.first<{ clientId: number; hasOtherOrders: number }>();
+	return null === row ? null : { receivableId, ...row, hasOtherOrders: 1 === row.hasOtherOrders };
+}
+
+/** The order form's «Este pedido está en la cuenta de cobro Nº …» and «Cliente»'s lock, or null. */
+export async function getOrderBilling(
+	db: D1Database,
+	order: Pick<Order, 'id' | 'receivableId'>,
+	actor: Actor | null
+): Promise<Billing | null> {
+	requireRole(actor, TAKES_ORDERS);
+	return findBilling(db, { id: order.id, receivable_id: order.receivableId });
+}
+
+// A cuenta has one client: its only order's new client is the cuenta's, in the order's batch.
+// «Cliente nuevo»'s id comes from the same subquery as the order's, logged.
+function billingStatements(
+	db: D1Database,
+	actor: Actor,
+	{ billing, edit }: { billing: Billing; edit: ReturnType<typeof clientWrite> }
+): D1PreparedStatement[] {
+	const write = {
+		table: 'receivables',
+		entityType: 'RECEIVABLE',
+		actor,
+		id: billing.receivableId,
+		current: { client_id: billing.clientId }
+	};
+	if ('client_id' in edit.computed) {
+		const computed = { client_id: { ...edit.computed.client_id, isLogged: true } };
+		return auditedUpdate(db, { ...write, changes: {}, computed });
+	}
+	return auditedUpdate(db, { ...write, changes: { client_id: edit.values.client_id ?? null } });
+}
+
+// A changed client's cuenta, to change with it; refused when the cuenta bills other orders.
+async function clientChangeBilling(
+	db: D1Database,
+	row: OrderRow,
+	clientId: number | null
+): Promise<Billing | Refusal | null> {
+	const billing = clientId === row.client_id ? null : await findBilling(db, row);
+	return billing?.hasOtherOrders
+		? refusal('client_id', clientLockedMessage(billing.receivableId))
+		: billing;
+}
+
+type Edit = { row: OrderRow; resolved: ResolvedOrder; billing: Billing | null };
+
 // `order_items` and each JSON column are logged whole when anything in them changed.
 async function applyEdit(
 	db: D1Database,
 	actor: Actor,
-	{ row, resolved }: { row: OrderRow; resolved: ResolvedOrder }
+	{ row, resolved, billing }: Edit
 ): Promise<SaveResult> {
-	const { values, computed, clientStatements } = clientWrite(db, actor, resolved);
+	const edit = clientWrite(db, actor, resolved);
 	const statements = auditedUpdate(db, {
 		table: 'orders',
 		entityType: 'ORDER',
 		actor,
 		id: row.id,
 		current: row,
-		changes: values,
-		computed
+		changes: edit.values,
+		computed: edit.computed
 	});
+	const receivable = null === billing ? [] : billingStatements(db, actor, { billing, edit });
 	if (0 < statements.length) {
-		await db.batch([...clientStatements, ...statements]);
+		await db.batch([...edit.clientStatements, ...statements, ...receivable]);
 	}
 	return { ok: true, id: row.id };
 }
 
-/** The whole form, from CONFIRMED through DELIVERED. Lines already on it keep their frozen name and price. */
+/**
+ * The whole form, from CONFIRMED through DELIVERED. Lines already on it keep their frozen name and
+ * price. A billed order too: its cuenta reads it live. Its client changes only when it's the cuenta's
+ * only order, and then the cuenta's changes with it.
+ */
 export async function updateOrder(
 	db: D1Database,
 	input: unknown,
@@ -723,9 +818,13 @@ export async function updateOrder(
 	if (!isEditableStatus(row.status)) {
 		return NOT_EDITABLE;
 	}
+	const billing = await clientChangeBilling(db, row, parsed.data.client_id);
+	if (null !== billing && 'ok' in billing) {
+		return billing;
+	}
 	const current = toOrder(row);
 	const resolved = await resolveColumns(db, parsed.data, { current, frozenItems: current.items });
-	return 'ok' in resolved ? resolved : applyEdit(db, actor, { row, resolved });
+	return 'ok' in resolved ? resolved : applyEdit(db, actor, { row, resolved, billing });
 }
 
 const extensionInputSchema = z.object({ parent_order_id: z.coerce.number().int().positive() });
@@ -1188,7 +1287,7 @@ function deliveryClause(period: DeliveryPeriod): Clause | null {
 	return null === range ? null : { sql: 'delivery_date between ? and ?', params: range };
 }
 
-// Each filter in SQL, over the order's own snapshot: never the contact, whose name or phone may
+// Each filter in SQL, over the order's own snapshot: never the contact, whose name, phone or username may
 // have changed since.
 function listClauses(filters: OrderFilters): Clause[] {
 	const candidates: [unknown, Clause][] = [
@@ -1201,7 +1300,11 @@ function listClauses(filters: OrderFilters): Clause[] {
 	const search =
 		undefined === filters.text
 			? null
-			: searchClause(filters.text, FOLDED_NAME_SQL, "json_extract(client_attributes, '$.phone')");
+			: searchClause(filters.text, {
+					textSql: FOLDED_NAME_SQL,
+					phoneSql: "json_extract(client_attributes, '$.phone')",
+					whatsappSql: "json_extract(client_attributes, '$.whatsapp')"
+				});
 	return [...set, deliveryClause(filters.delivery), search].filter((clause) => null !== clause);
 }
 
@@ -1217,8 +1320,9 @@ export const RECEIVABLE_PAID_MOVEMENT_SQL = `((entity_type = 'ORDER'
 	and entity_id in (select id from orders where receivable_id = receivables.id))
 	or (entity_type = 'RECEIVABLE' and concept = 'INSTALLMENT' and entity_id = receivables.id))`;
 
+// A CANCELLED order stays in its cuenta but adds nothing to it; its payments still count as paid.
 export const RECEIVABLE_TOTAL_SQL = `coalesce((select sum(order_total) from orders
-	where receivable_id = receivables.id), 0)`;
+	where receivable_id = receivables.id and status <> 'CANCELLED'), 0)`;
 
 export const RECEIVABLE_PAID_SQL = `coalesce((select sum(amount) from cash_movements
 	where ${RECEIVABLE_PAID_MOVEMENT_SQL}), 0)`;
@@ -1293,13 +1397,16 @@ const DEPOSIT_HELD_SQL = `coalesce((select sum(amount) from cash_movements
 
 /**
  * The only rule for what a CANCELLED order owes its client, over `orders` in the caller's query: its
- * installments net of their refunds, plus the deposit held. A CANCELLATION_FEE isn't in it: a fee
- * kept from the payments already lowered it through its refund half. The company owes the client
- * when it's above 0.
+ * installments net of their refunds, plus the deposit held. A billed order's payments are its
+ * cuenta's, so it reads the cuenta's credit, `−receivable_balance`, in their place. A
+ * CANCELLATION_FEE isn't in it: a fee kept from the payments already lowered it through its refund
+ * half. The company owes the client when it's above 0.
  */
-export const OWED_TO_CLIENT_SQL = `coalesce((select sum(amount) from cash_movements
+export const OWED_TO_CLIENT_SQL = `iif(orders.receivable_id is null,
+	coalesce((select sum(amount) from cash_movements
 	where entity_type = 'ORDER' and entity_id = orders.id
-	and concept in ('INSTALLMENT', 'INSTALLMENT_REFUND')), 0) + ${DEPOSIT_HELD_SQL}`;
+	and concept in ('INSTALLMENT', 'INSTALLMENT_REFUND')), 0),
+	-${ORDER_RECEIVABLE_BALANCE_SQL}) + ${DEPOSIT_HELD_SQL}`;
 
 /** One of the order's movements, as its detail lists it. */
 export type OrderPayment = {
@@ -1648,8 +1755,12 @@ async function feeRetention(
 		const message = `Supera el depósito recibido (${formatPesos(depositHeld)}).`;
 		return { concept: 'DEPOSIT_REFUND', available: depositHeld, message };
 	}
+	// A billed order's payments are its cuenta's: the fee is kept up to the cuenta's credit.
 	const paid = owedToClient - depositHeld;
-	const message = `Supera lo pagado (${formatPesos(paid)}).`;
+	const message =
+		null === order.receivableId
+			? `Supera lo pagado (${formatPesos(paid)}).`
+			: `Supera el saldo a favor de la cuenta de cobro Nº ${order.receivableId} (${formatPesos(paid)}).`;
 	return { concept: 'INSTALLMENT_REFUND', available: paid, message };
 }
 

@@ -16,10 +16,19 @@
 		picked: ClientCandidate | null;
 		onpick: (candidate: ClientCandidate) => void;
 		onnew: () => void;
+		/** Why the client can't change: then only the one picked shows, read-only, with this note. */
+		lockedNote?: string;
 		error?: string;
 	}
 
-	let { choice = $bindable(), picked = $bindable(), onpick, onnew, error }: Props = $props();
+	let {
+		choice = $bindable(),
+		picked = $bindable(),
+		onpick,
+		onnew,
+		lockedNote = '',
+		error
+	}: Props = $props();
 
 	const SEARCH_ID = 'client-search';
 
@@ -96,17 +105,19 @@
 	}
 </script>
 
-<Field label="Buscar cliente" id={SEARCH_ID}>
-	<Input
-		id={SEARCH_ID}
-		type="search"
-		autocomplete="off"
-		placeholder="Buscar por nombre, teléfono o dirección"
-		bind:value={query}
-		oninput={searchClients}
-		onkeydown={keyInSearch}
-	/>
-</Field>
+{#if !lockedNote}
+	<Field label="Buscar cliente" id={SEARCH_ID}>
+		<Input
+			id={SEARCH_ID}
+			type="search"
+			autocomplete="off"
+			placeholder="Buscar por nombre, teléfono o dirección"
+			bind:value={query}
+			oninput={searchClients}
+			onkeydown={keyInSearch}
+		/>
+	</Field>
+{/if}
 
 <!-- With nothing searched, only the client picked, if any, and «Cliente nuevo». -->
 <Choice aria-label="Escoge el cliente" layout="none">
@@ -117,6 +128,7 @@
 					type="radio"
 					name="client"
 					checked={candidate.id === choice}
+					disabled={'' !== lockedNote}
 					onchange={() => pick(candidate)}
 					onkeydown={keyInCards}
 				/>
@@ -129,26 +141,35 @@
 				</span>
 			</label>
 		{/each}
-		<label class="client">
-			<input
-				type="radio"
-				name="client"
-				checked={'new' === choice}
-				onchange={pickNew}
-				onkeydown={keyInCards}
-			/>
-			<span class="client__text">
-				<span class="client__name">Cliente nuevo</span>
-				<span class="meta">Con el teléfono y el nombre que escribas</span>
-			</span>
-		</label>
+		{#if !lockedNote}
+			<label class="client">
+				<input
+					type="radio"
+					name="client"
+					checked={'new' === choice}
+					onchange={pickNew}
+					onkeydown={keyInCards}
+				/>
+				<span class="client__text">
+					<span class="client__name">Cliente nuevo</span>
+					<span class="meta">Con el teléfono y el nombre que escribas</span>
+				</span>
+			</label>
+		{/if}
 	</div>
+	{#if lockedNote}
+		<p class="note">{lockedNote}</p>
+	{/if}
 	{#if error}
 		<p class="field-error">{error}</p>
 	{/if}
 </Choice>
 
 <style>
+	.note {
+		margin-top: var(--space-3);
+	}
+
 	.field-error {
 		margin: var(--space-3) 0 0;
 		font-size: var(--text-xs);

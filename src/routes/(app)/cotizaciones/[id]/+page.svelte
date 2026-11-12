@@ -10,7 +10,7 @@
 	import { formatLongDay, getInstantDate } from '$lib/datetime';
 	import { formatPesos, formatShare } from '$lib/format';
 	import { QUOTE_STATE_LABELS } from '$lib/labels';
-	import { formatPhone } from '$lib/phone';
+	import ReachLines from '../../ReachLines.svelte';
 	import type { PageProps } from './$types';
 
 	// The order detail's order without its trips or its money: client, event, validity, notes,
@@ -86,21 +86,7 @@
 
 	<h2 class="section-title client">{quote.client.name}</h2>
 	<div class="reach">
-		<span>{formatPhone(quote.client.phone)}</span>
-		<IconButton
-			icon="phone"
-			size="lg"
-			label="Llamar a {quote.client.name}"
-			href="tel:+{quote.client.phone}"
-		/>
-		<IconButton
-			icon="whatsapp"
-			size="lg"
-			label="Escribir por WhatsApp a {quote.client.name}"
-			href="https://wa.me/{quote.client.phone}"
-			target="_blank"
-			rel="noopener"
-		/>
+		<ReachLines phone={quote.client.phone} whatsapp={quote.client.whatsapp} />
 	</div>
 
 	<h2 class="section-title">Evento</h2>
@@ -215,17 +201,8 @@
 		margin-bottom: var(--space-2);
 	}
 
-	/* 24px apart: each icon's 48px hit area overhangs its glyph by 11px on either side. */
 	.reach {
-		display: flex;
-		gap: var(--space-12);
-		align-items: center;
 		margin-bottom: var(--space-11);
-		color: var(--link);
-	}
-
-	.reach > span {
-		color: var(--text-body);
 	}
 
 	.place {
