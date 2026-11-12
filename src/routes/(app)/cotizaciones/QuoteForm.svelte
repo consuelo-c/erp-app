@@ -220,149 +220,155 @@
 	<input type="hidden" name="quote" value={payload} />
 
 	{#if form}
-		<Notice tone="error">{form.message}</Notice>
+		<div class="quote__notice"><Notice tone="error">{form.message}</Notice></div>
 	{/if}
 
 	{#if copy}
 		{@const id = String(copy.source.id)}
-		<Notice tone="info">
-			{#if 'ORDER' === copy.source.kind}
-				Desde el pedido
-				<a href={resolve('/(app)/pedidos/[id]', { id })}>#{id}</a>
-			{:else}
-				Copia de la cotización
-				<a href={resolve('/(app)/cotizaciones/[id]', { id })}>#{id}</a>
-			{/if}
-			a los precios de hoy: el cliente, el lugar, los días, el descuento, el transporte, las notas y los
-			productos con sus cantidades. La fecha del evento queda vacía y la vigencia empieza de nuevo.
-		</Notice>
-	{/if}
-
-	<ClientSearch
-		bind:choice
-		bind:picked
-		onpick={pick}
-		onnew={pickNewClient}
-		error={errorOf('client_id')}
-	/>
-
-	<div class="field-row">
-		<Field label="Nombre" id="client-name" error={errorOf('client_name')}>
-			<Input
-				id="client-name"
-				placeholder="Ej. Postobón S.A."
-				aria-invalid={undefined !== errorOf('client_name')}
-				bind:value={clientName}
-			/>
-		</Field>
-		<Field label="Teléfono" id="phone" error={errorOf('client_phone')} hint={phoneNote}>
-			<Input
-				id="phone"
-				inputmode="tel"
-				autocomplete="off"
-				placeholder="310 442 8890"
-				aria-invalid={undefined !== errorOf('client_phone')}
-				bind:value={phone}
-				oninput={() => (phoneNote = '')}
-			/>
-		</Field>
-	</div>
-
-	<div class="field-row">
-		<Field label="Fecha del evento (opcional)" id="event-date" error={errorOf('event_date')}>
-			<Input
-				id="event-date"
-				type="date"
-				aria-invalid={undefined !== errorOf('event_date')}
-				bind:value={eventDate}
-			/>
-		</Field>
-		<Field
-			label="Válida hasta"
-			id="valid-until"
-			error={errorOf('valid_until')}
-			hint={quote
-				? ''
-				: `Empieza en hoy más ${options.validityDays} días, la vigencia de Configuración.`}
-		>
-			<Input
-				id="valid-until"
-				type="date"
-				required
-				aria-invalid={undefined !== errorOf('valid_until')}
-				bind:value={validUntil}
-			/>
-		</Field>
-	</div>
-
-	<Field
-		label="Lugar del evento (opcional)"
-		id="address"
-		error={errorOf('address_1')}
-		hint={addressNote}
-	>
-		<div class="address" oninput={() => (addressNote = '')}>
-			<Input
-				id="address"
-				placeholder="Ej. Hacienda Fizebad, km 38 vía Las Palmas"
-				aria-invalid={undefined !== errorOf('address_1')}
-				bind:value={address1}
-			/>
-			<Input
-				aria-label="Lugar del evento, segunda línea"
-				placeholder="Ej. Salón principal (opcional)"
-				bind:value={address2}
-			/>
+		<div class="quote__notice">
+			<Notice tone="info">
+				{#if 'ORDER' === copy.source.kind}
+					Desde el pedido
+					<a href={resolve('/(app)/pedidos/[id]', { id })}>#{id}</a>
+				{:else}
+					Copia de la cotización
+					<a href={resolve('/(app)/cotizaciones/[id]', { id })}>#{id}</a>
+				{/if}
+				a los precios de hoy: el cliente, el lugar, los días, el descuento, el transporte, las notas y
+				los productos con sus cantidades. La fecha del evento queda vacía y la vigencia empieza de nuevo.
+			</Notice>
 		</div>
-	</Field>
+	{/if}
 
-	<div class="field--narrow">
-		<Field label="Días cobrados" id="rental-days" error={errorOf('rental_days')}>
-			<Input
-				id="rental-days"
-				inputmode="numeric"
-				aria-invalid={undefined !== errorOf('rental_days')}
-				bind:value={rentalDays}
-			/>
+	<div class="quote__main">
+		<ClientSearch
+			bind:choice
+			bind:picked
+			onpick={pick}
+			onnew={pickNewClient}
+			error={errorOf('client_id')}
+		/>
+
+		<div class="field-row">
+			<Field label="Nombre" id="client-name" error={errorOf('client_name')}>
+				<Input
+					id="client-name"
+					placeholder="Ej. Postobón S.A."
+					aria-invalid={undefined !== errorOf('client_name')}
+					bind:value={clientName}
+				/>
+			</Field>
+			<Field label="Teléfono" id="phone" error={errorOf('client_phone')} hint={phoneNote}>
+				<Input
+					id="phone"
+					inputmode="tel"
+					autocomplete="off"
+					placeholder="310 442 8890"
+					aria-invalid={undefined !== errorOf('client_phone')}
+					bind:value={phone}
+					oninput={() => (phoneNote = '')}
+				/>
+			</Field>
+		</div>
+
+		<div class="field-row">
+			<Field label="Fecha del evento (opcional)" id="event-date" error={errorOf('event_date')}>
+				<Input
+					id="event-date"
+					type="date"
+					aria-invalid={undefined !== errorOf('event_date')}
+					bind:value={eventDate}
+				/>
+			</Field>
+			<Field
+				label="Válida hasta"
+				id="valid-until"
+				error={errorOf('valid_until')}
+				hint={quote
+					? ''
+					: `Empieza en hoy más ${options.validityDays} días, la vigencia de Configuración.`}
+			>
+				<Input
+					id="valid-until"
+					type="date"
+					required
+					aria-invalid={undefined !== errorOf('valid_until')}
+					bind:value={validUntil}
+				/>
+			</Field>
+		</div>
+
+		<Field
+			label="Lugar del evento (opcional)"
+			id="address"
+			error={errorOf('address_1')}
+			hint={addressNote}
+		>
+			<div class="address" oninput={() => (addressNote = '')}>
+				<Input
+					id="address"
+					placeholder="Ej. Hacienda Fizebad, km 38 vía Las Palmas"
+					aria-invalid={undefined !== errorOf('address_1')}
+					bind:value={address1}
+				/>
+				<Input
+					aria-label="Lugar del evento, segunda línea"
+					placeholder="Ej. Salón principal (opcional)"
+					bind:value={address2}
+				/>
+			</div>
+		</Field>
+
+		<div class="field--narrow">
+			<Field label="Días cobrados" id="rental-days" error={errorOf('rental_days')}>
+				<Input
+					id="rental-days"
+					inputmode="numeric"
+					aria-invalid={undefined !== errorOf('rental_days')}
+					bind:value={rentalDays}
+				/>
+			</Field>
+		</div>
+
+		{#if copy && describeRemovedProducts(copy.removed)}
+			<Notice tone="info">{describeRemovedProducts(copy.removed)}</Notice>
+		{/if}
+
+		<OrderLines
+			bind:lines
+			products={options.products}
+			rentalDays={rentalDayCount}
+			{errorOf}
+			field="quote_items"
+		/>
+
+		<Field label="Notas (opcional)" id="notes" hint="Salen impresas en la cotización.">
+			<textarea
+				class="notes"
+				id="notes"
+				rows="3"
+				placeholder="Ej. Precios incluyen montaje y desmontaje"
+				bind:value={notes}></textarea>
 		</Field>
 	</div>
 
-	{#if copy && describeRemovedProducts(copy.removed)}
-		<Notice tone="info">{describeRemovedProducts(copy.removed)}</Notice>
-	{/if}
+	<div class="quote__side">
+		<OrderTotals
+			bind:discount
+			bind:transport
+			itemsTotal={totals.itemsTotal}
+			total={totals.orderTotal}
+			{errorOf}
+			totalLabel={isTransportPending ? 'Total sin transporte' : 'Total'}
+			transportPlaceholder="Por acordar"
+			transportHint={isTransportPending
+				? 'Vacío queda por acordar. Si no se cobra, escribe 0.'
+				: 'Si lo borras, queda por acordar.'}
+		/>
 
-	<OrderLines
-		bind:lines
-		products={options.products}
-		rentalDays={rentalDayCount}
-		{errorOf}
-		field="quote_items"
-	/>
-
-	<OrderTotals
-		bind:discount
-		bind:transport
-		itemsTotal={totals.itemsTotal}
-		total={totals.orderTotal}
-		{errorOf}
-		totalLabel={isTransportPending ? 'Total sin transporte' : 'Total'}
-		transportPlaceholder="Por acordar"
-		transportHint={isTransportPending
-			? 'Vacío queda por acordar. Si no se cobra, escribe 0.'
-			: 'Si lo borras, queda por acordar.'}
-	/>
-
-	<Field label="Notas (opcional)" id="notes" hint="Salen impresas en la cotización.">
-		<textarea
-			class="notes"
-			id="notes"
-			rows="3"
-			placeholder="Ej. Precios incluyen montaje y desmontaje"
-			bind:value={notes}></textarea>
-	</Field>
-
-	<div class="quote__save">
-		<Button type="submit" disabled={isSaving}>Guardar cotización</Button>
+		<div class="quote__save">
+			<Button type="submit" disabled={isSaving}>Guardar cotización</Button>
+		</div>
 	</div>
 </form>
 
@@ -372,8 +378,19 @@
 	.quote {
 		display: flex;
 		flex-direction: column;
+		gap: var(--space-11);
+	}
+
+	.quote__main,
+	.quote__side {
+		display: flex;
+		flex-direction: column;
 		gap: var(--space-9);
-		max-width: 760px;
+		min-width: 0;
+	}
+
+	.quote__notice {
+		margin-bottom: calc(-1 * var(--space-4));
 	}
 
 	.quote__save {
@@ -416,5 +433,27 @@
 
 	.notes:focus-visible {
 		border-color: var(--border-strong);
+	}
+
+	/* A desktop: as the order's, the quote on the left, its money and saving on the right. */
+	@container (width >= 1280px) {
+		.quote {
+			display: grid;
+			grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
+			column-gap: var(--space-12);
+			align-items: start;
+		}
+
+		.quote__notice {
+			grid-column: 1 / -1;
+			margin-bottom: 0;
+		}
+
+		.quote__side {
+			position: sticky;
+			top: 0;
+			padding-left: var(--space-12);
+			border-left: var(--border-w-hair) solid var(--border-default);
+		}
 	}
 </style>
