@@ -43,13 +43,13 @@ const platform = () => ({
 });
 
 /** An order in `status` with its event on `eventDate`, and its client link's token. */
-async function create(status: string, eventDate = '2026-10-31'): Promise<string> {
+async function create(status: string, eventDate = '2026-10-31', clientId = 1): Promise<string> {
 	const trip = { time: '14:00', address_1: 'Cra 43A #18-95', address_2: null };
 	const result = await createOrder(
 		db,
 		{
-			client_id: 1,
-			client_name: 'Luz Marina Restrepo',
+			client_id: clientId,
+			client_name: 1 === clientId ? 'Luz Marina Restrepo' : 'Mayra Castaño',
 			event_date: eventDate,
 			delivery_date: eventDate,
 			pickup_date: eventDate,
@@ -79,7 +79,8 @@ async function submit(fields: Record<string, string>) {
 	return actions.default(event as never);
 }
 
-const lookup = (phone: string, eventDate: string) => submit({ phone, event_date: eventDate });
+const lookup = (typed: string, eventDate: string) =>
+	submit({ phone_or_username: typed, event_date: eventDate });
 
 test('over the limit: a 429, and neither siteverify nor D1 is called', async () => {
 	limit.mockResolvedValueOnce({ success: false });
@@ -114,7 +115,7 @@ test('a missing token, a refusal or no answer: rejected, and no query', async ()
 		data: { message: 'No pudimos verificar la consulta. Intente de nuevo.' }
 	};
 	const missing = await submit({
-		phone: '3104428890',
+		phone_or_username: '3104428890',
 		event_date: '2026-10-31',
 		'cf-turnstile-response': ''
 	});
@@ -127,11 +128,38 @@ test('a missing token, a refusal or no answer: rejected, and no query', async ()
 	expect(prepare).not.toHaveBeenCalled();
 });
 
-test('a phone the helper rejects is a field error', async () => {
-	expect(await lookup('310 44', '2026-10-31')).toMatchObject({
-		status: 400,
-		data: { errors: { phone: 'Escriba el teléfono con el que hizo el pedido' }, phone: '310 44' }
-	});
+test('text both helpers reject is a field error, and no query', async () => {
+	const prepare = vi.spyOn(db, 'prepare');
+	for (const typed of ['310 44', '@ma']) {
+		expect(await lookup(typed, '2026-10-31')).toMatchObject({
+			status: 400,
+			data: {
+				errors: {
+					phone_or_username:
+						'Escriba el teléfono o el usuario de WhatsApp con el que hizo el pedido.'
+				},
+				phone_or_username: typed
+			}
+		});
+	}
+	expect(prepare).not.toHaveBeenCalled();
+});
+
+test("a client with only a username finds the order with it; a phone still finds Luz Marina's", async () => {
+	database.exec(
+		`insert into contacts (phone, whatsapp, full_name, document_id, services, created_at, created_by, updated_at, updated_by) values (null, 'MayC47', 'Mayra Castaño', '@9TNB5WQE', '[]', ${AUDIT})`
+	);
+	const luz = await create('CONFIRMED');
+	const mayra = await create('CONFIRMED', '2026-10-31', 2);
+	for (const [typed, token] of [
+		['@mayc47', mayra],
+		['310 442 8890', luz]
+	]) {
+		await expect(lookup(typed, '2026-10-31')).rejects.toSatisfy(
+			(thrown) =>
+				isRedirect(thrown) && 303 === thrown.status && `/mi-pedido/${token}` === thrown.location
+		);
+	}
 });
 
 test('one match opens its page; two or more list, by id', async () => {
@@ -149,18 +177,22 @@ test('one match opens its page; two or more list, by id', async () => {
 	});
 });
 
-test('every miss is the same answer: wrong phone, wrong date, an event too old', async () => {
+test('every miss is the same answer: wrong phone or username, wrong date, an event too old', async () => {
+	database.exec("update contacts set whatsapp = 'LuzMarina10'");
 	await create('CONFIRMED');
 	await create('COMPLETED', '2026-09-27');
 	const misses = await Promise.all([
 		lookup('310 442 8891', '2026-10-31'),
+		lookup('@LuzMarina11', '2026-10-31'),
 		lookup('310 442 8890', '2026-11-01'),
-		lookup('310 442 8890', '2026-09-27')
+		lookup('@luzmarina10', '2026-11-01'),
+		lookup('310 442 8890', '2026-09-27'),
+		lookup('@luzmarina10', '2026-09-27')
 	]);
 	for (const miss of misses) {
 		expect(miss).toMatchObject({
 			status: 404,
-			data: { message: 'No encontramos un pedido con ese teléfono y esa fecha.' }
+			data: { message: 'No encontramos un pedido con esos datos y esa fecha.' }
 		});
 	}
 });

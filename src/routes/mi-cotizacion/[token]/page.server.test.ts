@@ -119,6 +119,38 @@ test('a valid quote shows, with no session, built for the client: no phone, docu
 	);
 });
 
+test("the load sends neither the client's phone nor username: its keys, listed", async () => {
+	const token = insertQuote();
+	database.exec(
+		`update quotes set client_attributes = json_set(client_attributes, '$.whatsapp', 'PostobonEventos');
+		update contacts set whatsapp = 'PostobonEventos'`
+	);
+	const data = await open(token);
+	expect(Object.keys(data).sort()).toEqual(['changesHref', 'confirmHref', 'quote', 'terms']);
+	expect(Object.keys(data.quote).sort()).toEqual(
+		[
+			'id',
+			'createdOn',
+			'validUntil',
+			'clientName',
+			'eventDate',
+			'address1',
+			'address2',
+			'rentalDays',
+			'items',
+			'itemsTotal',
+			'discount',
+			'transportCost',
+			'quoteTotal',
+			'notes'
+		].sort()
+	);
+	const shown = JSON.stringify(data.quote).toLowerCase();
+	for (const hidden of ['576045765100', 'postoboneventos', 'whatsapp', 'phone']) {
+		expect(shown).not.toContain(hidden);
+	}
+});
+
 test('«por acordar» transport: no price, and the total leaves it out', async () => {
 	const data = await open(insertQuote({ transportCost: null }));
 	expect(data.quote).toMatchObject({ transportCost: null, quoteTotal: 400000 });

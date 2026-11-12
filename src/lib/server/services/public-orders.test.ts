@@ -159,6 +159,7 @@ test('never the carrier, trip dates, times, notes, list prices, phone, incident 
 		'client_id',
 		'clientId',
 		'phone',
+		'whatsapp',
 		'has_incident',
 		'hasIncident',
 		'time',
@@ -237,9 +238,9 @@ test('the terms as stored, empty while there are none', async () => {
 });
 
 /** The tokens the lookup finds, on Wednesday 28 October 2026 in Bogotá. */
-async function lookup(phone: string, eventDate: string): Promise<string[]> {
+async function lookup(typed: string, eventDate: string): Promise<string[]> {
 	vi.setSystemTime(new Date('2026-10-28T15:00:00Z'));
-	const result = await lookupOrders(db, { phone, event_date: eventDate });
+	const result = await lookupOrders(db, { phone_or_username: typed, event_date: eventDate });
 	if (!result.ok) {
 		throw new Error(JSON.stringify(result.errors));
 	}
@@ -253,6 +254,39 @@ test('the phone however it is typed, compared whole against the order, on its ev
 	}
 	expect(await lookup('310 442 8890', '2026-10-30')).toEqual([]);
 	expect(await lookup('310 442 8891', '2026-10-31')).toEqual([]);
+});
+
+test("a username, with or without its @ and in any case, against the order's own", async () => {
+	database
+		.prepare(
+			`insert into contacts (phone, whatsapp, full_name, document_id, services, created_at, created_by, updated_at, updated_by) values (null, 'MayC47', 'Mayra Castaño', '@9TNB5WQE', '[]', ${AUDIT})`
+		)
+		.run();
+	const token = await create('CONFIRMED', {
+		client_id: 3,
+		client_name: 'Mayra Castaño',
+		event_date: '2026-10-31'
+	});
+	for (const typed of ['@mayc47', 'MayC47', 'MAYC47', ' wa.me/mayc47 ']) {
+		expect(await lookup(typed, '2026-10-31')).toEqual([token]);
+	}
+	expect(await lookup('@mayc47', '2026-10-30')).toEqual([]);
+	expect(await lookup('@mayc48', '2026-10-31')).toEqual([]);
+	database.prepare("update contacts set whatsapp = 'OtraMayra' where id = 3").run();
+	expect(await lookup('@mayc47', '2026-10-31')).toEqual([token]);
+	expect(await lookup('@OtraMayra', '2026-10-31')).toEqual([]);
+});
+
+test('a username finds nothing by phone, and a phone nothing by username', async () => {
+	await create('CONFIRMED', { event_date: '2026-10-31' });
+	database
+		.prepare(
+			"update orders set client_attributes = json_set(client_attributes, '$.whatsapp', 'luz310')"
+		)
+		.run();
+	expect((await lookup('@luz310', '2026-10-31')).length).toBe(1);
+	expect((await lookup('310 442 8890', '2026-10-31')).length).toBe(1);
+	expect(await lookup('@luzmarina', '2026-10-31')).toEqual([]);
 });
 
 test("the order's own phone, never the contact's", async () => {
@@ -289,7 +323,10 @@ test('every status: a cancelled order is found', async () => {
 test('two orders on the same phone and event date, both by id', async () => {
 	const first = await create('DELIVERED', { event_date: '2026-10-31' });
 	const second = await create('CONFIRMED', { event_date: '2026-10-31' });
-	const result = await lookupOrders(db, { phone: '3104428890', event_date: '2026-10-31' });
+	const result = await lookupOrders(db, {
+		phone_or_username: '3104428890',
+		event_date: '2026-10-31'
+	});
 	expect(result).toEqual({
 		ok: true,
 		matches: [
@@ -299,13 +336,17 @@ test('two orders on the same phone and event date, both by id', async () => {
 	});
 });
 
-test('a phone the helper rejects is a field error and runs no query', async () => {
+test('text both helpers reject is a field error and runs no query', async () => {
 	const prepare = vi.spyOn(db, 'prepare');
-	expect(await lookupOrders(db, { phone: '310 44', event_date: '2026-10-31' })).toEqual({
-		ok: false,
-		errors: { phone: 'Escriba el teléfono con el que hizo el pedido' }
-	});
-	expect(await lookupOrders(db, { phone: '3104428890', event_date: '' })).toEqual({
+	for (const typed of ['310 44', '@ma', 'www.mayc47', 'luz marina', '']) {
+		expect(await lookupOrders(db, { phone_or_username: typed, event_date: '2026-10-31' })).toEqual({
+			ok: false,
+			errors: {
+				phone_or_username: 'Escriba el teléfono o el usuario de WhatsApp con el que hizo el pedido.'
+			}
+		});
+	}
+	expect(await lookupOrders(db, { phone_or_username: '3104428890', event_date: '' })).toEqual({
 		ok: false,
 		errors: { event_date: 'Escoja la fecha del evento' }
 	});

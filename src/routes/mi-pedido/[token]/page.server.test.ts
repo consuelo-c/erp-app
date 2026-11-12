@@ -103,6 +103,38 @@ test('an unknown token or an id: the same 404, with a session or without', async
 	}
 });
 
+test("the load sends neither the client's phone nor username: its keys, listed", async () => {
+	database.exec("update contacts set whatsapp = 'LuzMarina10' where id = 1");
+	const token = await create('CONFIRMED');
+	const data = (await open(token)) as { order: object; terms: string };
+	expect(Object.keys(data)).toEqual(['order', 'terms']);
+	expect(Object.keys(data.order).sort()).toEqual(
+		[
+			'id',
+			'status',
+			'clientName',
+			'eventDate',
+			'rentalDays',
+			'delivery',
+			'pickup',
+			'items',
+			'itemsTotal',
+			'discount',
+			'transportCost',
+			'orderTotal',
+			'depositAmount',
+			'paid',
+			'balanceDue',
+			'receivableId',
+			'receivableBalance'
+		].sort()
+	);
+	const shown = JSON.stringify(data).toLowerCase();
+	for (const hidden of ['3104428890', 'luzmarina10', 'whatsapp', 'phone']) {
+		expect(shown).not.toContain(hidden);
+	}
+});
+
 test('with no session, the page, writing nothing: events and sessions unchanged', async () => {
 	const token = await create('CONFIRMED');
 	const count = (table: string) =>

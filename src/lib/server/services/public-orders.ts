@@ -1,9 +1,10 @@
-// The client's side of an order, with no session: the lookup by phone and event date, and its page
+// The client's side of an order, with no session: the lookup by phone or WhatsApp username and event date, and its page
 // through `public_token`, never the order's id; a quote's page too, only through its own token. No actor and no writes: a client isn't a login, and reads aren't logged.
 
 import { z } from 'zod';
 import { addDays, getInstantDate, getTodaysDate } from '$lib/datetime';
 import { normalizePhone } from '$lib/phone';
+import { normalizeWhatsapp } from '$lib/whatsapp';
 import {
 	BALANCE_DUE_SQL,
 	clientAttributesSchema,
@@ -237,17 +238,20 @@ export async function getWhatsAppHref(db: D1Database, text: string): Promise<str
 	return '' === number ? null : `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
 }
 
+const UNKNOWN_REACH = 'Escriba el teléfono o el usuario de WhatsApp con el que hizo el pedido.';
+
+/** What the client typed, as the order stores it: a username when it has a letter, else a phone. */
+type Reach = { column: '$.phone' | '$.whatsapp'; value: string };
+
 const lookupSchema = z.object({
-	phone: z.string().transform((typed, context) => {
-		const phone = normalizePhone(typed);
-		if (null === phone) {
-			context.addIssue({
-				code: 'custom',
-				message: 'Escriba el teléfono con el que hizo el pedido'
-			});
+	phone_or_username: z.string().transform((typed, context): Reach => {
+		const isUsername = /[a-z]/i.test(typed);
+		const value = isUsername ? normalizeWhatsapp(typed) : normalizePhone(typed);
+		if (null === value) {
+			context.addIssue({ code: 'custom', message: UNKNOWN_REACH });
 			return z.NEVER;
 		}
-		return phone;
+		return { column: isUsername ? '$.whatsapp' : '$.phone', value };
 	}),
 	event_date: z.iso.date('Escoja la fecha del evento')
 });
@@ -257,12 +261,13 @@ export type LookupMatch = { id: number; status: OrderStatus; token: string };
 
 export type LookupResult =
 	| { ok: true; matches: LookupMatch[] }
-	| { ok: false; errors: Partial<Record<'phone' | 'event_date', string>> };
+	| { ok: false; errors: Partial<Record<'phone_or_username' | 'event_date', string>> };
 
 /**
- * The orders of a phone and an event date, by `id`: the phone compared whole against the order's
- * own snapshot, never `contacts.phone`; every status; an event no older than the
- * window. No match is the one miss, whatever failed; a field the client mistyped runs no query.
+ * The orders of a phone or a WhatsApp username and an event date, by `id`: compared against the
+ * order's own snapshot, never the contact; the phone whole, the username ignoring case; every
+ * status; an event no older than the window. No match is the one miss, whatever failed; a field
+ * the client mistyped runs no query.
  */
 export async function lookupOrders(db: D1Database, input: unknown): Promise<LookupResult> {
 	const parsed = lookupSchema.safeParse(input);
@@ -272,13 +277,14 @@ export async function lookupOrders(db: D1Database, input: unknown): Promise<Look
 		);
 		return { ok: false, errors };
 	}
+	const { column, value } = parsed.data.phone_or_username;
 	const { results } = await db
 		.prepare(
 			`select id, status, public_token as token from orders
 			where event_date = ? and event_date >= ?
-			and json_extract(client_attributes, '$.phone') = ? order by id`
+			and lower(json_extract(client_attributes, ?)) = lower(?) order by id`
 		)
-		.bind(parsed.data.event_date, getLookupWindowStart(), parsed.data.phone)
+		.bind(parsed.data.event_date, getLookupWindowStart(), column, value)
 		.all<LookupMatch>();
 	return { ok: true, matches: results };
 }

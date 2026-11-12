@@ -10,7 +10,7 @@ import type { Actions, PageServerLoad } from './$types';
 
 const TOO_MANY = 'Demasiados intentos. Espere un minuto e intente de nuevo.';
 const NOT_VERIFIED = 'No pudimos verificar la consulta. Intente de nuevo.';
-const MISS = 'No encontramos un pedido con ese teléfono y esa fecha.';
+const MISS = 'No encontramos un pedido con esos datos y esa fecha.';
 
 // Public: no `requireRole`, and a logged-in employee sees the same as anyone.
 export const load: PageServerLoad = async ({ platform }) => {
@@ -27,12 +27,15 @@ export const load: PageServerLoad = async ({ platform }) => {
 /** What the client typed, sent back to refill the form. */
 function typedFields(form: FormData) {
 	return {
-		phone: String(form.get('phone') ?? ''),
+		phone_or_username: String(form.get('phone_or_username') ?? ''),
 		event_date: String(form.get('event_date') ?? '')
 	};
 }
 
-/** Why the lookup can't run, or null: the phone and date are guessable, so the rate limit, then Turnstile. */
+/**
+ * Why the lookup can't run, or null: the phone, username and date are guessable, so the rate
+ * limit, then Turnstile.
+ */
 async function refusal(env: Env, ip: string, token: unknown) {
 	const { success: withinLimit } = await env.LOOKUP_RATE_LIMIT.limit({ key: ip });
 	if (!withinLimit) {
