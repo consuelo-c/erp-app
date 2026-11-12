@@ -18,6 +18,7 @@ import {
 	getQuoteDetail,
 	getOrderRequote,
 	getQuoteDuplicate,
+	getQuotePublicToken,
 	getQuoteTimeline,
 	getSourceQuoteId,
 	listQuotes,
@@ -681,6 +682,27 @@ test('nothing is written until saved; the copy takes the next number and leaves 
 		{ entity_id: id, action: 'CREATED' },
 		{ entity_id: id + 1, action: 'CREATED' }
 	]);
+});
+
+test('the client link token is set once: editing keeps it, a duplicate gets its own', async () => {
+	const id = await create();
+	const token = await getQuotePublicToken(db, id, sales);
+	expect(String(token)).toMatch(
+		/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+	);
+	expect(await updateQuote(db, { ...quote1043, id, discount: 0 }, sales)).toMatchObject({
+		ok: true
+	});
+	expect(await getQuotePublicToken(db, id, sales)).toBe(token);
+	const copy = await getQuoteDuplicate(db, id, sales);
+	const duplicate = await create(draftInput(copy?.draft as QuoteDraft));
+	expect(await getQuotePublicToken(db, duplicate, sales)).not.toBe(token);
+	const events = database.prepare('select after from events').all();
+	expect(JSON.stringify(events)).not.toContain(String(token));
+	for (const actor of [warehouse, driver]) {
+		const refusal = await getQuotePublicToken(db, id, actor).catch((caught) => caught);
+		expect(isHttpError(refusal, 403)).toBe(true);
+	}
 });
 
 test('WAREHOUSE and DRIVER get a 403 duplicating', async () => {

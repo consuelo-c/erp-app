@@ -150,18 +150,18 @@ type Columns = {
 	attributes: string;
 };
 
-type QuoteRow = Omit<Columns, 'client_id'> & {
+export type QuoteRow = Omit<Columns, 'client_id'> & {
 	id: number;
 	client_id: number;
 	order_id: number | null;
 	created_at: number;
 };
 
-const SELECT_QUOTE = `select id, client_id, order_id, event_date, valid_until, rental_days,
+export const SELECT_QUOTE = `select id, client_id, order_id, event_date, valid_until, rental_days,
 	client_attributes, quote_items, items_total, discount, transport_cost, quote_total, attributes,
 	created_at from quotes`;
 
-function toQuote(row: QuoteRow): Quote {
+export function toQuote(row: QuoteRow): Quote {
 	const attributes = quoteAttributesSchema.parse(JSON.parse(row.attributes));
 	const validity = { orderId: row.order_id, validUntil: row.valid_until };
 	return {
@@ -787,6 +787,23 @@ export async function convertQuote(
 	const link = linkStatements(db, actor, { row, publicToken: order.publicToken });
 	const results = await db.batch([...order.statements, ...link]);
 	return { ok: true, id: results[order.insertAt].meta.last_row_id };
+}
+
+/**
+ * The token of the quote's client page, for «Copiar enlace del cliente», in any state. Kept out of
+ * `getQuote`: no staff screen shows it as text.
+ */
+export async function getQuotePublicToken(
+	db: D1Database,
+	id: number,
+	actor: Actor | null
+): Promise<string | null> {
+	requireRole(actor, TAKES_QUOTES);
+	const row = await db
+		.prepare('select public_token from quotes where id = ?')
+		.bind(id)
+		.first<{ public_token: string }>();
+	return row?.public_token ?? null;
 }
 
 /** The quote order `orderId` came from, read through `quotes.order_id`: null for most orders. */
