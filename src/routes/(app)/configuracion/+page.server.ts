@@ -5,7 +5,7 @@ import type { SettingModule } from '$lib/settings';
 import type { Actions, PageServerLoad } from './$types';
 
 // General's modules; payroll's are Nómina's tab.
-const MODULES: SettingModule[] = ['COMPANY', 'ORDERS', 'QUOTES'];
+const MODULES: SettingModule[] = ['COMPANY', 'QUOTES'];
 
 export const load: PageServerLoad = async ({ locals, platform }) => {
 	requireRole(locals.user, ['ADMIN', 'MANAGER']);

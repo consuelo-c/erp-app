@@ -33,7 +33,7 @@ const warehouse: Actor = {
 const driver: Actor = { username: 'conductor', employeeId: null, roles: ['DRIVER'], kind: 'user' };
 
 // Both tabs' modules: General's and Nómina's.
-const modules: SettingModule[] = ['COMPANY', 'ORDERS', 'QUOTES', 'PAYROLL'];
+const modules: SettingModule[] = ['COMPANY', 'QUOTES', 'PAYROLL'];
 
 let db: D1Database;
 let database: DatabaseSync;
@@ -119,14 +119,12 @@ test('an invalid field saves nothing and comes back with its message', async () 
 		...toForm(await getSystemSettings(db, modules, manager)),
 		COMPANY_NAME: 'Banquetes C',
 		PAYROLL_HOURS_PER_MONTH: '',
-		ORDERS_SUGGESTED_ADVANCE_PCT: '120',
 		'PAYROLL_NIGHT_END.hour': '13'
 	};
 	expect(await updateSystemSettings(db, { modules, values: form }, manager)).toEqual({
 		ok: false,
 		errors: {
 			PAYROLL_HOURS_PER_MONTH: 'Escribe un número entero mayor que cero',
-			ORDERS_SUGGESTED_ADVANCE_PCT: 'Escribe un porcentaje de 0 a 100',
 			PAYROLL_NIGHT_END: 'Escribe la hora, de 1 a 12'
 		}
 	});
@@ -144,6 +142,21 @@ test('each tab reads and saves only its own modules: Nómina ignores a general f
 	});
 	expect(readValue('COMPANY_NAME')).toMatchObject({ value: 'Banquetes Consuelo C' });
 	expect(readEvents()).toEqual([]);
+});
+
+test('General loads and saves with the retired ORDERS_SUGGESTED_ADVANCE_PCT row still stored', async () => {
+	database.exec(
+		"insert into settings (key, value, created_at, created_by, updated_at, updated_by) values ('ORDERS_SUGGESTED_ADVANCE_PCT', '50', 0, 'system', 0, 'system')"
+	);
+	const general: SettingModule[] = ['COMPANY', 'QUOTES'];
+	const values = await getSystemSettings(db, general, manager);
+	expect(values).not.toHaveProperty('ORDERS_SUGGESTED_ADVANCE_PCT');
+	const form = { ...toForm(values), COMPANY_NAME: 'Banquetes C' };
+	expect(await updateSystemSettings(db, { modules: general, values: form }, manager)).toEqual({
+		ok: true
+	});
+	expect(readValue('COMPANY_NAME')).toMatchObject({ value: 'Banquetes C' });
+	expect(readValue('ORDERS_SUGGESTED_ADVANCE_PCT')).toEqual({ value: '50', updated_by: 'system' });
 });
 
 test("changing a quote's validity moves no existing quote's «Válida hasta»", async () => {
