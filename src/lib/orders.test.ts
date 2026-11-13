@@ -5,11 +5,11 @@ import {
 	isCancelledOnItsWay,
 	isIncidentReportable,
 	isLegalTransition,
-	LINES_PER_PAGE,
 	nextOperationalStatus,
 	readReceivableBalance,
 	receivableLine,
 	formatRemisiones,
+	splitIntoColumns,
 	splitIntoPages,
 	splitOrdersIntoPages
 } from './orders';
@@ -137,18 +137,26 @@ function linesOf(count: number): number[] {
 	return Array.from({ length: count }, (_, index) => index);
 }
 
-test('a short order prints on one sheet, its totals and signature under its lines', () => {
-	expect(splitIntoPages(linesOf(3))).toEqual([linesOf(3)]);
+test('up to 12 lines print on one sheet, its closing under them', () => {
+	expect(splitIntoPages(linesOf(12))).toEqual([linesOf(12)]);
 });
 
-test('30 lines spill onto a second sheet, which carries the totals and signature', () => {
-	const pages = splitIntoPages(linesOf(30));
-	expect(pages.map((page) => page.length)).toEqual([LINES_PER_PAGE, 30 - LINES_PER_PAGE]);
-	expect(pages.flat()).toEqual(linesOf(30));
+test('45 lines take two sheets: 26 on the first, 19 with the closing on the second', () => {
+	const pages = splitIntoPages(linesOf(45));
+	expect(pages.map((page) => page.length)).toEqual([26, 19]);
+	expect(pages.flat()).toEqual(linesOf(45));
 });
 
-test('lines filling the first sheet exactly leave the totals and signature a second one', () => {
-	expect(splitIntoPages(linesOf(LINES_PER_PAGE))).toEqual([linesOf(LINES_PER_PAGE), []]);
+test('lines filling the first sheet exactly leave the closing a second one', () => {
+	expect(splitIntoPages(linesOf(26))).toEqual([linesOf(26), []]);
+});
+
+test('a sheet splits into its two columns, the left one filling first', () => {
+	const [first, last] = splitIntoPages(linesOf(45));
+	expect(splitIntoColumns(first, true, false).map((column) => column.length)).toEqual([13, 13]);
+	expect(splitIntoColumns(last, false, true).map((column) => column.length)).toEqual([11, 8]);
+	expect(splitIntoColumns(linesOf(10), true, true).map((column) => column.length)).toEqual([6, 4]);
+	expect(splitIntoColumns(linesOf(3), true, true)).toEqual([linesOf(3), []]);
 });
 
 function orderOf(id: number, lineCount: number) {

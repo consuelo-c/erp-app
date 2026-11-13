@@ -6,10 +6,11 @@
 	import { DEDUCTION_LABELS, EARNING_LABELS } from '$lib/labels';
 	import type { PageProps } from './$types';
 
-	// Outside the app's shell: the half-letter sheet the worker signs, and what prints is the sheet.
+	// Outside the app's shell: the landscape half-letter sheet the worker signs, and what prints is
+	// the sheet, as it's seen.
 	let { data }: PageProps = $props();
 
-	const { draft, payment, company, periodStart, periodEnd, extraHours } = $derived(data.receipt);
+	const { draft, payment, company, periodStart, periodEnd } = $derived(data.receipt);
 	const backHref = $derived(
 		`${resolve('/(app)/nomina')}?${new URLSearchParams({
 			empleado: String(draft.employeeId),
@@ -45,91 +46,98 @@
 			/>
 			<div class="print-head__company">
 				<div class="print-head__title">PAGO DE NÓMINA · SEMANA {draft.weekNumber}</div>
-				<div class="print-small">{company.COMPANY_NAME}</div>
-				<div class="print-small">{company.COMPANY_ADDRESS}</div>
-				<div class="print-small">{company.COMPANY_PHONE}</div>
+				<div class="print-small">{company.COMPANY_ADDRESS} · {company.COMPANY_PHONE}</div>
 			</div>
 		</header>
+		<div class="print-small print-page">1 de 1</div>
 
-		<div class="print-row">
-			<span>Fecha de pago</span><span>{formatLongDay(draft.paymentDate)}</span>
-		</div>
-
-		<div class="print-group">
-			<div class="print-row"><span>Nombre</span><span>{payment.employeeName}</span></div>
-			<div class="print-row">
-				<span>Cédula</span><span>{formatIdNumber(payment.employeeIdNumber)}</span>
+		<div class="print-band">
+			<div>
+				<div class="print-row"><span>Nombre</span><span>{payment.employeeName}</span></div>
+				<div class="print-row">
+					<span>Cédula</span><span>{formatIdNumber(payment.employeeIdNumber)}</span>
+				</div>
+				<div class="print-row">
+					<span>Cargo</span><span>{payment.employeePosition ?? '—'}</span>
+				</div>
 			</div>
-			<div class="print-row"><span>Cargo</span><span>{payment.employeePosition ?? '—'}</span></div>
-		</div>
-
-		<div class="print-group">
-			<div class="print-row print-row--strong">
-				<span>Periodo</span>
-				<span>{formatShortDay(periodStart)} – {formatLongDay(periodEnd)}</span>
-			</div>
-			<div class="print-row">
-				<span>Horas extras</span>
-				<span>{formatShortDay(extraHours.start)} – {formatShortDay(extraHours.end)}</span>
+			<div>
+				<div class="print-row">
+					<span>Fecha de pago</span><span>{formatLongDay(draft.paymentDate)}</span>
+				</div>
+				<div class="print-row print-row--strong">
+					<span>Periodo</span>
+					<span>{formatShortDay(periodStart)} – {formatLongDay(periodEnd)}</span>
+				</div>
 			</div>
 		</div>
 
-		<table class="print-table">
-			<thead>
-				<tr><th>DEVENGADOS</th><th class="num">Cant.</th><th class="num">Valor</th></tr>
-			</thead>
-			<tbody>
-				{#each draft.earnings as line (line.concept)}
-					<tr>
-						<td>{EARNING_LABELS[line.concept]}</td>
-						<td class="num">{formatQuantity(line.qty, line.derivedQty)}</td>
-						<td class="num">{formatPesos(line.amount)}</td>
-					</tr>
-				{/each}
-			</tbody>
-		</table>
-		<div class="print-row print-row--strong">
-			<span>Total devengado</span><span>{formatPesos(draft.totalEarnings)}</span>
-		</div>
-
-		<table class="print-table">
-			<thead>
-				<tr><th>DEDUCCIONES</th><th></th><th class="num">Valor</th></tr>
-			</thead>
-			<tbody>
-				{#each draft.deductions as line (line.concept)}
-					<tr>
-						<td>
-							{DEDUCTION_LABELS[line.concept]}
-							{#if line.description}<div class="print-small">{line.description}</div>{/if}
-						</td>
-						<td></td>
-						<td class="num">{formatPesos(line.amount)}</td>
-					</tr>
-				{/each}
-			</tbody>
-		</table>
-		<div class="print-row print-row--strong">
-			<span>Total deducciones</span><span>{formatPesos(draft.totalDeductions)}</span>
-		</div>
-
-		<div class="print-net">
-			<span>Neto a pagar</span><span class="print-net__amount">{formatPesos(draft.netPay)}</span>
+		<div class="print-band">
+			<div>
+				<table class="print-table">
+					<thead>
+						<tr><th>DEVENGADOS</th><th class="num">Cant.</th><th class="num">Valor</th></tr>
+					</thead>
+					<tbody>
+						{#each draft.earnings as line (line.concept)}
+							<tr>
+								<td>{EARNING_LABELS[line.concept]}</td>
+								<td class="num">{formatQuantity(line.qty, line.derivedQty)}</td>
+								<td class="num">{formatPesos(line.amount)}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+				<div class="print-row print-row--strong">
+					<span>Total devengado</span><span>{formatPesos(draft.totalEarnings)}</span>
+				</div>
+			</div>
+			<div>
+				<table class="print-table">
+					<thead>
+						<tr><th>DEDUCCIONES</th><th class="num">Valor</th></tr>
+					</thead>
+					<tbody>
+						{#each draft.deductions as line (line.concept)}
+							<tr>
+								<td>
+									{DEDUCTION_LABELS[line.concept]}
+									{#if line.description}<div class="print-small">{line.description}</div>{/if}
+								</td>
+								<td class="num">{formatPesos(line.amount)}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+				<div class="print-row print-row--strong">
+					<span>Total deducciones</span><span>{formatPesos(draft.totalDeductions)}</span>
+				</div>
+			</div>
 		</div>
 
 		<div class="print-spacer"></div>
-		<p class="print-received">Recibí a satisfacción el pago de la liquidación arriba descrita.</p>
-		<div class="signature">
-			Firma del trabajador · C.C. {formatIdNumber(payment.employeeIdNumber)}
+
+		<div class="print-band print-close">
+			<div class="print-net">
+				<span>Neto a pagar</span><span class="print-net__amount">{formatPesos(draft.netPay)}</span>
+			</div>
+			<div>
+				<p class="print-received">
+					Recibí a satisfacción el pago de la liquidación arriba descrita.
+				</p>
+				<div class="signature">
+					Firma del trabajador · C.C. {formatIdNumber(payment.employeeIdNumber)}
+				</div>
+				<div class="print-small print-prepared">Elaboró: {payment.preparedBy}</div>
+			</div>
 		</div>
-		<div class="print-small print-prepared">Elaboró: {payment.preparedBy}</div>
 	</article>
 </div>
 
 <style>
-	/* Half-letter portrait, edge to edge: the sheet carries its own margins. */
+	/* Half-letter landscape, edge to edge: the sheet carries its own margins. */
 	@page {
-		size: 5.5in 8.5in;
+		size: 8.5in 5.5in;
 		margin: 0;
 	}
 
@@ -146,12 +154,14 @@
 	.receipt__toolbar {
 		display: flex;
 		gap: var(--control-gap);
+		align-items: center;
 		justify-content: space-between;
 		width: var(--print-sheet-w);
 		max-width: 100%;
 	}
 
 	.print-sheet {
+		position: relative;
 		box-sizing: border-box;
 		display: flex;
 		flex: none;
@@ -170,7 +180,7 @@
 		gap: var(--space-8);
 		align-items: flex-start;
 		justify-content: space-between;
-		margin-bottom: var(--space-7);
+		margin-bottom: var(--space-5);
 	}
 
 	.print-head__logo {
@@ -194,8 +204,27 @@
 		color: var(--text-secondary);
 	}
 
-	.print-group {
-		margin-top: var(--space-4);
+	/* In the sheet's margin: it never takes a row. */
+	.print-page {
+		position: absolute;
+		right: 26px;
+		bottom: 6px;
+	}
+
+	.print-band {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 0 var(--space-14);
+		align-items: start;
+	}
+
+	.print-band .print-row > :last-child {
+		max-width: 240px;
+	}
+
+	.print-close {
+		align-items: end;
+		margin-top: var(--space-6);
 	}
 
 	.print-row {
@@ -254,7 +283,6 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		margin-top: var(--space-7);
 		font-size: 12px;
 		font-weight: var(--weight-bold);
 	}
@@ -269,14 +297,13 @@
 	}
 
 	.print-received {
-		margin: 0 0 56px;
+		margin: 0 0 72px;
 		font-size: var(--print-md);
 	}
 
 	/* The signature line is never sacrificed for space. */
 	.signature {
-		flex: none;
-		width: 62%;
+		width: 100%;
 		padding-top: var(--space-2);
 		font-size: var(--print-sm);
 		color: var(--text-secondary);
@@ -284,7 +311,7 @@
 	}
 
 	.print-prepared {
-		margin-top: 14px;
+		margin-top: var(--space-4);
 	}
 
 	@media print {

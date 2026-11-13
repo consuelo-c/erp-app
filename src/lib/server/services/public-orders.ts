@@ -189,7 +189,7 @@ async function findQuoteByToken(db: D1Database, token: unknown) {
 
 /**
  * The client's quote page: null for an unknown token, or a quote that isn't VALID. Renewing an
- * expired quote brings the same link back; a converted one never leads to its order.
+ * expired quote brings the same link back; a converted one leads to its order instead.
  */
 export async function getPublicQuote(db: D1Database, token: unknown): Promise<PublicQuote | null> {
 	const quote = await findQuoteByToken(db, token);
@@ -219,6 +219,27 @@ export async function getPublicQuote(db: D1Database, token: unknown): Promise<Pu
 		quoteTotal,
 		notes
 	};
+}
+
+/**
+ * The order's client link token for a CONVERTED quote's link, null for any other: a quote with an
+ * `order_id` is converted, whatever its «Válida hasta», and the order's status isn't looked at.
+ */
+export async function findConvertedOrderToken(
+	db: D1Database,
+	token: unknown
+): Promise<string | null> {
+	const parsed = tokenSchema.safeParse(token);
+	if (!parsed.success) {
+		return null;
+	}
+	const row = await db
+		.prepare(
+			'select orders.public_token from quotes join orders on orders.id = quotes.order_id where quotes.public_token = ?'
+		)
+		.bind(parsed.data)
+		.first<{ public_token: string }>();
+	return row?.public_token ?? null;
 }
 
 /** The quote a client link names, in any state, for an employee opening it: they go to its detail. */

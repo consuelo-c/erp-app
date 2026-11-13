@@ -165,7 +165,6 @@ export const PUNCH_LABELS: Record<Punch, string> = {
 /** The settings screen's groups, in the order it shows them. */
 export const SETTING_MODULE_LABELS = {
 	COMPANY: 'Empresa',
-	ORDERS: 'Pedidos',
 	QUOTES: 'Cotizaciones',
 	PAYROLL: 'Nómina'
 };

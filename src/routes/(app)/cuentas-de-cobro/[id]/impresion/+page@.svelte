@@ -145,10 +145,8 @@
 					src="/banquetes-consuelo-c-logo.svg"
 					alt={company.COMPANY_NAME}
 				/>
-				{#if 1 < pages.length}
-					<div class="print-small print-page">{index + 1} de {pages.length}</div>
-				{/if}
 			</header>
+			<div class="print-small print-page">{index + 1} de {pages.length}</div>
 
 			{#if 0 === index}
 				<div class="print-date">Medellín, {formatSpelledDate(printout.issueDate)}</div>
@@ -191,9 +189,6 @@
 
 			{#if isLastPage}
 				{@render closing()}
-			{:else}
-				<div class="print-spacer"></div>
-				<div class="print-small print-continues">Continúa en la hoja {index + 2}</div>
 			{/if}
 		</article>
 	{/each}
@@ -226,6 +221,7 @@
 
 	/* Every height below adds up to the lines `LETTER_SHEET` counts, in `$lib/orders`. */
 	.print-sheet {
+		position: relative;
 		box-sizing: border-box;
 		display: flex;
 		flex: none;
@@ -256,8 +252,11 @@
 		color: var(--text-secondary);
 	}
 
+	/* In the sheet's margin: it never takes a line. */
 	.print-page {
-		font-weight: var(--weight-bold);
+		position: absolute;
+		right: 64px;
+		bottom: 24px;
 	}
 
 	.print-date {
@@ -349,9 +348,11 @@
 		font-size: var(--print-base);
 	}
 
+	/* Set apart from the last order's total, so the two aren't confused. */
 	.print-totals--grand {
-		padding-top: var(--space-4);
-		border-top: var(--border-w-strong) solid var(--border-strong);
+		padding-top: 10px;
+		margin-top: 28px;
+		border-top: 4px double var(--border-strong);
 	}
 
 	.print-row {
@@ -371,6 +372,10 @@
 
 	.print-row--strong > :first-child {
 		color: inherit;
+	}
+
+	.print-totals--grand > .print-row:first-child {
+		font-size: 14px;
 	}
 
 	.print-payment {
@@ -414,10 +419,6 @@
 
 	.print-spacer {
 		flex: 1;
-	}
-
-	.print-continues {
-		text-align: right;
 	}
 
 	@media print {

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { normalizePhone } from './phone';
 
-export type SettingModule = 'COMPANY' | 'HELP' | 'ORDERS' | 'PAYROLL' | 'QUOTES' | 'TERMS';
+export type SettingModule = 'COMPANY' | 'HELP' | 'PAYROLL' | 'QUOTES' | 'TERMS';
 
 type SettingDefinition = {
 	module: SettingModule;
@@ -17,7 +17,6 @@ type SettingDefinition = {
 
 // The messages reach the settings screen, next to the field.
 const POSITIVE_INTEGER_MESSAGE = 'Escribe un número entero mayor que cero';
-const PERCENTAGE_MESSAGE = 'Escribe un porcentaje de 0 a 100';
 const VALIDITY_DAYS_MESSAGE = 'Escribe un número entero de 1 a 365';
 
 /** The help's limit, which its editor counts against. */
@@ -90,17 +89,6 @@ export const SETTINGS = {
 				}
 				return phone;
 			})
-	},
-	ORDERS_SUGGESTED_ADVANCE_PCT: {
-		module: 'ORDERS',
-		label: 'Anticipo sugerido',
-		unit: '%',
-		placeholder: '50',
-		schema: z.coerce
-			.number(PERCENTAGE_MESSAGE)
-			.int(PERCENTAGE_MESSAGE)
-			.min(0, PERCENTAGE_MESSAGE)
-			.max(100, PERCENTAGE_MESSAGE)
 	},
 	// Only a new quote's default: changing it moves no existing quote's «Válida hasta».
 	QUOTES_VALIDITY_DAYS: {

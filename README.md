@@ -151,7 +151,7 @@ gh api repos/:owner/:repo/milestones --jq '.[].title'
 
 Esta sección explica cómo poner la aplicación en producción, qué datos necesita para funcionar y cómo asegurarse de que el despliegue quedó bien. Se asume que ya se completaron los pasos de las secciones [Cloudflare](#cloudflare) y [Github](#github), es decir, que ya existen la base de datos, el _bucket_, el `API Token` y el repositorio.
 
-Solo existe un ambiente: no hay _staging_, por lo que la rama `main` es producción. El despliegue no se hace a mano desde la terminal, sino a través del workflow `.github/workflows/deploy.yml` de GitHub Actions. Un `npx wrangler deploy` manual solo tiene sentido para depurar un problema puntual.
+Solo existe un ambiente: no hay _staging_ (ver [Montar un ambiente de _staging_](#montar-un-ambiente-de-staging)), por lo que la rama `main` es producción. El despliegue no se hace a mano desde la terminal, sino a través del workflow `.github/workflows/deploy.yml` de GitHub Actions. Un `npx wrangler deploy` manual solo tiene sentido para depurar un problema puntual.
 
 ### Qué hace el despliegue
 
@@ -337,7 +337,13 @@ El dominio debe responder con estado `200`:
 curl -sI https://app.consueloc.com | head -n 1
 ```
 
-Después se hace una revisión en el navegador. Debe hacerse en `https://app.consueloc.com` y no en la URL de `workers.dev`, porque el _widget_ de Turnstile solo está autorizado para ese dominio.
+La URL de `workers.dev` del Worker no debe responder, porque `wrangler.jsonc` apaga `workers_dev` y `preview_urls` para que producción solo responda en `app.consueloc.com`. `npx wrangler deployments list` no la muestra; si se conoce, esta petición debe fallar o devolver un error de Cloudflare:
+
+```bash
+curl -sI https://consueloc-erp.<subdominio>.workers.dev | head -n 1
+```
+
+Después se hace una revisión en el navegador en `https://app.consueloc.com`, el único dominio para el que está autorizado el _widget_ de Turnstile.
 
 - [ ] La página `/` carga y muestra el _widget_ de Turnstile
 - [ ] Una consulta con cualquier teléfono y fecha responde «No encontramos un pedido con esos datos y esa fecha.». Si en cambio responde «No pudimos verificar la consulta. Intente de nuevo.», hay que revisar `TURNSTILE_SECRET_KEY` y el _widget_
@@ -347,6 +353,41 @@ Después se hace una revisión en el navegador. Debe hacerse en `https://app.con
 
 > [!WARNING]
 > No se deben crear pedidos de prueba en producción. Un pedido consume un número de la secuencia de `orders`, y una vez que `orders` tiene filas el despliegue ya no puede borrar la base de datos después de aplastar las migraciones.
+
+## Montar un ambiente de _staging_
+
+Esta sección es una receta: **nada de esto está construido**. Mientras nadie la siga, sigue existiendo un único ambiente y `main` es producción. El _staging_ sirve para mostrarles a los usuarios trabajo en progreso, incluso una rama sin _merge_, sin tocar producción.
+
+### El diseño
+
+- **Dominio:** `stg-app.consueloc.com`, agregado como _custom domain_ del Worker de _staging_ (igual que en el [Paso 4](#paso-4-configurar-el-dashboard-de-cloudflare)).
+- **Un ambiente `staging` en `wrangler.jsonc`** (`env.staging`), con su propia base de datos D1 y su propio _bucket_ R2, creados con la CLI como en [Crear la base de datos D1 y el Bucket R2](#crear-la-base-de-datos-d1-y-el-bucket-r2). Los _bindings_ no se heredan entre ambientes, así que `env.staging` repite cada uno: `DB`, `BUCKET`, `LOOKUP_RATE_LIMIT` y `TURNSTILE_SITE_KEY`.
+- **Turnstile:** al _widget_ `consueloc-erp-lookup` se le agrega el hostname `stg-app.consueloc.com`.
+- **Sin datos de ejemplo:** `scripts/sample-data.sql` sigue siendo solo para desarrollo. Los `settings` llegan con la copia de producción.
+- **El _bucket_ R2 queda vacío:** hoy nada en la aplicación lee R2, y el _bucket_ existe solo para que el _binding_ resuelva.
+- **Abierto:** lo protegen los logins de la aplicación, igual que a producción. No se usa Cloudflare Access.
+- **Una franja fija en todas las páginas, «Ambiente de pruebas: lo que se haga aquí se borra»**, tanto en las que piden sesión como en las públicas. La activa una variable que solo define el ambiente `staging`. Evita que se tome un pedido real en _staging_ o que se le envíe por error a un cliente un enlace de _staging_.
+
+### Desplegar
+
+El _staging_ se despliega desde la terminal, no desde GitHub Actions: `npm run deploy:staging`, ejecutado desde la rama que se quiere mostrar, corre las pruebas, compila y despliega con `--env staging`.
+
+**Cada despliegue arranca de una copia fresca de la D1 de producción.** El _script_ exporta la base de datos de producción, vacía la de _staging_, importa la exportación, aplica las migraciones de la rama y luego despliega. Todo lo que se haga en _staging_ se pierde en el siguiente despliegue. El paso lee producción y nunca escribe en ella, y lo único que vacía es la base de datos de _staging_. `scripts/wipe-d1-if-squashed.js` no se usa en _staging_, porque la copia ya reemplaza la base de datos completa.
+
+> [!WARNING]
+> Riesgos de desplegar desde la terminal:
+>
+> - Se despliega la carpeta de trabajo tal como está, **incluidos los cambios sin _commit_**.
+> - Nada registra quién desplegó qué.
+> - Un `npx wrangler deploy` sin `--env staging` **publica en producción**.
+
+### Secretos
+
+**El `PASSWORD_PEPPER` de _staging_ es el de producción**, para que cada empleado entre a _staging_ con su contraseña real. Con un _pepper_ distinto, los _hashes_ copiados de producción no dejarían entrar a nadie, ni siquiera a `admin`, porque el Worker solo crea `admin` cuando no existe. Los demás secretos (`ADMIN_PASSWORD`, `TURNSTILE_SECRET_KEY`) se crean con `npx wrangler secret put <NOMBRE> --env staging`.
+
+### Cuando se construya
+
+Los documentos que dicen que no hay _staging_ cambian: `hard-rules.md`, `working-methodology.md` y `delivery-index.md` en `erp-planning`, y este `README.md`.
 
 ## Diseño
 

@@ -50,7 +50,7 @@ function sheetsOf(body: string): string[] {
 	return body.split('<article').slice(1);
 }
 
-test('30 lines print on two sheets, each titled and numbered; totals and notes only on the last', () => {
+test('30 lines print on two sheets, each titled and numbered; notes and totals only on the last', () => {
 	const sheets = sheetsOf(printout({ quote: { ...quote, items: itemsOf(30) } }));
 	expect(sheets).toHaveLength(2);
 	expect(sheets[0]).toContain('Cotización #12');
@@ -107,4 +107,19 @@ test('one contact line: the phone, the username without one, or a blank «Teléf
 	expect(username).not.toContain('Teléfono');
 	const neither = { ...quote, client: { ...quote.client, phone: null } };
 	expect(printout({ quote: neither })).toContain('<span>Teléfono</span><span></span>');
+});
+
+test('the toolbar offers «Volver» and «Imprimir», and the sheet prints unturned', () => {
+	const { head, body } = render(Page, {
+		props: { data: { printout: { quote, document: null, company } } } as never
+	});
+	expect(body).toMatch(/Volver a la cotización[\s\S]*Imprimir/);
+	expect(body).not.toContain('Vertical');
+	expect(head).not.toContain('page-orientation');
+});
+
+test('one sheet is numbered «1 de 1», and «Productos» counts the lines', () => {
+	const body = printout();
+	expect(body).toContain('1 de 1');
+	expect(body).toContain('<span>Productos</span><span>3</span>');
 });

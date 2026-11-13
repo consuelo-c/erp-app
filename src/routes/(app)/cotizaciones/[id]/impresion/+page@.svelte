@@ -7,7 +7,7 @@
 	import type { PageProps } from './$types';
 
 	// The paper a company's purchasing department asks for: the client and the event open the first
-	// sheet, the totals and the notes close the last. Nobody receives anything against it: no
+	// sheet, the notes and the totals close the last. Nobody receives anything against it: no
 	// signature, deposit, payments or terms.
 	let { data }: PageProps = $props();
 
@@ -17,14 +17,13 @@
 </script>
 
 {#snippet opening()}
-	<div class="print-row">
-		<span>Fecha</span><span>{formatLongDay(getInstantDate(quote.createdAt))}</span>
-	</div>
-	<div class="print-row">
-		<span>Válida hasta</span><span>{formatLongDay(quote.validUntil)}</span>
-	</div>
-
-	<div class="print-group">
+	<div>
+		<div class="print-row">
+			<span>Fecha</span><span>{formatLongDay(getInstantDate(quote.createdAt))}</span>
+		</div>
+		<div class="print-row print-row--strong">
+			<span>Válida hasta</span><span>{formatLongDay(quote.validUntil)}</span>
+		</div>
 		<div class="print-row"><span>Cliente</span><span>{quote.client.name}</span></div>
 		<div class="print-row">
 			<span>{contact.label}</span><span>{contact.value}</span>
@@ -34,7 +33,7 @@
 		{/if}
 	</div>
 
-	<div class="print-group">
+	<div>
 		{#if quote.eventDate}
 			<div class="print-row">
 				<span>Evento</span><span>{formatLongDay(quote.eventDate)}</span>
@@ -54,28 +53,30 @@
 {/snippet}
 
 {#snippet closing()}
-	<div class="print-row">
-		<span>Subtotal</span><span>{formatPesos(quote.itemsTotal)}</span>
+	<div>
+		{#if quote.notes}
+			<div class="print-small notes__label">Notas</div>
+			<p class="print-small notes__text">{quote.notes}</p>
+		{/if}
 	</div>
-	<div class="print-row">
-		<span>Descuento</span>
-		<span>{0 === quote.discount ? formatPesos(0) : `−${formatPesos(quote.discount)}`}</span>
-	</div>
-	<div class="print-row">
-		<span>Transporte</span>
-		<span>{null === quote.transportCost ? 'Por acordar' : formatPesos(quote.transportCost)}</span>
-	</div>
-	<div class="print-row print-row--strong print-total">
-		<span>{isTransportPending ? 'Total sin transporte' : 'Total'}</span>
-		<span>{formatPesos(quote.quoteTotal)}</span>
-	</div>
-
-	{#if quote.notes}
-		<div class="notes">
-			<div class="print-small">Notas</div>
-			<p>{quote.notes}</p>
+	<div>
+		<div class="print-row"><span>Productos</span><span>{quote.items.length}</span></div>
+		<div class="print-row">
+			<span>Subtotal</span><span>{formatPesos(quote.itemsTotal)}</span>
 		</div>
-	{/if}
+		<div class="print-row">
+			<span>Descuento</span>
+			<span>{0 === quote.discount ? formatPesos(0) : `−${formatPesos(quote.discount)}`}</span>
+		</div>
+		<div class="print-row">
+			<span>Transporte</span>
+			<span>{null === quote.transportCost ? 'Por acordar' : formatPesos(quote.transportCost)}</span>
+		</div>
+		<div class="print-row print-row--strong print-total">
+			<span>{isTransportPending ? 'Total sin transporte' : 'Total'}</span>
+			<span>{formatPesos(quote.quoteTotal)}</span>
+		</div>
+	</div>
 {/snippet}
 
 <HalfLetterPrintout
@@ -91,11 +92,11 @@
 />
 
 <style>
-	.notes {
-		margin-top: var(--space-7);
+	.notes__label {
+		font-weight: var(--weight-bold);
 	}
 
-	.notes p {
+	.notes__text {
 		margin: 2px 0 0;
 		white-space: pre-line;
 	}

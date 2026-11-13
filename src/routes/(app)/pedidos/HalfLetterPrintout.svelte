@@ -2,14 +2,15 @@
 	import type { Snippet } from 'svelte';
 	import Button from '$lib/components/Button.svelte';
 	import { formatPesos } from '$lib/format';
-	import { splitIntoPages } from '$lib/orders';
+	import { splitIntoColumns, splitIntoPages } from '$lib/orders';
 	import type { OrderItem } from '$lib/server/services/orders';
 	import type { CompanySettings } from '$lib/server/services/settings';
 
-	// Outside the app's shell, the half-letter sheets the order and the quote print on: what prints
-	// is the sheets. Each repeats the header and numbers itself; `opening` opens the first, the lines
-	// follow, and `closing` closes the last, never split from it. The rows the snippets write
-	// (`print-row`, `print-group`, …) take their style from here.
+	// Outside the app's shell, the landscape half-letter sheets the order and the quote print on:
+	// what prints is the sheets, as they're seen. Each repeats the header and numbers itself in its
+	// margin. `opening` writes the band's two columns under the first header, the lines follow in two
+	// columns, and `closing` writes the last sheet's closing row, never split from it: left, then
+	// right. The rows the snippets write (`print-row`, …) take their style from here.
 	interface Props {
 		/** «Pedido #1043», «Cotización #12». */
 		title: string;
@@ -46,59 +47,55 @@
 				/>
 				<div class="print-head__company">
 					<div class="print-head__title">{title}</div>
-					<div class="print-small">{company.COMPANY_NAME}</div>
-					<div class="print-small">{company.COMPANY_ADDRESS}</div>
-					<div class="print-small">{company.COMPANY_PHONE}</div>
-					<div class={['print-small', { 'print-page--spills': 1 < pages.length }]}>
-						{index + 1} de {pages.length}
-					</div>
+					<div class="print-small">{company.COMPANY_ADDRESS} · {company.COMPANY_PHONE}</div>
 				</div>
 			</header>
+			<div class="print-small print-page">{index + 1} de {pages.length}</div>
 
 			{#if 0 === index}
-				{@render opening()}
+				<div class="print-band">{@render opening()}</div>
 			{/if}
 
-			{#if lines.length}
-				<table class="print-table">
-					<thead>
-						<tr>
-							<th>Producto</th>
-							<th class="num">Cant.</th>
-							<th class="num">Precio unit.</th>
-							<th class="num">Total</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each lines as item (item.product_id)}
-							<tr>
-								<td>{item.name}</td>
-								<td class="num">{item.qty}</td>
-								<td class="num">{formatPesos(item.unit_price)}</td>
-								<td class="num">{formatPesos(item.line_total)}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			{/if}
+			<div class="print-columns">
+				{#each splitIntoColumns(lines, 0 === index, isLastPage) as column, columnIndex (columnIndex)}
+					{#if column.length}
+						<table class="print-table">
+							<thead>
+								<tr>
+									<th>Producto</th>
+									<th class="num">Cant.</th>
+									<th class="num">Precio unit.</th>
+									<th class="num">Total</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each column as item (item.product_id)}
+									<tr>
+										<td>{item.name}</td>
+										<td class="num">{item.qty}</td>
+										<td class="num">{formatPesos(item.unit_price)}</td>
+										<td class="num">{formatPesos(item.line_total)}</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					{/if}
+				{/each}
+			</div>
 
 			<div class="print-spacer"></div>
 
 			{#if isLastPage}
-				{@render closing()}
-			{:else}
-				<div class="print-small print-continues">
-					Continúa en la hoja {index + 2} · {items.length} líneas
-				</div>
+				<div class="print-close">{@render closing()}</div>
 			{/if}
 		</article>
 	{/each}
 </div>
 
 <style>
-	/* Half-letter portrait, edge to edge: the sheet carries its own margins. */
+	/* Half-letter landscape, edge to edge: the sheet carries its own margins. */
 	@page {
-		size: 5.5in 8.5in;
+		size: 8.5in 5.5in;
 		margin: 0;
 	}
 
@@ -115,12 +112,14 @@
 	.printout__toolbar {
 		display: flex;
 		gap: var(--control-gap);
+		align-items: center;
 		justify-content: space-between;
 		width: var(--print-sheet-w);
 		max-width: 100%;
 	}
 
 	.print-sheet {
+		position: relative;
 		box-sizing: border-box;
 		display: flex;
 		flex: none;
@@ -139,7 +138,7 @@
 		gap: var(--space-8);
 		align-items: flex-start;
 		justify-content: space-between;
-		margin-bottom: var(--space-7);
+		margin-bottom: var(--space-5);
 	}
 
 	.print-head__logo {
@@ -163,12 +162,36 @@
 		color: var(--text-secondary);
 	}
 
-	.print-page--spills {
-		font-weight: var(--weight-bold);
+	/* In the sheet's margin: it never takes a row. */
+	.print-page {
+		position: absolute;
+		right: 26px;
+		bottom: 6px;
 	}
 
-	.print-sheet :global(.print-group) {
-		margin-top: var(--space-4);
+	.print-band,
+	.print-close {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 0 var(--space-14);
+		align-items: start;
+	}
+
+	.print-band :global(.print-row > :last-child) {
+		max-width: 240px;
+	}
+
+	.print-close {
+		align-items: end;
+		margin-top: var(--space-6);
+	}
+
+	/* Read down the left column, then on to the right one. */
+	.print-columns {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 0 var(--space-12);
+		align-items: start;
 	}
 
 	.print-sheet :global(.print-row) {
@@ -207,7 +230,7 @@
 	}
 
 	.print-table th {
-		padding: 3px 5px;
+		padding: 2px 5px;
 		font-size: var(--print-xs);
 		font-weight: var(--weight-bold);
 		color: var(--text-secondary);
@@ -216,7 +239,7 @@
 	}
 
 	.print-table td {
-		padding: 3px 5px;
+		padding: 2px 5px;
 		vertical-align: top;
 		border-bottom: var(--border-w-hair) solid var(--border-default);
 	}
@@ -229,10 +252,6 @@
 
 	.print-spacer {
 		flex: 1;
-	}
-
-	.print-continues {
-		text-align: right;
 	}
 
 	@media print {

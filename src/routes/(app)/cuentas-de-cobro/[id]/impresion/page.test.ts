@@ -56,7 +56,7 @@ function sheetsOf(body: string): string[] {
 	return body.split('<article').slice(1);
 }
 
-test('one order: its date and client, with no block heading and no «TOTAL A PAGAR»', () => {
+test('one order: its date and client, numbered «1 de 1», with no block heading or «TOTAL A PAGAR»', () => {
 	const body = printout();
 	expect(sheetsOf(body)).toHaveLength(1);
 	expect(body).toContain('Medellín, 13 de octubre de 2026');
@@ -66,7 +66,7 @@ test('one order: its date and client, with no block heading and no «TOTAL A PAG
 	expect(body).toContain('Calle 52 #47-42, Medellín');
 	expect(body).not.toContain('print-block__title');
 	expect(body).not.toContain('TOTAL A PAGAR');
-	expect(body).not.toContain(' de 1<');
+	expect(body).toContain('1 de 1');
 });
 
 test('an «Anulada» cuenta prints its title so, with no order block, «Concepto» or total', () => {

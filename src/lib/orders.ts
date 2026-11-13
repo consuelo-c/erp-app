@@ -199,17 +199,24 @@ export const FEE_SOURCES = ['NEW', 'INSTALLMENTS', 'DEPOSIT'] as const;
 
 export type FeeSource = (typeof FEE_SOURCES)[number];
 
-// A half-letter sheet holds this many lines under the order's header. The totals and the
-// signature take the room of `closingLines` of them, and are never split across two sheets.
-export const LINES_PER_PAGE = 20;
-
 export type PrintSheet = { firstPageLines: number; linesPerPage: number; closingLines: number };
 
-const HALF_LETTER_SHEET: PrintSheet = {
-	firstPageLines: LINES_PER_PAGE,
-	linesPerPage: LINES_PER_PAGE,
-	closingLines: 10
-};
+// A landscape half-letter sheet holds its lines in two columns of 13 rows under the client's band,
+// 18 on the next sheets. The closing (signature, totals) takes 7 rows of each column on the last
+// sheet, and is never split from it.
+const HALF_LETTER_SHEET: PrintSheet = { firstPageLines: 26, linesPerPage: 36, closingLines: 14 };
+
+/** One half-letter sheet's lines, left column then right: the left one fills first. */
+export function splitIntoColumns<Line>(
+	lines: Line[],
+	isFirstPage: boolean,
+	isLastPage: boolean
+): Line[][] {
+	const { firstPageLines, linesPerPage, closingLines } = HALF_LETTER_SHEET;
+	const room = (isFirstPage ? firstPageLines : linesPerPage) - (isLastPage ? closingLines : 0);
+	const columnRows = room / 2;
+	return [lines.slice(0, columnRows), lines.slice(columnRows)];
+}
 
 /**
  * The printout's lines, sheet by sheet: the last one keeps room for the totals and signature.
@@ -238,10 +245,10 @@ export function splitIntoPages<Line>(
 }
 
 // A letter sheet in lines of 16px, the row height of the cuenta de cobro's table: 952px between its
-// margins. The first page gives 17 lines to the opening and one to «Continúa»; the others, 7 to the
-// header and 4 to the head of an order that continues on them.
+// margins. The first page gives 17 lines to the opening; the others, 7 to the header and 4 to the
+// head of an order that continues on them. «1 de N» sits in the margin, taking no line.
 // ponytail: a product name that wraps counts as one line; measure rows if a sheet ever overflows.
-const LETTER_SHEET: PrintSheet = { firstPageLines: 41, linesPerPage: 48, closingLines: 17 };
+const LETTER_SHEET: PrintSheet = { firstPageLines: 42, linesPerPage: 48, closingLines: 17 };
 const BLOCK_HEAD_LINES = 4;
 const BLOCK_TOTALS_LINES = 5;
 
