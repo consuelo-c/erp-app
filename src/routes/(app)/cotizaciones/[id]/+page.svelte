@@ -22,7 +22,7 @@
 	const isOpen = $derived('CONVERTED' !== quote.state);
 
 	// «Copiar enlace del cliente», in every state: the link is copied, never shown; the notice clears
-	// itself. An expired or converted quote's link opens «ya no está disponible».
+	// itself. An expired quote's link opens «ya no está disponible»; a converted one's, its order.
 	let copyNotice = $state<string | null>(null);
 	let copyTimer: ReturnType<typeof setTimeout> | undefined;
 

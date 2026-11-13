@@ -3,6 +3,7 @@ import { resolve } from '$app/paths';
 import { hasAnyRole } from '$lib/server/actor';
 import { renderTerms } from '$lib/server/markdown';
 import {
+	findConvertedOrderToken,
 	findQuoteIdByToken,
 	getClientTerms,
 	getPublicQuote,
@@ -11,8 +12,9 @@ import {
 import type { PageServerLoad } from './$types';
 
 // Public: no `requireRole`, and it writes nothing. Whoever sees quotes, opening a client's link,
-// goes to the quote's detail in any state; WAREHOUSE and DRIVER get the client's page. The session
-// is only read.
+// goes to the quote's detail in any state; anyone else, WAREHOUSE and DRIVER included, follows a
+// converted quote's link to its order's page, and gets the client's page otherwise. The session is
+// only read.
 export const load: PageServerLoad = async ({ locals, params, platform, url }) => {
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
@@ -23,6 +25,10 @@ export const load: PageServerLoad = async ({ locals, params, platform, url }) =>
 		if (null !== id) {
 			redirect(303, resolve('/(app)/cotizaciones/[id]', { id: String(id) }));
 		}
+	}
+	const orderToken = await findConvertedOrderToken(db, params.token);
+	if (null !== orderToken) {
+		redirect(303, resolve('/mi-pedido/[token]', { token: orderToken }));
 	}
 	const quote = await getPublicQuote(db, params.token);
 	if (null === quote) {

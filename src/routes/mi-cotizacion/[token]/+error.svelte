@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/state';
 
-	// An unknown token, or a quote expired or converted: one page for every case, the
-	// contact beside it in the layout.
+	// An unknown token, or an expired quote: one page for every case, the contact beside it in the
+	// layout. A converted quote's link goes to its order instead.
 </script>
 
 <svelte:head>

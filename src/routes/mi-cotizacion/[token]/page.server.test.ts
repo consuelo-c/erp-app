@@ -6,6 +6,7 @@ import { createMemoryD1 } from '$lib/server/db/memory-d1';
 import { handle } from '../../../hooks.server';
 import { load as loadLayout } from './+layout.server';
 import { load } from './+page.server';
+import { load as loadOrder } from '../../mi-pedido/[token]/+page.server';
 
 const AUDIT = "0, 'admin', 0, 'admin'";
 const ORIGIN = 'https://app.example.com';
@@ -31,7 +32,15 @@ function actor(role: Role): Actor {
 	return { username: role.toLowerCase(), employeeId: null, roles: [role], kind: 'user' };
 }
 
-type QuoteRow = { validUntil?: string; orderId?: number; transportCost?: number | null };
+type QuoteRow = {
+	validUntil?: string;
+	orderId?: number;
+	orderStatus?: 'CONFIRMED' | 'DELIVERED' | 'CANCELLED';
+	transportCost?: number | null;
+};
+
+/** The client link token of the order each converted quote is inserted with, by order id. */
+const orderTokens = new Map<number, string>();
 
 const ITEMS = [
 	{
@@ -48,14 +57,16 @@ const ITEMS = [
 function insertQuote({
 	validUntil = '2026-11-30',
 	orderId,
+	orderStatus = 'CONFIRMED',
 	transportCost = 250000
 }: QuoteRow = {}) {
 	const token = crypto.randomUUID();
 	const total = 440000 - 40000 + (transportCost ?? 0);
 	if (undefined !== orderId) {
+		orderTokens.set(orderId, crypto.randomUUID());
 		database.exec(
 			`insert into orders (id, public_token, client_id, status, event_date, delivery_date, pickup_date, rental_days, client_attributes, delivery_attributes, pickup_attributes, order_items, items_total, order_total, created_at, created_by, updated_at, updated_by)
-			values (${orderId}, '${crypto.randomUUID()}', 1, 'CONFIRMED', '2026-12-12', '2026-12-11', '2026-12-13', 1, '{}', '{"method":"COMPANY_DELIVERY"}', '{"method":"COMPANY_PICKUP"}', '[]', 0, 0, ${AUDIT})`
+			values (${orderId}, '${orderTokens.get(orderId)}', 1, '${orderStatus}', '2026-12-12', '2026-12-11', '2026-12-13', 1, '{}', '{"method":"COMPANY_DELIVERY"}', '{"method":"COMPANY_PICKUP"}', '[]', 0, 0, ${AUDIT})`
 		);
 	}
 	database
@@ -75,7 +86,7 @@ async function open(token: string, user: Actor | null = null): Promise<PageData>
 	return (await load(event as never)) as PageData;
 }
 
-async function redirectOf(token: string, user: Actor): Promise<string> {
+async function redirectOf(token: string, user: Actor | null = null): Promise<string> {
 	try {
 		await open(token, user);
 	} catch (thrown) {
@@ -156,10 +167,9 @@ test('«por acordar» transport: no price, and the total leaves it out', async (
 	expect(data.quote).toMatchObject({ transportCost: null, quoteTotal: 400000 });
 });
 
-test('expired, converted, unknown, or a quote id: the same 404, «ya no está disponible»', async () => {
+test('expired, unknown, or a quote id: the same 404, «ya no está disponible»', async () => {
 	const expired = insertQuote({ validUntil: '2026-10-27' });
-	const converted = insertQuote({ orderId: 1060 });
-	for (const token of [expired, converted, crypto.randomUUID(), '12', '1']) {
+	for (const token of [expired, crypto.randomUUID(), '12', '1']) {
 		await expect(open(token)).rejects.toSatisfy(isUnavailable);
 	}
 });
@@ -171,13 +181,40 @@ test('an expired quote renewed to a later «Válida hasta» opens again at the s
 	expect((await open(token)).quote.id).toBe(1);
 });
 
+test("a converted quote's link goes to its order's page, whatever the order's status or «Válida hasta»", async () => {
+	const statuses = ['CONFIRMED', 'DELIVERED', 'CANCELLED'] as const;
+	for (const [index, orderStatus] of statuses.entries()) {
+		const orderId = 1060 + index;
+		const token = insertQuote({ orderId, orderStatus });
+		expect(await redirectOf(token)).toBe(`/mi-pedido/${orderTokens.get(orderId)}`);
+	}
+	const past = insertQuote({ orderId: 1070, validUntil: '2026-10-01' });
+	expect(await redirectOf(past)).toBe(`/mi-pedido/${orderTokens.get(1070)}`);
+});
+
+test("WAREHOUSE and DRIVER follow a converted quote's link to the order's operational detail", async () => {
+	const token = insertQuote({ orderId: 1060 });
+	for (const role of ['WAREHOUSE', 'DRIVER'] satisfies Role[]) {
+		const location = await redirectOf(token, actor(role));
+		const orderToken = String(orderTokens.get(1060));
+		expect(location).toBe(`/mi-pedido/${orderToken}`);
+		const event = { locals: { user: actor(role) }, params: { token: orderToken } };
+		await expect(loadOrder({ ...event, platform: { env: { DB: db } } } as never)).rejects.toSatisfy(
+			(thrown) => isRedirect(thrown) && '/despachos/1060' === thrown.location
+		);
+	}
+});
+
 test('opening it writes nothing: events and sessions unchanged', async () => {
 	const token = insertQuote();
+	const converted = insertQuote({ orderId: 1060 });
 	const count = (table: string) =>
 		database.prepare(`select count(*) as total from ${table}`).get()?.total;
 	const before = [count('events'), count('sessions')];
 	await open(token);
 	await open(token, actor('WAREHOUSE'));
+	await redirectOf(converted);
+	await redirectOf(converted, actor('DRIVER'));
 	expect([count('events'), count('sessions')]).toEqual(before);
 });
 
