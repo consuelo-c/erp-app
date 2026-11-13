@@ -71,9 +71,17 @@ test('with neither it prints «Teléfono» blank, to be written in by hand', () 
 	expect(sheet(null, null)).toContain('<span>Teléfono</span><span></span>');
 });
 
-test('the toolbar offers «Volver», «Horizontal / Vertical» and «Imprimir», opening on Horizontal', () => {
+test('the toolbar offers «Volver» and «Imprimir», and the sheet prints unturned', () => {
 	const { head, body } = render(OrderPrintout, { props: { printout, backHref: '/pedidos/1' } });
-	expect(body).toMatch(/Volver al pedido[\s\S]*Horizontal[\s\S]*Vertical[\s\S]*Imprimir/);
-	expect(body).toMatch(/<input[^>]*checked[^>]*\/>Horizontal/);
-	expect(head).toContain('page-orientation: rotate-left');
+	expect(body).toMatch(/Volver al pedido[\s\S]*Imprimir/);
+	expect(body).not.toContain('Vertical');
+	expect(head).not.toContain('page-orientation');
+});
+
+test('the dates print as «Entrega aproximada» and «Recogida tentativa»; «Productos» counts lines', () => {
+	const body = sheet('573104428890', null);
+	expect(body).toContain('Entrega aproximada');
+	expect(body).toContain('Recogida tentativa');
+	expect(body).toContain('<span>Productos</span><span>1</span>');
+	expect(body).toContain('1 de 1');
 });

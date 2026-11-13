@@ -25,9 +25,16 @@ const receipt = {
 	extraHours: { start: '2026-09-28', end: '2026-10-04' }
 };
 
-test('the toolbar offers «Volver», «Horizontal / Vertical» and «Imprimir», opening on Horizontal', () => {
+test('the toolbar offers «Volver» and «Imprimir», and the sheet prints unturned', () => {
 	const { head, body } = render(Page, { props: { data: { receipt } } as never });
-	expect(body).toMatch(/Volver a la liquidación[\s\S]*Horizontal[\s\S]*Vertical[\s\S]*Imprimir/);
-	expect(body).toMatch(/<input[^>]*checked[^>]*\/>Horizontal/);
-	expect(head).toContain('page-orientation: rotate-left');
+	expect(body).toMatch(/Volver a la liquidación[\s\S]*Imprimir/);
+	expect(body).not.toContain('Vertical');
+	expect(head).not.toContain('page-orientation');
+});
+
+test('the slip prints no «Horas extras» nor the company name, and numbers itself «1 de 1»', () => {
+	const { body } = render(Page, { props: { data: { receipt } } as never });
+	expect(body).not.toContain('Horas extras');
+	expect(body).not.toMatch(/<div class="print-small[^"]*">Banquetes Consuelo C</);
+	expect(body).toContain('1 de 1');
 });

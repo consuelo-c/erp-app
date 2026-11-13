@@ -6,7 +6,8 @@
 	import { CASH_CONCEPT_LABELS, PAYMENT_METHOD_LABELS } from '$lib/labels';
 	import type { PageProps } from './$types';
 
-	// Outside the app's shell: the quarter-letter sheet, one template whose title follows the sign.
+	// Outside the app's shell: the landscape half-letter sheet, the order's, one template whose title
+	// follows the sign.
 	// An offsetting movement prints by its own sign: correcting an egreso prints a recibo.
 	let { data }: PageProps = $props();
 
@@ -71,34 +72,39 @@
 			</div>
 		</header>
 
-		<div class="print-row">
-			<span>Fecha</span><span>{formatLongDay(movement.movementDate)}</span>
-		</div>
-		<div class="print-row">
-			<span>{isInflow ? 'Recibido de' : 'Pagado a'}</span>
-			<span>{movement.employeeName ?? movement.payee ?? ''}</span>
-		</div>
-		<div class="print-row"><span>Concepto</span><span>{concept}</span></div>
-		{#if null !== movement.orderId}
-			<div class="print-row"><span>Pedido relacionado</span><span>#{movement.orderId}</span></div>
-		{/if}
-		{#if null !== movement.receivableId}
-			<div class="print-row">
-				<span>Cuenta de cobro relacionada</span>
-				<span>Nº {movement.receivableId} · {billedOrders}</span>
+		<div class="print-band">
+			<div>
+				<div class="print-row">
+					<span>Fecha</span><span>{formatLongDay(movement.movementDate)}</span>
+				</div>
+				<div class="print-row">
+					<span>{isInflow ? 'Recibido de' : 'Pagado a'}</span>
+					<span>{movement.employeeName ?? movement.payee ?? ''}</span>
+				</div>
+				<div class="print-row"><span>Concepto</span><span>{concept}</span></div>
+				{#if null !== movement.orderId}
+					<div class="print-row">
+						<span>Pedido relacionado</span><span>#{movement.orderId}</span>
+					</div>
+				{/if}
+				{#if null !== movement.receivableId}
+					<div class="print-row">
+						<span>Cuenta de cobro relacionada</span>
+						<span>Nº {movement.receivableId} · {billedOrders}</span>
+					</div>
+				{/if}
+				<div class="print-row">
+					<span>Método de pago</span>
+					<span>{movement.otherMethod ?? PAYMENT_METHOD_LABELS[movement.method]}</span>
+				</div>
 			</div>
-		{/if}
-		<div class="print-row">
-			<span>Método de pago</span>
-			<span>{movement.otherMethod ?? PAYMENT_METHOD_LABELS[movement.method]}</span>
-		</div>
-
-		<div class="print-amount">
-			<div class="print-row print-row--strong">
-				<span>Valor</span>
-				<span class="print-amount__number">{formatPesos(Math.abs(movement.amount))}</span>
+			<div class="print-amount">
+				<div class="print-row print-row--strong">
+					<span>Valor</span>
+					<span class="print-amount__number">{formatPesos(Math.abs(movement.amount))}</span>
+				</div>
+				<div class="print-small print-amount__words">{formatPesosInWords(movement.amount)}</div>
 			</div>
-			<div class="print-small print-amount__words">{formatPesosInWords(movement.amount)}</div>
 		</div>
 
 		<div class="print-spacer"></div>
@@ -107,9 +113,9 @@
 </div>
 
 <style>
-	/* Quarter-letter, edge to edge: the sheet carries its own margins. */
+	/* Half-letter landscape, edge to edge: the sheet carries its own margins. */
 	@page {
-		size: 5.5in 4.25in;
+		size: 8.5in 5.5in;
 		margin: 0;
 	}
 
@@ -131,14 +137,13 @@
 		max-width: 100%;
 	}
 
-	/* Half the payroll receipt's half-letter: same width, half the height. */
 	.print-sheet {
 		box-sizing: border-box;
 		display: flex;
 		flex: none;
 		flex-direction: column;
 		width: var(--print-sheet-w);
-		height: calc(var(--print-sheet-h) / 2);
+		height: var(--print-sheet-h);
 		padding: 22px 28px;
 		font: var(--weight-regular) var(--print-base) / 1.35 var(--font-sans);
 		color: var(--text-body);
@@ -152,7 +157,7 @@
 		align-items: flex-start;
 		justify-content: space-between;
 		padding-bottom: 10px;
-		margin-bottom: 12px;
+		margin-bottom: var(--space-8);
 		border-bottom: var(--border-w-strong) solid var(--border-strong);
 	}
 
@@ -172,6 +177,18 @@
 	.print-head__number {
 		margin-top: 3px;
 		font-size: 12px;
+	}
+
+	/* The data left, the amount right. */
+	.print-band {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 0 var(--space-14);
+		align-items: start;
+	}
+
+	.print-band .print-row > :last-child {
+		max-width: 240px;
 	}
 
 	.print-small {
@@ -206,12 +223,11 @@
 
 	.print-amount {
 		padding-top: var(--space-4);
-		margin-top: 12px;
 		border-top: var(--border-w-hair) solid var(--border-default);
 	}
 
 	.print-amount__number {
-		font-size: 18px;
+		font-size: 22px;
 		font-variant-numeric: tabular-nums;
 	}
 
