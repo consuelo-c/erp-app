@@ -5,6 +5,7 @@
 	import { splitIntoPages } from '$lib/orders';
 	import type { OrderItem } from '$lib/server/services/orders';
 	import type { CompanySettings } from '$lib/server/services/settings';
+	import PrintOrientation from '../PrintOrientation.svelte';
 
 	// Outside the app's shell, the half-letter sheets the order and the quote print on: what prints
 	// is the sheets. Each repeats the header and numbers itself; `opening` opens the first, the lines
@@ -32,6 +33,7 @@
 <div class="printout">
 	<div class="printout__toolbar">
 		<Button href={back.href} variant="secondary" size="sm" inline>{back.label}</Button>
+		<PrintOrientation />
 		<Button type="button" size="sm" inline onclick={() => window.print()}>Imprimir</Button>
 	</div>
 
@@ -115,6 +117,7 @@
 	.printout__toolbar {
 		display: flex;
 		gap: var(--control-gap);
+		align-items: center;
 		justify-content: space-between;
 		width: var(--print-sheet-w);
 		max-width: 100%;

@@ -3,12 +3,22 @@
 
 	// A label around a native checkbox or radio, so a form posts the selection without JS. A radio's
 	// `checked` isn't bound (a group binds across inputs): the caller sets it and listens to `onchange`.
-	type Props = HTMLInputAttributes & { label: string; type?: 'checkbox' | 'radio' };
+	type Props = Omit<HTMLInputAttributes, 'size'> & {
+		label: string;
+		type?: 'checkbox' | 'radio';
+		size?: 'md' | 'sm';
+	};
 
-	let { label, type = 'checkbox', checked = $bindable(false), ...rest }: Props = $props();
+	let {
+		label,
+		type = 'checkbox',
+		size = 'md',
+		checked = $bindable(false),
+		...rest
+	}: Props = $props();
 </script>
 
-<label class="chip">
+<label class={['chip', 'sm' === size && 'chip--sm']}>
 	{#if 'radio' === type}
 		<input {...rest} type="radio" {checked} />{label}
 	{:else}
@@ -33,6 +43,12 @@
 		background: var(--surface-card);
 		border: var(--border-w) solid var(--border-default);
 		border-radius: var(--radius-chip);
+	}
+
+	/* A toolbar's chips, e.g. a printout's «Horizontal / Vertical». */
+	.chip--sm {
+		padding: var(--space-3) var(--space-6);
+		font-size: var(--text-label);
 	}
 
 	/* Selected is ink with white text, never yellow. */

@@ -108,3 +108,12 @@ test('one contact line: the phone, the username without one, or a blank «Teléf
 	const neither = { ...quote, client: { ...quote.client, phone: null } };
 	expect(printout({ quote: neither })).toContain('<span>Teléfono</span><span></span>');
 });
+
+test('the toolbar offers «Volver», «Horizontal / Vertical» and «Imprimir», opening on Horizontal', () => {
+	const { head, body } = render(Page, {
+		props: { data: { printout: { quote, document: null, company } } } as never
+	});
+	expect(body).toMatch(/Volver a la cotización[\s\S]*Horizontal[\s\S]*Vertical[\s\S]*Imprimir/);
+	expect(body).toMatch(/<input[^>]*checked[^>]*\/>Horizontal/);
+	expect(head).toContain('page-orientation: rotate-left');
+});

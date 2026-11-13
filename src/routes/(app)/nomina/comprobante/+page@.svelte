@@ -4,6 +4,7 @@
 	import { formatLongDay, formatShortDay } from '$lib/datetime';
 	import { formatIdNumber, formatPesos } from '$lib/format';
 	import { DEDUCTION_LABELS, EARNING_LABELS } from '$lib/labels';
+	import PrintOrientation from '../../PrintOrientation.svelte';
 	import type { PageProps } from './$types';
 
 	// Outside the app's shell: the half-letter sheet the worker signs, and what prints is the sheet.
@@ -33,6 +34,7 @@
 <div class="receipt">
 	<div class="receipt__toolbar">
 		<Button href={backHref} variant="secondary" size="sm" inline>Volver a la liquidación</Button>
+		<PrintOrientation />
 		<Button type="button" size="sm" inline onclick={() => window.print()}>Imprimir</Button>
 	</div>
 
@@ -146,6 +148,7 @@
 	.receipt__toolbar {
 		display: flex;
 		gap: var(--control-gap);
+		align-items: center;
 		justify-content: space-between;
 		width: var(--print-sheet-w);
 		max-width: 100%;

@@ -70,3 +70,10 @@ test('with only a username it prints «WhatsApp @mayc47»', () => {
 test('with neither it prints «Teléfono» blank, to be written in by hand', () => {
 	expect(sheet(null, null)).toContain('<span>Teléfono</span><span></span>');
 });
+
+test('the toolbar offers «Volver», «Horizontal / Vertical» and «Imprimir», opening on Horizontal', () => {
+	const { head, body } = render(OrderPrintout, { props: { printout, backHref: '/pedidos/1' } });
+	expect(body).toMatch(/Volver al pedido[\s\S]*Horizontal[\s\S]*Vertical[\s\S]*Imprimir/);
+	expect(body).toMatch(/<input[^>]*checked[^>]*\/>Horizontal/);
+	expect(head).toContain('page-orientation: rotate-left');
+});
