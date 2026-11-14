@@ -160,6 +160,7 @@ test('General loads and saves with the retired ORDERS_SUGGESTED_ADVANCE_PCT row 
 });
 
 test("changing a quote's validity moves no existing quote's «Válida hasta»", async () => {
+	database.exec(readFileSync('scripts/catalog.sql', 'utf8'));
 	database.exec(readFileSync('scripts/sample-data.sql', 'utf8'));
 	const readValidity = () =>
 		database.prepare('select id, valid_until from quotes order by id').all();

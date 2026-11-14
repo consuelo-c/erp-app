@@ -21,6 +21,7 @@ import {
 import { quoteAttributesSchema } from '../services/quotes';
 import { getReceivableDetail, getReceivablePrintout } from '../services/receivables';
 
+const catalog = readFileSync('scripts/catalog.sql', 'utf8');
 const sampleData = readFileSync('scripts/sample-data.sql', 'utf8');
 const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
 
@@ -34,6 +35,7 @@ beforeEach(() => {
 	for (const file of files) {
 		database.exec(readFileSync(`migrations/${file}`, 'utf8'));
 	}
+	database.exec(catalog);
 	database.exec(sampleData);
 });
 
@@ -41,21 +43,41 @@ function readAll(table: string) {
 	return database.prepare(`select * from ${table} order by id`).all();
 }
 
-test("loads the Design Brief's eight products, the four colors of one variant group and a retired chair", () => {
-	const products = readAll('products');
-	expect(products).toHaveLength(13);
-	const retired = products.filter((product) => 0 === product.active);
-	expect(retired.map((product) => product.name)).toEqual(['Silla Rimax']);
+test('inserts no product but the retired «Silla Rimax», on no order', () => {
+	const catalogOnly = new DatabaseSync(':memory:');
+	for (const file of readdirSync('migrations').filter((each) => each.endsWith('.sql'))) {
+		catalogOnly.exec(readFileSync(`migrations/${file}`, 'utf8'));
+	}
+	catalogOnly.exec(catalog);
+	const catalogNames = catalogOnly.prepare('select name from products').all();
+	const added = readAll('products').filter(
+		(product) => !catalogNames.some((each) => each.name === product.name)
+	);
+	expect(added.map((product) => [product.name, product.active])).toEqual([['Silla Rimax', 0]]);
 	const onOrders = database
 		.prepare("select 1 from orders, json_each(order_items) where value ->> 'name' = 'Silla Rimax'")
 		.all();
 	expect(onOrders).toEqual([]);
-	const variants = products.filter((product) => 'Mantel cuadrado 50×50' === product.variant_group);
-	expect(variants.map((variant) => [variant.variant_name, variant.rental_price])).toEqual([
-		['Dorado', 9500],
-		['Rojo', 8000],
-		['Verde', 8000],
-		['Azul', 8000]
+});
+
+test('every line and count names a catalog product, so none is dropped', () => {
+	const linedNames = [...sampleData.matchAll(/\["([^"]+)",\d+/g)].map((match) => match[1]);
+	const countedNames = [...sampleData.matchAll(/'name', '([^']+)'/g)].map((match) => match[1]);
+	const names = new Set([...linedNames, ...countedNames]);
+	expect(names.size).toBeGreaterThan(10);
+	const isProduct = database.prepare('select 1 from products where name = ?');
+	expect([...names].filter((name) => undefined === isProduct.get(name))).toEqual([]);
+});
+
+test('the catalog products the orders use get stock', () => {
+	const stock = database
+		.prepare(
+			"select name, total_quantity from products where name in ('Sillas Tiffany', 'Mesas Redondas') order by name"
+		)
+		.all();
+	expect(stock).toEqual([
+		{ name: 'Mesas Redondas', total_quantity: 60 },
+		{ name: 'Sillas Tiffany', total_quantity: 800 }
 	]);
 });
 
@@ -97,7 +119,9 @@ test('loads clients, two transporters, a decorator, one of each newer service an
 });
 
 test('a second run duplicates nothing and keeps an edit', () => {
-	database.exec("update products set rental_price = 3000 where name = 'Silla Tiffany dorada'");
+	database.exec(
+		"update products set rental_price = 3000, total_quantity = 790 where name = 'Sillas Tiffany'"
+	);
 	database.exec("update users set password_hash = 'set-by-admin' where username = 'gerente'");
 	database.exec('update orders set rental_days = 3 where id = 1043');
 	const tables = () => [
@@ -206,6 +230,7 @@ test('punches the four from Saturday 10 to Sunday 18 October 2026 but Thursday 1
 test("the week of 12 October's settlement fills each of the five overtime rows", async () => {
 	const { db, database: memory } = createMemoryD1();
 	memory.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
+	memory.exec(catalog);
 	memory.exec(sampleData);
 	const { employees } = await openWeek(db, { employeeId: null, week: '2026-10-12' }, manager);
 	expect(employees).toHaveLength(4);
@@ -249,7 +274,7 @@ test("loads the Design Brief's #1043 and #1051, #1047 delivered, and enough for 
 	]);
 	const [order1043, order1051] = [byId(1043), byId(1051)].map(parseOrder);
 	expect(order1043.client.name).toBe('Luz Marina Restrepo');
-	expect(order1043.items.map((item) => item.line_total)).toEqual([600000, 288000, 216000]);
+	expect(order1043.items.map((item) => item.line_total)).toEqual([1440000, 216000, 235200]);
 	expect(order1051.delivery).toMatchObject({
 		method: 'CLIENT_PICKUP',
 		time: '08:00',
@@ -340,6 +365,7 @@ test('every trip falls from 1 to 18 October, each status as if today were Wednes
 function openSeededD1() {
 	const { db, database: memory } = createMemoryD1();
 	memory.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
+	memory.exec(catalog);
 	memory.exec(sampleData);
 	return db;
 }
@@ -365,9 +391,9 @@ test('loads two pending counts sharing a product, one stale, and a rejected one'
 	expect(readAll('payroll_runs')).toEqual([]);
 });
 
-test("#1043 reads the Design Brief's paid, balance and deposit", async () => {
+test('#1043 is paid $500.000 of $1.980.000 and holds a $200.000 deposit', async () => {
 	const order = await getOrderDetail(openSeededD1(), 1043, manager);
-	expect([order?.paid, order?.balanceDue, order?.depositHeld]).toEqual([500000, 680000, 200000]);
+	expect([order?.paid, order?.balanceDue, order?.depositHeld]).toEqual([500000, 1480000, 200000]);
 });
 
 test('#1009, paid in two, and #1012, its deposit given back, owe and hold nothing', async () => {
@@ -449,7 +475,7 @@ test("loads Postobón's open #1 and expired #2, and #3 converted into #1043 with
 	expect(secondItems.map((item) => item.name)).toContain('Silla Rimax');
 	expect(secondItems.some((item) => item.unit_price < item.list_price)).toBe(true);
 	const order1043 = readAll('orders').find((order) => 1043 === order.id) ?? {};
-	expect(third).toMatchObject({ order_id: 1043, quote_total: 1180000 });
+	expect(third).toMatchObject({ order_id: 1043, quote_total: 1980000 });
 	expect(parseQuote(third).items).toEqual(parseOrder(order1043).items);
 });
 
@@ -458,9 +484,9 @@ test("Nº 4794 groups Postobón's #1060 and #1061 and is unpaid", async () => {
 	expect(receivable).toMatchObject({
 		paymentTerms: 'Contado',
 		client: { name: 'Postobón S.A.', documentId: '8909039395' },
-		total: 1360000,
+		total: 2390000,
 		paid: 0,
-		balance: 1360000
+		balance: 2390000
 	});
 	expect(receivable?.orders.map((order) => order.id)).toEqual([1060, 1061]);
 	expect(receivable?.payments).toEqual([]);
@@ -470,7 +496,7 @@ test("#1060 and #1061 carry Nº 4794's balance, and #1072 none", async () => {
 	const db = openSeededD1();
 	const balanceOf = async (id: number) =>
 		(await getOrderDetail(db, id, manager))?.receivableBalance;
-	expect(await Promise.all([1060, 1061, 1072].map(balanceOf))).toEqual([1360000, 1360000, null]);
+	expect(await Promise.all([1060, 1061, 1072].map(balanceOf))).toEqual([2390000, 2390000, null]);
 });
 
 test("#1072 is Postobón's too, COMPLETED and unbilled", () => {
@@ -483,19 +509,19 @@ test("#1072 is Postobón's too, COMPLETED and unbilled", () => {
 test("Nº 4795 bills Postobón's cancelled #1073 alone, paid: «Anulada», and #1073 is owed it", async () => {
 	const db = openSeededD1();
 	const receivable = await getReceivableDetail(db, 4795, manager);
-	expect(receivable).toMatchObject({ total: 0, paid: 450000, balance: -450000, isVoid: true });
+	expect(receivable).toMatchObject({ total: 0, paid: 770000, balance: -770000, isVoid: true });
 	expect(receivable?.orders).toEqual([expect.objectContaining({ id: 1073, isCancelled: true })]);
 	const order = await getOrderDetail(db, 1073, manager);
-	expect(order).toMatchObject({ status: 'CANCELLED', receivableId: 4795, owedToClient: 450000 });
+	expect(order).toMatchObject({ status: 'CANCELLED', receivableId: 4795, owedToClient: 770000 });
 });
 
 test("Nº 4796 bills Postobón's CONFIRMED #1074 alone, with its advance paid on the order", async () => {
 	const db = openSeededD1();
 	const receivable = await getReceivableDetail(db, 4796, manager);
-	expect(receivable).toMatchObject({ total: 635000, paid: 300000, balance: 335000, isVoid: false });
+	expect(receivable).toMatchObject({ total: 1115000, paid: 300000, balance: 815000, isVoid: false });
 	expect(receivable?.orders.map((order) => order.id)).toEqual([1074]);
 	const printout = await getReceivablePrintout(db, 4796, manager);
-	expect(printout).toMatchObject({ paid: 300000, balance: 335000 });
+	expect(printout).toMatchObject({ paid: 300000, balance: 815000 });
 	const order = await getOrderDetail(db, 1074, manager);
 	expect(order).toMatchObject({ status: 'CONFIRMED', receivableId: 4796 });
 	expect(order && receivableLine(order)).toBe('Entregar cuenta de cobro Nº 4796');
