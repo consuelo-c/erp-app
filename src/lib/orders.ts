@@ -3,7 +3,7 @@
 // input is whole pesos, so nothing rounds. Shared with the browser, so the order form recalculates
 // as it's typed and the screens offer only the legal transitions.
 
-import { formatPesos } from '$lib/format';
+import { formatBalance, formatPesos } from '$lib/format';
 import type { DeliveryMethod, OrderStatus, ReturnMethod } from '$lib/server/services/orders';
 
 export type PricedLine = { qty: number; unit_price: number };
@@ -89,6 +89,25 @@ export function receivableLine(order: {
 	return BEFORE_DELIVERY.includes(order.status)
 		? `Entregar cuenta de cobro Nº ${order.receivableId}`
 		: `Cuenta de cobro Nº ${order.receivableId}`;
+}
+
+// A completed order's deposit went back, a cancelled one's is owed back: «$0 de $50.000» would read
+// as unpaid.
+const DEPOSIT_SETTLED: readonly OrderStatus[] = ['COMPLETED', 'CANCELLED'];
+
+/**
+ * The deposit as the client's paper reads it, «$20.000 de $50.000»: received, net of its refunds,
+ * of agreed. Null with no agreed deposit, or once the order is completed or cancelled.
+ */
+export function depositReceivedOfAgreed(order: {
+	status: OrderStatus;
+	depositAmount: number;
+	depositHeld: number;
+}): string | null {
+	if (0 === order.depositAmount || DEPOSIT_SETTLED.includes(order.status)) {
+		return null;
+	}
+	return `${formatBalance(order.depositHeld)} de ${formatPesos(order.depositAmount)}`;
 }
 
 export type OrderMove = {
