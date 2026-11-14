@@ -804,6 +804,8 @@ test('the form opens filled from the quote, with its client as the contact is to
 		quote: { id, state: 'VALID', rentalDays: 2, discount: 104000, transportCost: 180000 },
 		client: { id: LUZ_MARINA, fullName: 'Luz Marina Restrepo Gil', phone: '573104428890' }
 	});
+	// The holidays' dates, which the form's default delivery and pickup skip.
+	expect(conversion?.holidayDates).toContain('2026-12-08');
 	expect({ ...countRows(), ...countOrders() }).toEqual(before);
 	expect((await read(id)).state).toBe('VALID');
 	expect(await getQuoteConversion(db, 99, sales)).toBeNull();

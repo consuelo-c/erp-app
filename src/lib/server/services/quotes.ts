@@ -712,8 +712,11 @@ export async function getOrderRequote(
 	return { source: { kind: 'ORDER', id: order.id }, ...fresh };
 }
 
-/** «Convertir en pedido»: the quote, and its client as the contact is today, for the order form. */
-export type QuoteConversion = { quote: Quote; client: ClientCandidate };
+/**
+ * «Convertir en pedido»: the quote, and its client as the contact is today, for the order form;
+ * the holidays' dates, which the trips' default dates skip.
+ */
+export type QuoteConversion = { quote: Quote; client: ClientCandidate; holidayDates: string[] };
 
 /** What the order form opens filled with. Writes nothing: only «Guardar pedido» converts. Null: no such quote. */
 export async function getQuoteConversion(
@@ -729,7 +732,8 @@ export async function getQuoteConversion(
 	const contact = await getContact(db, quote.clientId, actor);
 	const { fullName, phone, whatsapp, address1, address2 } = contact as ClientCandidate;
 	const client = { id: quote.clientId, fullName, phone, whatsapp, address1, address2 };
-	return { quote, client };
+	const { PAYROLL_HOLIDAYS: holidays } = await readSettings(db, ['PAYROLL_HOLIDAYS']);
+	return { quote, client, holidayDates: holidays.map((holiday) => holiday.date) };
 }
 
 const conversionInputSchema = z.object({
