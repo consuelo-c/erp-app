@@ -206,7 +206,7 @@ Llegan automáticamente:
 Se cargan a mano:
 
 - **WhatsApp y términos y condiciones:** `COMPANY_WHATSAPP` y `TERMS_CONDITIONS` llegan vacíos y se llenan desde _Configuración_ en la aplicación.
-- **Catálogo de productos:** siguiendo la sección [Importar el catálogo desde WooCommerce](#importar-el-catálogo-desde-woocommerce).
+- **Catálogo de productos:** siguiendo la sección [Cargar el catálogo](#cargar-el-catálogo).
 - **Numeración de los pedidos:** siguiendo la sección [Fijar la secuencia de los pedidos](#fijar-la-secuencia-de-los-pedidos).
 - **Numeración de las cuentas de cobro:** siguiendo la sección [Fijar la secuencia de las cuentas de cobro](#fijar-la-secuencia-de-las-cuentas-de-cobro).
 
@@ -463,18 +463,16 @@ openssl rand -base64 32 | npx wrangler secret put PASSWORD_PEPPER
 > [!IMPORTANT]
 > `ADMIN_PASSWORD` solo se lee mientras no exista el login `admin`, es decir, hasta el primer intento de inicio de sesión. Después, cambiar el _secret_ no cambia la contraseña: se cambia en la aplicación, en _Logins → `admin` → Cambiar contraseña_.
 
-## Importar el catálogo desde WooCommerce
+## Cargar el catálogo
 
-Se creó un script que toma el CSV de WooCommerce y lo convierte en un archivo `.sql` que luego puede importarse en D1 usando `wrangler`. Para exportar, en WordPress, _Productos → Exportar_ (todas las columnas) genera un CSV. Luego en la terminal se importa:
+El catálogo real está en `scripts/catalog.sql`, armado a mano una sola vez con la exportación de WooCommerce y el inventario de manteles. De ahí en adelante el catálogo se mantiene en _Productos_, no en WooCommerce. En desarrollo, `npm run db:seed` lo carga solo. En producción se carga una única vez, a mano, con la tabla `products` vacía:
 
 ```bash
-node scripts/convert-wc-catalog.js ~/Downloads/wc-product-export-….csv products-import.sql
-npx wrangler d1 execute consueloc-erp-db --local --file products-import.sql   # Desarrollo
-npx wrangler d1 execute consueloc-erp-db --remote --file products-import.sql  # Producción
+npx wrangler d1 execute consueloc-erp-db --remote --file scripts/catalog.sql
 ```
 
-- Solo entran los productos simples que tienen precio y categoría de alquiler. Las variaciones, el Catering, los productos sin precio y los nombres repetidos se omiten, y el script los lista.
-- Los productos no publicados entran inactivos. Todos entran con 0 unidades, que se completan en _Productos_.
+- Se ejecuta después del último despliegue con migraciones aplastadas, porque ese despliegue borra la base de datos mientras `orders` esté vacía.
+- `deploy.yml` nunca lo aplica: un producto renombrado en _Productos_ volvería como duplicado.
 - Se puede ejecutar varias veces: un producto cuyo nombre ya existe (sin importar mayúsculas) se omite.
 
 ## Fijar la secuencia de los pedidos
