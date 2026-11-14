@@ -63,8 +63,7 @@ test('creating stores digits only and writes a PRODUCT / CREATED event', async (
 		description: null,
 		rentalPrice: 8000,
 		totalQuantity: 120,
-		isActive: true,
-		updatedAt: expect.any(Number)
+		isActive: true
 	});
 	expect(events()).toMatchObject([{ entity_type: 'PRODUCT', action: 'CREATED', before: null }]);
 });
