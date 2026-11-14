@@ -90,9 +90,8 @@ test('Inactivo deactivates the product, which stays in the list', async () => {
 	expect((await listProducts(db, {}, manager)).products).toMatchObject([{ id, isActive: false }]);
 });
 
-test('the picker lists each group once, with its category, and a save says its group', async () => {
-	const result = await createProduct(db, golden, manager);
-	expect(result).toMatchObject({ ok: true, variantGroup: 'Mantel cuadrado 50×50' });
+test('the picker lists each group once, with its category', async () => {
+	await create(golden);
 	const picked = { ...golden, new_variant_group: '', variant_group: 'Mantel cuadrado 50×50' };
 	await create({ ...picked, variant_name: 'Rojo' });
 	await create(chair);
@@ -168,7 +167,7 @@ test('WAREHOUSE and DRIVER get a 403 on the list', async () => {
 	}
 });
 
-test('the list narrows by text and category, a group kept whole by any variant', async () => {
+test('the list narrows by text and category, each variant on its own', async () => {
 	await create(chair);
 	await create(golden);
 	const red = { name: 'Mantel cuadrado 50×50 — Rojo', variant_name: 'Rojo' };
@@ -181,10 +180,38 @@ test('the list narrows by text and category, a group kept whole by any variant',
 	await create({ ...chair, name: 'Copa cristalería', category: 'GLASSWARE' });
 	const names = async (input: Record<string, string>) =>
 		(await listProducts(db, input, manager)).products.map(({ name }) => name);
-	expect(await names({ search: 'ROJO' })).toEqual([golden.name, red.name]);
+	expect(await names({ search: 'ROJO' })).toEqual([red.name]);
+	expect(await names({ search: '50×50' })).toEqual([golden.name, red.name]);
 	expect(await names({ search: 'cristaleria' })).toEqual(['Copa cristalería']);
 	expect(await names({ search: 'silla', category: 'LINENS' })).toEqual([]);
 	expect(await names({ category: 'CHAIRS_TABLES' })).toEqual(['Silla Tiffany']);
 	// A tampered category is ignored, not an error.
 	expect(await names({ category: 'NOPE' })).toHaveLength(4);
+});
+
+test('the list dates each product by the last event that changed its total_quantity', async () => {
+	const id = await create(chair);
+	const log = (after: object, createdAt: number) =>
+		database
+			.prepare(
+				"insert into events (entity_type, entity_id, action, actor_username, actor_kind, after, created_at) values ('PRODUCT', ?, 'EDITED', 'gerente', 'user', ?, ?)"
+			)
+			.run(id, JSON.stringify(after), createdAt);
+	log({ total_quantity: 100 }, 2_000_000_000);
+	log({ rental_price: 9000 }, 2_100_000_000);
+	// Seeded: no event at all, so its creation.
+	database
+		.prepare(
+			"insert into products (name, category, rental_price, total_quantity, created_at, created_by, updated_at, updated_by) values ('Copa', 'GLASSWARE', 900, 10, 1800000000, 'seed', 1800000000, 'seed')"
+		)
+		.run();
+	const dates = (await listProducts(db, {}, manager)).products.map(
+		({ name, quantityUpdatedAt }) => [name, quantityUpdatedAt]
+	);
+	expect(dates).toEqual(
+		expect.arrayContaining([
+			['Silla Tiffany', 2_000_000_000],
+			['Copa', 1_800_000_000]
+		])
+	);
 });

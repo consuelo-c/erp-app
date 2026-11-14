@@ -1,5 +1,5 @@
 import { error, fail, redirect } from '@sveltejs/kit';
-import { catalogHref } from '$lib/navigation';
+import { resolve } from '$app/paths';
 import { requireRole } from '$lib/server/actor';
 import { createProduct, listVariantGroups } from '$lib/server/services/products';
 import type { Actions, PageServerLoad } from './$types';
@@ -23,7 +23,7 @@ export const actions: Actions = {
 		if (!result.ok) {
 			return fail(400, { ...result, values });
 		}
-		// Back to the list, or to the group it joined, with the saved notice.
-		redirect(303, catalogHref(result.variantGroup, { guardado: '' }));
+		// Back to the list, with the saved notice.
+		redirect(303, `${resolve('/productos')}?guardado`);
 	}
 };
