@@ -106,6 +106,7 @@ test("#1043's page: the printout's figures, and exactly the fields the client se
 		transportCost: 180000,
 		orderTotal: 1180000,
 		depositAmount: 200000,
+		depositHeld: 0,
 		paid: 500000,
 		balanceDue: 680000,
 		receivableId: null,

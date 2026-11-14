@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { formatClockTime, formatLongDay, formatShortDay } from '$lib/datetime';
 	import { formatBalance, formatPesos } from '$lib/format';
-	import { readReceivableBalance } from '$lib/orders';
+	import { depositReceivedOfAgreed, readReceivableBalance } from '$lib/orders';
 	import type { OrderPrintout } from '$lib/server/services/orders';
 	import { printedContact } from '$lib/whatsapp';
 	import HalfLetterPrintout from './HalfLetterPrintout.svelte';
@@ -15,6 +15,7 @@
 	const delivery = $derived(order.delivery);
 	const pickup = $derived(order.pickup);
 	const receivable = $derived(readReceivableBalance(order));
+	const deposit = $derived(depositReceivedOfAgreed(order));
 	const contact = $derived(printedContact(order.client.phone, order.client.whatsapp));
 	// The pickup address only when the products come back from somewhere else.
 	const isPickupElsewhere = $derived(
@@ -93,9 +94,9 @@
 		<div class="print-row print-row--strong print-total">
 			<span>Total</span><span>{formatPesos(order.orderTotal)}</span>
 		</div>
-		<div class="print-row">
-			<span>Depósito</span><span>{formatPesos(order.depositAmount)}</span>
-		</div>
+		{#if deposit}
+			<div class="print-row"><span>Depósito: {deposit}</span></div>
+		{/if}
 		{#if null === receivable}
 			<div class="print-row"><span>Pagado</span><span>{formatBalance(order.paid)}</span></div>
 			<div class="print-row print-row--strong">

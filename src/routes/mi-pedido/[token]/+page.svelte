@@ -7,7 +7,7 @@
 		CLIENT_RETURN_METHOD_LABELS,
 		ORDER_STATUS_LABELS
 	} from '$lib/labels';
-	import { readReceivableBalance } from '$lib/orders';
+	import { depositReceivedOfAgreed, readReceivableBalance } from '$lib/orders';
 	import type { PageProps } from './$types';
 
 	// «Su pedido»: the order as the client holds it on paper, read-only. The event's date only,
@@ -18,6 +18,7 @@
 	const order = $derived(data.order);
 	const receivable = $derived(readReceivableBalance(order));
 	const credit = $derived(receivable?.credit ?? -order.balanceDue);
+	const deposit = $derived(depositReceivedOfAgreed(order));
 </script>
 
 <svelte:head>
@@ -96,9 +97,9 @@
 	<li class="detail-list__row--strong">
 		<span>Total</span><span>{formatPesos(order.orderTotal)}</span>
 	</li>
-	<li class="detail-list__row--plain">
-		<span>Depósito</span><span>{formatPesos(order.depositAmount)}</span>
-	</li>
+	{#if deposit}
+		<li class="detail-list__row--plain"><span>Depósito</span><span>{deposit}</span></li>
+	{/if}
 	{#if null === receivable}
 		<li class="detail-list__row--plain">
 			<span>Pagado</span><span>{formatBalance(order.paid)}</span>

@@ -1391,7 +1391,7 @@ export async function listOrders(
 }
 
 /** What the client left as a guarantee and hasn't been given back: held, never income. */
-const DEPOSIT_HELD_SQL = `coalesce((select sum(amount) from cash_movements
+export const DEPOSIT_HELD_SQL = `coalesce((select sum(amount) from cash_movements
 	where entity_type = 'ORDER' and entity_id = orders.id
 	and concept in ('SECURITY_DEPOSIT', 'DEPOSIT_REFUND')), 0)`;
 
