@@ -157,6 +157,11 @@ export function addDays(date: string, days: number): string {
 	return `${moved.getUTCFullYear()}-${month}-${day}`;
 }
 
+/** `date`'s day of the week: 0 is Sunday, 6 is Saturday. */
+export function getDayOfWeek(date: string): number {
+	return toUtcDate(date).getUTCDay();
+}
+
 /** The first and last civil dates of `date`'s month. */
 export function getMonthRange(date: string): { start: string; end: string } {
 	const start = `${date.slice(0, 7)}-01`;

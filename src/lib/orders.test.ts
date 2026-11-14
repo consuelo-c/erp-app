@@ -2,6 +2,8 @@ import { expect, test } from 'vitest';
 import { ORDER_STATUSES, type OrderStatus } from '$lib/server/services/orders';
 import {
 	calculateOrderTotals,
+	findEventDateWarnings,
+	followEventDate,
 	isCancelledOnItsWay,
 	isIncidentReportable,
 	isLegalTransition,
@@ -241,4 +243,78 @@ test("a billed order below 0 reads paid and the client's credit", () => {
 
 test('an unbilled order has no reading: it keeps its own balance', () => {
 	expect(readReceivableBalance({ receivableId: null, receivableBalance: null })).toBeNull();
+});
+
+// 8 December 2026 is a holiday in PAYROLL_HOLIDAYS.
+const HOLIDAYS = ['2026-12-08'];
+const UNTYPED = {
+	deliveryDate: '',
+	pickupDate: '',
+	isDeliveryDateTyped: false,
+	isPickupDateTyped: false
+};
+
+test.each([
+	{ day: 'Saturday 5', event: '2026-12-05', deliveryDate: '2026-12-05', pickupDate: '2026-12-07' },
+	{ day: 'Friday 4', event: '2026-12-04', deliveryDate: '2026-12-04', pickupDate: '2026-12-07' },
+	{ day: 'Sunday 6', event: '2026-12-06', deliveryDate: '2026-12-05', pickupDate: '2026-12-07' },
+	{ day: 'Monday 7', event: '2026-12-07', deliveryDate: '2026-12-07', pickupDate: '2026-12-09' },
+	{ day: 'holiday Tuesday 8', event: '2026-12-08', deliveryDate: '2026-12-07', pickupDate: '2026-12-09' }
+])('an event on $day December gets its default delivery and pickup', ({ event, ...expected }) => {
+	const { deliveryDate, pickupDate } = expected;
+	expect(followEventDate(event, UNTYPED, HOLIDAYS)).toEqual({ deliveryDate, pickupDate });
+});
+
+test('moving the event moves both dates; one typed by hand stays while the other follows', () => {
+	const first = followEventDate('2026-12-05', UNTYPED, HOLIDAYS);
+	expect(followEventDate('2026-12-04', { ...UNTYPED, ...first }, HOLIDAYS)).toEqual({
+		deliveryDate: '2026-12-04',
+		pickupDate: '2026-12-07'
+	});
+	const typed = { ...first, pickupDate: '2026-12-10', isDeliveryDateTyped: false, isPickupDateTyped: true };
+	expect(followEventDate('2026-12-07', typed, HOLIDAYS)).toEqual({
+		deliveryDate: '2026-12-07',
+		pickupDate: '2026-12-10'
+	});
+});
+
+test('no event date leaves both dates empty, and typing one fills them', () => {
+	expect(followEventDate('', UNTYPED, HOLIDAYS)).toEqual({ deliveryDate: '', pickupDate: '' });
+	expect(followEventDate('2026-12-06', UNTYPED, HOLIDAYS)).toEqual({
+		deliveryDate: '2026-12-05',
+		pickupDate: '2026-12-07'
+	});
+});
+
+test('a saved order counts its dates as typed: moving its event leaves them as saved', () => {
+	const saved = {
+		deliveryDate: '2026-08-14',
+		pickupDate: '2026-08-17',
+		isDeliveryDateTyped: true,
+		isPickupDateTyped: true
+	};
+	expect(followEventDate('2026-08-22', saved, HOLIDAYS)).toEqual({
+		deliveryDate: '2026-08-14',
+		pickupDate: '2026-08-17'
+	});
+});
+
+test('a delivery after the event and a pickup before it each warn', () => {
+	const event = { eventDate: '2026-08-22', deliveryDate: '2026-08-22', pickupDate: '2026-08-24' };
+	expect(findEventDateWarnings(event)).toEqual([]);
+	expect(findEventDateWarnings({ ...event, deliveryDate: '2026-08-23' })).toEqual([
+		'La entrega es después del evento'
+	]);
+	expect(findEventDateWarnings({ ...event, pickupDate: '2026-08-17' })).toEqual([
+		'La recogida es antes del evento'
+	]);
+	expect(findEventDateWarnings({ ...event, deliveryDate: '2026-08-23', pickupDate: '2026-08-21' })).toEqual([
+		'La entrega es después del evento',
+		'La recogida es antes del evento'
+	]);
+});
+
+test('blank dates never warn', () => {
+	expect(findEventDateWarnings({ eventDate: '', deliveryDate: '2026-08-23', pickupDate: '' })).toEqual([]);
+	expect(findEventDateWarnings({ eventDate: '2026-08-22', deliveryDate: '', pickupDate: '' })).toEqual([]);
 });

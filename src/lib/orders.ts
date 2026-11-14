@@ -3,6 +3,7 @@
 // input is whole pesos, so nothing rounds. Shared with the browser, so the order form recalculates
 // as it's typed and the screens offer only the legal transitions.
 
+import { addDays, getDayOfWeek } from '$lib/datetime';
 import { formatBalance, formatPesos } from '$lib/format';
 import type { DeliveryMethod, OrderStatus, ReturnMethod } from '$lib/server/services/orders';
 
@@ -108,6 +109,72 @@ export function depositReceivedOfAgreed(order: {
 		return null;
 	}
 	return `${formatBalance(order.depositHeld)} de ${formatPesos(order.depositAmount)}`;
+}
+
+const SUNDAY = 0;
+const SATURDAY = 6;
+
+// Delivery is the event's day, or the latest earlier day that's neither a Sunday nor a holiday.
+function defaultDeliveryDate(eventDate: string, holidayDates: string[]): string {
+	let date = eventDate;
+	while (SUNDAY === getDayOfWeek(date) || holidayDates.includes(date)) {
+		date = addDays(date, -1);
+	}
+	return date;
+}
+
+// Pickup is the first day after the event that's not a Saturday, a Sunday or a holiday.
+function defaultPickupDate(eventDate: string, holidayDates: string[]): string {
+	let date = addDays(eventDate, 1);
+	while ([SATURDAY, SUNDAY].includes(getDayOfWeek(date)) || holidayDates.includes(date)) {
+		date = addDays(date, 1);
+	}
+	return date;
+}
+
+export type TripDates = { deliveryDate: string; pickupDate: string };
+
+export type FollowingTrips = TripDates & { isDeliveryDateTyped: boolean; isPickupDateTyped: boolean };
+
+/**
+ * A quote's new order: the trips' dates from the event date, each until it's typed by hand. No
+ * event date leaves them as they are.
+ */
+export function followEventDate(
+	eventDate: string,
+	trips: FollowingTrips,
+	holidayDates: string[]
+): TripDates {
+	const { deliveryDate, pickupDate } = trips;
+	if ('' === eventDate) {
+		return { deliveryDate, pickupDate };
+	}
+	return {
+		deliveryDate: trips.isDeliveryDateTyped
+			? deliveryDate
+			: defaultDeliveryDate(eventDate, holidayDates),
+		pickupDate: trips.isPickupDateTyped ? pickupDate : defaultPickupDate(eventDate, holidayDates)
+	};
+}
+
+/** The order form's warnings for trips on the wrong side of the event. They never block. */
+export function findEventDateWarnings(dates: {
+	eventDate: string;
+	deliveryDate: string;
+	pickupDate: string;
+}): string[] {
+	const { eventDate, deliveryDate, pickupDate } = dates;
+	if ('' === eventDate) {
+		return [];
+	}
+	const warnings = [];
+	if ('' !== deliveryDate && deliveryDate > eventDate) {
+		warnings.push('La entrega es después del evento');
+	}
+	if ('' !== pickupDate && pickupDate < eventDate) {
+		warnings.push('La recogida es antes del evento');
+	}
+	return warnings;
 }
 
 export type OrderMove = {
