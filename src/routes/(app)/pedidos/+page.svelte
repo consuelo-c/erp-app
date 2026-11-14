@@ -149,7 +149,6 @@
 	{#if isEmpty}
 		<div class="empty">
 			<p>Aún no hay pedidos.</p>
-			<p>Un pedido se crea al convertir una cotización.</p>
 		</div>
 	{:else}
 		<div class="toolbar phone-only">
@@ -254,6 +253,13 @@
 			</div>
 		{/if}
 	{/if}
+
+	<!-- No «Nuevo pedido»: every order is born from a quote, so the list points there. -->
+	<div class="screen__action">
+		<p class="meta origin">Un pedido se crea al convertir una cotización.</p>
+		<Button variant="secondary" href={resolve('/cotizaciones')}>Ver cotizaciones</Button>
+		<Button href={resolve('/cotizaciones/nueva')}>Nueva cotización</Button>
+	</div>
 </Screen>
 
 <BottomSheet bind:open={isSheetOpen} title="Filtros">
@@ -447,6 +453,11 @@
 
 		.filters__wide {
 			grid-column: 1 / -1;
+		}
+
+		/* The sentence on the left, the buttons on the right. */
+		.origin {
+			margin-right: auto;
 		}
 	}
 </style>
