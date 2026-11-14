@@ -49,7 +49,7 @@ Claude runs `test`, `lint` and `typecheck`; the developer runs every other one.
 - `npm run db:generate` — new migration from the schema
 - `npx wrangler d1 migrations apply consueloc-erp-db --local` — apply migrations locally; remote is applied only by `deploy.yml`
 - `npm run db:reset` — local only: deletes the on-disk D1, applies every migration and runs the seed
-- `npm run db:seed` — local only: `scripts/settings-defaults.sql` (default `settings`, the only part `deploy.yml` applies to production), then `scripts/sample-data.sql` (its header says what it holds: October 2026, read as if today were the 14th; the `gerente`, `representante`, `bodega` and `conductor` logins have no password until admin sets one); idempotent, writes no `events`
+- `npm run db:seed` — local only: `scripts/settings-defaults.sql` (default `settings`, the only part `deploy.yml` applies to production), then `scripts/catalog.sql` (the real catalog, run once by hand on production), then `scripts/sample-data.sql` (its header says what it holds: October 2026, read as if today were the 14th; the `gerente`, `representante`, `bodega` and `conductor` logins have no password until admin sets one); idempotent, writes no `events`
 - `npm run db:export` — SQL dump of production to `db-export.sql` (git-ignored)
 - `npm run env:create` — creates the D1 database and the R2 bucket; copy the printed IDs into `wrangler.jsonc`
 - `npm run build`, `npx wrangler dev` — local run on the Workers runtime
@@ -77,7 +77,7 @@ Where things live and which helper to reuse. What a screen or service does is re
 - `src/lib/server/db/` — `schema.ts`, Drizzle, source of `migrations/`; `memory-d1.ts`, the tests' D1 over `node:sqlite`
 - `src/service-worker.ts` — the PWA shell cache, never a data response (hence `paths.relative: false`)
 - `migrations/` — generated SQL; squashed freely until launch, append-only after
-- `scripts/` — `settings-defaults.sql`, `sample-data.sql`, `wipe-d1-if-squashed.js` (the deploy's pre-launch wipe)
+- `scripts/` — `settings-defaults.sql`, `catalog.sql`, `sample-data.sql`, `wipe-d1-if-squashed.js` (the deploy's pre-launch wipe)
 - `.github/workflows/` — `verify.yml` (PRs), `deploy.yml` (merge to `main`); `.husky/` — `pre-commit`, `commit-msg`; `.claude/` — the allow and deny lists, and the `start-phase` and `build-phase` skills
 
 ## Hard rules

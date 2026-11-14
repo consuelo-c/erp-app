@@ -35,6 +35,7 @@ import {
 } from './cash';
 import { listProducts, type Product } from './products';
 import {
+	capitalizeName,
 	generateDocumentId,
 	getContact,
 	INVALID_PHONE,
@@ -372,8 +373,9 @@ type ClientInput = Pick<
 	'client_id' | 'client_name' | 'client_phone' | 'client_whatsapp'
 >;
 
-// «Cliente nuevo» is made from the name typed and the phone and username typed, normalized: each
-// optional, and refused only when typed and not valid.
+// «Cliente nuevo» is made from the name typed, capitalized as Contactos › Nuevo saves it, and the
+// phone and username typed, normalized: each optional, and refused only when typed and not valid.
+// The order freezes the contact's name, so its printout matches Contactos.
 function newClient(order: ClientInput): ResolvedClient | Refusal {
 	const phone = phoneSchema.safeParse(order.client_phone);
 	if (!phone.success) {
@@ -384,8 +386,9 @@ function newClient(order: ClientInput): ResolvedClient | Refusal {
 		return refusal('client_whatsapp', INVALID_WHATSAPP);
 	}
 	const contact = { phone: phone.data, whatsapp: whatsapp.data };
-	const client = { ...contact, fullName: order.client_name, documentId: generateDocumentId() };
-	return { snapshot: { name: order.client_name, ...contact }, newClient: client };
+	const fullName = capitalizeName(order.client_name);
+	const client = { ...contact, fullName, documentId: generateDocumentId() };
+	return { snapshot: { name: fullName, ...contact }, newClient: client };
 }
 
 // The order keeps the name typed and the phone and username it was taken with: renaming the
@@ -1391,7 +1394,7 @@ export async function listOrders(
 }
 
 /** What the client left as a guarantee and hasn't been given back: held, never income. */
-const DEPOSIT_HELD_SQL = `coalesce((select sum(amount) from cash_movements
+export const DEPOSIT_HELD_SQL = `coalesce((select sum(amount) from cash_movements
 	where entity_type = 'ORDER' and entity_id = orders.id
 	and concept in ('SECURITY_DEPOSIT', 'DEPOSIT_REFUND')), 0)`;
 

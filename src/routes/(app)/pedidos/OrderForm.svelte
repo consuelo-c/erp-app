@@ -26,7 +26,13 @@
 		PAYMENT_METHOD_LABELS,
 		RETURN_METHOD_LABELS
 	} from '$lib/labels';
-	import { calculateOrderTotals, clientLockedMessage } from '$lib/orders';
+	import {
+		calculateOrderTotals,
+		clientLockedMessage,
+		findEventDateWarnings,
+		followEventDate
+	} from '$lib/orders';
+	import { describeConversionGaps } from '$lib/quotes';
 	import { parsePesos, parseQuantity } from '$lib/payroll';
 	import { formatPhone } from '$lib/phone';
 	import { formatNameAndReach, formatWhatsapp } from '$lib/whatsapp';
@@ -133,6 +139,8 @@
 		clientName: string;
 		deliveryDate: string;
 		pickupDate: string;
+		isDeliveryDateTyped: boolean;
+		isPickupDateTyped: boolean;
 		deliveryTime: DialTime;
 		pickupTime: DialTime;
 		rentalDays: string;
@@ -160,6 +168,9 @@
 		clientName: '',
 		deliveryDate: '',
 		pickupDate: '',
+		// Only a quote's new order has dates that follow the event date: the rest are typed.
+		isDeliveryDateTyped: true,
+		isPickupDateTyped: true,
 		deliveryTime: EMPTY_TIME,
 		pickupTime: EMPTY_TIME,
 		rentalDays: '1',
@@ -187,6 +198,9 @@
 			clientName: saved.client.name,
 			deliveryDate: saved.deliveryDate,
 			pickupDate: saved.pickupDate,
+			// Saved dates count as typed: moving the event never moves them.
+			isDeliveryDateTyped: true,
+			isPickupDateTyped: true,
 			deliveryTime: dialOf(trip.time),
 			pickupTime: dialOf(back.time),
 			rentalDays: String(saved.rentalDays),
@@ -219,20 +233,31 @@
 		};
 	}
 
+	const UNTYPED_DATES = {
+		deliveryDate: '',
+		pickupDate: '',
+		isDeliveryDateTyped: false,
+		isPickupDateTyped: false
+	};
+
 	// A quote's order starts with its client as the contact is today, «Lugar del evento» as both
-	// addresses, and its terms and lines as quoted. The trips are the salesperson's, and a «por
-	// acordar» transport stays empty: «Guardar pedido» asks for it.
-	function quotedFields({ quote, client }: QuoteConversion): Fields {
+	// addresses, its terms and lines as quoted, and the trips' dates from the event's. The trips'
+	// times and methods are the salesperson's, and a «por acordar» transport stays empty: «Guardar
+	// pedido» asks for it.
+	function quotedFields({ quote, client, holidayDates }: QuoteConversion): Fields {
 		const address = {
 			carrierId: '',
 			address1: quote.address1 ?? '',
 			address2: quote.address2 ?? ''
 		};
+		const eventDate = quote.eventDate ?? '';
 		return {
 			...structuredClone(NEW_ORDER),
 			phone: formatPhone(client.phone),
 			whatsapp: whatsappOf(client.whatsapp),
-			eventDate: quote.eventDate ?? '',
+			eventDate,
+			...UNTYPED_DATES,
+			...followEventDate(eventDate, UNTYPED_DATES, holidayDates),
 			choice: client.id,
 			picked: client,
 			clientName: client.fullName,
@@ -245,13 +270,7 @@
 		};
 	}
 
-	// What the quote filled, and what's left for the salesperson.
 	const isTransportPending = $derived(null === conversion?.quote.transportCost);
-	const quoteNote = $derived(
-		isTransportPending
-			? 'el descuento y las notas. Faltan las fechas, los métodos y el transporte.'
-			: 'el descuento, el transporte y las notas. Faltan las fechas y los métodos.'
-	);
 
 	function readFields(): Fields {
 		if (null !== original) {
@@ -272,6 +291,8 @@
 	let clientName = $state(fields.clientName);
 	let deliveryDate = $state(fields.deliveryDate);
 	let pickupDate = $state(fields.pickupDate);
+	let isDeliveryDateTyped = $state(fields.isDeliveryDateTyped);
+	let isPickupDateTyped = $state(fields.isPickupDateTyped);
 	let deliveryTime = $state(fields.deliveryTime);
 	let pickupTime = $state(fields.pickupTime);
 	let rentalDays = $state(fields.rentalDays);
@@ -313,6 +334,19 @@
 			? null
 			: new Map(schedule.availability.map((each) => [each.productId, each.available]))
 	);
+	// An extension copies its original's event date and is delivered after it by design.
+	const eventDateWarnings = $derived(
+		null === original ? findEventDateWarnings({ eventDate, deliveryDate, pickupDate }) : []
+	);
+
+	function changeEventDate() {
+		if (null === conversion) {
+			return;
+		}
+		const trips = { deliveryDate, pickupDate, isDeliveryDateTyped, isPickupDateTyped };
+		({ deliveryDate, pickupDate } = followEventDate(eventDate, trips, conversion.holidayDates));
+	}
+
 	const rangeLabel = $derived(
 		deliveryDate && pickupDate ? formatDayRange(deliveryDate, pickupDate) : ''
 	);
@@ -526,7 +560,7 @@
 			<Notice tone="info">
 				Desde la cotización
 				<a href={resolve('/(app)/cotizaciones/[id]', { id: String(quote.id) })}>#{quote.id}</a>: el
-				cliente, las líneas con sus precios, los días, {quoteNote}
+				cliente, las líneas con sus precios, los días, {describeConversionGaps(quote)}
 			</Notice>
 		</div>
 	{/if}
@@ -592,6 +626,7 @@
 						type="date"
 						aria-invalid={undefined !== errorOf('event_date')}
 						bind:value={eventDate}
+						oninput={changeEventDate}
 					/>
 				</Field>
 				<Field label="Días cobrados" id="rental-days" error={errorOf('rental_days')}>
@@ -622,6 +657,7 @@
 							disabled={null !== original}
 							aria-invalid={undefined !== errorOf('delivery_date')}
 							bind:value={deliveryDate}
+							oninput={() => (isDeliveryDateTyped = true)}
 						/>
 					</Field>
 					<ClockField
@@ -678,6 +714,7 @@
 							type="date"
 							aria-invalid={undefined !== errorOf('pickup_date')}
 							bind:value={pickupDate}
+							oninput={() => (isPickupDateTyped = true)}
 						/>
 					</Field>
 					<ClockField
@@ -728,20 +765,23 @@
 			</div>
 
 			<!-- Warnings never block: they can all show at once and the order still saves. -->
-			{#if schedule}
+			{#if schedule || eventDateWarnings.length}
 				<div class="warnings">
-					{#each schedule.warnings.holidays as holiday (holiday.trip)}
+					{#each schedule?.warnings.holidays ?? [] as holiday (holiday.trip)}
 						<Notice tone="warning">
 							⚠ La {tripLabel(holiday.trip)}, {formatShortDay(holiday.date)}, es festivo ({holiday.label}).
 							Puedes continuar igual.
 						</Notice>
 					{/each}
-					{#each schedule.warnings.clashes as clash (`${clash.trip}-${clash.orderId}`)}
+					{#each schedule?.warnings.clashes ?? [] as clash (`${clash.trip}-${clash.orderId}`)}
 						<Notice tone="warning">
 							⚠ El pedido #{clash.orderId} también tiene {tripLabel(clash.theirTrip)} el
 							{formatShortDay(clash.date)} a las {formatClockTime(clash.time)}. Puedes continuar
 							igual.
 						</Notice>
+					{/each}
+					{#each eventDateWarnings as warning (warning)}
+						<Notice tone="warning">⚠ {warning}. Puedes continuar igual.</Notice>
 					{/each}
 				</div>
 			{/if}

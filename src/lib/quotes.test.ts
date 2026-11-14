@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { getTodaysDate } from './datetime';
 import { QUOTE_STATE_LABELS } from './labels';
-import { describeRemovedProducts, getQuoteState } from './quotes';
+import { describeConversionGaps, describeRemovedProducts, getQuoteState } from './quotes';
 
 afterEach(() => {
 	vi.useRealTimers();
@@ -38,5 +38,21 @@ test('«Duplicar» names the inactive products it left out: one, or how many, in
 	);
 	expect(describeRemovedProducts(['Silla Rimax', 'Mantel rosa'])).toBe(
 		'Se quitaron 2 productos inactivos: Mantel rosa, Silla Rimax.'
+	);
+});
+
+test('«Convertir en pedido» says the trips come from the event date, or that the dates are missing', () => {
+	const dated = { eventDate: '2026-12-12', transportCost: 180000 };
+	expect(describeConversionGaps(dated)).toBe(
+		'el descuento, el transporte y las notas. La entrega y la recogida salen de la fecha del evento; faltan las horas y los métodos.'
+	);
+	expect(describeConversionGaps({ ...dated, transportCost: null })).toBe(
+		'el descuento y las notas. La entrega y la recogida salen de la fecha del evento; faltan las horas, los métodos y el transporte.'
+	);
+	expect(describeConversionGaps({ ...dated, eventDate: null })).toBe(
+		'el descuento, el transporte y las notas. Faltan las fechas y los métodos.'
+	);
+	expect(describeConversionGaps({ eventDate: null, transportCost: null })).toBe(
+		'el descuento y las notas. Faltan las fechas, los métodos y el transporte.'
 	);
 });

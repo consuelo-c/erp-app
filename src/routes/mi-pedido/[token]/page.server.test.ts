@@ -1,5 +1,6 @@
 import { isHttpError, isRedirect } from '@sveltejs/kit';
 import type { DatabaseSync } from 'node:sqlite';
+import { render } from 'svelte/server';
 import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
 import type { Actor, Role } from '$lib/server/actor';
 import { createMemoryD1 } from '$lib/server/db/memory-d1';
@@ -7,6 +8,7 @@ import { createOrder } from '$lib/server/db/test-orders';
 import { handle } from '../../../hooks.server';
 import { load as loadLayout } from './+layout.server';
 import { load } from './+page.server';
+import Page from './+page.svelte';
 
 const AUDIT = "0, 'admin', 0, 'admin'";
 
@@ -123,6 +125,7 @@ test("the load sends neither the client's phone nor username: its keys, listed",
 			'transportCost',
 			'orderTotal',
 			'depositAmount',
+			'depositHeld',
 			'paid',
 			'balanceDue',
 			'receivableId',
@@ -133,6 +136,40 @@ test("the load sends neither the client's phone nor username: its keys, listed",
 	for (const hidden of ['3104428890', 'luzmarina10', 'whatsapp', 'phone']) {
 		expect(shown).not.toContain(hidden);
 	}
+});
+
+/** «Su pedido» as the client reads it: the order agreeing `depositAmount`, with these deposit movements. */
+async function pageWith(status: string, depositAmount: number, deposits: number[]) {
+	const token = await create(status);
+	database.prepare('update orders set deposit_amount = ? where id = 1').run(depositAmount);
+	for (const amount of deposits) {
+		database.exec(
+			`insert into cash_movements (concept, payment_method, amount, movement_date, entity_type, entity_id, payee, receipt_number, created_at, created_by, updated_at, updated_by)
+			values ('${amount > 0 ? 'SECURITY_DEPOSIT' : 'DEPOSIT_REFUND'}', 'CASH', ${amount}, '2026-10-20', 'ORDER', 1, 'Luz Marina Restrepo', (select coalesce(max(receipt_number), 0) + 1 from cash_movements), ${AUDIT})`
+		);
+	}
+	return render(Page, { props: { data: await open(token) } as never }).body;
+}
+
+test('«Depósito» reads «$20.000 de $50.000», received of agreed, right after «Total»', async () => {
+	expect(await pageWith('CONFIRMED', 50000, [20000])).toMatch(
+		/<span>Total<\/span><span>\$25\.000<\/span><\/li>\s*<!--\[0--><li class="detail-list__row--plain"><span>Depósito<\/span><span>\$20\.000 de \$50\.000<\/span><\/li>/
+	);
+});
+
+test('received is net of «Devolución de depósito»', async () => {
+	const body = await pageWith('CONFIRMED', 50000, [50000, -30000]);
+	expect(body).toContain('<span>Depósito</span><span>$20.000 de $50.000</span>');
+});
+
+test.each([
+	['CONFIRMED', 0, []],
+	['COMPLETED', 50000, [50000, -50000]],
+	['CANCELLED', 50000, [50000]]
+])('no deposit line on a %s order agreeing %i', async (status, depositAmount, deposits) => {
+	const body = await pageWith(status, depositAmount, deposits);
+	expect(body).toContain('<span>Total</span>');
+	expect(body).not.toContain('<span>Depósito</span>');
 });
 
 test('with no session, the page, writing nothing: events and sessions unchanged', async () => {

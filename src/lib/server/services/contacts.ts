@@ -143,6 +143,31 @@ export function generateDocumentId(): string {
 	return AUTO_DOCUMENT_PREFIX + symbols.join('');
 }
 
+// Spanish names' connecting words: «María de la Cruz», never «María De La Cruz».
+const LOWERCASE_WORDS = new Set(['de', 'del', 'la', 'las', 'los', 'y']);
+
+function capitalizeLowercase(word: string): string {
+	if (word !== word.toLocaleLowerCase('es')) {
+		return word;
+	}
+	return word.charAt(0).toLocaleUpperCase('es') + word.slice(1);
+}
+
+/**
+ * The name a new contact is saved with: each word typed all in lowercase gets its capital, as
+ * does each part after a hyphen or an apostrophe. A word with any capital is kept as typed, so
+ * «McDonald» and «S.A.S.» survive; an edit never comes through here, so a wrong guess is fixed
+ * by editing it.
+ */
+export function capitalizeName(name: string): string {
+	let wordIndex = 0;
+	return name.replace(/\S+/g, (word) => {
+		const isConnectingWord = 0 < wordIndex && LOWERCASE_WORDS.has(word);
+		wordIndex += 1;
+		return isConnectingWord ? word : word.replace(/[^-'’]+/g, capitalizeLowercase);
+	});
+}
+
 const DOCUMENT_REQUIRED = 'Escribe la cédula o NIT';
 
 // Contactos always saves a real one: only «Cliente nuevo» leaves an automatic one, so a call isn't
@@ -323,7 +348,7 @@ export async function createContact(
 	if (!parsed.success) {
 		return invalidForm(parsed.error);
 	}
-	const columns = toColumns(parsed.data);
+	const columns = toColumns({ ...parsed.data, full_name: capitalizeName(parsed.data.full_name) });
 	requireLockedFieldsKept(actor, NEW_CONTACT, columns);
 	const refusal = await documentRefusalOf(db, parsed.data.document_id, 0);
 	if (null !== refusal) {

@@ -2,7 +2,7 @@
 	import Button from '$lib/components/Button.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
-	import { catalogHref } from '$lib/navigation';
+	import { resolve } from '$app/paths';
 	import ProductForm from '../ProductForm.svelte';
 	import type { PageProps } from './$types';
 
@@ -15,7 +15,7 @@
 
 <Screen>
 	{#snippet header()}
-		<ScreenHeader title="Nuevo producto" backHref={catalogHref(null)} />
+		<ScreenHeader title="Nuevo producto" backHref={resolve('/productos')} />
 	{/snippet}
 
 	<ProductForm product={null} groups={data.groups} {form} />

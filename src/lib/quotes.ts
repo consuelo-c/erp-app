@@ -23,6 +23,27 @@ export function getQuoteState(quote: QuoteValidity, today: string): QuoteState {
 	return quote.validUntil >= today ? 'VALID' : 'EXPIRED';
 }
 
+/**
+ * The end of «Convertir en pedido»'s notice, after «el cliente, las líneas con sus precios, los
+ * días,»: what else the quote filled and what's left for the salesperson. A «por acordar»
+ * transport is left too, and an event date fills the trips' dates.
+ */
+export function describeConversionGaps(quote: {
+	eventDate: string | null;
+	transportCost: number | null;
+}): string {
+	const isTransportPending = null === quote.transportCost;
+	const filled = isTransportPending
+		? 'el descuento y las notas.'
+		: 'el descuento, el transporte y las notas.';
+	if (null === quote.eventDate) {
+		const left = isTransportPending ? 'las fechas, los métodos y el transporte' : 'las fechas y los métodos';
+		return `${filled} Faltan ${left}.`;
+	}
+	const left = isTransportPending ? 'las horas, los métodos y el transporte' : 'las horas y los métodos';
+	return `${filled} La entrega y la recogida salen de la fecha del evento; faltan ${left}.`;
+}
+
 /** The note «Duplicar» shows above the grid, naming the inactive products it left out; null for none. */
 export function describeRemovedProducts(names: string[]): string | null {
 	if (0 === names.length) {

@@ -302,6 +302,14 @@ test('«Cliente nuevo» creates its contact, automatic document, in the same bat
 	expect(Object.keys(errorsOf(refused))).toEqual(['client_phone']);
 });
 
+test('«Cliente nuevo» capitalizes the name, and the quote freezes the capitalized one', async () => {
+	const fresh = { ...quote1043, client_id: null, client_name: 'luz marina restrepo' };
+	const id = await create({ ...fresh, client_phone: '315 220 7781' });
+	const contact = database.prepare("select full_name from contacts where phone = '573152207781'");
+	expect(contact.get()?.full_name).toBe('Luz Marina Restrepo');
+	expect((await read(id)).client.name).toBe('Luz Marina Restrepo');
+});
+
 test("a quote freezes the picked contact's username, not the typed one; «Cliente nuevo» saves the typed one", async () => {
 	database.exec(`update contacts set whatsapp = 'LuzMarinaR' where id = ${LUZ_MARINA}`);
 	const picked = await create({ ...quote1043, client_whatsapp: '@otro_usuario' });
@@ -796,6 +804,8 @@ test('the form opens filled from the quote, with its client as the contact is to
 		quote: { id, state: 'VALID', rentalDays: 2, discount: 104000, transportCost: 180000 },
 		client: { id: LUZ_MARINA, fullName: 'Luz Marina Restrepo Gil', phone: '573104428890' }
 	});
+	// The holidays' dates, which the form's default delivery and pickup skip.
+	expect(conversion?.holidayDates).toContain('2026-12-08');
 	expect({ ...countRows(), ...countOrders() }).toEqual(before);
 	expect((await read(id)).state).toBe('VALID');
 	expect(await getQuoteConversion(db, 99, sales)).toBeNull();
