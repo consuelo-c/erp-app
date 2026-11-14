@@ -163,6 +163,11 @@
 					</tbody>
 				</table>
 			</div>
+			<!-- What the filters left, inactive ones included. -->
+			<p class="meta count">
+				{formatInteger(products.length)}
+				{1 === products.length ? 'producto' : 'productos'}
+			</p>
 		{/if}
 
 		{#if data.canEdit}
@@ -236,8 +241,12 @@
 	}
 
 	.scroll {
-		margin-bottom: var(--space-10);
 		overflow-x: auto;
+	}
+
+	.count {
+		margin: var(--space-4) 0 var(--space-10);
+		text-align: right;
 	}
 
 	.table {
