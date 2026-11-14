@@ -80,6 +80,14 @@
 	// Paying is the usual next step while there's a balance.
 	const isPaymentNext = $derived(data.paymentConcepts.includes('INSTALLMENT'));
 
+	// A salesperson who typed the transport and the deposit may think they were recorded as paid.
+	const isJustCreated = $derived('nuevo' === page.url.searchParams.get('guardado'));
+	const amountsNotPayments = $derived(
+		0 === order.depositAmount
+			? 'El transporte y el total son lo que se le cobra al cliente, no pagos recibidos. Registra el pago con «Registrar pago».'
+			: 'El transporte, el depósito y el total son lo que se le cobra al cliente, no pagos recibidos. Registra con «Registrar pago» el pago del pedido y, aparte, el depósito de garantía.'
+	);
+
 	// Set by the payment entry's redirect: the payment just recorded, its receipt next.
 	const recordedPayment = $derived(
 		order.payments.find((payment) => String(payment.id) === page.url.searchParams.get('pago'))
@@ -220,9 +228,14 @@
 		</ScreenHeader>
 	{/snippet}
 
-	<!-- Set by the order form's redirect after a save. -->
+	<!-- Set by the order form's redirect after a save; `nuevo` when it created the order. -->
 	{#if page.url.searchParams.has('guardado')}
-		<div class="lead-notice"><Notice tone="success">Pedido guardado con éxito</Notice></div>
+		<div class="lead-notice saved">
+			<Notice tone="success">Pedido guardado con éxito</Notice>
+			{#if isJustCreated}
+				<Notice tone="info">{amountsNotPayments}</Notice>
+			{/if}
+		</div>
 	{/if}
 
 	{#if recordedPayment}
@@ -643,6 +656,12 @@
 
 	.lead-notice {
 		margin-bottom: var(--space-8);
+	}
+
+	.saved {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-4);
 	}
 
 	.client {
