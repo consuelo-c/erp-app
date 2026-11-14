@@ -1,4 +1,5 @@
-import { formatPesos } from '$lib/format';
+import { formatCivilDate, getInstantDate } from '$lib/datetime';
+import { formatInteger, formatPesos } from '$lib/format';
 import { CATEGORY_LABELS } from '$lib/labels';
 import type { Category, Product } from '$lib/server/services/products';
 
@@ -47,13 +48,41 @@ function countVariants(variants: Product[]): string {
 	return `${variants.length} ${1 === variants.length ? 'variante' : 'variantes'}`;
 }
 
-/** «4 variantes · $8.000 – $9.500», or a single price when they all cost the same. */
-export function summarizeGroup(variants: Product[]): string {
+/** «Modificado 12 oct 2026», the Bogotá date of the last change. */
+function describeModified(updatedAt: number): string {
+	return `Modificado ${formatModified(updatedAt)}`;
+}
+
+/** A row's figure on the right, its price per day, and its gray line under the name. */
+export type RowSummary = { price: string; meta: string };
+
+/** «$2.500» and «800 en inventario · Modificado 12 oct 2026». */
+export function summarizeProduct(product: Product): RowSummary {
+	const stock = `${formatInteger(product.totalQuantity)} en inventario`;
+	return {
+		price: formatPesos(product.rentalPrice),
+		meta: `${stock} · ${describeModified(product.updatedAt)}`
+	};
+}
+
+/**
+ * «$8.000 – $9.500», or a single price when they all cost the same, and «4 variantes · Modificado
+ * 13 oct 2026», the latest change among the variants.
+ */
+export function summarizeGroup(variants: Product[]): RowSummary {
 	const prices = variants.map((variant) => variant.rentalPrice);
 	const [lowest, highest] = [Math.min(...prices), Math.max(...prices)];
-	const range =
-		lowest === highest ? formatPesos(lowest) : `${formatPesos(lowest)} – ${formatPesos(highest)}`;
-	return `${countVariants(variants)} · ${range}`;
+	const latest = Math.max(...variants.map((variant) => variant.updatedAt));
+	return {
+		price:
+			lowest === highest ? formatPesos(lowest) : `${formatPesos(lowest)} – ${formatPesos(highest)}`,
+		meta: `${countVariants(variants)} · ${describeModified(latest)}`
+	};
+}
+
+/** A variant's «Modificado» column: «12 oct 2026». */
+export function formatModified(updatedAt: number): string {
+	return formatCivilDate(getInstantDate(updatedAt));
 }
 
 /** «Manteles y ruches · 20 variantes · 1 inactiva». */

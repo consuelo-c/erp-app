@@ -33,6 +33,8 @@ export type Product = {
 	rentalPrice: number;
 	totalQuantity: number;
 	isActive: boolean;
+	/** Epoch seconds of the last change, from the audit columns. */
+	updatedAt: number;
 };
 
 /** A variant group the form's picker offers, with the category its variants are in. */
@@ -52,6 +54,7 @@ type ProductRow = {
 	rental_price: number;
 	total_quantity: number;
 	active: number;
+	updated_at: number;
 };
 
 const optionalTextSchema = z
@@ -112,7 +115,7 @@ const newProductSchema = productSchema.and(
 const idSchema = z.object({ id: z.coerce.number().int().positive() });
 
 const SELECT_PRODUCT =
-	'select id, name, category, variant_group, variant_name, description, rental_price, total_quantity, active from products';
+	'select id, name, category, variant_group, variant_name, description, rental_price, total_quantity, active, updated_at from products';
 
 function invalid(error: z.ZodError): Failure {
 	const [issue] = error.issues;
@@ -129,7 +132,8 @@ function toProduct(row: ProductRow): Product {
 		description: row.description,
 		rentalPrice: row.rental_price,
 		totalQuantity: row.total_quantity,
-		isActive: 1 === row.active
+		isActive: 1 === row.active,
+		updatedAt: row.updated_at
 	};
 }
 
