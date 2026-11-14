@@ -102,7 +102,7 @@ gh issue edit <N> --repo "$R" --milestone "$M"
 
 Show the script in full with its absolute path and change it on request. The developer may edit it directly; re-read it before describing or changing it. Once the developer approves it, run it with `bash <path>` (its permission prompt is the approval); if it fails, fix the file and run it again: existing titles are skipped and existing edges reported.
 
-End by telling the developer the phase is ready for `/build-phase NN`, in a session started with `claude --permission-mode dontAsk`.
+End by telling the developer the phase is ready for `/build-phase NN`, in a session started with `claude --permission-mode auto`.
 
 ## 7. Planning findings
 
