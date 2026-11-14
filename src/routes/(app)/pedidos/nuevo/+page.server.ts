@@ -51,7 +51,8 @@ export const actions: Actions = {
 		if (!result.ok) {
 			return fail(400, result);
 		}
-		// To the new order's detail, with the saved notice: its payments are recorded from there.
-		redirect(303, `${resolve('/(app)/pedidos/[id]', { id: String(result.id) })}?guardado`);
+		// To the new order's detail, with the saved notice and the new order's reminder that its
+		// amounts aren't payments: they're recorded from there.
+		redirect(303, `${resolve('/(app)/pedidos/[id]', { id: String(result.id) })}?guardado=nuevo`);
 	}
 };

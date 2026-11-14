@@ -39,6 +39,7 @@ export const actions: Actions = {
 		if (!result.ok) {
 			return fail(400, result);
 		}
-		redirect(303, `${resolve('/(app)/pedidos/[id]', { id: String(result.id) })}?guardado`);
+		// An extension is a new order: its detail reminds that its amounts aren't payments.
+		redirect(303, `${resolve('/(app)/pedidos/[id]', { id: String(result.id) })}?guardado=nuevo`);
 	}
 };
