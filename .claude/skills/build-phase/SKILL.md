@@ -1,6 +1,6 @@
 ---
 name: build-phase
-description: Build every unit of an opened phase on one branch, one fresh subagent and one commit per unit, then walk the criteria and open the pull request. Usage - /build-phase 19, in a session started with claude --permission-mode dontAsk
+description: Build every unit of an opened phase on one branch, one fresh subagent and one commit per unit, then walk the criteria and open the pull request. Usage - /build-phase 19, in a session started with claude --permission-mode auto
 disable-model-invocation: true
 argument-hint: <phase number>
 ---
@@ -11,7 +11,7 @@ Build Phase $ARGUMENTS. `NN` below is that number, zero-padded (`3` → `03`). `
 
 The process is `erp-planning:working-methodology.md` "Building a phase"; this skill adds only what that section leaves to the run. `erp-planning:` names the planning repository's clone, a sibling of this one: find its folder by its remote (`git -C <folder> remote get-url origin` ending in `consuelo-c/erp-planning.git`).
 
-**You are the orchestrator.** You build nothing, read no source file and no planning beyond what this skill names: every unit is a fresh subagent's. Keep only issue numbers, commit hashes, held questions and what each subagent returns. The session runs in `dontAsk` mode: whatever the allow list doesn't cover is refused without a prompt, and `AskUserQuestion` is refused too.
+**You are the orchestrator.** You build nothing, read no source file and no planning beyond what this skill names: every unit is a fresh subagent's. Keep only issue numbers, commit hashes, held questions and what each subagent returns. The session runs in `auto` mode: the allow list runs as is, anything else goes to auto mode's classifier, and the deny list and the guard hook (`.claude/hooks/guard.js`) refuse what is never Claude's. If the session isn't in auto mode, stop and ask the developer to restart it with `claude --permission-mode auto`.
 
 ## 1. The gate
 
@@ -53,7 +53,7 @@ Start one subagent per unit, in the foreground, one at a time: units share the w
 
 > You are building one unit of Phase NN in `erp-app`, on branch `<branch>`: issue #<n>. Read the issue (`gh issue view <n> --repo R`), then follow `CLAUDE.md`: read what "Starting a unit" and "Building a screen" name, build the unit end to end, and close it as `erp-planning:working-methodology.md` §3 says: `npm run lint` clean, the diff reviewed against §13, the unit's files staged by name, one commit `<type>: <subject> (#<n>)` within 100 characters, then `git push -u origin <branch>`. Record every open item as an issue (§4, bodies written out in full) before you return.
 >
-> You're in `dontAsk` mode: a refused command is not a question. Work around it, or report it.
+> You're in `auto` mode: a refused command is not a question. Work around it, or report it.
 >
 > If a gap is one that "stops and asks" (Gaps in the planning), don't guess: run `git stash push -u -m "#<n>"` so the tree is clean, and return `HELD` with the question written so it reads on its own: what you found, where, the options, the one you'd recommend.
 >
@@ -67,7 +67,7 @@ After each `DONE`, check `git status` is clean and `git log -1` names the unit. 
 
 On the first `HELD`, send a push notification: «Phase NN: una pregunta espera respuesta». Keep the subagent: you'll resume it. Units blocked by a held one wait too.
 
-When no unit is ready, ask the held questions in plain chat, one per message, the subagent's own words with its recommendation. Send each answer to its subagent with SendMessage: "Answer: <answer>. Pop your stash (`git stash list`, `git stash pop` the one named #<n>), resolve any conflict, write the answer into the open phase's `erp-planning` planning as Gaps in the planning says, finish the unit, and return as before." Then continue with §3.
+When no unit is ready, ask the held questions with `AskUserQuestion`, one per call: the subagent's own words, its recommended option first and marked «(Recomendado)». Send each answer to its subagent with SendMessage: "Answer: <answer>. Pop your stash (`git stash list`, `git stash pop` the one named #<n>), resolve any conflict, write the answer into the open phase's `erp-planning` planning as Gaps in the planning says and commit it there (`git -C <erp-planning> commit`, files by name, a Spanish `docs:` subject; never push), finish the unit, and return as before with that commit too." Then continue with §3.
 
 ## 6. The criteria walk
 
@@ -80,7 +80,7 @@ A fresh subagent, after every unit and the canvas unit:
 `gh pr create --repo R --base main --head <branch>`, in Spanish:
 
 - **Title:** `Fase NN: <the map's title after the dash>`.
-- **Body:** a paragraph on what the phase builds; `Closes #N` per unit, one per line; «Verificación manual», a checklist of the manual criteria; «Issues creados»; «Decisiones tomadas en la construcción», the readings chosen for gaps; «Canvas», the pages changed; «Cambios en la planeación», the `erp-planning` files the answers changed, uncommitted, for the developer to commit there; «Comandos rechazados», if any. No attribution line.
+- **Body:** a paragraph on what the phase builds; `Closes #N` per unit, one per line; «Verificación manual», a checklist of the manual criteria; «Issues creados»; «Decisiones tomadas en la construcción», the readings chosen for gaps; «Canvas», the pages changed; «Cambios en la planeación», the local `erp-planning` commits the answers made, for the developer to review and push; «Comandos rechazados», if any. No attribution line.
 
 Then `gh pr checks <pr> --repo R --watch`. A red check: read its log (`gh run view <run> --repo R --log-failed`), start a fresh subagent with the failure and the branch to fix it in one `fix:` commit and push, and watch again. Stop after three rounds on the same check, and say so.
 

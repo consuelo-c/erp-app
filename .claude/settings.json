@@ -34,8 +34,10 @@
 			"Bash(gh pr edit:*)",
 			"Bash(gh run list:*)",
 			"Bash(gh run view:*)",
-			"Bash(gh api:*)",
-			"Bash(gh project item-list:*)"
+			"Bash(gh project item-list:*)",
+			"Bash(git rm:*)",
+			"Bash(curl -sL https://github.com/user-attachments/files/*)",
+			"Bash(rm:*)"
 		],
 		"deny": [
 			"Bash(gh issue delete:*)",
@@ -45,7 +47,7 @@
 			"Bash(git push * --force*)",
 			"Bash(git push * -f*)",
 			"Bash(git push * main)",
-			"Bash(git push * main:*)",
+			"Bash(git push * main*)",
 			"Bash(npm ci:*)",
 			"Bash(npm i:*)",
 			"Bash(npm install:*)",
@@ -65,12 +67,31 @@
 			"Bash(wrangler d1 migrations apply:*)",
 			"Bash(wrangler deploy:*)",
 			"Bash(wrangler r2 bucket create:*)",
-			"Bash(wrangler secret put:*)"
+			"Bash(wrangler secret put:*)",
+			"Bash(gh pr close:*)",
+			"Bash(gh issue transfer:*)",
+			"Bash(gh issue comment * --delete-last*)",
+			"Bash(gh pr comment * --delete-last*)",
+			"Bash(git push * --delete*)",
+			"Bash(git push * :*)",
+			"Bash(gh repo delete:*)",
+			"Bash(gh repo archive:*)",
+			"Bash(gh repo rename:*)",
+			"Bash(gh repo edit:*)",
+			"Bash(gh release delete:*)",
+			"Bash(gh label delete:*)",
+			"Bash(gh workflow disable:*)",
+			"Bash(gh secret:*)",
+			"Bash(gh variable:*)",
+			"Edit(/.claude/settings*.json)",
+			"Edit(/.claude/hooks/**)"
 		],
-		"defaultMode": "plan"
+		"defaultMode": "plan",
+		"additionalDirectories": ["../erp-planning", "../branding"]
 	},
 	"enabledPlugins": {
-		"svelte@svelte": true
+		"svelte@svelte": true,
+		"ponytail@ponytail": true
 	},
 	"extraKnownMarketplaces": {
 		"svelte": {
@@ -78,6 +99,41 @@
 				"source": "github",
 				"repo": "sveltejs/ai-tools"
 			}
+		},
+		"ponytail": {
+			"source": {
+				"source": "github",
+				"repo": "DietrichGebert/ponytail"
+			}
 		}
+	},
+	"env": {
+		"PONYTAIL_DEFAULT_MODE": "full"
+	},
+	"hooks": {
+		"SessionStart": [
+			{
+				"matcher": "startup|resume|clear",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/mode-reminder.js\"",
+						"timeout": 5
+					}
+				]
+			}
+		],
+		"PreToolUse": [
+			{
+				"matcher": "Bash|Edit|Write|NotebookEdit",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard.js\"",
+						"timeout": 10
+					}
+				]
+			}
+		]
 	}
 }
