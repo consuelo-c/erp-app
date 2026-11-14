@@ -13,7 +13,15 @@
 	import { CATEGORY_LABELS } from '$lib/labels';
 	import { catalogHref } from '$lib/navigation';
 	import type { Product } from '$lib/server/services/products';
-	import { describeGroup, findVariants, groupCatalog, summarizeGroup } from './catalog';
+	import {
+		describeGroup,
+		findVariants,
+		formatModified,
+		groupCatalog,
+		summarizeGroup,
+		summarizeProduct,
+		type RowSummary
+	} from './catalog';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -74,6 +82,7 @@
 			<thead>
 				<tr>
 					<th>Variante</th><th class="num">Precio/día</th><th class="num">Inventario</th>
+					<th class="num">Modificado</th>
 					{#if data.canEdit}<th><span class="visually-hidden">Abrir</span></th>{/if}
 				</tr>
 			</thead>
@@ -98,6 +107,7 @@
 						</td>
 						<td class="num">{formatPesos(variant.rentalPrice)}</td>
 						<td class="num">{formatInteger(variant.totalQuantity)}</td>
+						<td class="num">{formatModified(variant.updatedAt)}</td>
 						{#if data.canEdit}<td class="num chevron">›</td>{/if}
 					</tr>
 				{/each}
@@ -190,20 +200,21 @@
 </Screen>
 
 {#snippet productRow(product: Product)}
-	{@render description(product.name, `${formatPesos(product.rentalPrice)}/día`, product.isActive)}
-	<span class="quantity">
-		<span class="quantity__value">{formatInteger(product.totalQuantity)}</span>
-		<span class="quantity__label">en inventario</span>
-	</span>
+	{@render description(product.name, summarizeProduct(product), product.isActive)}
 {/snippet}
 
-{#snippet description(name: string, meta: string, isActive: boolean)}
+<!-- The price on the right, so prices compare down the list. -->
+{#snippet description(name: string, { price, meta }: RowSummary, isActive: boolean)}
 	<span class="product__text">
 		<span class="product__name">
 			{name}
 			{#if !isActive}<Badge>Inactivo</Badge>{/if}
 		</span>
 		<span class="meta">{meta}</span>
+	</span>
+	<span class="price">
+		<span class="price__value">{price}</span>
+		<span class="price__label">por día</span>
 	</span>
 {/snippet}
 
@@ -314,20 +325,19 @@
 		font: var(--weight-semibold) var(--text-base) / 1.3 var(--font-sans);
 	}
 
-	/* Right-aligned, so quantities compare down the list. */
-	.quantity {
+	.price {
 		display: flex;
 		flex: none;
 		flex-direction: column;
 		text-align: right;
 	}
 
-	.quantity__value {
+	.price__value {
 		font: var(--weight-semibold) var(--text-base) / 1.3 var(--font-sans);
 		font-variant-numeric: tabular-nums;
 	}
 
-	.quantity__label {
+	.price__label {
 		font-size: var(--text-label);
 		color: var(--text-secondary);
 	}
