@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { enhance } from '$app/forms';
+	import { afterNavigate, replaceState } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import Badge, { ORDER_STATUS_TONES } from '$lib/components/Badge.svelte';
@@ -80,8 +81,19 @@
 	// Paying is the usual next step while there's a balance.
 	const isPaymentNext = $derived(data.paymentConcepts.includes('INSTALLMENT'));
 
+	// The save's notices belong to the redirect that brought them: kept for this view, then taken
+	// off the URL, so a reload or «Atrás» back to it shows neither.
+	let keptSave = $state<string | null>(null);
+	afterNavigate(({ to }) => {
+		keptSave = to?.url.searchParams.get('guardado') ?? null;
+		if (null !== keptSave) {
+			replaceState(resolve('/(app)/pedidos/[id]', { id: String(order.id) }), {});
+		}
+	});
+	const savedNotice = $derived(page.url.searchParams.get('guardado') ?? keptSave);
+
 	// A salesperson who typed the transport and the deposit may think they were recorded as paid.
-	const isJustCreated = $derived('nuevo' === page.url.searchParams.get('guardado'));
+	const isJustCreated = $derived('nuevo' === savedNotice);
 	const amountsNotPayments = $derived(
 		0 === order.depositAmount
 			? 'El transporte y el total son lo que se le cobra al cliente, no pagos recibidos. Registra el pago con «Registrar pago».'
@@ -229,7 +241,7 @@
 	{/snippet}
 
 	<!-- Set by the order form's redirect after a save; `nuevo` when it created the order. -->
-	{#if page.url.searchParams.has('guardado')}
+	{#if null !== savedNotice}
 		<div class="lead-notice saved">
 			<Notice tone="success">Pedido guardado con éxito</Notice>
 			{#if isJustCreated}
