@@ -7,6 +7,7 @@ import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
 import { containing } from './cash';
 import {
+	capitalizeName,
 	documentIdSchema,
 	documentTakenRefusal,
 	invalidForm,
@@ -329,14 +330,16 @@ type ContactColumns = {
 
 const CONTACT = { table: 'contacts', entityType: 'CONTACT' };
 
-// A new contact is inserted; a picked one gets what was typed.
+// A new contact is inserted, its name capitalized as Contactos › Nuevo saves it; a picked one gets
+// what was typed, as an edit does.
 function contactWrite(
 	db: D1Database,
 	actor: Actor,
 	{ picked, contact }: { picked: CandidateRow | null; contact: ContactColumns }
 ) {
 	if (null === picked) {
-		return auditedInsert(db, { ...CONTACT, actor, values: contact });
+		const values = { ...contact, full_name: capitalizeName(contact.full_name) };
+		return auditedInsert(db, { ...CONTACT, actor, values });
 	}
 	return auditedUpdate(db, { ...CONTACT, actor, id: picked.id, current: picked, changes: contact });
 }

@@ -4,6 +4,7 @@ import { beforeEach, expect, test } from 'vitest';
 import type { Actor, Role } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
 import {
+	capitalizeName,
 	contactAttributesSchema,
 	createContact,
 	findWhatsappOwner,
@@ -456,6 +457,27 @@ test('the order form finds clients by name, address or phone, by name, with thei
 	expect(await ids('luzma')).toEqual([username]);
 	expect(await ids('@LUZMA')).toEqual([username]);
 	expect(await rejection(searchClients(db, 'luz', actorWith('WAREHOUSE')))).toBe(403);
+});
+
+test.each([
+	['luz marina restrepo', 'Luz Marina Restrepo'],
+	['INVERSIONES ABC S.A.S.', 'INVERSIONES ABC S.A.S.'],
+	['ABC eventos', 'ABC Eventos'],
+	['McDonald', 'McDonald'],
+	['maría de la cruz', 'María de la Cruz'],
+	['de la torre', 'De la Torre'],
+	["ana-maría o'neill", "Ana-María O'Neill"]
+])('a new contact typed «%s» is saved «%s»', async (typed, saved) => {
+	expect(capitalizeName(typed)).toBe(saved);
+	const id = await create({ full_name: typed });
+	expect((await getContact(db, id, sales))?.fullName).toBe(saved);
+});
+
+test('an edit saves the name exactly as typed', async () => {
+	const id = await create({ ...luzMarina, document_id: '1036452118' });
+	const edit = { ...luzMarina, full_name: 'luz marina restrepo', document_id: '1036452118', id };
+	expect(await updateContact(db, edit, sales)).toEqual({ ok: true, id });
+	expect((await getContact(db, id, sales))?.fullName).toBe('luz marina restrepo');
 });
 
 test('the transporters are the contacts with TRANSPORTER, by name, with phone and username', async () => {

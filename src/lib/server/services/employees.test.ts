@@ -120,6 +120,14 @@ test('a contact picked from the search is reused, its phone, name and ID number 
 	]);
 });
 
+test('a new contact gets its name capitalized; a picked one keeps the name as typed', async () => {
+	const created = await hire({ ...carlos, full_name: 'carlos vélez' });
+	expect((await getEmployee(db, created, manager))?.fullName).toBe('Carlos Vélez');
+	await newClient();
+	const picked = await hire({ ...carlos, ...jorge, full_name: 'jorge iván betancur', contact_id: '2' });
+	expect((await getEmployee(db, picked, manager))?.fullName).toBe('jorge iván betancur');
+});
+
 test("a contact that's already another employee's is refused naming them", async () => {
 	await hire();
 	const refusal = { ok: false, message: 'Carlos Vélez ya está en Personal' };

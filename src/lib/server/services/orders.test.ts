@@ -1216,6 +1216,14 @@ test('«Cliente nuevo» makes the contact and the order in one batch, linked by 
 	]);
 });
 
+test('«Cliente nuevo» capitalizes the name, and the order freezes the capitalized one', async () => {
+	const fresh = { ...order1043, client_id: null, client_name: 'luz marina restrepo' };
+	const id = await create({ ...fresh, client_phone: '315 220 7781' });
+	const [contact] = contactsByPhone('573152207781');
+	expect(contact.full_name).toBe('Luz Marina Restrepo');
+	expect((await read(id)).client.name).toBe('Luz Marina Restrepo');
+});
+
 test('«Cliente nuevo» needs a typed phone that normalizes, and writes nothing otherwise', async () => {
 	const fresh = { ...order1043, client_id: null, client_name: 'Gloria', client_phone: '12' };
 	const result = await createOrder(db, fresh, sales);
