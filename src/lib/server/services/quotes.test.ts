@@ -302,6 +302,14 @@ test('«Cliente nuevo» creates its contact, automatic document, in the same bat
 	expect(Object.keys(errorsOf(refused))).toEqual(['client_phone']);
 });
 
+test('«Cliente nuevo» capitalizes the name, and the quote freezes the capitalized one', async () => {
+	const fresh = { ...quote1043, client_id: null, client_name: 'luz marina restrepo' };
+	const id = await create({ ...fresh, client_phone: '315 220 7781' });
+	const contact = database.prepare("select full_name from contacts where phone = '573152207781'");
+	expect(contact.get()?.full_name).toBe('Luz Marina Restrepo');
+	expect((await read(id)).client.name).toBe('Luz Marina Restrepo');
+});
+
 test("a quote freezes the picked contact's username, not the typed one; «Cliente nuevo» saves the typed one", async () => {
 	database.exec(`update contacts set whatsapp = 'LuzMarinaR' where id = ${LUZ_MARINA}`);
 	const picked = await create({ ...quote1043, client_whatsapp: '@otro_usuario' });
