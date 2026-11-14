@@ -34,4 +34,11 @@
 <symbol id="receipt" viewBox="0 0 24 24"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"></path><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"></path><path d="M12 17.5v-11"></path></symbol>
 <symbol id="printer" viewBox="0 0 24 24"><path d="M6 9V2h12v7"></path><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></symbol>
 <symbol id="copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></symbol>
+<symbol id="chair" viewBox="0 0 24 24"><path d="M7 3v18"></path><path d="M7 13h10v8"></path><path d="M7 3h5"></path></symbol>
+<symbol id="tablecloth" viewBox="0 0 24 24"><path d="M3 6h18"></path><path d="M5 6v9c2 2 4-1 7 1s5-1 7-1V6"></path></symbol>
+<symbol id="glass" viewBox="0 0 24 24"><path d="M7 3h10l-1 6a4 4 0 0 1-8 0z"></path><path d="M12 13v8M8 21h8"></path></symbol>
+<symbol id="cutlery" viewBox="0 0 24 24"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"></path><path d="M7 2v20"></path><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3zm0 0v7"></path></symbol>
+<symbol id="plate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="5"></circle></symbol>
+<symbol id="cloche" viewBox="0 0 24 24"><path d="M3 18h18"></path><path d="M5 18a7 7 0 0 1 14 0"></path><path d="M12 11V9M10.5 9h3"></path></symbol>
+<symbol id="sparkles" viewBox="0 0 24 24"><path d="M11 3l1.9 5.1L18 10l-5.1 1.9L11 17l-1.9-5.1L4 10l5.1-1.9z"></path><path d="M19 15v6M16 18h6"></path></symbol>
 </svg>

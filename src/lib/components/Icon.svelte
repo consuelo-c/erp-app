@@ -34,7 +34,14 @@
 		| 'copy'
 		| 'printer'
 		| 'pin'
-		| 'whatsapp';
+		| 'whatsapp'
+		| 'chair'
+		| 'tablecloth'
+		| 'glass'
+		| 'cutlery'
+		| 'plate'
+		| 'cloche'
+		| 'sparkles';
 
 	interface Props {
 		name: IconName;

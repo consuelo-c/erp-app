@@ -1,5 +1,5 @@
 import { error, fail, redirect } from '@sveltejs/kit';
-import { catalogHref } from '$lib/navigation';
+import { resolve } from '$app/paths';
 import { requireRole } from '$lib/server/actor';
 import { getProduct, listVariantGroups, updateProduct } from '$lib/server/services/products';
 import type { Actions, PageServerLoad } from './$types';
@@ -31,6 +31,6 @@ export const actions: Actions = {
 		if (!result.ok) {
 			return fail(400, { ...result, values });
 		}
-		redirect(303, catalogHref(result.variantGroup, { guardado: '' }));
+		redirect(303, `${resolve('/productos')}?guardado`);
 	}
 };

@@ -39,8 +39,10 @@ export type Product = {
 export type VariantGroup = { name: string; category: Category };
 
 type Failure = { ok: false; message: string; field?: string };
-/** A save also says the product's group: the screen goes back to it. */
-export type Result = { ok: true; id: number; variantGroup: string | null } | Failure;
+export type Result = { ok: true; id: number } | Failure;
+
+/** A catalog row: when its `total_quantity` last changed (epoch seconds), for the list's ℹ. */
+export type ListedProduct = Product & { quantityUpdatedAt: number };
 
 type ProductRow = {
 	id: number;
@@ -111,8 +113,14 @@ const newProductSchema = productSchema.and(
 
 const idSchema = z.object({ id: z.coerce.number().int().positive() });
 
-const SELECT_PRODUCT =
-	'select id, name, category, variant_group, variant_name, description, rental_price, total_quantity, active from products';
+const PRODUCT_COLUMNS =
+	'id, name, category, variant_group, variant_name, description, rental_price, total_quantity, active';
+
+const SELECT_PRODUCT = `select ${PRODUCT_COLUMNS} from products`;
+
+// Every write to `total_quantity` (create, edit, count, incident, their reversals) logs it in its
+// event's `after`: the latest such event, or the creation for a seeded product with none.
+const SELECT_LISTED_PRODUCT = `select ${PRODUCT_COLUMNS}, coalesce((select max(events.created_at) from events where events.entity_type = 'PRODUCT' and events.entity_id = products.id and json_extract(events.after, '$.total_quantity') is not null), products.created_at) as quantity_updated_at from products`;
 
 function invalid(error: z.ZodError): Failure {
 	const [issue] = error.issues;
@@ -194,7 +202,7 @@ const listSchema = z.object({
 export type ProductFilters = z.output<typeof listSchema>;
 
 /** The filters come back parsed: what the screen shows as chosen is what was applied. */
-export type ProductList = { products: Product[]; filters: ProductFilters };
+export type ProductList = { products: ListedProduct[]; filters: ProductFilters };
 
 function matches(product: Product, search: string): boolean {
 	const { name, variantGroup, variantName } = product;
@@ -203,10 +211,7 @@ function matches(product: Product, search: string): boolean {
 	);
 }
 
-/**
- * Every product, inactive ones included, by name, narrowed by text and category; the screen groups
- * them. A group is kept whole when its name or any of its variants matches: it's one row there.
- */
+/** Every product, inactive ones included, by name, narrowed by text and category. */
 export async function listProducts(
 	db: D1Database,
 	input: unknown,
@@ -216,14 +221,13 @@ export async function listProducts(
 	const filters = listSchema.parse(input ?? {});
 	const search = fold(filters.search);
 	// ponytail: the whole catalog read, narrowed here so accents fold; SQL if it reaches thousands.
-	const { results } = await db.prepare(SELECT_PRODUCT).all<ProductRow>();
-	const inCategory = results
-		.map(toProduct)
-		.filter(({ category }) => undefined === filters.category || category === filters.category);
-	const found = inCategory.filter((product) => matches(product, search));
-	const foundGroups = new Set(found.map(({ variantGroup }) => variantGroup).filter(Boolean));
-	const products = inCategory
-		.filter((product) => found.includes(product) || foundGroups.has(product.variantGroup))
+	const { results } = await db
+		.prepare(SELECT_LISTED_PRODUCT)
+		.all<ProductRow & { quantity_updated_at: number }>();
+	const products = results
+		.map((row) => ({ ...toProduct(row), quantityUpdatedAt: row.quantity_updated_at }))
+		.filter(({ category }) => undefined === filters.category || category === filters.category)
+		.filter((product) => matches(product, search))
 		.sort((first, second) => first.name.localeCompare(second.name, 'es'));
 	return { products, filters };
 }
@@ -277,8 +281,7 @@ export async function createProduct(
 	if (null === results) {
 		return DUPLICATE_VARIANT;
 	}
-	const { variant_group: variantGroup } = parsed.data.columns;
-	return { ok: true, id: results[0].meta.last_row_id, variantGroup };
+	return { ok: true, id: results[0].meta.last_row_id };
 }
 
 async function applyEdit(
@@ -287,7 +290,7 @@ async function applyEdit(
 	{ row, product }: { row: ProductRow; product: ParsedProduct }
 ): Promise<Result> {
 	const { id, ...current } = row;
-	const saved: Result = { ok: true, id, variantGroup: product.columns.variant_group };
+	const saved: Result = { ok: true, id };
 	const statements = auditedUpdate(db, {
 		table: 'products',
 		entityType: 'PRODUCT',

@@ -9,24 +9,20 @@
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import Select from '$lib/components/Select.svelte';
+	import { formatCivilDate, getInstantDate } from '$lib/datetime';
 	import { formatInteger, formatPesos } from '$lib/format';
-	import { CATEGORY_LABELS } from '$lib/labels';
-	import { catalogHref } from '$lib/navigation';
-	import type { Product } from '$lib/server/services/products';
-	import { describeGroup, findVariants, groupCatalog, summarizeGroup } from './catalog';
+	import { CATEGORY_ICONS, CATEGORY_LABELS } from '$lib/labels';
+	import { catalogName, sortCatalog } from './catalog';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
 
-	const sections = $derived(groupCatalog(data.products));
-	// `?grupo=` opens one group's variants; a group with none left falls back to the list.
-	const group = $derived(page.url.searchParams.get('grupo'));
-	const variants = $derived(null === group ? [] : findVariants(data.products, group));
+	const products = $derived(sortCatalog(data.products));
 
 	const filters = $derived(data.filters);
 	const isFiltered = $derived('' !== filters.search || undefined !== filters.category);
 	// No product at all, as opposed to none matching: the filters have nothing to narrow.
-	const isEmpty = $derived(!isFiltered && 0 === sections.length);
+	const isEmpty = $derived(!isFiltered && 0 === products.length);
 
 	const noneText = $derived.by(() => {
 		const { search, category } = filters;
@@ -51,16 +47,12 @@
 </script>
 
 <svelte:head>
-	<title>{group ?? 'Productos'} · Banquetes Consuelo C</title>
+	<title>Productos · Banquetes Consuelo C</title>
 </svelte:head>
 
 <Screen>
 	{#snippet header()}
-		{#if variants.length}
-			<ScreenHeader title={group!} backHref={catalogHref(null)} />
-		{:else}
-			<ScreenHeader title="Productos" />
-		{/if}
+		<ScreenHeader title="Productos" />
 	{/snippet}
 
 	<!-- Set by the product form's redirect after a save. -->
@@ -68,42 +60,7 @@
 		<div class="saved"><Notice tone="success">Producto guardado con éxito</Notice></div>
 	{/if}
 
-	{#if variants.length}
-		<p class="meta group-meta">{describeGroup(variants)}</p>
-		<table class="table">
-			<thead>
-				<tr>
-					<th>Variante</th><th class="num">Precio/día</th><th class="num">Inventario</th>
-					{#if data.canEdit}<th><span class="visually-hidden">Abrir</span></th>{/if}
-				</tr>
-			</thead>
-			<tbody>
-				{#each variants as variant (variant.id)}
-					<tr
-						class={[data.canEdit && 'table__row--link', !variant.isActive && 'table__row--muted']}
-					>
-						<td>
-							<span class="variant">
-								{#if data.canEdit}
-									<a
-										class="table__link"
-										href={resolve('/(app)/productos/[id]', { id: String(variant.id) })}
-										>{variant.variantName}</a
-									>
-								{:else}
-									{variant.variantName}
-								{/if}
-								{#if !variant.isActive}<Badge>Inactivo</Badge>{/if}
-							</span>
-						</td>
-						<td class="num">{formatPesos(variant.rentalPrice)}</td>
-						<td class="num">{formatInteger(variant.totalQuantity)}</td>
-						{#if data.canEdit}<td class="num chevron">›</td>{/if}
-					</tr>
-				{/each}
-			</tbody>
-		</table>
-	{:else if isEmpty}
+	{#if isEmpty}
 		<!-- Empty state: the action sits centered under the message. -->
 		<div class="empty">
 			<p><strong>Aún no hay productos</strong></p>
@@ -145,67 +102,74 @@
 			</Select>
 		</form>
 
-		{#if 0 === sections.length}
+		{#if 0 === products.length}
 			<div class="none">
 				<p class="meta">{noneText}</p>
 				<Button href="{resolve('/productos')}?limpiar" variant="secondary" inline>Ver todos</Button>
 			</div>
+		{:else}
+			<!-- On a phone names never wrap: the table scrolls sideways instead. -->
+			<div class="scroll">
+				<table class="table">
+					<thead>
+						<tr>
+							<th class="table__icon"><span class="visually-hidden">Categoría</span></th>
+							<th>Producto</th>
+							<th class="num">Precio/día</th>
+							<th class="num">Inventario</th>
+							{#if data.canEdit}<th><span class="visually-hidden">Abrir</span></th>{/if}
+						</tr>
+					</thead>
+					<tbody>
+						{#each products as product (product.id)}
+							{@const category = CATEGORY_LABELS[product.category]}
+							{@const updated = `Inventario actualizado el ${formatCivilDate(getInstantDate(product.quantityUpdatedAt))}`}
+							<tr
+								class={[
+									data.canEdit && 'table__row--link',
+									!product.isActive && 'table__row--inactive'
+								]}
+							>
+								<td class="table__icon">
+									<span class="hint" title={category}>
+										<Icon name={CATEGORY_ICONS[product.category]} />
+										<span class="visually-hidden">{category}</span>
+									</span>
+								</td>
+								<td>
+									<span class="name">
+										{#if data.canEdit}
+											<a
+												class="table__link"
+												href={resolve('/(app)/productos/[id]', { id: String(product.id) })}
+												>{catalogName(product)}</a
+											>
+										{:else}
+											{catalogName(product)}
+										{/if}
+										<!-- Hover only: on a phone a tap doesn't open it. -->
+										<span class="hint hint--info" title={updated}>
+											<Icon name="info" size="sm" />
+											<span class="visually-hidden">{updated}</span>
+										</span>
+										{#if !product.isActive}<Badge>Inactivo</Badge>{/if}
+									</span>
+								</td>
+								<td class="num">{formatPesos(product.rentalPrice)}</td>
+								<td class="num">{formatInteger(product.totalQuantity)}</td>
+								{#if data.canEdit}<td class="num chevron">›</td>{/if}
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
 		{/if}
-
-		{#each sections as section (section.category)}
-			<section class="category">
-				<h2 class="section-title">{CATEGORY_LABELS[section.category]}</h2>
-				<ul class="products">
-					{#each section.rows as row ('group' === row.kind ? row.name : row.product.id)}
-						<li>
-							{#if 'group' === row.kind}
-								<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- catalogHref builds it with resolve() -->
-								<a class="product" href={catalogHref(row.name)}>
-									{@render description(row.name, summarizeGroup(row.variants), true)}
-									<span class="chevron">›</span>
-								</a>
-							{:else if data.canEdit}
-								<a
-									class={['product', !row.product.isActive && 'product--inactive']}
-									href={resolve('/(app)/productos/[id]', { id: String(row.product.id) })}
-								>
-									{@render productRow(row.product)}
-									<span class="chevron">›</span>
-								</a>
-							{:else}
-								<div class={['product', !row.product.isActive && 'product--inactive']}>
-									{@render productRow(row.product)}
-								</div>
-							{/if}
-						</li>
-					{/each}
-				</ul>
-			</section>
-		{/each}
 
 		{#if data.canEdit}
 			<div class="screen__action">{@render newProduct()}</div>
 		{/if}
 	{/if}
 </Screen>
-
-{#snippet productRow(product: Product)}
-	{@render description(product.name, `${formatPesos(product.rentalPrice)}/día`, product.isActive)}
-	<span class="quantity">
-		<span class="quantity__value">{formatInteger(product.totalQuantity)}</span>
-		<span class="quantity__label">en inventario</span>
-	</span>
-{/snippet}
-
-{#snippet description(name: string, meta: string, isActive: boolean)}
-	<span class="product__text">
-		<span class="product__name">
-			{name}
-			{#if !isActive}<Badge>Inactivo</Badge>{/if}
-		</span>
-		<span class="meta">{meta}</span>
-	</span>
-{/snippet}
 
 {#snippet newProduct()}
 	<Button href={resolve('/productos/nuevo')}>Nuevo producto</Button>
@@ -271,80 +235,15 @@
 		text-align: center;
 	}
 
-	.category {
+	.scroll {
 		margin-bottom: var(--space-10);
-	}
-
-	.products {
-		padding: 0;
-		margin: 0;
-		list-style: none;
-		border-top: var(--border-w-strong) solid var(--border-strong);
-	}
-
-	.product {
-		display: flex;
-		gap: var(--space-5);
-		align-items: center;
-		min-height: 60px;
-		padding: var(--space-4) 0;
-		color: inherit;
-		text-decoration: none;
-		border-bottom: var(--border-w) solid var(--border-default);
-	}
-
-	/* Still in its category, faded, with its badge. */
-	.product--inactive {
-		opacity: 0.55;
-	}
-
-	.product__text {
-		display: flex;
-		flex: 1;
-		flex-direction: column;
-		gap: var(--space-1);
-		min-width: 0;
-	}
-
-	.product__name {
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--space-4);
-		align-items: center;
-		font: var(--weight-semibold) var(--text-base) / 1.3 var(--font-sans);
-	}
-
-	/* Right-aligned, so quantities compare down the list. */
-	.quantity {
-		display: flex;
-		flex: none;
-		flex-direction: column;
-		text-align: right;
-	}
-
-	.quantity__value {
-		font: var(--weight-semibold) var(--text-base) / 1.3 var(--font-sans);
-		font-variant-numeric: tabular-nums;
-	}
-
-	.quantity__label {
-		font-size: var(--text-label);
-		color: var(--text-secondary);
-	}
-
-	.chevron {
-		flex: none;
-		font-size: var(--text-xl);
-		color: var(--text-disabled);
-	}
-
-	.group-meta {
-		margin-bottom: var(--space-8);
+		overflow-x: auto;
 	}
 
 	.table {
 		width: 100%;
 		font-size: var(--text-md);
+		white-space: nowrap;
 		border-collapse: collapse;
 	}
 
@@ -357,7 +256,6 @@
 		border-bottom: var(--border-w-strong) solid var(--border-strong);
 	}
 
-	/* 48px rows: twenty colors scroll by with the thumb. */
 	.table td {
 		height: 48px;
 		padding: 0 var(--space-4);
@@ -367,23 +265,45 @@
 	.table .num {
 		font-variant-numeric: tabular-nums;
 		text-align: right;
-		white-space: nowrap;
 	}
 
-	.variant {
+	.table .table__icon {
+		width: 20px;
+		padding-right: 0;
+	}
+
+	.name {
 		display: flex;
-		flex-wrap: wrap;
 		gap: var(--space-4);
 		align-items: center;
+		font-weight: var(--weight-semibold);
 	}
 
-	/* The variant's link covers its whole row: one tap target per variant. */
+	/* Above the row's link, so hovering it shows its title. */
+	.hint {
+		position: relative;
+		z-index: 1;
+		display: inline-flex;
+	}
+
+	.hint--info {
+		color: var(--text-secondary);
+		cursor: help;
+	}
+
+	.chevron {
+		font-size: var(--text-xl);
+		color: var(--text-disabled);
+	}
+
+	/* The product's link covers its whole row: one tap target per product. */
 	.table__row--link {
 		position: relative;
 	}
 
-	.table__row--muted td {
-		color: var(--text-secondary);
+	/* Still in its category, faded, with its badge. */
+	.table__row--inactive {
+		opacity: 0.55;
 	}
 
 	.table__link {

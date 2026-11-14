@@ -127,6 +127,17 @@ export const CATEGORY_LABELS: Record<Category, string> = {
 	DECOR: 'Decoración'
 };
 
+/** Each category's symbol in `static/icons.svg`, before a product's name in the catalog. */
+export const CATEGORY_ICONS = {
+	CHAIRS_TABLES: 'chair',
+	LINENS: 'tablecloth',
+	GLASSWARE: 'glass',
+	CUTLERY: 'cutlery',
+	TABLEWARE: 'plate',
+	CHAFERS_TRAYS: 'cloche',
+	DECOR: 'sparkles'
+} as const satisfies Record<Category, string>;
+
 export const SERVICE_LABELS: Record<Service, string> = {
 	TRANSPORTER: 'Transportador',
 	DECORATOR: 'Decorador',

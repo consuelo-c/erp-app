@@ -134,13 +134,6 @@ export const SETTINGS_TABS = [
 	{ label: 'Términos', href: resolve('/configuracion/terminos') }
 ];
 
-/** Productos, or with a group one group's variants; `query` adds the rest, like `guardado`. */
-export function catalogHref(group: string | null, query: Record<string, string> = {}): string {
-	const search = String(new URLSearchParams(null === group ? query : { grupo: group, ...query }));
-	const productsHref = resolve('/productos');
-	return '' === search ? productsHref : `${productsHref}?${search}`;
-}
-
 /**
  * The page numbers a pagination shows: the first, the last, and the current one with its
  * neighbors; `null` is an ellipsis for the pages skipped, never for a single one.

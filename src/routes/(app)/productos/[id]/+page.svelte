@@ -2,7 +2,7 @@
 	import Button from '$lib/components/Button.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
-	import { catalogHref } from '$lib/navigation';
+	import { resolve } from '$app/paths';
 	import ProductForm from '../ProductForm.svelte';
 	import type { PageProps } from './$types';
 
@@ -16,7 +16,7 @@
 <Screen>
 	{#snippet header()}
 		<!-- Back where it's listed: its group's variants, or the list. -->
-		<ScreenHeader title="Editar producto" backHref={catalogHref(data.product.variantGroup)} />
+		<ScreenHeader title="Editar producto" backHref={resolve('/productos')} />
 	{/snippet}
 
 	<ProductForm product={data.product} groups={data.groups} {form} />

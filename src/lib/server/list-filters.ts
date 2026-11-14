@@ -13,8 +13,8 @@ const LISTS = [
 	'caja'
 ] as const;
 
-// A notice, an open movement or a variant group: where the list was opened, not how it's filtered.
-const TRANSIENT = new Set(['guardado', 'aviso', 'movimiento', 'grupo']);
+// A notice or an open movement: where the list was opened, not how it's filtered.
+const TRANSIENT = new Set(['guardado', 'aviso', 'movimiento']);
 
 const DISPATCH_DAY_COOKIE = 'filters_despachos';
 
