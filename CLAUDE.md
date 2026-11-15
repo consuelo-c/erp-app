@@ -15,17 +15,15 @@ SvelteKit app for Banquetes Consuelo C, a party rental business in Medellín, de
 
 All in [`erp-planning:working-methodology.md`](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md) (`methodology`) unless named.
 
-- **Opening a session** — `methodology` [§7](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#7-opening-and-closing-a-session): the milestone's open issues, not the planning
-- **Opening a phase** — the developer runs `/start-phase NN` (`.claude/skills/start-phase/`); asked to open a phase without it, suggest it. The process stays in `methodology` [Opening a phase](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#opening-a-phase) (screens first, then one issue per unit); the phase's plan is `erp-planning:phase-NN/planning.md`, read with [`erp-planning:foundations.md`](https://github.com/consuelo-c/erp-planning/blob/main/foundations.md)
-- **Building a phase** — the developer runs `/build-phase NN` (`.claude/skills/build-phase/`) in a session started with `claude --permission-mode auto`; asked to build a phase without it, suggest it. The process is `methodology` [Building a phase](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#building-a-phase)
-- **Starting a unit** — `methodology` [The cycle](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#the-cycle) (one unit, one fresh context, one commit; never ask for board moves nor wait on them); the phase's whole criteria file, both halves: `erp-planning:phase-NN/acceptance.md`
-- **Building a screen** — `methodology` [Opening a phase](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#opening-a-phase): only the canvas pages (`project/<page>`, read with the Artifact tool) of the screens its issue names; ask before reading another of the same phase (in a build run, build without it and say so)
+- **Sessions** — they start in plan mode (`defaultMode` in `.claude/settings.json`); a build run needs `claude --permission-mode auto`, which project settings can't turn on. `methodology` [§8 Sessions](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#8-sessions)
+- **Building a phase** — the developer runs `/build-phase NN` (`.claude/skills/build-phase/`) in a session started with `claude --permission-mode auto`; asked to build a phase without it, suggest it. The steps are the skill's; the reasons are `methodology` [Building a phase](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#building-a-phase)
+- **Starting a unit** — `methodology` [The cycle](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#the-cycle) (one unit, one fresh context, one commit; never ask for board moves nor wait on them); the phase's plan, `erp-planning:phase-NN/planning.md`, read with [`erp-planning:foundations.md`](https://github.com/consuelo-c/erp-planning/blob/main/foundations.md); the phase's whole criteria file, both halves: `erp-planning:phase-NN/acceptance.md`
+- **Building a screen** — `methodology` [Building a phase](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#building-a-phase): only the canvas pages (`project/<page>`, read with the Artifact tool) of the screens its issue names; ask before reading another of the same phase (in a build run, build without it and say so)
 - **Needing something another unit or phase owns** — `methodology` [Stubs are the way out](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#stubs-are-the-way-out)
 - **Finding a gap, ambiguity, error or contradiction in the planning** — `methodology` [Gaps in the planning](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#gaps-in-the-planning) and [§4](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#4-the-issues)
 - **Writing code** — `methodology` [§13 Code standards](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#13-code-standards)
 - **Creating an issue** — `methodology` [§4](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#4-the-issues)
 - **Closing a unit** — `methodology` [§3 Commits](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#3-commits)
-- **Closing a session** — `methodology` [§7](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#7-opening-and-closing-a-session)
 - **Closing a phase** — `methodology` [§9](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#9-closing-a-phase)
 - **Using a skill that reviews or trims code (ponytail)** — `methodology` [§10](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#10-the-skills): the planning wins over the skill
 
@@ -78,7 +76,7 @@ Where things live and which helper to reuse. What a screen or service does is re
 - `src/service-worker.ts` — the PWA shell cache, never a data response (hence `paths.relative: false`)
 - `migrations/` — generated SQL; squashed freely until launch, append-only after
 - `scripts/` — `settings-defaults.sql`, `catalog.sql`, `sample-data.sql`, `wipe-d1-if-squashed.js` (the deploy's pre-launch wipe)
-- `.github/workflows/` — `verify.yml` (PRs), `deploy.yml` (merge to `main`); `.husky/` — `pre-commit`, `commit-msg`; `.claude/` — the allow and deny lists, and the `start-phase` and `build-phase` skills
+- `.github/workflows/` — `verify.yml` (PRs), `deploy.yml` (merge to `main`); `.husky/` — `pre-commit`, `commit-msg`; `.claude/` — the allow and deny lists, and the `build-phase` skill
 
 ## Hard rules
 

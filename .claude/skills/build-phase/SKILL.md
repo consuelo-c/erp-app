@@ -9,7 +9,7 @@ argument-hint: <phase number>
 
 Build Phase $ARGUMENTS. `NN` below is that number, zero-padded (`3` → `03`). `R` is `consuelo-c/erp-app`.
 
-The process is `erp-planning:working-methodology.md` "Building a phase"; this skill adds only what that section leaves to the run. `erp-planning:` names the planning repository's clone, a sibling of this one: find its folder by its remote (`git -C <folder> remote get-url origin` ending in `consuelo-c/erp-planning.git`).
+This skill is the only description of the run's steps. `erp-planning:working-methodology.md` "Building a phase" holds the reasons behind them: read it for the why, never for a step. `erp-planning:` names the planning repository's clone, a sibling of this one: find its folder by its remote (`git -C <folder> remote get-url origin` ending in `consuelo-c/erp-planning.git`).
 
 **You are the orchestrator.** You build nothing, read no source file and no planning beyond what this skill names: every unit is a fresh subagent's. Keep only issue numbers, commit hashes, held questions and what each subagent returns. The session runs in `auto` mode: the allow list runs as is, anything else goes to auto mode's classifier, and the deny list and the guard hook (`.claude/hooks/guard.js`) refuse what is never Claude's. If the session isn't in auto mode, stop and ask the developer to restart it with `claude --permission-mode auto`.
 
