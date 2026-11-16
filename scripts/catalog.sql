@@ -4,12 +4,13 @@
 -- (README, «Cargar el catálogo»); `npm run db:seed` runs it between settings-defaults.sql and
 -- sample-data.sql; deploy.yml never applies it, or a product renamed in Productos would come back.
 -- Idempotent: a product whose name exists, ignoring case, is skipped. Writes no events row.
--- Descriptions write a line break as `\n`, turned into a real one on insert.
+-- Descriptions write a line break as `\n`, turned into a real one on insert, and land in
+-- `attributes` as its `description` key; a product without one gets `{}`.
 
 -- Simple WooCommerce products with a price and a rental category, as named there but for «Sillas
 -- Tiffany»; an unpublished one comes in inactive. No inventory row, so 0 units but the two in spandex.
-INSERT INTO products (name, category, description, rental_price, total_quantity, active, created_at, created_by, updated_at, updated_by)
-SELECT column1, column2, replace(column3, '\n', char(10)), column4, column5, column6, unixepoch(), 'system', unixepoch(), 'system'
+INSERT INTO products (name, category, attributes, rental_price, total_quantity, active, created_at, created_by, updated_at, updated_by)
+SELECT column1, column2, iif(column3 IS NULL, '{}', json_object('description', replace(column3, '\n', char(10)))), column4, column5, column6, unixepoch(), 'system', unixepoch(), 'system'
 FROM (VALUES
 	('Tenedores Grandes', 'CUTLERY', 'Tenedores para plato fuerte. Tenemos líneas que acompañan la línea de los cubiertos.', 980, 0, 1),
 	('Tablones', 'CHAIRS_TABLES', 'Los tablones son mesones de madera largos con capacidad hasta para 8 personas.\n\nMedida: 1.80 largo x 60 ancho x 75 alto.\n\nSi buscas alquilar sillas y mesas en Medellín los tablones son la mejor solución.\n\nNo olvides los manteles o alquilar las sillas Tiffany.\n\nSi buscas mesas para fiestas, los tablones son ideales.', 8000, 0, 1),
@@ -333,9 +334,9 @@ variants (variant_group, variant_name, total_quantity) AS (VALUES
 	('Forros para sillas', 'Blanco lino', 395),
 	('Forros para sillas', 'Negro', 149)
 )
-INSERT INTO products (name, category, variant_group, variant_name, description, rental_price, total_quantity, created_at, created_by, updated_at, updated_by)
+INSERT INTO products (name, category, variant_group, variant_name, attributes, rental_price, total_quantity, created_at, created_by, updated_at, updated_by)
 SELECT variants.variant_group || ' — ' || variants.variant_name, 'LINENS', variants.variant_group, variants.variant_name,
-	replace(variant_groups.description, '\n', char(10)), variant_groups.rental_price, variants.total_quantity,
+	iif(variant_groups.description IS NULL, '{}', json_object('description', replace(variant_groups.description, '\n', char(10)))), variant_groups.rental_price, variants.total_quantity,
 	unixepoch(), 'system', unixepoch(), 'system'
 FROM variants JOIN variant_groups USING (variant_group)
 WHERE NOT EXISTS (

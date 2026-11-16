@@ -173,10 +173,10 @@ export const products = sqliteTable(
 		category: text('category').notNull(),
 		variantGroup: text('variant_group'),
 		variantName: text('variant_name'),
-		description: text('description'),
 		rentalPrice: integer('rental_price').notNull(), // whole pesos per day
 		totalQuantity: integer('total_quantity').notNull(),
 		active: integer('active').notNull().default(1),
+		attributes: text('attributes').notNull().default('{}'), // JSON: description, website_url
 		...auditColumns
 	},
 	(table) => [

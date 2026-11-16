@@ -77,6 +77,23 @@ test('editing logs only the changed fields in before/after', async () => {
 	expect(JSON.parse(String(edited.after))).toEqual({ rental_price: 9000 });
 });
 
+test('an empty description saves no key, and a typed one keeps its line breaks', async () => {
+	const id = await create({ ...chair, description: '  ' });
+	const attributes = () =>
+		database.prepare('select attributes from products where id = ?').get(id)?.attributes;
+	expect(attributes()).toBe('{}');
+	await updateProduct(db, { ...chair, id, description: 'Blanca.\n\nPlegable.' }, manager);
+	expect((await getProduct(db, id, manager))?.description).toBe('Blanca.\n\nPlegable.');
+});
+
+test('editing the description logs attributes.description in before/after', async () => {
+	const id = await create({ ...chair, description: 'Blanca' });
+	await updateProduct(db, { ...chair, id, description: 'Dorada' }, manager);
+	const edited = events()[1];
+	expect(JSON.parse(String(edited.before))).toEqual({ 'attributes.description': 'Blanca' });
+	expect(JSON.parse(String(edited.after))).toEqual({ 'attributes.description': 'Dorada' });
+});
+
 test('an edit ignores total_quantity, which stays out of the EDITED event', async () => {
 	const id = await create(chair);
 	await updateProduct(db, { ...chair, id, total_quantity: '80', rental_price: '9.000' }, manager);

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d43f3189-2179-4721-8315-126e28147508",
+  "id": "bf058bfc-1ecd-40b6-9ad1-ad7ec0f67348",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "cash_movements": {
@@ -1187,13 +1187,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "description": {
-          "name": "description",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "rental_price": {
           "name": "rental_price",
           "type": "integer",
@@ -1215,6 +1208,14 @@
           "notNull": true,
           "autoincrement": false,
           "default": 1
+        },
+        "attributes": {
+          "name": "attributes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'{}'"
         },
         "created_at": {
           "name": "created_at",

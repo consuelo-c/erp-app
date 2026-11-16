@@ -107,9 +107,13 @@ test('the colors are tidied, and «Dorados» on MOÑOS falls back to its INVENTA
 	expect(quantityOf('Manteles para Mesas Cuadradas — Cuadros azul rey')).toBe(0);
 });
 
-test('a description keeps its line breaks', () => {
-	const product = database.prepare("select description from products where name = 'Tablones'");
-	expect(String(product.get()?.description)).toContain('personas.\n\nMedida: 1.80');
+test('a description lands in attributes with its line breaks; none is an empty object', () => {
+	const attributesOf = (name: string) =>
+		database.prepare('select attributes from products where name = ?').get(name)?.attributes;
+	expect(JSON.parse(String(attributesOf('Tablones'))).description).toContain(
+		'personas.\n\nMedida: 1.80'
+	);
+	expect(attributesOf('Sillas para Niños')).toBe('{}');
 });
 
 test('a second run inserts nothing; every row is created by system and writes no events', () => {
