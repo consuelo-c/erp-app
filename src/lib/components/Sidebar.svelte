@@ -1,81 +1,69 @@
 <script lang="ts">
-	import type { ComponentProps } from 'svelte';
+	import type { MenuEntry } from '$lib/navigation';
 	import Icon from './Icon.svelte';
 	import LogoutButton from './LogoutButton.svelte';
 
-	// Desktop navigation, the same destinations as the bottom bar. Collapsed it's a 68px icon rail,
-	// each item named by its `title`. An item without `href` is a destination whose screens don't
-	// exist yet: shown, not a link.
-	type Item = {
-		label: string;
-		icon: ComponentProps<typeof Icon>['name'];
-		href?: string;
-		isCurrent?: boolean;
-	};
-
+	// Desktop navigation, always expanded: the login's menu tree. The current parent shows its
+	// children below it; any other parent shows them in a flyout on hover or keyboard focus.
 	interface Props {
-		items: Item[];
-		footItems: Item[];
+		menu: MenuEntry[];
+		/** The open page's href; none on a section outside the menu. */
+		currentHref?: string;
 		username: string;
-		isCollapsed?: boolean;
 	}
 
-	let { items, footItems, username, isCollapsed = $bindable(false) }: Props = $props();
+	let { menu, currentHref, username }: Props = $props();
+
+	function isOpen({ ownHref, children }: MenuEntry): boolean {
+		return (
+			undefined !== currentHref &&
+			(ownHref === currentHref || children.some(({ href }) => href === currentHref))
+		);
+	}
+
+	function ariaCurrent(href: string | undefined) {
+		return undefined !== currentHref && href === currentHref ? 'page' : undefined;
+	}
 </script>
 
-<nav class={['sidebar', isCollapsed && 'sidebar--collapsed']} aria-label="Principal">
+<nav class="sidebar" aria-label="Principal">
 	<div class="sidebar__brand">
 		<img class="sidebar__logo" src="/banquetes-consuelo-c-logo.svg" alt="Banquetes Consuelo C" />
-		<img class="sidebar__mark" src="/c-logo.svg" alt="Consuelo C" />
-		<button
-			class="sidebar__toggle"
-			type="button"
-			aria-label={isCollapsed ? 'Expandir menú' : 'Contraer menú'}
-			aria-expanded={!isCollapsed}
-			onclick={() => (isCollapsed = !isCollapsed)}
-		>
-			<Icon name="collapse" size="md" />
-		</button>
 	</div>
 	<div class="sidebar__nav">
-		{#each items as item (item.label)}
-			{@render sidebarItem(item)}
+		{#each menu as parent (parent.label)}
+			{@const isParentOpen = isOpen(parent)}
+			<div class="sidebar__group">
+				<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- MENU builds its hrefs with resolve() -->
+				<a class="sidebar__item" href={parent.href} aria-current={ariaCurrent(parent.ownHref)}>
+					<Icon name={parent.icon} size="md" />{parent.label}
+				</a>
+				{#if 0 < parent.children.length}
+					<div class={isParentOpen ? 'sidebar__children' : 'sidebar__flyout'}>
+						{#each parent.children as child (child.href)}
+							{@const childClass = ['sidebar__item', isParentOpen && 'sidebar__item--child']}
+							<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- MENU builds its hrefs with resolve() -->
+							<a class={childClass} href={child.href} aria-current={ariaCurrent(child.href)}>
+								{child.label}
+							</a>
+						{/each}
+					</div>
+				{/if}
+			</div>
 		{/each}
 	</div>
 	<div class="sidebar__nav sidebar__foot">
-		{#each footItems as item (item.label)}
-			{@render sidebarItem(item)}
-		{/each}
 		<!-- Offline the shell draws with no session to name. -->
 		{#if username}<div class="sidebar__session">Sesión: {username}</div>{/if}
 		<LogoutButton>
 			{#snippet trigger(open)}
-				<button
-					class="sidebar__item"
-					type="button"
-					title="Cerrar sesión ({username})"
-					onclick={open}
-				>
-					<Icon name="exit" size="md" /><span class="sidebar__label">Cerrar sesión</span>
+				<button class="sidebar__item" type="button" onclick={open}>
+					<Icon name="exit" size="md" />Cerrar sesión
 				</button>
 			{/snippet}
 		</LogoutButton>
 	</div>
 </nav>
-
-{#snippet sidebarItem(item: Item)}
-	{@const current = item.isCurrent ? 'page' : undefined}
-	{#if item.href}
-		<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- the caller passes an href built with resolve() -->
-		<a class="sidebar__item" href={item.href} title={item.label} aria-current={current}>
-			<Icon name={item.icon} size="md" /><span class="sidebar__label">{item.label}</span>
-		</a>
-	{:else}
-		<span class="sidebar__item" title={item.label} aria-disabled="true">
-			<Icon name={item.icon} size="md" /><span class="sidebar__label">{item.label}</span>
-		</span>
-	{/if}
-{/snippet}
 
 <style>
 	.sidebar {
@@ -84,48 +72,26 @@
 		flex: none;
 		flex-direction: column;
 		width: var(--sidebar-w);
-		height: 100%;
 
-		/* A window shorter than the menu scrolls the rail itself: overflowing, it would make the
-		   page scroll past the rail's dark background. */
-		overflow-y: auto;
+		/* Taller than the window, the menu grows the page rather than scroll inside: a scrolling
+		   sidebar would clip the flyouts. */
+		min-height: 100%;
 		background: var(--surface-sidebar);
 	}
 
 	.sidebar__brand {
-		position: relative;
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
 		padding: var(--space-10) var(--space-9);
 		border-bottom: var(--border-w-hair) solid var(--border-sidebar);
 	}
 
-	/* The logo files draw in currentColor, which an <img> renders black: the rail needs them white. */
-	.sidebar__logo,
-	.sidebar__mark {
-		filter: brightness(0) invert(1);
-	}
-
+	/* The logo file draws in currentColor, which an <img> renders black: the sidebar needs it white. */
 	.sidebar__logo {
 		display: block;
 		width: 100px;
 		height: auto;
-	}
-
-	.sidebar__mark {
-		display: none;
-		width: auto;
-		height: 24px;
-	}
-
-	.sidebar__toggle {
-		display: flex;
-		padding: 0;
-		color: var(--neutral-400);
-		cursor: pointer;
-		background: none;
-		border: 0;
+		filter: brightness(0) invert(1);
 	}
 
 	.sidebar__nav {
@@ -133,6 +99,14 @@
 		flex-direction: column;
 		gap: var(--space-1);
 		padding: var(--space-7) var(--space-5);
+	}
+
+	.sidebar__group,
+	.sidebar__children {
+		position: relative;
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
 	}
 
 	.sidebar__item {
@@ -157,9 +131,43 @@
 		background: var(--brand-yellow);
 	}
 
-	.sidebar__item[aria-disabled='true'] {
-		color: var(--neutral-600);
-		cursor: default;
+	/* Aligned with the parent's label: its padding, its 18px icon and the gap. */
+	.sidebar__item--child {
+		padding-left: calc(2 * var(--space-6) + 18px);
+	}
+
+	.sidebar__flyout {
+		position: absolute;
+		top: 0;
+		left: calc(100% + var(--space-5));
+		z-index: var(--z-modal);
+		display: none;
+		flex-direction: column;
+		gap: var(--space-1);
+		min-width: 200px;
+		padding: var(--space-3);
+		background: var(--surface-sidebar);
+		border-radius: var(--radius-md);
+	}
+
+	/* Bridges the gap to the flyout, so moving the pointer onto it doesn't close it. */
+	.sidebar__flyout::before {
+		position: absolute;
+		top: 0;
+		right: 100%;
+		bottom: 0;
+		width: var(--space-5);
+		content: '';
+	}
+
+	.sidebar__group:hover > .sidebar__flyout,
+	.sidebar__group:focus-within > .sidebar__flyout {
+		display: flex;
+	}
+
+	.sidebar__group:hover:has(> .sidebar__flyout) > .sidebar__item,
+	.sidebar__group:focus-within:has(> .sidebar__flyout) > .sidebar__item {
+		background: var(--neutral-800);
 	}
 
 	/* «Cerrar sesión» is a button among the links. */
@@ -179,44 +187,5 @@
 		padding: var(--space-6) var(--space-6) var(--space-1);
 		font: var(--weight-semibold) var(--text-label) / 1.2 var(--font-sans);
 		color: var(--neutral-400);
-	}
-
-	.sidebar--collapsed {
-		width: var(--sidebar-w-collapsed);
-	}
-
-	.sidebar--collapsed .sidebar__brand {
-		justify-content: center;
-		padding: var(--space-10) 0;
-	}
-
-	.sidebar--collapsed .sidebar__logo,
-	.sidebar--collapsed .sidebar__session,
-	.sidebar--collapsed .sidebar__label,
-	.sidebar--collapsed .sidebar__toggle :global(.icon) {
-		display: none;
-	}
-
-	.sidebar--collapsed .sidebar__mark {
-		display: block;
-	}
-
-	/* Collapsed, the whole brand area is the toggle. */
-	.sidebar--collapsed .sidebar__toggle {
-		position: absolute;
-		inset: 0;
-	}
-
-	.sidebar--collapsed .sidebar__nav {
-		gap: var(--space-3);
-		align-items: center;
-		padding: var(--space-7) 0;
-	}
-
-	.sidebar--collapsed .sidebar__item {
-		justify-content: center;
-		width: var(--sidebar-item);
-		height: var(--sidebar-item);
-		padding: 0;
 	}
 </style>

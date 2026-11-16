@@ -1,6 +1,7 @@
 import type { ComponentProps } from 'svelte';
 import { resolve } from '$app/paths';
 import type Icon from '$lib/components/Icon.svelte';
+import type { Role } from '$lib/server/actor';
 
 type IconName = ComponentProps<typeof Icon>['name'];
 
@@ -13,7 +14,8 @@ export type Destination = {
 	paths?: string[];
 };
 
-// The same menu for every login: a section outside the login's roles is its route's 403.
+// STUB: «Barra inferior y hoja «Más» con el árbol» (#554, Phase 21) replaces the bottom bar and the
+// «Más» sheet, the last users of DESTINATIONS, BAR_SLOTS, HELP and findDestination, with MENU.
 export const DESTINATIONS: Destination[] = [
 	{
 		label: 'Despachos',
@@ -105,6 +107,123 @@ export function findDestination(pathname: string): Destination | undefined {
 	return DESTINATIONS.find(({ paths = [] }) =>
 		paths.some((path) => pathname === path || pathname.startsWith(`${path}/`))
 	);
+}
+
+/** A page of the menu tree, with the roles its route lets in; without `roles`, every login. */
+type MenuPage = { label: string; href: string; roles?: readonly Role[] };
+
+/** A parent of the menu tree: Pagos and Reportes have no page of their own. */
+type MenuParent = {
+	label: string;
+	icon: IconName;
+	page?: Omit<MenuPage, 'label'>;
+	children: MenuPage[];
+};
+
+/** A parent as one login sees it: `href` is its own page, or else its first child it can open. */
+export type MenuEntry = {
+	label: string;
+	icon: IconName;
+	href: string;
+	ownHref?: string;
+	children: { label: string; href: string }[];
+};
+
+const MANAGERS = ['ADMIN', 'MANAGER'] as const;
+const SELLERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
+
+/** The menu tree, in its order. Each page's `roles` copy its route's `requireRole`. */
+const MENU: MenuParent[] = [
+	{ label: 'Despachos', icon: 'truck', page: { href: resolve('/despachos') }, children: [] },
+	{
+		label: 'Cotizaciones',
+		icon: 'file',
+		page: { href: resolve('/cotizaciones'), roles: SELLERS },
+		children: [{ label: 'Pedidos', href: resolve('/pedidos'), roles: SELLERS }]
+	},
+	{
+		label: 'Productos',
+		icon: 'package',
+		page: { href: resolve('/productos'), roles: SELLERS },
+		children: [
+			{
+				label: 'Conteos',
+				href: resolve('/inventario'),
+				roles: [...MANAGERS, 'WAREHOUSE', 'DRIVER']
+			},
+			{ label: 'Revisiones', href: resolve('/inventario/revisar'), roles: MANAGERS }
+		]
+	},
+	{
+		label: 'Contactos',
+		icon: 'contact',
+		page: { href: resolve('/contactos'), roles: SELLERS },
+		children: []
+	},
+	{
+		label: 'Pagos',
+		icon: 'wallet',
+		children: [
+			{ label: 'Cuentas de cobro', href: resolve('/cuentas-de-cobro'), roles: SELLERS },
+			{ label: 'Movimiento', href: resolve('/caja/registrar'), roles: MANAGERS },
+			{ label: 'Caja', href: resolve('/caja'), roles: MANAGERS }
+		]
+	},
+	{
+		label: 'Personal',
+		icon: 'users',
+		page: { href: resolve('/personal'), roles: MANAGERS },
+		children: [
+			{ label: 'Nómina', href: resolve('/nomina'), roles: MANAGERS },
+			{ label: 'Horas', href: resolve('/horas') },
+			{ label: 'Logins', href: resolve('/logins'), roles: ['ADMIN'] }
+		]
+	},
+	{
+		label: 'Reportes',
+		icon: 'chart',
+		children: [{ label: 'Planilla horas', href: resolve('/horas/equipo'), roles: MANAGERS }]
+	},
+	{ label: 'Ayuda', icon: 'help', page: { href: resolve('/ayuda') }, children: [] },
+	{
+		label: 'Configuración',
+		icon: 'settings',
+		page: { href: resolve('/configuracion'), roles: MANAGERS },
+		children: [
+			{ label: 'Nómina', href: resolve('/configuracion/nomina'), roles: MANAGERS },
+			{ label: 'Festivos', href: resolve('/configuracion/festivos'), roles: MANAGERS },
+			{ label: 'Ayuda', href: resolve('/configuracion/ayuda'), roles: MANAGERS },
+			{ label: 'Términos', href: resolve('/configuracion/terminos'), roles: MANAGERS }
+		]
+	}
+];
+
+function canOpen(page: { roles?: readonly Role[] }, roles: readonly Role[]): boolean {
+	return undefined === page.roles || page.roles.some((role) => roles.includes(role));
+}
+
+/** The menu one login sees: only what its roles open, and no parent left with nothing to open. */
+export function getMenu(roles: readonly Role[]): MenuEntry[] {
+	return MENU.flatMap(({ label, icon, page, children }) => {
+		const ownPage = page && canOpen(page, roles) ? page : undefined;
+		const openChildren = children
+			.filter((child) => canOpen(child, roles))
+			.map((child) => ({ label: child.label, href: child.href }));
+		const href = ownPage?.href ?? openChildren[0]?.href;
+		if (undefined === href) {
+			return [];
+		}
+		return [{ label, icon, href, ownHref: ownPage?.href, children: openChildren }];
+	});
+}
+
+/** The href of the menu page that holds the path: the most specific, so Planilla horas beats Horas. */
+export function findCurrentHref(menu: MenuEntry[], pathname: string): string | undefined {
+	return menu
+		.flatMap(({ ownHref, children }) => [ownHref, ...children.map(({ href }) => href)])
+		.filter((href) => undefined !== href)
+		.filter((href) => pathname === href || pathname.startsWith(`${href}/`))
+		.sort((first, second) => second.length - first.length)[0];
 }
 
 /** Horas' tabs, for the logins that log everyone's hours. */
