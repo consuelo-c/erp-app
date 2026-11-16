@@ -2,8 +2,7 @@
 	import type { ComponentProps } from 'svelte';
 	import Icon from './Icon.svelte';
 
-	// Mobile navigation, 2 to 4 slots. A slot is a link, a button (the «Más» sheet), or, with
-	// neither, a destination whose screens don't exist yet.
+	// Mobile navigation, 2 to 4 slots. A slot is a link, or a button (the «Más» sheet).
 	type Item = {
 		label: string;
 		icon: ComponentProps<typeof Icon>['name'];
@@ -23,14 +22,10 @@
 			<a class="bottom-nav__item" href={item.href} aria-current={current}>
 				<Icon name={item.icon} />{item.label}
 			</a>
-		{:else if item.onclick}
+		{:else}
 			<button class="bottom-nav__item" type="button" onclick={item.onclick} aria-current={current}>
 				<Icon name={item.icon} />{item.label}
 			</button>
-		{:else}
-			<span class="bottom-nav__item" aria-disabled="true">
-				<Icon name={item.icon} />{item.label}
-			</span>
 		{/if}
 	{/each}
 </nav>
@@ -68,9 +63,5 @@
 	.bottom-nav__item[aria-current='page'] {
 		font-weight: var(--weight-bold);
 		color: var(--text-body);
-	}
-
-	.bottom-nav__item[aria-disabled='true'] {
-		cursor: default;
 	}
 </style>

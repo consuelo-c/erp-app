@@ -1,11 +1,12 @@
 import { expect, test } from 'vitest';
 import {
-	BAR_SLOTS,
-	DESTINATIONS,
 	findCurrentHref,
-	findDestination,
+	findPageLabel,
+	findSheetParent,
+	getBarSlots,
 	getMenu,
 	getPageNumbers,
+	hasSheetList,
 	type MenuEntry
 } from './navigation';
 
@@ -15,42 +16,6 @@ function outline(menu: MenuEntry[]): string[] {
 		[label, children.map((child) => child.label).join(', ')].filter(Boolean).join(': ')
 	);
 }
-
-test('a path belongs to the destination that holds it, Personal and Nómina apart', () => {
-	expect(findDestination('/despachos')?.label).toBe('Despachos');
-	expect(findDestination('/horas/2026-07-30')?.label).toBe('Horas');
-	expect(findDestination('/pedidos/1043')?.label).toBe('Pedidos');
-	expect(findDestination('/personal/7')?.label).toBe('Personal');
-	expect(findDestination('/nomina/comprobante')?.label).toBe('Nómina');
-	expect(findDestination('/inventario/revisar/3')?.label).toBe('Inventario');
-	expect(findDestination('/')).toBeUndefined();
-});
-
-test('Cotizaciones follows Pedidos: the first in «Más», after Pedidos in the sidebar', () => {
-	const labels = DESTINATIONS.map((destination) => destination.label);
-	expect(labels.slice(BAR_SLOTS - 1, BAR_SLOTS + 2)).toEqual([
-		'Pedidos',
-		'Cotizaciones',
-		'Cuentas de cobro'
-	]);
-	expect(findDestination('/cotizaciones/12/editar')).toMatchObject({ icon: 'file' });
-});
-
-test('Cuentas de cobro follows Cotizaciones, with an icon of its own', () => {
-	const labels = DESTINATIONS.map((destination) => destination.label);
-	expect(labels.slice(BAR_SLOTS, BAR_SLOTS + 3)).toEqual([
-		'Cotizaciones',
-		'Cuentas de cobro',
-		'Contactos'
-	]);
-	expect(findDestination('/cuentas-de-cobro/4794')).toMatchObject({ icon: 'receipt' });
-});
-
-test('Logins is its own destination, outside Configuración, whose tabs keep Nómina', () => {
-	expect(findDestination('/logins/3/contrasena')?.label).toBe('Logins');
-	expect(findDestination('/loginsx')).toBeUndefined();
-	expect(findDestination('/configuracion/nomina')?.label).toBe('Configuración');
-});
 
 test('ADMIN sees the whole tree, in its order', () => {
 	expect(outline(getMenu(['ADMIN']))).toEqual([
@@ -114,6 +79,59 @@ test('the most specific path is the current page', () => {
 	expect(findCurrentHref(menu, '/nomina/comprobante')).toBe('/nomina');
 	expect(findCurrentHref(menu, '/')).toBeUndefined();
 	expect(findCurrentHref(getMenu(['SALES']), '/caja')).toBeUndefined();
+});
+
+test('the bar is Despachos · Horas · Conteos; Sales alone gets Productos; a slot nobody opens goes', () => {
+	const slots = (roles: Parameters<typeof getMenu>[0]) =>
+		getBarSlots(getMenu(roles)).map(({ label, href }) => `${label} ${href}`);
+	expect(slots(['ADMIN'])).toEqual(['Despachos /despachos', 'Horas /horas', 'Conteos /inventario']);
+	expect(slots(['WAREHOUSE'])).toEqual(slots(['ADMIN']));
+	expect(slots(['SALES'])).toEqual([
+		'Despachos /despachos',
+		'Horas /horas',
+		'Productos /productos'
+	]);
+	expect(slots(['SALES', 'DRIVER'])).toEqual(slots(['ADMIN']));
+	expect(slots([])).toEqual(['Despachos /despachos', 'Horas /horas']);
+});
+
+test('a bar slot is current only on its own page: Revisiones and Planilla horas mark «Más»', () => {
+	const menu = getMenu(['ADMIN']);
+	const currentSlot = (pathname: string) =>
+		getBarSlots(menu).find(({ href }) => href === findCurrentHref(menu, pathname))?.label;
+	expect(currentSlot('/inventario')).toBe('Conteos');
+	expect(currentSlot('/horas/empleado')).toBe('Horas');
+	expect(currentSlot('/inventario/revisar')).toBeUndefined();
+	expect(currentSlot('/horas/equipo')).toBeUndefined();
+	expect(currentSlot('/contactos')).toBeUndefined();
+});
+
+test("the «Más» sheet opens on the current parent's list, or on the first list", () => {
+	const menu = getMenu(['ADMIN']);
+	expect(findSheetParent(menu, findCurrentHref(menu, '/caja/registrar'))?.label).toBe('Pagos');
+	expect(findSheetParent(menu, findCurrentHref(menu, '/productos/12'))?.label).toBe('Productos');
+	expect(findSheetParent(menu, findCurrentHref(menu, '/contactos'))).toBeUndefined();
+	// Reportes holds one page: a plain row, no list to open on.
+	expect(findSheetParent(menu, findCurrentHref(menu, '/horas/equipo'))).toBeUndefined();
+	// A section outside the login's roles has no current page.
+	expect(findSheetParent(menu, undefined)).toBeUndefined();
+});
+
+test('a parent with one page the login opens is a plain row to that page', () => {
+	const personal = (roles: Parameters<typeof getMenu>[0]) =>
+		getMenu(roles).find(({ label }) => 'Personal' === label) as MenuEntry;
+	expect(hasSheetList(personal(['ADMIN']))).toBe(true);
+	expect(hasSheetList(personal([]))).toBe(false);
+	expect(personal([]).href).toBe('/horas');
+});
+
+test('the no-permission screen is titled by the menu page that holds the path', () => {
+	expect(findPageLabel('/personal')).toBe('Personal');
+	expect(findPageLabel('/personal/7')).toBe('Personal');
+	expect(findPageLabel('/caja/registrar')).toBe('Movimiento');
+	expect(findPageLabel('/horas/equipo')).toBe('Planilla horas');
+	expect(findPageLabel('/configuracion/nomina')).toBe('Nómina');
+	expect(findPageLabel('/')).toBeUndefined();
 });
 
 test('the pagination shows the first, the last and the neighbors of the current page', () => {

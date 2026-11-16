@@ -8,14 +8,7 @@
 	import LogoutButton from '$lib/components/LogoutButton.svelte';
 	import MenuList from '$lib/components/MenuList.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
-	import {
-		BAR_SLOTS,
-		DESTINATIONS,
-		findCurrentHref,
-		findDestination,
-		getMenu,
-		HELP
-	} from '$lib/navigation';
+	import { findCurrentHref, findSheetParent, getBarSlots, getMenu } from '$lib/navigation';
 	import type { LayoutProps } from './$types';
 
 	let { data, children }: LayoutProps = $props();
@@ -27,41 +20,41 @@
 		isMoreOpen = false;
 	});
 
-	const current = $derived(findDestination(page.url.pathname));
-	const isHelpCurrent = $derived(HELP.href === page.url.pathname);
-	const barDestinations = DESTINATIONS.slice(0, BAR_SLOTS);
-	const moreDestinations = DESTINATIONS.slice(BAR_SLOTS);
-
-	// While the sheet is open, «Más» is the current slot.
-	const barItems = $derived([
-		...barDestinations.map((destination) => ({
-			...destination,
-			isCurrent: !isMoreOpen && destination === current
-		})),
-		{
-			label: 'Más',
-			icon: 'more' as const,
-			onclick: () => (isMoreOpen = true),
-			isCurrent:
-				isMoreOpen ||
-				isHelpCurrent ||
-				moreDestinations.some((destination) => destination === current)
-		}
-	]);
-
-	const moreRows = $derived([
-		...moreDestinations.map((destination) => ({
-			...destination,
-			isCurrent: destination === current
-		})),
-		{ ...HELP, isCurrent: isHelpCurrent }
-	]);
-
 	const menu = $derived(getMenu(data.roles));
 	// A section outside the login's roles marks nothing, even under a parent the login sees.
 	const currentHref = $derived(
 		403 === page.status ? undefined : findCurrentHref(menu, page.url.pathname)
 	);
+
+	// A slot is current only on its own page, and none while the sheet is open: then, and on every
+	// other page, «Más» is.
+	const barSlots = $derived(
+		getBarSlots(menu).map((slot) => ({
+			...slot,
+			isCurrent: !isMoreOpen && slot.href === currentHref
+		}))
+	);
+	const barItems = $derived([
+		...barSlots,
+		{
+			label: 'Más',
+			icon: 'more' as const,
+			onclick: openMore,
+			isCurrent: !barSlots.some(({ isCurrent }) => isCurrent)
+		}
+	]);
+
+	let sheetParentLabel = $state<string>();
+	let isParentListOpen = $state(false);
+	const sheetTitle = $derived((isParentListOpen && sheetParentLabel) || 'Más');
+
+	// The sheet opens on the current parent's list, or on the first list.
+	function openMore() {
+		const parent = findSheetParent(menu, currentHref);
+		sheetParentLabel = parent?.label;
+		isParentListOpen = undefined !== parent;
+		isMoreOpen = true;
+	}
 </script>
 
 <!-- Both navigations are in the page; the width decides which one shows. -->
@@ -73,8 +66,8 @@
 	<div class="shell__bar"><BottomNav items={barItems} /></div>
 </div>
 
-<BottomSheet bind:open={isMoreOpen} title="Más">
-	<MenuList rows={moreRows}>
+<BottomSheet bind:open={isMoreOpen} title={sheetTitle}>
+	<MenuList {menu} {currentHref} bind:parentLabel={sheetParentLabel} bind:isParentListOpen>
 		{#snippet session()}
 			{#if data.username}<p class="meta">Sesión: <b>{data.username}</b></p>{/if}
 			<LogoutButton>
