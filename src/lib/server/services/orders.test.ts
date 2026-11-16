@@ -161,6 +161,11 @@ test('creating stores the snapshots and works out the totals, ignoring any sent'
 	});
 });
 
+test('a client carrying Vetado saves an order like any other, with no extra step', async () => {
+	database.exec(`update contacts set labels = '["BANNED"]' where id = ${LUZ_MARINA}`);
+	expect((await read(await create())).clientId).toBe(LUZ_MARINA);
+});
+
 test('the public token is a UUID kept out of the CREATED event', async () => {
 	const id = await create();
 	const { public_token } = database.prepare('select public_token from orders').get() ?? {};
