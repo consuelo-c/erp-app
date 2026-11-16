@@ -1,5 +1,6 @@
 import { resolve } from '$app/paths';
 import { fetchJson } from '$lib/offline';
+import type { Role } from '$lib/server/actor';
 import type { LayoutLoad } from './$types';
 
 // The shell needs a session. Without one the endpoint's 401 throws above the shell, so the error
@@ -7,6 +8,7 @@ import type { LayoutLoad } from './$types';
 // Universal, not a server load, so Despachos opens with no network: offline the shell draws with no
 // username, and a server load would send it to the root error page instead.
 export const load: LayoutLoad = async ({ fetch }) => {
-	const session = await fetchJson<{ username: string }>(fetch, resolve('/sesion'));
-	return { username: session?.username ?? null };
+	const session = await fetchJson<{ username: string; roles: Role[] }>(fetch, resolve('/sesion'));
+	// Offline, with no roles, the menu holds only what every login opens: Despachos among them.
+	return { username: session?.username ?? null, roles: session?.roles ?? [] };
 };

@@ -8,13 +8,19 @@
 	import LogoutButton from '$lib/components/LogoutButton.svelte';
 	import MenuList from '$lib/components/MenuList.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
-	import { BAR_SLOTS, DESTINATIONS, findDestination, HELP } from '$lib/navigation';
+	import {
+		BAR_SLOTS,
+		DESTINATIONS,
+		findCurrentHref,
+		findDestination,
+		getMenu,
+		HELP
+	} from '$lib/navigation';
 	import type { LayoutProps } from './$types';
 
 	let { data, children }: LayoutProps = $props();
 
 	let isMoreOpen = $state(false);
-	let isSidebarCollapsed = $state(false);
 
 	// The sheet's rows are links: leaving the page closes it.
 	afterNavigate(() => {
@@ -51,20 +57,17 @@
 		{ ...HELP, isCurrent: isHelpCurrent }
 	]);
 
-	const sidebarItems = $derived(
-		DESTINATIONS.map((destination) => ({ ...destination, isCurrent: destination === current }))
+	const menu = $derived(getMenu(data.roles));
+	// A section outside the login's roles marks nothing, even under a parent the login sees.
+	const currentHref = $derived(
+		403 === page.status ? undefined : findCurrentHref(menu, page.url.pathname)
 	);
 </script>
 
 <!-- Both navigations are in the page; the width decides which one shows. -->
 <div class="shell">
 	<div class="shell__sidebar">
-		<Sidebar
-			items={sidebarItems}
-			footItems={[{ ...HELP, isCurrent: isHelpCurrent }]}
-			username={data.username ?? ''}
-			bind:isCollapsed={isSidebarCollapsed}
-		/>
+		<Sidebar {menu} {currentHref} username={data.username ?? ''} />
 	</div>
 	<div class="shell__screen">{@render children()}</div>
 	<div class="shell__bar"><BottomNav items={barItems} /></div>
