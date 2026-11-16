@@ -40,7 +40,9 @@ import {
 	getContact,
 	isAutoDocument,
 	searchClause,
+	toClientCandidate,
 	type ClientCandidate,
+	type Contact,
 	type NewClient
 } from './contacts';
 import { COMPANY_SETTINGS, readSettings, type CompanySettings } from './settings';
@@ -729,9 +731,7 @@ export async function getQuoteConversion(
 		return null;
 	}
 	// The contact is the quote's foreign key: it's always there.
-	const contact = await getContact(db, quote.clientId, actor);
-	const { fullName, phone, whatsapp, address1, address2 } = contact as ClientCandidate;
-	const client = { id: quote.clientId, fullName, phone, whatsapp, address1, address2 };
+	const client = toClientCandidate((await getContact(db, quote.clientId, actor)) as Contact);
 	const { PAYROLL_HOLIDAYS: holidays } = await readSettings(db, ['PAYROLL_HOLIDAYS']);
 	return { quote, client, holidayDates: holidays.map((holiday) => holiday.date) };
 }

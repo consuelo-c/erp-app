@@ -811,6 +811,13 @@ test('the form opens filled from the quote, with its client as the contact is to
 	expect(await getQuoteConversion(db, 99, sales)).toBeNull();
 });
 
+test('the conversion marks a client carrying Vetado, for the warning under «Cliente»', async () => {
+	const id = await create();
+	expect((await getQuoteConversion(db, id, sales))?.client.isBanned).toBe(false);
+	database.exec(`update contacts set labels = '["BANNED"]' where id = ${LUZ_MARINA}`);
+	expect((await getQuoteConversion(db, id, sales))?.client.isBanned).toBe(true);
+});
+
 test('saving creates a CONFIRMED order and links the quote, with ORDER CREATED and QUOTE CONVERTED', async () => {
 	const id = await create();
 	const orderId = await convert(id);

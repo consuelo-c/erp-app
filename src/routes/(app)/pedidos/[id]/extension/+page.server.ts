@@ -1,6 +1,7 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { requireRole } from '$lib/server/actor';
+import { isBannedClient } from '$lib/server/services/contacts';
 import { createExtension, getOrderDetail, getOrderFormOptions } from '$lib/server/services/orders';
 import { readPostedJson } from '../../order-form';
 import type { Actions, PageServerLoad } from './$types';
@@ -24,7 +25,8 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	if ('DELIVERED' !== original.status) {
 		redirect(303, resolve('/(app)/pedidos/[id]', { id: String(original.id) }));
 	}
-	return { original, options };
+	const isClientBanned = await isBannedClient(db, original.clientId, locals.user);
+	return { original, options, isClientBanned };
 };
 
 export const actions: Actions = {

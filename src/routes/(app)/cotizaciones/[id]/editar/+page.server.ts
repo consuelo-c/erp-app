@@ -1,6 +1,7 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { requireRole } from '$lib/server/actor';
+import { isBannedClient } from '$lib/server/services/contacts';
 import { getQuote, getQuoteFormOptions, updateQuote } from '$lib/server/services/quotes';
 import { readPostedJson } from '../../../pedidos/order-form';
 import type { Actions, PageServerLoad } from './$types';
@@ -24,7 +25,8 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	if ('CONVERTED' === quote.state) {
 		redirect(303, resolve('/(app)/cotizaciones/[id]', { id: String(quote.id) }));
 	}
-	return { quote, options };
+	const isClientBanned = await isBannedClient(db, quote.clientId, locals.user);
+	return { quote, options, isClientBanned };
 };
 
 export const actions: Actions = {

@@ -33,11 +33,13 @@
 		quote: Quote | null;
 		/** «Duplicar» or «Cotizar de nuevo»: a new quote filled from a quote's or an order's terms, at today's prices. */
 		copy?: QuoteDuplicate | null;
+		/** The saved or copied quote's client carries Vetado: «Cliente» warns. */
+		isClientBanned?: boolean;
 		/** A refused save: its message and each field's. */
 		form: { message: string; errors: Record<string, string> } | null | undefined;
 	}
 
-	let { options, quote, copy = null, form }: Props = $props();
+	let { options, quote, copy = null, isClientBanned = false, form }: Props = $props();
 
 	const FORM_ID = 'quote-form';
 
@@ -77,9 +79,10 @@
 	// A quote's terms as the form holds them; its client as its snapshot.
 	function savedFields(saved: QuoteDraft, { eventDate, validUntil }: Dates): Fields {
 		const { name: fullName, phone, whatsapp } = saved.client;
+		const client = { id: saved.clientId, fullName, phone, whatsapp, isBanned: isClientBanned };
 		return {
 			choice: saved.clientId,
-			picked: { id: saved.clientId, fullName, phone, whatsapp, address1: null, address2: null },
+			picked: { ...client, address1: null, address2: null },
 			clientName: fullName,
 			phone: formatPhone(phone),
 			whatsapp: whatsappOf(whatsapp),

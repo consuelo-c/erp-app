@@ -11,6 +11,7 @@ import {
 	findWhatsappOwner,
 	generateDocumentId,
 	getContact,
+	isBannedClient,
 	listContacts,
 	listTransporters,
 	newClientStatements,
@@ -470,7 +471,8 @@ test('the order form finds clients by name, address or phone, by name, with thei
 			phone: '573104428890',
 			whatsapp: null,
 			address1: null,
-			address2: null
+			address2: null,
+			isBanned: false
 		},
 		{
 			id: luzMarinaId,
@@ -478,7 +480,8 @@ test('the order form finds clients by name, address or phone, by name, with thei
 			phone: '573104428890',
 			whatsapp: null,
 			address1: 'Cra 43A #18-95, El Poblado',
-			address2: 'Piso 2'
+			address2: 'Piso 2',
+			isBanned: false
 		}
 	]);
 	expect(await ids('restrepo')).toEqual([companyId, luzMarinaId]);
@@ -489,6 +492,18 @@ test('the order form finds clients by name, address or phone, by name, with thei
 	expect(await ids('luzma')).toEqual([username]);
 	expect(await ids('@LUZMA')).toEqual([username]);
 	expect(await rejection(searchClients(db, 'luz', actorWith('WAREHOUSE')))).toBe(403);
+});
+
+test('a client carrying Vetado is found marked, for the forms’ warning under «Cliente»', async () => {
+	const id = await create({ ...luzMarina, labels: ['BANNED'] });
+	const other = await create({ phone: '311 222 3344', full_name: 'Luz Elena' });
+	const found = await searchClients(db, 'luz', sales);
+	expect(found.map(({ id, isBanned }) => ({ id, isBanned }))).toEqual([
+		{ id: other, isBanned: false },
+		{ id, isBanned: true }
+	]);
+	expect(await isBannedClient(db, id, sales)).toBe(true);
+	expect(await isBannedClient(db, other, sales)).toBe(false);
 });
 
 test.each([

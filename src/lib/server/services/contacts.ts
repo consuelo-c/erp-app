@@ -5,6 +5,7 @@
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import {
+	BANNED,
 	EMPLOYEE_FILTER,
 	labelKeysSchema,
 	TRANSPORTER,
@@ -648,7 +649,24 @@ export type ClientCandidate = {
 	whatsapp: string | null;
 	address1: string | null;
 	address2: string | null;
+	/** Carries Vetado: the quote and order forms warn under «Cliente», and never block. */
+	isBanned: boolean;
 };
+
+export function toClientCandidate(contact: Contact): ClientCandidate {
+	const { id, fullName, phone, whatsapp, address1, address2, labels } = contact;
+	return { id, fullName, phone, whatsapp, address1, address2, isBanned: labels.includes(BANNED) };
+}
+
+/** Whether contact `id` carries Vetado, for a quote or order the form opens with its saved client. */
+export async function isBannedClient(
+	db: D1Database,
+	id: number,
+	actor: Actor | null
+): Promise<boolean> {
+	const contact = await getContact(db, id, actor);
+	return contact?.labels.includes(BANNED) ?? false;
+}
 
 // The name and both address lines, folded, so «diana poblado» finds Diana in El Poblado.
 const CLIENT_TEXT_SQL = foldedSql(
@@ -682,14 +700,7 @@ export async function searchClients(
 		)
 		.bind(...clause.params, CLIENT_MATCHES)
 		.all<ContactRow>();
-	return results.map(toContact).map(({ id, fullName, phone, whatsapp, address1, address2 }) => ({
-		id,
-		fullName,
-		phone,
-		whatsapp,
-		address1,
-		address2
-	}));
+	return results.map(toContact).map(toClientCandidate);
 }
 
 /** A carrier the order form offers: a contact carrying the etiqueta TRANSPORTER. */
