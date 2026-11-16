@@ -65,6 +65,8 @@
 		conversion?: QuoteConversion | null;
 		/** A billed order's cuenta de cobro: a warning above «Guardar», and «Cliente» locked when it bills others. */
 		billing?: Billing | null;
+		/** The saved order's client, or the original's, carries Vetado: «Cliente» warns. */
+		isClientBanned?: boolean;
 		/** A refused save: its message and each field's, or what's short for a new order's dates. */
 		form:
 			| { message: string; errors: Record<string, string>; shortages?: Shortage[] }
@@ -78,6 +80,7 @@
 		original = null,
 		conversion = null,
 		billing = null,
+		isClientBanned = false,
 		form
 	}: Props = $props();
 
@@ -118,7 +121,8 @@
 	// The order's client as its snapshot: the contact may have changed since.
 	function ownClient(saved: OrderDetail): ClientCandidate {
 		const { name: fullName, phone, whatsapp } = saved.client;
-		return { id: saved.clientId, fullName, phone, whatsapp, address1: null, address2: null };
+		const client = { id: saved.clientId, fullName, phone, whatsapp, isBanned: isClientBanned };
+		return { ...client, address1: null, address2: null };
 	}
 
 	function pesosOf(amount: number): string {

@@ -2,6 +2,7 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { isEditableStatus } from '$lib/orders';
 import { requireRole } from '$lib/server/actor';
+import { isBannedClient } from '$lib/server/services/contacts';
 import {
 	getOrderBilling,
 	getOrderDetail,
@@ -30,8 +31,11 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	if (!isEditableStatus(order.status)) {
 		redirect(303, resolve('/(app)/pedidos/[id]', { id: String(order.id) }));
 	}
-	const billing = await getOrderBilling(db, order, locals.user);
-	return { order, options, billing };
+	const [billing, isClientBanned] = await Promise.all([
+		getOrderBilling(db, order, locals.user),
+		isBannedClient(db, order.clientId, locals.user)
+	]);
+	return { order, options, billing, isClientBanned };
 };
 
 export const actions: Actions = {

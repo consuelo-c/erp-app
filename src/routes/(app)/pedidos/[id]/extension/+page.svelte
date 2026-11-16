@@ -19,5 +19,11 @@
 			backHref={resolve('/(app)/pedidos/[id]', { id: String(data.original.id) })}
 		/>
 	{/snippet}
-	<OrderForm options={data.options} order={null} original={data.original} {form} />
+	<OrderForm
+		options={data.options}
+		order={null}
+		original={data.original}
+		isClientBanned={data.isClientBanned}
+		{form}
+	/>
 </Screen>

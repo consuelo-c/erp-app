@@ -3,6 +3,7 @@
 	import Choice from '$lib/components/Choice.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import Input from '$lib/components/Input.svelte';
+	import Notice from '$lib/components/Notice.svelte';
 	import { formatPhone } from '$lib/phone';
 	import type { ClientCandidate } from '$lib/server/services/contacts';
 	import { moveThroughResults } from './order-form';
@@ -164,6 +165,10 @@
 		<p class="field-error">{error}</p>
 	{/if}
 </Choice>
+
+{#if 'new' !== choice && picked?.isBanned}
+	<Notice tone="warning">⚠ Cliente vetado. Puedes continuar igual.</Notice>
+{/if}
 
 <style>
 	.note {

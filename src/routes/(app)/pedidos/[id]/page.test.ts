@@ -6,8 +6,15 @@ import type { Actor } from '$lib/server/actor';
 import { createMemoryD1 } from '$lib/server/db/memory-d1';
 import { createOrder } from '$lib/server/db/test-orders';
 import { createQuote } from '$lib/server/services/quotes';
-import { actions as convertActions } from '../nuevo/+page.server';
-import { actions as editActions } from './editar/+page.server';
+import {
+	actions as quoteEditActions,
+	load as loadQuoteEdit
+} from '../../cotizaciones/[id]/editar/+page.server';
+import QuoteEditPage from '../../cotizaciones/[id]/editar/+page.svelte';
+import { actions as convertActions, load as loadConversion } from '../nuevo/+page.server';
+import ConversionPage from '../nuevo/+page.svelte';
+import { actions as editActions, load as loadEdit } from './editar/+page.server';
+import EditPage from './editar/+page.svelte';
 import { actions as extensionActions } from './extension/+page.server';
 import { load } from './+page.server';
 import Page from './+page.svelte';
@@ -157,4 +164,61 @@ test('saving an edit lands on the order with `guardado` alone', async () => {
 	const post = { ...postOf(orderInput), params: { id: String(id) } };
 	const location = await locationAfter(() => editActions.default(post as never));
 	expect(location).toBe(`/pedidos/${id}?guardado`);
+});
+
+const BANNED_WARNING = '⚠ Cliente vetado. Puedes continuar igual.';
+
+function banClient() {
+	database.exec(`update contacts set labels = '["BANNED"]' where id = 1`);
+}
+
+type Route = { page: unknown; load: unknown };
+
+// The form as the route renders it, its data from the route's own load.
+async function rendered({ page, load }: Route, params: object, url = 'http://localhost/') {
+	const event = { locals: { user: sales }, params, platform: { env: { DB: db } }, url: new URL(url) };
+	const data = await (load as (event: never) => Promise<unknown>)(event as never);
+	return render(page as never, { props: { data, form: null } as never }).body;
+}
+
+const quoteInput = {
+	client_id: 1,
+	client_name: 'Luz Marina Restrepo',
+	valid_until: '2099-12-31',
+	rental_days: 2,
+	quote_items: orderInput.order_items,
+	discount: 0,
+	transport_cost: 180000
+};
+
+async function newQuote(): Promise<number> {
+	const quote = await createQuote(db, quoteInput, sales);
+	if (!quote.ok) {
+		throw new Error(JSON.stringify(quote));
+	}
+	return quote.id;
+}
+
+test('a Vetado client warns under «Cliente» when the order loads, and the edit still saves', async () => {
+	const id = await newOrder();
+	expect(await rendered({ page: EditPage, load: loadEdit }, { id: String(id) })).not.toContain(BANNED_WARNING);
+	banClient();
+	expect(await rendered({ page: EditPage, load: loadEdit }, { id: String(id) })).toContain(BANNED_WARNING);
+	const post = { ...postOf(orderInput), params: { id: String(id) } };
+	expect(await locationAfter(() => editActions.default(post as never))).toBe(`/pedidos/${id}?guardado`);
+});
+
+test('a Vetado client warns under «Cliente» when a quote loads, edited or converted, and it saves', async () => {
+	const quote = await newQuote();
+	banClient();
+	const edit = await rendered({ page: QuoteEditPage, load: loadQuoteEdit }, { id: String(quote) });
+	expect(edit).toContain(BANNED_WARNING);
+	const url = `http://localhost/pedidos/nuevo?cotizacion=${quote}`;
+	expect(await rendered({ page: ConversionPage, load: loadConversion }, {}, url)).toContain(BANNED_WARNING);
+	const formData = new FormData();
+	formData.set('quote', JSON.stringify(quoteInput));
+	const request = new Request('http://localhost/', { method: 'POST', body: formData });
+	const post = { locals: { user: sales }, platform: { env: { DB: db } }, request };
+	const saved = () => quoteEditActions.default({ ...post, params: { id: String(quote) } } as never);
+	expect(await locationAfter(saved)).toBe(`/cotizaciones/${quote}?guardado`);
 });

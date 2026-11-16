@@ -19,5 +19,10 @@
 			backHref={resolve('/(app)/cotizaciones/[id]', { id: String(data.quote.id) })}
 		/>
 	{/snippet}
-	<QuoteForm options={data.options} quote={data.quote} {form} />
+	<QuoteForm
+		options={data.options}
+		quote={data.quote}
+		isClientBanned={data.isClientBanned}
+		{form}
+	/>
 </Screen>

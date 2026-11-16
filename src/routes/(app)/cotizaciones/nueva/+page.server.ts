@@ -1,6 +1,7 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { requireRole } from '$lib/server/actor';
+import { isBannedClient } from '$lib/server/services/contacts';
 import {
 	createQuote,
 	getOrderRequote,
@@ -28,16 +29,18 @@ export const load: PageServerLoad = async ({ locals, platform, url }) => {
 		if (null === copy) {
 			error(404, 'Ese pedido no existe');
 		}
-		return { options, copy };
+		const isClientBanned = await isBannedClient(db, copy.draft.clientId, locals.user);
+		return { options, copy, isClientBanned };
 	}
 	if (null === from) {
-		return { options, copy: null };
+		return { options, copy: null, isClientBanned: false };
 	}
 	const copy = await getQuoteDuplicate(db, from, locals.user);
 	if (null === copy) {
 		error(404, 'Esa cotización no existe');
 	}
-	return { options, copy };
+	const isClientBanned = await isBannedClient(db, copy.draft.clientId, locals.user);
+	return { options, copy, isClientBanned };
 };
 
 export const actions: Actions = {
