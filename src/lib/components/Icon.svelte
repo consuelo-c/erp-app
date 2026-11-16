@@ -27,6 +27,7 @@
 		| 'users'
 		| 'help'
 		| 'info'
+		| 'external-link'
 		| 'edit'
 		| 'contact'
 		| 'lock'

@@ -30,6 +30,8 @@ export type Product = {
 	variantGroup: string | null;
 	variantName: string | null;
 	description: string | null;
+	/** The product's page on consueloc.com, or anywhere: a reference for the team, never shown to clients. */
+	websiteUrl: string | null;
 	rentalPrice: number;
 	totalQuantity: number;
 	isActive: boolean;
@@ -77,6 +79,29 @@ function attributesJson(attributes: ProductAttributes): string {
 	return JSON.stringify({ description, website_url });
 }
 
+const WEBSITE_URL_MESSAGE = 'Escribe una dirección web válida, que empiece con https://';
+
+function withHttps(address: string): string {
+	return /^[a-z][a-z\d+.-]*:/i.test(address) ? address : `https://${address}`;
+}
+
+// Any site, not only consueloc.com's; a host without a dot is a typo, not a page.
+function isWebsiteUrl(address: string): boolean {
+	if (!URL.canParse(address)) {
+		return false;
+	}
+	const { protocol, hostname } = new URL(address);
+	return 'https:' === protocol && /\.[a-z]{2,}$/i.test(hostname);
+}
+
+// Typed without its scheme, https:// is added; blank is no key.
+const websiteUrlSchema = z
+	.string()
+	.trim()
+	.optional()
+	.transform((value) => (value ? withHttps(value) : undefined))
+	.refine((value) => undefined === value || isWebsiteUrl(value), WEBSITE_URL_MESSAGE);
+
 const optionalTextSchema = z
 	.string()
 	.trim()
@@ -100,6 +125,7 @@ const productSchema = z
 		new_variant_group: optionalTextSchema,
 		variant_name: optionalTextSchema,
 		description: z.string().optional(),
+		website_url: websiteUrlSchema,
 		rental_price: wholeNumberSchema('Escribe el precio por día').pipe(
 			z.number().positive('El precio por día debe ser mayor que cero')
 		),
@@ -110,12 +136,12 @@ const productSchema = z
 			.transform((value) => ('on' === value ? 1 : 0))
 	})
 	.transform((typed) => {
-		const { new_variant_group, description, ...columns } = typed;
+		const { new_variant_group, description, website_url, ...columns } = typed;
 		return {
 			columns: {
 				...columns,
 				variant_group: new_variant_group ?? columns.variant_group,
-				attributes: attributesJson({ description })
+				attributes: attributesJson({ description, website_url })
 			},
 			isNewGroup: null !== new_variant_group
 		};
@@ -161,6 +187,7 @@ function toProduct(row: ProductRow): Product {
 		variantGroup: row.variant_group,
 		variantName: row.variant_name,
 		description: attributes.description ?? null,
+		websiteUrl: attributes.website_url ?? null,
 		rentalPrice: row.rental_price,
 		totalQuantity: row.total_quantity,
 		isActive: 1 === row.active

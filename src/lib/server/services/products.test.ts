@@ -61,6 +61,7 @@ test('creating stores digits only and writes a PRODUCT / CREATED event', async (
 		variantGroup: null,
 		variantName: null,
 		description: null,
+		websiteUrl: null,
 		rentalPrice: 8000,
 		totalQuantity: 120,
 		isActive: true
@@ -92,6 +93,54 @@ test('editing the description logs attributes.description in before/after', asyn
 	const edited = events()[1];
 	expect(JSON.parse(String(edited.before))).toEqual({ 'attributes.description': 'Blanca' });
 	expect(JSON.parse(String(edited.after))).toEqual({ 'attributes.description': 'Dorada' });
+});
+
+test('a page address is trimmed and gets https:// when typed without it', async () => {
+	const typed = '  consueloc.com/producto/mantel-dorado/ ';
+	const id = await create({ ...chair, website_url: typed });
+	const saved = (await getProduct(db, id, manager))?.websiteUrl;
+	expect(saved).toBe('https://consueloc.com/producto/mantel-dorado/');
+	const elsewhere = await create({
+		...chair,
+		name: 'Copa',
+		website_url: 'https://example.org/copa'
+	});
+	expect((await getProduct(db, elsewhere, manager))?.websiteUrl).toBe('https://example.org/copa');
+});
+
+test('an address that is not https, or not an address, is rejected on its field', async () => {
+	for (const address of ['http://x', 'no es una url']) {
+		expect(await createProduct(db, { ...chair, website_url: address }, manager)).toEqual({
+			ok: false,
+			message: 'Escribe una dirección web válida, que empiece con https://',
+			field: 'website_url'
+		});
+	}
+});
+
+test('an empty address saves no key, and two products may share one', async () => {
+	const id = await create({ ...chair, website_url: ' ' });
+	const attributes = database.prepare('select attributes from products where id = ?').get(id);
+	expect(attributes?.attributes).toBe('{}');
+	const page = 'https://consueloc.com/producto/mantel-cuadrado/';
+	const goldenId = await create({ ...golden, website_url: page });
+	const red = { ...golden, new_variant_group: '', variant_group: golden.new_variant_group };
+	expect(
+		await createProduct(db, { ...red, variant_name: 'Rojo', website_url: page }, manager)
+	).toMatchObject({ ok: true });
+	expect((await getProduct(db, goldenId, manager))?.websiteUrl).toBe(page);
+});
+
+test('editing the address logs attributes.website_url in before/after', async () => {
+	const id = await create({ ...chair, website_url: 'https://consueloc.com/a/' });
+	await updateProduct(db, { ...chair, id, website_url: 'https://consueloc.com/b/' }, manager);
+	const edited = events()[1];
+	expect(JSON.parse(String(edited.before))).toEqual({
+		'attributes.website_url': 'https://consueloc.com/a/'
+	});
+	expect(JSON.parse(String(edited.after))).toEqual({
+		'attributes.website_url': 'https://consueloc.com/b/'
+	});
 });
 
 test('an edit ignores total_quantity, which stays out of the EDITED event', async () => {
