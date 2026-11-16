@@ -32,7 +32,7 @@ const warehouse: Actor = {
 };
 const driver: Actor = { username: 'conductor', employeeId: null, roles: ['DRIVER'], kind: 'user' };
 
-// Both tabs' modules: General's and Nómina's.
+// Both screens' modules: Configuración's and Nómina's.
 const modules: SettingModule[] = ['COMPANY', 'QUOTES', 'PAYROLL'];
 
 let db: D1Database;

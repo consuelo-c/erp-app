@@ -6,8 +6,6 @@
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import Select from '$lib/components/Select.svelte';
-	import Tabs from '$lib/components/Tabs.svelte';
-	import { HOURS_TABS } from '$lib/navigation';
 	import HoursView from '../HoursView.svelte';
 	import type { PageProps } from './$types';
 
@@ -26,7 +24,7 @@
 
 <Screen>
 	{#snippet header()}
-		<ScreenHeader><Tabs tabs={HOURS_TABS} current="Empleado" /></ScreenHeader>
+		<ScreenHeader title="Horas" />
 	{/snippet}
 
 	{#if null === data.hours}

@@ -5,7 +5,6 @@
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
-	import Tabs from '$lib/components/Tabs.svelte';
 	import WeekPicker from '$lib/components/WeekPicker.svelte';
 	import {
 		addDays,
@@ -17,7 +16,6 @@
 	} from '$lib/datetime';
 	import { formatHours } from '$lib/format';
 	import { PUNCH_LABELS } from '$lib/labels';
-	import { HOURS_TABS } from '$lib/navigation';
 	import type { Punch, TeamMember } from '$lib/server/services/timesheets';
 	import type { PageProps } from './$types';
 
@@ -65,7 +63,7 @@
 
 <Screen>
 	{#snippet header()}
-		<ScreenHeader><Tabs tabs={HOURS_TABS} current="Equipo" /></ScreenHeader>
+		<ScreenHeader title="Planilla horas" />
 	{/snippet}
 
 	<WeekPicker

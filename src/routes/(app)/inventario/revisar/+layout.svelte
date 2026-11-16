@@ -5,15 +5,13 @@
 	import Card from '$lib/components/Card.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
-	import Tabs from '$lib/components/Tabs.svelte';
 	import { formatInstant } from '$lib/datetime';
 	import { INVENTORY_COUNT_STATUS_LABELS } from '$lib/labels';
-	import { INVENTORY_TABS } from '$lib/navigation';
 	import type { CountSummary } from '$lib/server/services/inventory';
 	import type { LayoutProps } from './$types';
 
 	// Several counts can wait at once, so the review is a list. A count's detail is its own route:
-	// instead of the tabs and the list on a phone, a side panel beside them from 1024px.
+	// instead of the title and the list on a phone, a side panel beside them from 1024px.
 	let { data, children }: LayoutProps = $props();
 
 	const pending = $derived(data.counts.filter(({ status }) => 'PENDING_APPROVAL' === status));
@@ -55,9 +53,7 @@
 
 <div class={['review', { 'review--open': openId }]}>
 	<div class="review__header">
-		<ScreenHeader>
-			<Tabs tabs={INVENTORY_TABS} current="Revisar conteo" />
-		</ScreenHeader>
+		<ScreenHeader title="Revisiones" />
 	</div>
 
 	<div class="review__body">
@@ -152,7 +148,7 @@
 			display: block;
 		}
 
-		/* List and panel share the screens' column, under the tabs. */
+		/* List and panel share the screens' column, under the title. */
 		.review__body {
 			display: grid;
 			grid-template-columns: minmax(0, 1fr) max(440px, 40%);

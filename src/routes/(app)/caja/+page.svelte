@@ -14,7 +14,6 @@
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import Select from '$lib/components/Select.svelte';
-	import Tabs from '$lib/components/Tabs.svelte';
 	import {
 		formatInstant,
 		formatInstantTime,
@@ -24,7 +23,6 @@
 	} from '$lib/datetime';
 	import { formatBalance, formatPesos, formatReceiptNumber, formatSignedPesos } from '$lib/format';
 	import { CASH_CONCEPT_LABELS, PAYMENT_METHOD_LABELS } from '$lib/labels';
-	import { CASH_TABS } from '$lib/navigation';
 	import type { CashBookEntry, MovementDetail, ReceiptReference } from '$lib/server/services/cash';
 	import type { PageProps } from './$types';
 
@@ -407,9 +405,7 @@
 
 <div class={['book', { 'book--detail': movement }]}>
 	<div class="book__header">
-		<ScreenHeader>
-			<Tabs tabs={CASH_TABS} current="Libro de caja" />
-		</ScreenHeader>
+		<ScreenHeader title="Caja" />
 	</div>
 
 	<div class="book__body">
@@ -670,8 +666,8 @@
 		margin: 0;
 	}
 
-	/* The tabs head the section, and under them the book and, once a movement is open, its
-	   detail: instead of the tabs and the book on a phone, beside the book on a desktop. */
+	/* The title heads the section, and under it the book and, once a movement is open, its
+	   detail: instead of the title and the book on a phone, beside the book on a desktop. */
 	.book {
 		display: flex;
 		flex-direction: column;

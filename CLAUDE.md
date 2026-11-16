@@ -56,7 +56,7 @@ Claude runs `test`, `lint` and `typecheck`; the developer runs every other one.
 
 Where things live and which helper to reuse. What a screen or service does is read in its code, or in the phase's `planning.md` before extending it.
 
-- `src/routes/` — the public pages: `/` (landing and the client's lookup), `/login`, `/logout`, `/sesion` (the shell's session JSON), `/mi-pedido/[token]` (the client's page). `(app)/` is the shell, session required, one folder per destination in `DESTINATIONS`; route IDs inside carry the group: `resolve('/(app)/logins/[id]', …)`. Printouts render outside the shell through `+page@.svelte`
+- `src/routes/` — the public pages: `/` (landing and the client's lookup), `/login`, `/logout`, `/sesion` (the shell's session JSON), `/mi-pedido/[token]` (the client's page). `(app)/` is the shell, session required, one folder per section of the menu; route IDs inside carry the group: `resolve('/(app)/logins/[id]', …)`. Printouts render outside the shell through `+page@.svelte`
 - `src/hooks.server.ts` — the session cookie into `locals.user` (an `Actor`, or null), sliding its expiry; the public pages' no-referrer, no-index, no-store headers
 - `src/app.css` — the Design System's tokens, base and text roles, and the layout wrappers (`.form-stack`, `.chip-row`, `.detail-list`, `.screen__action`)
 - `src/lib/components/` — the Design System's components in Svelte, keeping its BEM class names; only the ones a screen uses. Icons are `static/icons.svg`, the system's sprite
@@ -65,7 +65,7 @@ Where things live and which helper to reuse. What a screen or service does is re
   - `phone.ts` — `normalizePhone`, the only normalizer, on save; `formatPhone`
   - `format.ts` — pesos, numbers, receipt numbers, `formatPesosInWords`; `fold`, accents and case off, for every search
   - `labels.ts` — every enum value's Spanish label
-  - `navigation.ts` — `DESTINATIONS` (one menu for every login) and each section's tabs; `getPageNumbers`
+  - `navigation.ts` — the menu tree, filtered by role (`getMenu`), and the bottom bar's slots (`getBarSlots`); `getPageNumbers`
   - `settings.ts` — `SETTINGS`: each key's module, label, unit and Zod schema
   - `orders.ts` — `calculateOrderTotals`; `isLegalTransition`, the only rule for status changes; `nextOperationalStatus`, `isEditableStatus`, `isIncidentReportable`
   - `payroll.ts` — `calculateSettlement`, `deriveRates`, and the typed-text parsers both sides share

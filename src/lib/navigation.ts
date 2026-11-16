@@ -171,33 +171,6 @@ export function getBarSlots(menu: MenuEntry[]): BarSlot[] {
 	return BAR.flatMap((choices) => choices.filter(({ href }) => hrefs.has(href)).slice(0, 1));
 }
 
-/** Horas' tabs, for the logins that log everyone's hours. */
-export const HOURS_TABS = [
-	{ label: 'Empleado', href: resolve('/horas/empleado') },
-	{ label: 'Equipo', href: resolve('/horas/equipo') }
-];
-
-/** Caja's tabs: the entry of a movement no other module records, and the book. */
-export const CASH_TABS = [
-	{ label: 'Registrar movimiento', shortLabel: 'Registrar', href: resolve('/caja/registrar') },
-	{ label: 'Libro de caja', href: resolve('/caja') }
-];
-
-/** Inventario's tabs, for the logins that review counts. */
-export const INVENTORY_TABS = [
-	{ label: 'Conteo físico', href: resolve('/inventario') },
-	{ label: 'Revisar conteo', href: resolve('/inventario/revisar') }
-];
-
-/** Configuración's tabs: the general and payroll settings, and the holidays, help and terms editors. */
-export const SETTINGS_TABS = [
-	{ label: 'General', href: resolve('/configuracion') },
-	{ label: 'Nómina', href: resolve('/configuracion/nomina') },
-	{ label: 'Festivos', href: resolve('/configuracion/festivos') },
-	{ label: 'Ayuda', href: resolve('/configuracion/ayuda') },
-	{ label: 'Términos', href: resolve('/configuracion/terminos') }
-];
-
 /**
  * The page numbers a pagination shows: the first, the last, and the current one with its
  * neighbors; `null` is an ellipsis for the pages skipped, never for a single one.
