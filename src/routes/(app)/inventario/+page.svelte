@@ -256,7 +256,7 @@
 <Screen>
 	{#snippet header()}
 		{#if data.canReview}
-			<ScreenHeader title="Conteos" />
+			<ScreenHeader title="Nuevo conteo" />
 		{:else}
 			<ScreenHeader title="Conteo físico" />
 		{/if}

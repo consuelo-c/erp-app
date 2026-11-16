@@ -405,7 +405,7 @@
 
 <div class={['book', { 'book--detail': movement }]}>
 	<div class="book__header">
-		<ScreenHeader title="Caja" />
+		<ScreenHeader title="Movimientos caja" />
 	</div>
 
 	<div class="book__body">

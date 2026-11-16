@@ -163,7 +163,7 @@ const BAR: BarSlot[][] = [
 	[{ label: 'Despachos', icon: 'truck', href: resolve('/despachos') }],
 	[{ label: 'Horas', icon: 'clock', href: resolve('/horas') }],
 	[
-		{ label: 'Conteos', icon: 'clipboard', href: resolve('/inventario') },
+		{ label: 'Nuevo conteo', icon: 'clipboard', href: resolve('/inventario') },
 		{ label: 'Productos', icon: 'package', href: resolve('/productos') }
 	]
 ];

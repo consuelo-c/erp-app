@@ -53,7 +53,7 @@
 
 <div class={['review', { 'review--open': openId }]}>
 	<div class="review__header">
-		<ScreenHeader title="Revisiones" />
+		<ScreenHeader title="Confirmar conteo" />
 	</div>
 
 	<div class="review__body">
