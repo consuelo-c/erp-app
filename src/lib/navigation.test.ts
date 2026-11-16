@@ -81,10 +81,14 @@ test('the most specific path is the current page', () => {
 	expect(findCurrentHref(getMenu(['SALES']), '/caja')).toBeUndefined();
 });
 
-test('the bar is Despachos · Horas · Conteos; Sales alone gets Productos; a slot nobody opens goes', () => {
+test('the bar is Despachos · Horas · Nuevo conteo; Sales alone gets Productos; a slot nobody opens goes', () => {
 	const slots = (roles: Parameters<typeof getMenu>[0]) =>
 		getBarSlots(getMenu(roles)).map(({ label, href }) => `${label} ${href}`);
-	expect(slots(['ADMIN'])).toEqual(['Despachos /despachos', 'Horas /horas', 'Conteos /inventario']);
+	expect(slots(['ADMIN'])).toEqual([
+		'Despachos /despachos',
+		'Horas /horas',
+		'Nuevo conteo /inventario'
+	]);
 	expect(slots(['WAREHOUSE'])).toEqual(slots(['ADMIN']));
 	expect(slots(['SALES'])).toEqual([
 		'Despachos /despachos',
@@ -95,11 +99,11 @@ test('the bar is Despachos · Horas · Conteos; Sales alone gets Productos; a sl
 	expect(slots([])).toEqual(['Despachos /despachos', 'Horas /horas']);
 });
 
-test('a bar slot is current only on its own page: Revisiones and Planilla horas mark «Más»', () => {
+test('a bar slot is current only on its own page: Confirmar conteo and Planilla horas mark «Más»', () => {
 	const menu = getMenu(['ADMIN']);
 	const currentSlot = (pathname: string) =>
 		getBarSlots(menu).find(({ href }) => href === findCurrentHref(menu, pathname))?.label;
-	expect(currentSlot('/inventario')).toBe('Conteos');
+	expect(currentSlot('/inventario')).toBe('Nuevo conteo');
 	expect(currentSlot('/horas/empleado')).toBe('Horas');
 	expect(currentSlot('/inventario/revisar')).toBeUndefined();
 	expect(currentSlot('/horas/equipo')).toBeUndefined();
