@@ -104,3 +104,18 @@ export function noMatchText(search: string, filter: ContactLabel | undefined): s
 		? `Ningún contacto tiene la etiqueta ${filter.name}.`
 		: `Nadie coincide con «${search}» con la etiqueta ${filter.name}.`;
 }
+
+/** How many contacts carry an etiqueta, as Configuración › Etiquetas counts them. */
+export function contactCountText(count: number): string {
+	if (0 === count) {
+		return 'Ningún contacto';
+	}
+	return 1 === count ? '1 contacto' : `${count} contactos`;
+}
+
+/** What deleting an etiqueta asks: the contacts it's stripped from, or nothing when none carries it. */
+export function deleteLabelText(name: string, contactCount: number): string {
+	return 0 === contactCount
+		? ''
+		: `${name} está en ${contactCountText(contactCount)}; se quita de todos.`;
+}

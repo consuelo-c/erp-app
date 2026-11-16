@@ -9,7 +9,7 @@
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
-	import { BANNED } from '$lib/contact-labels';
+	import { BANNED, contactCountText, deleteLabelText } from '$lib/contact-labels';
 	import type { LabelRow } from '$lib/server/services/contacts';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import type { PageProps } from './$types';
@@ -22,13 +22,6 @@
 	let draft = $state('');
 	let deleting = $state<LabelRow | null>(null);
 	let isDeleteOpen = $state(false);
-
-	const countText = (count: number) => {
-		if (0 === count) {
-			return 'Ningún contacto';
-		}
-		return 1 === count ? '1 contacto' : `${count} contactos`;
-	};
 
 	const errorOf = (action: string) => (action === form?.action ? form.message : undefined);
 
@@ -124,7 +117,7 @@
 						<Field
 							label="Nombre de la etiqueta"
 							id="label-name"
-							hint="{countText(label.contactCount)}: verán el nombre nuevo."
+							hint="{contactCountText(label.contactCount)}: verán el nombre nuevo."
 							error={errorOf('renombrar')}
 						>
 							<Input
@@ -144,7 +137,7 @@
 						<span class="labels__name" class:labels__name--danger={BANNED === label.key}>
 							{label.name}
 						</span>
-						<span class="meta">{countText(label.contactCount)}</span>
+						<span class="meta">{contactCountText(label.contactCount)}</span>
 					</span>
 					<span class="labels__edit">
 						<IconButton
@@ -181,9 +174,7 @@
 	<Modal
 		bind:open={isDeleteOpen}
 		title="¿Eliminar {deleting.name}?"
-		body={0 === deleting.contactCount
-			? ''
-			: `${deleting.name} está en ${countText(deleting.contactCount)}; se quita de todos.`}
+		body={deleteLabelText(deleting.name, deleting.contactCount)}
 	>
 		{#if errorOf('eliminar')}
 			<Notice tone="error">{errorOf('eliminar')}</Notice>

@@ -2,6 +2,7 @@ import { expect, test } from 'vitest';
 import {
 	contactBadges,
 	contactLabelsSchema,
+	deleteLabelText,
 	labelKeysSchema,
 	makeLabelKey,
 	noMatchText,
@@ -75,4 +76,10 @@ test("a new etiqueta's key comes from its name, with a suffix when taken", () =>
 	expect(makeLabelKey('Decoración', renamed)).toBe('DECORACION_2');
 	expect(makeLabelKey('Empleado', builtIn)).toBe('EMPLEADO');
 	expect(makeLabelKey('employee', builtIn)).toBe('EMPLOYEE_2');
+});
+
+test('deleting asks with the count of contacts it is stripped from, or without one', () => {
+	expect(deleteLabelText('Barista', 4)).toBe('Barista está en 4 contactos; se quita de todos.');
+	expect(deleteLabelText('Chef', 1)).toBe('Chef está en 1 contacto; se quita de todos.');
+	expect(deleteLabelText('Bartender', 0)).toBe('');
 });
