@@ -11,7 +11,7 @@
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import Select from '$lib/components/Select.svelte';
-	import { contactBadges, EMPLOYEE_FILTER, noMatchText } from '$lib/contact-labels';
+	import { BANNED, contactBadges, EMPLOYEE_FILTER, noMatchText } from '$lib/contact-labels';
 	import ReachLines from '../ReachLines.svelte';
 	import type { PageProps } from './$types';
 
@@ -101,7 +101,7 @@
 					<Select id="etiqueta" name="etiqueta" value={filters.label ?? ''} onchange={apply}>
 						<option value="">Todas</option>
 						{#each filterOptions as { key, name } (key)}
-							<option value={key}>{name}</option>
+							<option value={key} class:banned={BANNED === key}>{name}</option>
 						{/each}
 					</Select>
 				</Field>
@@ -158,6 +158,11 @@
 {/snippet}
 
 <style>
+	/* Vetado stands out among the etiquetas; a native list may ignore it (macOS, phones). */
+	.banned {
+		font-weight: var(--weight-bold);
+	}
+
 	p {
 		margin: 0;
 	}

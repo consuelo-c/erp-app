@@ -45,11 +45,11 @@ const MENU: MenuParent[] = [
 		page: { href: resolve('/productos'), roles: SELLERS },
 		children: [
 			{
-				label: 'Conteos',
+				label: 'Nuevo conteo',
 				href: resolve('/inventario'),
 				roles: [...MANAGERS, 'WAREHOUSE', 'DRIVER']
 			},
-			{ label: 'Revisiones', href: resolve('/inventario/revisar'), roles: MANAGERS }
+			{ label: 'Confirmar conteo', href: resolve('/inventario/revisar'), roles: MANAGERS }
 		]
 	},
 	{
@@ -63,8 +63,7 @@ const MENU: MenuParent[] = [
 		icon: 'wallet',
 		children: [
 			{ label: 'Cuentas de cobro', href: resolve('/cuentas-de-cobro'), roles: SELLERS },
-			{ label: 'Movimiento', href: resolve('/caja/registrar'), roles: MANAGERS },
-			{ label: 'Caja', href: resolve('/caja'), roles: MANAGERS }
+			{ label: 'Movimiento', href: resolve('/caja/registrar'), roles: MANAGERS }
 		]
 	},
 	{
@@ -80,7 +79,10 @@ const MENU: MenuParent[] = [
 	{
 		label: 'Reportes',
 		icon: 'chart',
-		children: [{ label: 'Planilla horas', href: resolve('/horas/equipo'), roles: MANAGERS }]
+		children: [
+			{ label: 'Planilla horas', href: resolve('/horas/equipo'), roles: MANAGERS },
+			{ label: 'Movimientos caja', href: resolve('/caja'), roles: MANAGERS }
+		]
 	},
 	{ label: 'Ayuda', icon: 'help', page: { href: resolve('/ayuda') }, children: [] },
 	{

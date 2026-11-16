@@ -21,11 +21,11 @@ test('ADMIN sees the whole tree, in its order', () => {
 	expect(outline(getMenu(['ADMIN']))).toEqual([
 		'Despachos',
 		'Cotizaciones: Pedidos',
-		'Productos: Conteos, Revisiones',
+		'Productos: Nuevo conteo, Confirmar conteo',
 		'Contactos',
-		'Pagos: Cuentas de cobro, Movimiento, Caja',
+		'Pagos: Cuentas de cobro, Movimiento',
 		'Personal: Nómina, Horas, Logins',
-		'Reportes: Planilla horas',
+		'Reportes: Planilla horas, Movimientos caja',
 		'Ayuda',
 		'Configuración: Nómina, Festivos, Ayuda, Términos, Etiquetas'
 	]);
@@ -44,12 +44,12 @@ test('each role sees only what it opens; two roles see the union', () => {
 	]);
 	expect(outline(getMenu(['WAREHOUSE']))).toEqual([
 		'Despachos',
-		'Productos: Conteos',
+		'Productos: Nuevo conteo',
 		'Personal: Horas',
 		'Ayuda'
 	]);
 	expect(outline(getMenu(['DRIVER']))).toEqual(outline(getMenu(['WAREHOUSE'])));
-	expect(outline(getMenu(['SALES', 'WAREHOUSE']))).toContain('Productos: Conteos');
+	expect(outline(getMenu(['SALES', 'WAREHOUSE']))).toContain('Productos: Nuevo conteo');
 });
 
 test('a parent without its own page, or one the login cannot open, opens its first child', () => {
@@ -111,8 +111,7 @@ test("the «Más» sheet opens on the current parent's list, or on the first lis
 	expect(findSheetParent(menu, findCurrentHref(menu, '/caja/registrar'))?.label).toBe('Pagos');
 	expect(findSheetParent(menu, findCurrentHref(menu, '/productos/12'))?.label).toBe('Productos');
 	expect(findSheetParent(menu, findCurrentHref(menu, '/contactos'))).toBeUndefined();
-	// Reportes holds one page: a plain row, no list to open on.
-	expect(findSheetParent(menu, findCurrentHref(menu, '/horas/equipo'))).toBeUndefined();
+	expect(findSheetParent(menu, findCurrentHref(menu, '/caja'))?.label).toBe('Reportes');
 	// A section outside the login's roles has no current page.
 	expect(findSheetParent(menu, undefined)).toBeUndefined();
 });

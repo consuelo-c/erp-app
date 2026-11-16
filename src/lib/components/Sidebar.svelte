@@ -1,10 +1,11 @@
 <script lang="ts">
-	import type { MenuEntry } from '$lib/navigation';
+	import { getParentPages, type MenuEntry } from '$lib/navigation';
 	import Icon from './Icon.svelte';
 	import LogoutButton from './LogoutButton.svelte';
 
 	// Desktop navigation, always expanded: the login's menu tree. The current parent shows its
-	// children below it; any other parent shows them in a flyout on hover or keyboard focus.
+	// pages below it; any other parent shows them in a flyout on hover or keyboard focus. A
+	// parent's list repeats its own page first, as the «Más» sheet does.
 	interface Props {
 		menu: MenuEntry[];
 		/** The open page's href; none on a section outside the menu. */
@@ -34,18 +35,32 @@
 		{#each menu as parent (parent.label)}
 			{@const isParentOpen = isOpen(parent)}
 			<div class="sidebar__group">
-				<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- MENU builds its hrefs with resolve() -->
-				<a class="sidebar__item" href={parent.href} aria-current={ariaCurrent(parent.ownHref)}>
-					<Icon name={parent.icon} size="md" />{parent.label}
-				</a>
-				{#if 0 < parent.children.length}
+				{#if 0 === parent.children.length}
+					<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- MENU builds its hrefs with resolve() -->
+					<a class="sidebar__item" href={parent.href} aria-current={ariaCurrent(parent.ownHref)}>
+						<Icon name={parent.icon} size="md" />{parent.label}
+					</a>
+				{:else}
+					<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- MENU builds its hrefs with resolve() -->
+					<a class="sidebar__item" href={parent.href}>
+						<Icon name={parent.icon} size="md" />{parent.label}
+						<span
+							class="sidebar__caret"
+							class:sidebar__caret--open={isParentOpen}
+							aria-hidden="true">›</span
+						>
+					</a>
 					<div class={isParentOpen ? 'sidebar__children' : 'sidebar__flyout'}>
-						{#each parent.children as child (child.href)}
-							{@const childClass = ['sidebar__item', isParentOpen && 'sidebar__item--child']}
-							<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- MENU builds its hrefs with resolve() -->
-							<a class={childClass} href={child.href} aria-current={ariaCurrent(child.href)}>
+						{#each getParentPages(parent) as child (child.href)}
+							<!-- eslint-disable svelte/no-navigation-without-resolve -- MENU builds its hrefs with resolve() -->
+							<a
+								class="sidebar__item sidebar__item--child"
+								href={child.href}
+								aria-current={ariaCurrent(child.href)}
+							>
 								{child.label}
 							</a>
+							<!-- eslint-enable svelte/no-navigation-without-resolve -->
 						{/each}
 					</div>
 				{/if}
@@ -131,9 +146,28 @@
 		background: var(--brand-yellow);
 	}
 
+	/* A page under a parent: regular weight, so it doesn't read as an item missing its icon. */
+	.sidebar__item--child,
+	.sidebar__item--child[aria-current='page'] {
+		font-weight: var(--weight-regular);
+	}
+
 	/* Aligned with the parent's label: its padding, its 18px icon and the gap. */
-	.sidebar__item--child {
+	.sidebar__children > .sidebar__item--child {
 		padding-left: calc(2 * var(--space-6) + 18px);
+	}
+
+	/* A parent with pages under it: the caret points at the flyout, and down once they're open. */
+	.sidebar__caret {
+		margin-left: auto;
+		font-size: 22px;
+		font-weight: var(--weight-regular);
+		line-height: 0;
+		color: var(--neutral-400);
+	}
+
+	.sidebar__caret--open {
+		transform: rotate(90deg);
 	}
 
 	.sidebar__flyout {

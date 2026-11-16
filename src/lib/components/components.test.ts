@@ -62,7 +62,7 @@ test('MenuList: parents with a list carry ›, the open list marks its current p
 	});
 	const body = rendered.body.replaceAll(/<!--.*?-->/g, '');
 	expect(body).toMatch(/Pagos\s*<span class="menu-row__chevron/);
-	expect(body).not.toMatch(/Reportes\s*<span class="menu-row__chevron/);
+	expect(body).not.toMatch(/Contactos\s*<span class="menu-row__chevron/);
 	expect(body).toMatch(/<a[^>]*href="\/caja\/registrar"[^>]*aria-current="page"[^>]*>Movimiento</);
 	expect(body).toMatch(/<a[^>]*href="\/cuentas-de-cobro"[^>]*>Cuentas de cobro</);
 	expect(body).toMatch(/menu-row--back[^>]*>[\s\S]*Volver/);
