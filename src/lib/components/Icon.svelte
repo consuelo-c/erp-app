@@ -1,8 +1,6 @@
 <script lang="ts">
 	type IconName =
-		| 'list'
 		| 'file'
-		| 'receipt'
 		| 'truck'
 		| 'clock'
 		| 'settings'
@@ -21,7 +19,6 @@
 		| 'more'
 		| 'back'
 		| 'package'
-		| 'banknote'
 		| 'wallet'
 		| 'users'
 		| 'chart'

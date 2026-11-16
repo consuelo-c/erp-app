@@ -4,16 +4,16 @@
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
-	import { findDestination } from '$lib/navigation';
+	import { findPageLabel } from '$lib/navigation';
 
 	// An error inside the shell, its navigation still usable. A 403 is a section outside the login's
-	// roles: the header names the section, the body says why.
+	// roles: the header names its menu page, the body says why.
 	// A 503 is Despachos with no signal and no copy of today's: nothing broke, there's no data yet.
 	const isForbidden = $derived(403 === page.status);
 	const isOffline = $derived(503 === page.status);
 	const title = $derived.by(() => {
 		if (isForbidden) {
-			return findDestination(page.url.pathname)?.label ?? 'Acceso restringido';
+			return findPageLabel(page.url.pathname) ?? 'Acceso restringido';
 		}
 		return isOffline ? 'Sin señal' : 'Error';
 	});

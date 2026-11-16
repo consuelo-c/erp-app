@@ -5,110 +5,6 @@ import type { Role } from '$lib/server/actor';
 
 type IconName = ComponentProps<typeof Icon>['name'];
 
-/** A menu destination. No `href` until the phase that builds its screens: shown, but disabled. */
-export type Destination = {
-	label: string;
-	icon: IconName;
-	href?: string;
-	/** Paths under this destination, its own included: which entry is current. */
-	paths?: string[];
-};
-
-// STUB: «Barra inferior y hoja «Más» con el árbol» (#554, Phase 21) replaces the bottom bar and the
-// «Más» sheet, the last users of DESTINATIONS, BAR_SLOTS, HELP and findDestination, with MENU.
-export const DESTINATIONS: Destination[] = [
-	{
-		label: 'Despachos',
-		icon: 'truck',
-		href: resolve('/despachos'),
-		paths: [resolve('/despachos')]
-	},
-	{
-		label: 'Horas',
-		icon: 'clock',
-		href: resolve('/horas'),
-		paths: [resolve('/horas')]
-	},
-	{
-		label: 'Pedidos',
-		icon: 'list',
-		href: resolve('/pedidos'),
-		paths: [resolve('/pedidos')]
-	},
-	{
-		label: 'Cotizaciones',
-		icon: 'file',
-		href: resolve('/cotizaciones'),
-		paths: [resolve('/cotizaciones')]
-	},
-	{
-		label: 'Cuentas de cobro',
-		icon: 'receipt',
-		href: resolve('/cuentas-de-cobro'),
-		paths: [resolve('/cuentas-de-cobro')]
-	},
-	{
-		label: 'Contactos',
-		icon: 'contact',
-		href: resolve('/contactos'),
-		paths: [resolve('/contactos')]
-	},
-	{
-		label: 'Productos',
-		icon: 'package',
-		href: resolve('/productos'),
-		paths: [resolve('/productos')]
-	},
-	{
-		label: 'Inventario',
-		icon: 'clipboard',
-		href: resolve('/inventario'),
-		paths: [resolve('/inventario')]
-	},
-	{
-		label: 'Caja',
-		icon: 'wallet',
-		href: resolve('/caja/registrar'),
-		paths: [resolve('/caja')]
-	},
-	{
-		label: 'Personal',
-		icon: 'users',
-		href: resolve('/personal'),
-		paths: [resolve('/personal')]
-	},
-	{
-		label: 'Nómina',
-		icon: 'banknote',
-		href: resolve('/nomina'),
-		paths: [resolve('/nomina')]
-	},
-	{
-		label: 'Logins',
-		icon: 'lock',
-		href: resolve('/logins'),
-		paths: [resolve('/logins')]
-	},
-	{
-		label: 'Configuración',
-		icon: 'settings',
-		href: resolve('/configuracion'),
-		paths: [resolve('/configuracion')]
-	}
-];
-
-/** How many destinations fit the bottom bar before «Más». */
-export const BAR_SLOTS = 3;
-
-/** Not a destination: it lives in «Más» and at the sidebar's foot. */
-export const HELP: Destination = { label: 'Ayuda', icon: 'help', href: resolve('/ayuda') };
-
-export function findDestination(pathname: string): Destination | undefined {
-	return DESTINATIONS.find(({ paths = [] }) =>
-		paths.some((path) => pathname === path || pathname.startsWith(`${path}/`))
-	);
-}
-
 /** A page of the menu tree, with the roles its route lets in; without `roles`, every login. */
 type MenuPage = { label: string; href: string; roles?: readonly Role[] };
 
@@ -126,8 +22,10 @@ export type MenuEntry = {
 	icon: IconName;
 	href: string;
 	ownHref?: string;
-	children: { label: string; href: string }[];
+	children: MenuPageLink[];
 };
+
+type MenuPageLink = { label: string; href: string };
 
 const MANAGERS = ['ADMIN', 'MANAGER'] as const;
 const SELLERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
@@ -217,13 +115,60 @@ export function getMenu(roles: readonly Role[]): MenuEntry[] {
 	});
 }
 
-/** The href of the menu page that holds the path: the most specific, so Planilla horas beats Horas. */
+/** Every page a parent lists, in order: its own page under its label, then its children. */
+export function getParentPages({ label, ownHref, children }: MenuEntry): MenuPageLink[] {
+	return undefined === ownHref ? children : [{ label, href: ownHref }, ...children];
+}
+
+/** The page among `pages` that holds the path: the most specific, so Planilla horas beats Horas. */
+function findPageOf<Page extends { href: string }>(pages: Page[], pathname: string) {
+	return pages
+		.filter(({ href }) => pathname === href || pathname.startsWith(`${href}/`))
+		.sort((first, second) => second.href.length - first.href.length)[0];
+}
+
+/** The href of the login's menu page that holds the path. */
 export function findCurrentHref(menu: MenuEntry[], pathname: string): string | undefined {
-	return menu
-		.flatMap(({ ownHref, children }) => [ownHref, ...children.map(({ href }) => href)])
-		.filter((href) => undefined !== href)
-		.filter((href) => pathname === href || pathname.startsWith(`${href}/`))
-		.sort((first, second) => second.length - first.length)[0];
+	return findPageOf(menu.flatMap(getParentPages), pathname)?.href;
+}
+
+/** The menu label of the page that holds the path, whatever the login: the no-permission title. */
+export function findPageLabel(pathname: string): string | undefined {
+	const pages = MENU.flatMap(({ label, page, children }) =>
+		page ? [{ label, href: page.href }, ...children] : children
+	);
+	return findPageOf(pages, pathname)?.label;
+}
+
+/** A parent the «Más» sheet slides into: one with more than one page the login can open. */
+export function hasSheetList(parent: MenuEntry): boolean {
+	return 1 < getParentPages(parent).length;
+}
+
+/** The parent whose list the «Más» sheet opens on: the one holding the current page, if it has a list. */
+export function findSheetParent(menu: MenuEntry[], currentHref: string | undefined) {
+	return menu.find(
+		(parent) =>
+			hasSheetList(parent) && getParentPages(parent).some(({ href }) => href === currentHref)
+	);
+}
+
+export type BarSlot = { label: string; icon: IconName; href: string };
+
+/** The bottom bar before «Más»: each slot is the first of its choices the login can open. */
+const BAR: BarSlot[][] = [
+	[{ label: 'Despachos', icon: 'truck', href: resolve('/despachos') }],
+	[{ label: 'Horas', icon: 'clock', href: resolve('/horas') }],
+	[
+		{ label: 'Conteos', icon: 'clipboard', href: resolve('/inventario') },
+		{ label: 'Productos', icon: 'package', href: resolve('/productos') }
+	]
+];
+
+/** The login's bar slots; a slot it can open none of is left out, and the bar is shorter. */
+export function getBarSlots(menu: MenuEntry[]): BarSlot[] {
+	const hrefs = new Set(menu.flatMap(getParentPages).map(({ href }) => href));
+	return BAR.flatMap((choices) => choices.filter(({ href }) => hrefs.has(href)).slice(0, 1));
 }
 
 /** Horas' tabs, for the logins that log everyone's hours. */

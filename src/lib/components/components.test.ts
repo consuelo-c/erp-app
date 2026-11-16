@@ -4,6 +4,8 @@ import { expect, test } from 'vitest';
 import Button from './Button.svelte';
 import Choice from './Choice.svelte';
 import Field from './Field.svelte';
+import { getMenu } from '$lib/navigation';
+import MenuList from './MenuList.svelte';
 import Modal from './Modal.svelte';
 
 const text = (html: string) => createRawSnippet(() => ({ render: () => html }));
@@ -46,4 +48,23 @@ test('Choice wraps its options by layout, except none', () => {
 	expect(free.body).toMatch(/<fieldset[^>]*aria-label="Cliente"/);
 	expect(free.body).not.toContain('<legend');
 	expect(free.body).not.toContain('choice__options');
+});
+
+test('MenuList: parents with a list carry ›, the open list marks its current page and ends with Volver', () => {
+	const rendered = render(MenuList, {
+		props: {
+			menu: getMenu(['ADMIN']),
+			currentHref: '/caja/registrar',
+			parentLabel: 'Pagos',
+			isParentListOpen: true,
+			session: text('<p>Sesión</p>')
+		}
+	});
+	const body = rendered.body.replaceAll(/<!--.*?-->/g, '');
+	expect(body).toMatch(/Pagos\s*<span class="menu-row__chevron/);
+	expect(body).not.toMatch(/Reportes\s*<span class="menu-row__chevron/);
+	expect(body).toMatch(/<a[^>]*href="\/caja\/registrar"[^>]*aria-current="page"[^>]*>Movimiento</);
+	expect(body).toMatch(/<a[^>]*href="\/cuentas-de-cobro"[^>]*>Cuentas de cobro</);
+	expect(body).toMatch(/menu-row--back[^>]*>[\s\S]*Volver/);
+	expect(body.match(/aria-current="page"/g)).toHaveLength(1);
 });
