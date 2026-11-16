@@ -50,11 +50,32 @@ type ProductRow = {
 	category: Category; // the CHECK admits nothing else
 	variant_group: string | null;
 	variant_name: string | null;
-	description: string | null;
 	rental_price: number;
 	total_quantity: number;
 	active: number;
+	attributes: string;
 };
+
+// Blank is no key at all: a missing key means empty.
+const blankableTextSchema = z
+	.string()
+	.trim()
+	.optional()
+	.transform((value) => value || undefined);
+
+/** What the app only reads about a product: nothing filters, sorts or indexes by these keys. */
+const productAttributesSchema = z.strictObject({
+	description: blankableTextSchema,
+	website_url: blankableTextSchema
+});
+
+type ProductAttributes = z.input<typeof productAttributesSchema>;
+
+// In a fixed key order, so an edit that changes nothing produces the same text and logs nothing.
+function attributesJson(attributes: ProductAttributes): string {
+	const { description, website_url } = productAttributesSchema.parse(attributes);
+	return JSON.stringify({ description, website_url });
+}
 
 const optionalTextSchema = z
 	.string()
@@ -78,7 +99,7 @@ const productSchema = z
 		variant_group: optionalTextSchema,
 		new_variant_group: optionalTextSchema,
 		variant_name: optionalTextSchema,
-		description: optionalTextSchema,
+		description: z.string().optional(),
 		rental_price: wholeNumberSchema('Escribe el precio por día').pipe(
 			z.number().positive('El precio por día debe ser mayor que cero')
 		),
@@ -89,9 +110,13 @@ const productSchema = z
 			.transform((value) => ('on' === value ? 1 : 0))
 	})
 	.transform((typed) => {
-		const { new_variant_group, ...columns } = typed;
+		const { new_variant_group, description, ...columns } = typed;
 		return {
-			columns: { ...columns, variant_group: new_variant_group ?? columns.variant_group },
+			columns: {
+				...columns,
+				variant_group: new_variant_group ?? columns.variant_group,
+				attributes: attributesJson({ description })
+			},
 			isNewGroup: null !== new_variant_group
 		};
 	})
@@ -114,7 +139,7 @@ const newProductSchema = productSchema.and(
 const idSchema = z.object({ id: z.coerce.number().int().positive() });
 
 const PRODUCT_COLUMNS =
-	'id, name, category, variant_group, variant_name, description, rental_price, total_quantity, active';
+	'id, name, category, variant_group, variant_name, rental_price, total_quantity, active, attributes';
 
 const SELECT_PRODUCT = `select ${PRODUCT_COLUMNS} from products`;
 
@@ -128,13 +153,14 @@ function invalid(error: z.ZodError): Failure {
 }
 
 function toProduct(row: ProductRow): Product {
+	const attributes = productAttributesSchema.parse(JSON.parse(row.attributes));
 	return {
 		id: row.id,
 		name: row.name,
 		category: row.category,
 		variantGroup: row.variant_group,
 		variantName: row.variant_name,
-		description: row.description,
+		description: attributes.description ?? null,
 		rentalPrice: row.rental_price,
 		totalQuantity: row.total_quantity,
 		isActive: 1 === row.active
@@ -297,7 +323,8 @@ async function applyEdit(
 		actor,
 		id,
 		current,
-		changes: product.columns
+		changes: product.columns,
+		jsonColumns: ['attributes']
 	});
 	if (0 === statements.length) {
 		return saved;
