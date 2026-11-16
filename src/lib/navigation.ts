@@ -91,7 +91,8 @@ const MENU: MenuParent[] = [
 			{ label: 'Nómina', href: resolve('/configuracion/nomina'), roles: MANAGERS },
 			{ label: 'Festivos', href: resolve('/configuracion/festivos'), roles: MANAGERS },
 			{ label: 'Ayuda', href: resolve('/configuracion/ayuda'), roles: MANAGERS },
-			{ label: 'Términos', href: resolve('/configuracion/terminos'), roles: MANAGERS }
+			{ label: 'Términos', href: resolve('/configuracion/terminos'), roles: MANAGERS },
+			{ label: 'Etiquetas', href: resolve('/configuracion/etiquetas'), roles: MANAGERS }
 		]
 	}
 ];

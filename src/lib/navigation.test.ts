@@ -27,7 +27,7 @@ test('ADMIN sees the whole tree, in its order', () => {
 		'Personal: Nómina, Horas, Logins',
 		'Reportes: Planilla horas',
 		'Ayuda',
-		'Configuración: Nómina, Festivos, Ayuda, Términos'
+		'Configuración: Nómina, Festivos, Ayuda, Términos, Etiquetas'
 	]);
 });
 

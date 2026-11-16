@@ -3,6 +3,7 @@ import {
 	contactBadges,
 	contactLabelsSchema,
 	labelKeysSchema,
+	makeLabelKey,
 	noMatchText,
 	type ContactLabel
 } from './contact-labels';
@@ -64,4 +65,14 @@ test('the empty texts name the etiqueta, or the employees', () => {
 	expect(noMatchText('', employee)).toBe('Aún no hay ningún empleado.');
 	expect(noMatchText('ana', employee)).toBe('Nadie coincide con «ana» entre los empleados.');
 	expect(noMatchText('ana', undefined)).toBe('Nadie coincide con «ana».');
+});
+
+test("a new etiqueta's key comes from its name, with a suffix when taken", () => {
+	expect(makeLabelKey('Proveedor de carpas', builtIn)).toBe('PROVEEDOR_DE_CARPAS');
+	expect(makeLabelKey('Decoración', builtIn)).toBe('DECORACION');
+	// The first «Decoración» renamed keeps its key, so a new one can't take it.
+	const renamed = [{ key: 'DECORACION', name: 'Decoración de mesas' }, ...builtIn];
+	expect(makeLabelKey('Decoración', renamed)).toBe('DECORACION_2');
+	expect(makeLabelKey('Empleado', builtIn)).toBe('EMPLEADO');
+	expect(makeLabelKey('employee', builtIn)).toBe('EMPLOYEE_2');
 });

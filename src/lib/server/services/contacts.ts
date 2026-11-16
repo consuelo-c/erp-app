@@ -7,7 +7,10 @@ import { z } from 'zod';
 import {
 	BANNED,
 	EMPLOYEE_FILTER,
+	contactLabelsSchema,
 	labelKeysSchema,
+	makeLabelKey,
+	sortByName,
 	TRANSPORTER,
 	type ContactLabel
 } from '$lib/contact-labels';
@@ -726,4 +729,166 @@ export async function listTransporters(
 		.bind(TRANSPORTER)
 		.all<Transporter>();
 	return results;
+}
+
+// Configuración › Etiquetas: the editor of CONTACTS_LABELS. Assigning one is the manager's call, so
+// is keeping the list.
+const EDITS_LABELS = ['ADMIN', 'MANAGER'] as const;
+
+const BUILT_IN_LABELS: readonly string[] = [TRANSPORTER, BANNED];
+
+export type LabelRow = ContactLabel & { contactCount: number; isBuiltIn: boolean };
+
+export type LabelResult = { ok: true } | { ok: false; message: string };
+
+const nameSchema = z.object({ name: z.string().trim().min(1, 'Escribe el nombre') });
+const keySchema = z.object({ key: z.string().min(1) });
+
+const UNKNOWN_LABEL: LabelResult = { ok: false, message: 'Esa etiqueta ya no existe' };
+
+/** Every etiqueta, A–Z, with how many contacts carry it. */
+export async function listLabelRows(db: D1Database, actor: Actor | null): Promise<LabelRow[]> {
+	requireRole(actor, EDITS_LABELS);
+	const [labels, { results }] = await Promise.all([
+		readContactLabels(db),
+		db
+			.prepare(
+				'select value as key, count(*) as count from contacts, json_each(contacts.labels) group by value'
+			)
+			.all<{ key: string; count: number }>()
+	]);
+	const counts = new Map(results.map(({ key, count }) => [key, count]));
+	return labels.map((label) => ({
+		...label,
+		contactCount: counts.get(label.key) ?? 0,
+		isBuiltIn: BUILT_IN_LABELS.includes(label.key)
+	}));
+}
+
+/** «Nueva etiqueta»: its key made from the name, never changed after. */
+export async function createLabel(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<LabelResult> {
+	requireRole(actor, EDITS_LABELS);
+	const parsed = nameSchema.safeParse(input);
+	if (!parsed.success) {
+		return { ok: false, message: parsed.error.issues[0].message };
+	}
+	const current = await readContactLabels(db);
+	const created = { key: makeLabelKey(parsed.data.name, current), name: parsed.data.name };
+	return saveLabels(db, actor, {
+		current,
+		labels: [...current, created],
+		changed: { before: [], after: [created] }
+	});
+}
+
+/** A new name for an etiqueta; its key stays, so no contact changes. */
+export async function renameLabel(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<LabelResult> {
+	requireRole(actor, EDITS_LABELS);
+	const parsed = keySchema.extend(nameSchema.shape).safeParse(input);
+	if (!parsed.success) {
+		return { ok: false, message: parsed.error.issues[0].message };
+	}
+	const { key, name } = parsed.data;
+	const current = await readContactLabels(db);
+	const old = current.find((label) => key === label.key);
+	if (undefined === old) {
+		return UNKNOWN_LABEL;
+	}
+	if (name === old.name) {
+		return { ok: true };
+	}
+	const renamed = { key, name };
+	return saveLabels(db, actor, {
+		current,
+		labels: current.map((label) => (key === label.key ? renamed : label)),
+		changed: { before: [old], after: [renamed] }
+	});
+}
+
+/** Removes an etiqueta and strips its key from every contact carrying it, in one batch. */
+export async function deleteLabel(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<LabelResult> {
+	requireRole(actor, EDITS_LABELS);
+	const { key } = keySchema.parse(input);
+	if (BUILT_IN_LABELS.includes(key)) {
+		return { ok: false, message: 'Transportador y Vetado no se eliminan' };
+	}
+	const current = await readContactLabels(db);
+	const deleted = current.find((label) => key === label.key);
+	if (undefined === deleted) {
+		return UNKNOWN_LABEL;
+	}
+	return saveLabels(db, actor, {
+		current,
+		labels: current.filter((label) => key !== label.key),
+		changed: { before: [deleted], after: [] },
+		contactStatements: await stripLabelStatements(db, actor, key)
+	});
+}
+
+async function stripLabelStatements(
+	db: D1Database,
+	actor: Actor,
+	key: string
+): Promise<D1PreparedStatement[]> {
+	const { results } = await db
+		.prepare(
+			'select id, labels from contacts where exists (select 1 from json_each(contacts.labels) where value = ?)'
+		)
+		.bind(key)
+		.all<{ id: number; labels: string }>();
+	return results.flatMap(({ id, labels }) => {
+		const kept = labelKeysSchema.parse(JSON.parse(labels)).filter((label) => key !== label);
+		return auditedUpdate(db, {
+			table: 'contacts',
+			entityType: 'CONTACT',
+			actor,
+			id,
+			current: { labels },
+			changes: { labels: labelsJson(kept) }
+		});
+	});
+}
+
+type LabelsWrite = {
+	current: ContactLabel[];
+	labels: ContactLabel[];
+	// Only the entries that changed go to the event, not the whole list.
+	changed: { before: ContactLabel[]; after: ContactLabel[] };
+	contactStatements?: D1PreparedStatement[];
+};
+
+// Sorted here, so the setting's schema has only a repeated name left to refuse.
+async function saveLabels(db: D1Database, actor: Actor, write: LabelsWrite): Promise<LabelResult> {
+	const parsed = contactLabelsSchema.safeParse(sortByName(write.labels));
+	if (!parsed.success) {
+		return { ok: false, message: parsed.error.issues[0].message };
+	}
+	const settingStatements = auditedUpdate(db, {
+		table: 'settings',
+		entityType: 'SETTINGS',
+		actor,
+		idColumn: 'key',
+		id: 'CONTACTS_LABELS',
+		current: {},
+		changes: {},
+		unlogged: { value: JSON.stringify(parsed.data) },
+		logged: {
+			before: { value: JSON.stringify(write.changed.before) },
+			after: { value: JSON.stringify(write.changed.after) }
+		}
+	});
+	await db.batch([...settingStatements, ...(write.contactStatements ?? [])]);
+	return { ok: true };
 }
