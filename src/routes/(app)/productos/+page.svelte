@@ -4,6 +4,7 @@
 	import Badge from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import Icon from '$lib/components/Icon.svelte';
+	import IconButton from '$lib/components/IconButton.svelte';
 	import Input from '$lib/components/Input.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
@@ -146,6 +147,17 @@
 											>
 										{:else}
 											{catalogName(product)}
+										{/if}
+										{#if product.websiteUrl}
+											<span class="page-link">
+												<IconButton
+													href={product.websiteUrl}
+													icon="external-link"
+													label="Abrir página"
+													target="_blank"
+													rel="noopener"
+												/>
+											</span>
 										{/if}
 										<!-- Hover only: on a phone a tap doesn't open it. -->
 										<span class="hint hint--info" title={updated}>
@@ -293,6 +305,18 @@
 		position: relative;
 		z-index: 1;
 		display: inline-flex;
+	}
+
+	/* Above the row's link, so a click on it opens only the page. */
+	.page-link {
+		position: relative;
+		z-index: 1;
+		display: inline-flex;
+		color: var(--link);
+	}
+
+	.page-link :global(.icon-btn) {
+		margin: -12px -4px;
 	}
 
 	.hint--info {

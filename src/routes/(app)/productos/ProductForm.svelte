@@ -43,6 +43,7 @@
 			variant_group: saved.variantGroup,
 			variant_name: saved.variantName,
 			description: saved.description,
+			website_url: saved.websiteUrl,
 			rental_price: formatPesos(saved.rentalPrice),
 			active: saved.isActive ? 'on' : 'off'
 		};
@@ -60,6 +61,7 @@
 			newGroup: text('new_variant_group'),
 			variant: text('variant_name'),
 			description: text('description'),
+			websiteUrl: text('website_url'),
 			rentalPrice: text('rental_price'),
 			totalQuantity: text('total_quantity'),
 			isActive: 'on' === posted.active
@@ -207,6 +209,25 @@
 			placeholder="Ej. Algodón, para mesa redonda de 10 puestos"
 			value={fields.description}></textarea>
 	</Field>
+	<!-- The saved address, not the one being typed, is the one «Abrir página» opens. -->
+	<Field
+		label="Página en consueloc.com (opcional)"
+		id="website_url"
+		hint={product?.websiteUrl ? pageHint : undefined}
+		error={errorOf('website_url')}
+	>
+		<!-- Not type="url": the browser would refuse an address typed without https://, which the save adds. -->
+		<Input
+			id="website_url"
+			name="website_url"
+			inputmode="url"
+			autocapitalize="off"
+			spellcheck="false"
+			value={fields.websiteUrl}
+			placeholder="Ej. https://consueloc.com/producto/mantel-dorado/"
+			aria-invalid={undefined !== errorOf('website_url')}
+		/>
+	</Field>
 	<div class="field-row">
 		<Field label="Precio por día" id="rental_price" error={errorOf('rental_price')}>
 			<Input
@@ -253,6 +274,11 @@
 		<Notice tone="error">{form.message}</Notice>
 	{/if}
 </form>
+
+{#snippet pageHint()}
+	<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- an external page -->
+	<a href={product?.websiteUrl} target="_blank" rel="noopener">Abrir página</a>
+{/snippet}
 
 {#snippet countHint()}
 	<a href={resolve('/inventario')}>Nuevo conteo para actualizar</a>
