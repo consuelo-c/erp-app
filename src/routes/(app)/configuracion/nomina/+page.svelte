@@ -2,8 +2,6 @@
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
-	import Tabs from '$lib/components/Tabs.svelte';
-	import { SETTINGS_TABS } from '$lib/navigation';
 	import type { PageProps } from './$types';
 	import SettingsForm from '../SettingsForm.svelte';
 
@@ -16,7 +14,7 @@
 
 <Screen>
 	{#snippet header()}
-		<ScreenHeader><Tabs tabs={SETTINGS_TABS} current="Nómina" /></ScreenHeader>
+		<ScreenHeader title="Nómina" />
 	{/snippet}
 
 	<SettingsForm settings={data.settings} {form}>

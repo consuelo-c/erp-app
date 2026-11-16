@@ -10,11 +10,9 @@
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
-	import Tabs from '$lib/components/Tabs.svelte';
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import { formatInteger, formatPesos, formatReceiptNumber, formatSignedPesos } from '$lib/format';
 	import { CASH_CONCEPT_LABELS, PAYMENT_METHOD_LABELS } from '$lib/labels';
-	import { CASH_TABS } from '$lib/navigation';
 	import { parsePesos } from '$lib/payroll';
 	import type { CashConcept, MovementDetail } from '$lib/server/services/cash';
 	import type { PageProps } from './$types';
@@ -100,7 +98,7 @@
 
 <Screen>
 	{#snippet header()}
-		<ScreenHeader><Tabs tabs={CASH_TABS} current="Registrar movimiento" /></ScreenHeader>
+		<ScreenHeader title="Movimiento" />
 	{/snippet}
 
 	<UnsavedChangesGuard form="movement" />

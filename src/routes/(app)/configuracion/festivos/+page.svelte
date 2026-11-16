@@ -9,10 +9,8 @@
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import Select from '$lib/components/Select.svelte';
-	import Tabs from '$lib/components/Tabs.svelte';
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import { addDays, formatLongDay, getTodaysDate } from '$lib/datetime';
-	import { SETTINGS_TABS } from '$lib/navigation';
 	import type { Holiday } from '$lib/server/services/settings';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import type { PageProps } from './$types';
@@ -177,7 +175,7 @@
 
 <Screen>
 	{#snippet header()}
-		<ScreenHeader><Tabs tabs={SETTINGS_TABS} current="Festivos" /></ScreenHeader>
+		<ScreenHeader title="Festivos" />
 	{/snippet}
 
 	<UnsavedChangesGuard form="holidays" />

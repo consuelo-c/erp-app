@@ -12,10 +12,8 @@
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
-	import Tabs from '$lib/components/Tabs.svelte';
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import { fold, formatInteger } from '$lib/format';
-	import { INVENTORY_TABS } from '$lib/navigation';
 	import type {
 		ApprovalPreview,
 		CountableProduct,
@@ -258,7 +256,7 @@
 <Screen>
 	{#snippet header()}
 		{#if data.canReview}
-			<ScreenHeader><Tabs tabs={INVENTORY_TABS} current="Conteo físico" /></ScreenHeader>
+			<ScreenHeader title="Conteos" />
 		{:else}
 			<ScreenHeader title="Conteo físico" />
 		{/if}
