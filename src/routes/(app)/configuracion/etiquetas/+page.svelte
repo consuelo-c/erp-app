@@ -139,23 +139,19 @@
 						</span>
 						<span class="meta">{contactCountText(label.contactCount)}</span>
 					</span>
-					<span class="labels__edit">
-						<IconButton
-							icon="edit"
-							label="Cambiar el nombre de {label.name}"
-							onclick={() => startRenaming(label)}
-						/>
-					</span>
+					<IconButton
+						icon="edit"
+						label="Cambiar el nombre de {label.name}"
+						onclick={() => startRenaming(label)}
+					/>
 					{#if label.isBuiltIn}
 						<span class="labels__spacer"></span>
 					{:else}
-						<span class="labels__delete">
-							<IconButton
-								icon="trash"
-								label="Eliminar {label.name}"
-								onclick={() => startDeleting(label)}
-							/>
-						</span>
+						<IconButton
+							icon="trash"
+							label="Eliminar {label.name}"
+							onclick={() => startDeleting(label)}
+						/>
 					{/if}
 				{/if}
 			</li>
@@ -225,14 +221,6 @@
 	}
 
 	.labels__name--danger {
-		color: var(--error-fg);
-	}
-
-	.labels__edit {
-		color: var(--link);
-	}
-
-	.labels__delete {
 		color: var(--error-fg);
 	}
 
