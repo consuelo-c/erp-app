@@ -4,7 +4,6 @@ import type { Role } from './server/actor';
 import type { FeeSource } from './orders';
 import type { DeductionConcept, EarningConcept } from './payroll';
 import type { CashConcept, PaymentMethod } from './server/services/cash';
-import type { ContactKind, Service } from './server/services/contacts';
 import type {
 	IncidentOutcome,
 	IncidentStatus,
@@ -137,34 +136,6 @@ export const CATEGORY_ICONS = {
 	CHAFERS_TRAYS: 'cloche',
 	DECOR: 'sparkles'
 } as const satisfies Record<Category, string>;
-
-export const SERVICE_LABELS: Record<Service, string> = {
-	TRANSPORTER: 'Transportador',
-	DECORATOR: 'Decorador',
-	CHEF: 'Chef',
-	WAITER: 'Mesero',
-	WEDDING_PLANNER: 'Wedding planner',
-	BARTENDER: 'Bartender',
-	BARISTA: 'Barista'
-};
-
-/** The Contactos chips: each service, then the contacts an employee points to. */
-export const CONTACT_KIND_LABELS: Record<ContactKind, string> = {
-	...SERVICE_LABELS,
-	EMPLOYEE: 'Empleado'
-};
-
-/** «Nadie coincide … entre los transportadores». */
-export const CONTACT_KIND_PLURAL_LABELS: Record<ContactKind, string> = {
-	TRANSPORTER: 'transportadores',
-	DECORATOR: 'decoradores',
-	CHEF: 'chefs',
-	WAITER: 'meseros',
-	WEDDING_PLANNER: 'wedding planners',
-	BARTENDER: 'bartenders',
-	BARISTA: 'baristas',
-	EMPLOYEE: 'empleados'
-};
 
 export const PUNCH_LABELS: Record<Punch, string> = {
 	morningIn: 'Inicio mañana',

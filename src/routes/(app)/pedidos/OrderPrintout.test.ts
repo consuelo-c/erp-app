@@ -61,7 +61,7 @@ beforeAll(async () => {
 	({ db, database } = createMemoryD1());
 	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
 	database.exec(
-		`insert into contacts (phone, full_name, document_id, services, created_at, created_by, updated_at, updated_by) values ('573104428890', 'Luz Marina Restrepo', '@luz', '[]', ${AUDIT});
+		`insert into contacts (phone, full_name, document_id, labels, created_at, created_by, updated_at, updated_by) values ('573104428890', 'Luz Marina Restrepo', '@luz', '[]', ${AUDIT});
 		insert into products (name, category, rental_price, total_quantity, active, created_at, created_by, updated_at, updated_by) values ('Silla Tiffany dorada', 'CHAIRS_TABLES', 2500, 500, 1, ${AUDIT})`
 	);
 	printout = await printoutWith(0);
@@ -87,7 +87,11 @@ test('received is net of «Devolución de depósito», as «Depósito recibido»
 
 test('no deposit line with none agreed, nor on a COMPLETED or CANCELLED order', async () => {
 	const agreed = await printoutWith(50000, [50000]);
-	for (const body of [sheetOf(printout), sheetOf(agreed, 'COMPLETED'), sheetOf(agreed, 'CANCELLED')]) {
+	for (const body of [
+		sheetOf(printout),
+		sheetOf(agreed, 'COMPLETED'),
+		sheetOf(agreed, 'CANCELLED')
+	]) {
 		expect(body).toContain('<span>Total</span>');
 		expect(body).not.toContain('Depósito');
 	}

@@ -18,7 +18,7 @@
 		<ScreenHeader title="Nuevo contacto" backHref={resolve('/contactos')} />
 	{/snippet}
 
-	<ContactForm contact={null} isManager={data.isManager} {form} />
+	<ContactForm contact={null} isManager={data.isManager} labels={data.labels} {form} />
 
 	<div class="screen__action">
 		<Button type="submit" form="contact">Guardar contacto</Button>

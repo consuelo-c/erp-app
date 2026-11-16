@@ -3,6 +3,7 @@
 // only inform: nothing here blocks on them.
 
 import { z } from 'zod';
+import { TRANSPORTER } from '$lib/contact-labels';
 import { addDays, getTodaysDate, getWeekStart } from '$lib/datetime';
 import { formatPesos } from '$lib/format';
 import { INVALID_WHATSAPP } from '$lib/whatsapp';
@@ -416,7 +417,7 @@ export async function resolveClient(
 	return { snapshot: { name: order.client_name, ...contact }, newClient: null };
 }
 
-// A JSON key has no foreign key: the carrier must be a contact offering TRANSPORTER. One already
+// A JSON key has no foreign key: the carrier must be a contact carrying TRANSPORTER. One already
 // on the trip keeps its snapshot, as the client does.
 async function snapshotCarrier(
 	db: D1Database,
@@ -429,9 +430,9 @@ async function snapshotCarrier(
 	return db
 		.prepare(
 			`select id, full_name as name, phone, whatsapp from contacts where id = ?
-			and exists (select 1 from json_each(contacts.services) where value = 'TRANSPORTER')`
+			and exists (select 1 from json_each(contacts.labels) where value = ?)`
 		)
-		.bind(carrierId)
+		.bind(carrierId, TRANSPORTER)
 		.first<Carrier>();
 }
 

@@ -38,7 +38,7 @@ CREATE TABLE `contacts` (
 	`whatsapp` text,
 	`full_name` text NOT NULL,
 	`document_id` text NOT NULL,
-	`services` text DEFAULT '[]' NOT NULL,
+	`labels` text DEFAULT '[]' NOT NULL,
 	`attributes` text DEFAULT '{}' NOT NULL,
 	`created_at` integer NOT NULL,
 	`created_by` text NOT NULL,

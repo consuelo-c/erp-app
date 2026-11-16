@@ -50,6 +50,29 @@ test('the help is a first draft: an intro, at least ten questions and no images'
 	expect(value).not.toContain('![');
 });
 
+test("the contacts' etiquetas are the seven services and Vetado, sorted by name", () => {
+	const { value } = database
+		.prepare("select value from settings where key = 'CONTACTS_LABELS'")
+		.get() as { value: string };
+	expect(SETTINGS.CONTACTS_LABELS.schema.parse(value)).toEqual([
+		{ key: 'BARISTA', name: 'Barista' },
+		{ key: 'BARTENDER', name: 'Bartender' },
+		{ key: 'CHEF', name: 'Chef' },
+		{ key: 'DECORATOR', name: 'Decorador' },
+		{ key: 'WAITER', name: 'Mesero' },
+		{ key: 'TRANSPORTER', name: 'Transportador' },
+		{ key: 'BANNED', name: 'Vetado' },
+		{ key: 'WEDDING_PLANNER', name: 'Wedding planner' }
+	]);
+	database.exec(
+		`update settings set value = '[{"key":"TRANSPORTER","name":"Carga"},{"key":"BANNED","name":"No"}]' where key = 'CONTACTS_LABELS'`
+	);
+	database.exec(defaults);
+	expect(
+		database.prepare("select value from settings where key = 'CONTACTS_LABELS'").get()
+	).toEqual({ value: '[{"key":"TRANSPORTER","name":"Carga"},{"key":"BANNED","name":"No"}]' });
+});
+
 test('a second run duplicates and overwrites nothing', () => {
 	database.exec("update settings set value = '99' where key = 'PAYROLL_PENSION_RATE'");
 	const before = readSettings();

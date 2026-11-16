@@ -57,7 +57,7 @@ export const events = sqliteTable(
 // The company's clients, providers and employees: one document, one row; a phone may be shared, as
 // a company's switchboard is by its branches, and so may a WhatsApp username, which is no key. Email, address, bank account and notes live in
 // `attributes` (JSON, validated with Zod). Being a client or an employee isn't stored: orders or an
-// `employees` row point here; an empty `services` means it isn't a provider.
+// `employees` row point here. `labels` holds the keys of its etiquetas, from `CONTACTS_LABELS`.
 export const contacts = sqliteTable('contacts', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
 	phone: text('phone'), // digits with country code: 573104428890; null when not given
@@ -65,7 +65,7 @@ export const contacts = sqliteTable('contacts', {
 	fullName: text('full_name').notNull(),
 	// Cédula, NIT or passport, normalized; when none is given, `@` and 8 random characters.
 	documentId: text('document_id').notNull().unique(),
-	services: text('services').notNull().default('[]'), // JSON: ["TRANSPORTER","DECORATOR"]
+	labels: text('labels').notNull().default('[]'), // JSON: ["BANNED","DECORATOR"]
 	attributes: text('attributes').notNull().default('{}'),
 	...auditColumns
 });

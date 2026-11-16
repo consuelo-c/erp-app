@@ -36,9 +36,9 @@ test('a bare list goes back to its last filters, a notice kept, until ?limpiar',
 	);
 	// Each list its own.
 	expect(redirectOf(() => rememberFilters('contactos', at('/contactos'), cookies))).toBeNull();
-	rememberFilters('contactos', at('/contactos?texto=&servicio=EMPLOYEE'), cookies);
+	rememberFilters('contactos', at('/contactos?texto=&etiqueta=EMPLOYEE'), cookies);
 	expect(redirectOf(() => rememberFilters('contactos', at('/contactos?guardado'), cookies))).toBe(
-		'/contactos?texto=&servicio=EMPLOYEE&guardado='
+		'/contactos?texto=&etiqueta=EMPLOYEE&guardado='
 	);
 
 	expect(redirectOf(() => rememberFilters('pedidos', at('/pedidos?limpiar'), cookies))).toBe(

@@ -20,7 +20,7 @@
 
 	<!-- Keyed: «Abrir contacto» moves to another contact on the same route, with a fresh form. -->
 	{#key data.contact.id}
-		<ContactForm contact={data.contact} isManager={data.isManager} {form} />
+		<ContactForm contact={data.contact} isManager={data.isManager} labels={data.labels} {form} />
 	{/key}
 
 	<div class="screen__action">

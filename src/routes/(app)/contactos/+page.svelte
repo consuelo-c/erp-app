@@ -3,32 +3,32 @@
 	import { page } from '$app/state';
 	import Badge from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
-	import Chip from '$lib/components/Chip.svelte';
+	import Field from '$lib/components/Field.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import Input from '$lib/components/Input.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
-	import { CONTACT_KIND_LABELS, CONTACT_KIND_PLURAL_LABELS, SERVICE_LABELS } from '$lib/labels';
+	import Select from '$lib/components/Select.svelte';
+	import { contactBadges, EMPLOYEE_FILTER, noMatchText } from '$lib/contact-labels';
 	import ReachLines from '../ReachLines.svelte';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
 
 	const filters = $derived(data.filters);
-	const isFiltered = $derived('' !== filters.search || undefined !== filters.service);
+	const isFiltered = $derived('' !== filters.search || undefined !== filters.label);
 	// No contact at all, as opposed to none matching: the search has nothing to narrow.
 	const isEmpty = $derived(!isFiltered && 0 === data.contacts.length);
 
-	const noneText = $derived.by(() => {
-		const { search, service } = filters;
-		if ('' === search) {
-			return `Aún no hay ningún ${service ? CONTACT_KIND_LABELS[service].toLowerCase() : 'contacto'}.`;
-		}
-		const among = service ? ` entre los ${CONTACT_KIND_PLURAL_LABELS[service]}` : '';
-		return `Nadie coincide con «${search}»${among}.`;
-	});
+	const filterOptions = $derived([{ key: EMPLOYEE_FILTER, name: 'Empleado' }, ...data.labels]);
+	const noneText = $derived(
+		noMatchText(
+			filters.search,
+			filterOptions.find(({ key }) => key === filters.label)
+		)
+	);
 	const countLabel = $derived.by(() => {
 		const count = `${data.total} ${1 === data.total ? 'contacto' : 'contactos'}`;
 		return 1 < data.pageCount ? `${count} · página ${filters.page} de ${data.pageCount}` : count;
@@ -43,14 +43,14 @@
 
 	let typing: ReturnType<typeof setTimeout> | undefined;
 
-	// The list narrows as it's typed, once the typing pauses; a service applies when picked.
+	// The list narrows as it's typed, once the typing pauses; an etiqueta applies when picked.
 	function searchSoon(event: Event & { currentTarget: HTMLInputElement }) {
 		const { form } = event.currentTarget;
 		clearTimeout(typing);
 		typing = setTimeout(() => form?.requestSubmit(), 300);
 	}
 
-	function apply(event: Event & { currentTarget: HTMLInputElement }) {
+	function apply(event: Event & { currentTarget: HTMLSelectElement }) {
 		event.currentTarget.form?.requestSubmit();
 	}
 </script>
@@ -77,7 +77,7 @@
 			<div class="empty__action">{@render newContact()}</div>
 		</div>
 	{:else}
-		<!-- Each filter is in the URL: a new search or service reloads the list from its first page. -->
+		<!-- Each filter is in the URL: a new search or etiqueta reloads the list from its first page. -->
 		<form
 			class="tools"
 			method="GET"
@@ -96,25 +96,15 @@
 					oninput={searchSoon}
 				/>
 			</label>
-			<div class="chip-row" role="group" aria-label="Servicio">
-				<Chip
-					type="radio"
-					name="servicio"
-					value=""
-					label="Todos"
-					checked={undefined === filters.service}
-					onchange={apply}
-				/>
-				{#each Object.entries(CONTACT_KIND_LABELS) as [service, label] (service)}
-					<Chip
-						type="radio"
-						name="servicio"
-						value={service}
-						{label}
-						checked={service === filters.service}
-						onchange={apply}
-					/>
-				{/each}
+			<div class="filter">
+				<Field label="Etiqueta" id="etiqueta">
+					<Select id="etiqueta" name="etiqueta" value={filters.label ?? ''} onchange={apply}>
+						<option value="">Todas</option>
+						{#each filterOptions as { key, name } (key)}
+							<option value={key}>{name}</option>
+						{/each}
+					</Select>
+				</Field>
 			</div>
 		</form>
 
@@ -126,20 +116,21 @@
 		{:else}
 			<ul class="contacts">
 				{#each data.contacts as contact (contact.id)}
+					{@const { badges, more } = contactBadges(contact, data.labels)}
 					<li class="contact">
 						<a
 							class="contact__open"
 							href={resolve('/(app)/contactos/[id]', { id: String(contact.id) })}
 						>
 							<span class="contact__name">{contact.fullName}</span>
-							{#if contact.isEmployee || contact.services.length}
+							{#if 0 < badges.length}
 								<span class="contact__badges">
-									{#if contact.isEmployee}
-										<Badge tone="info">Empleado</Badge>
-									{/if}
-									{#each contact.services as service (service)}
-										<Badge>{SERVICE_LABELS[service]}</Badge>
+									{#each badges as { text, tone }, i (i)}
+										<Badge {tone}>{text}</Badge>
 									{/each}
+									{#if 0 < more}
+										<span class="meta">+{more}</span>
+									{/if}
 								</span>
 							{/if}
 						</a>
@@ -204,7 +195,7 @@
 		padding-left: var(--input-icon-pad);
 	}
 
-	.tools .chip-row {
+	.filter {
 		margin: var(--space-6) 0 var(--space-4);
 	}
 
@@ -257,6 +248,7 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: var(--space-3);
+		align-items: center;
 	}
 
 	.contact__reach {

@@ -6,7 +6,7 @@
 	import Input from '$lib/components/Input.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
-	import { SERVICE_LABELS } from '$lib/labels';
+	import { BANNED, labelNames, type ContactLabel } from '$lib/contact-labels';
 	import { formatPhone, normalizePhone } from '$lib/phone';
 	import type { Contact } from '$lib/server/services/contacts';
 	import { formatWhatsapp } from '$lib/whatsapp';
@@ -23,10 +23,12 @@
 		/** Null for a new contact. */
 		contact: Contact | null;
 		isManager: boolean;
+		/** Every etiqueta, A–Z. */
+		labels: ContactLabel[];
 		form: Submitted | null | undefined;
 	}
 
-	let { contact, isManager, form }: Props = $props();
+	let { contact, isManager, labels, form }: Props = $props();
 
 	// After a failed save the fields come back with what was typed.
 	const value = (name: string, saved: string | null | undefined) =>
@@ -38,9 +40,14 @@
 		value('whatsapp', contact?.whatsapp ? formatWhatsapp(contact.whatsapp) : null)
 	);
 
-	const chosen = $derived(
-		Array.isArray(form?.values.services) ? form.values.services : (contact?.services ?? [])
+	const chosen: string[] = $derived(
+		Array.isArray(form?.values.labels) ? form.values.labels : (contact?.labels ?? [])
 	);
+	// Filled down each column, A–Z: as many rows as the longest column holds.
+	const labelRows = $derived({
+		phone: Math.ceil(labels.length / 2),
+		desktop: Math.ceil(labels.length / 3)
+	});
 
 	// For Sales, a set account is the manager's to change, and so is a real ID number: it's the
 	// contact's key. A locked field still posts its saved value: the service rejects a save that
@@ -177,25 +184,32 @@
 		{/if}
 	</Field>
 	<Field
-		label="Servicios"
-		id="services"
-		hint={isManager ? 'Elige los que presta. Sin servicios es un cliente.' : lockedHint}
+		label="Etiquetas"
+		id="labels"
+		hint={isManager ? undefined : lockedHint}
+		error={errorOf('labels')}
 	>
 		{#if isManager}
-			<div class="chip-row services" id="services">
-				{#each Object.entries(SERVICE_LABELS) as [service, label] (service)}
-					<Chip name="services" value={service} {label} checked={chosen.includes(service)} />
+			<div
+				class="labels"
+				id="labels"
+				style:--rows-phone={labelRows.phone}
+				style:--rows-desktop={labelRows.desktop}
+			>
+				{#each labels as { key, name } (key)}
+					<Chip
+						name="labels"
+						value={key}
+						label={name}
+						tone={BANNED === key ? 'error' : undefined}
+						checked={chosen.includes(key)}
+					/>
 				{/each}
 			</div>
 		{:else}
-			{@render locked(
-				'services',
-				chosen
-					.map((service) => SERVICE_LABELS[service as Contact['services'][number]])
-					.join(' · ') || 'Ninguno'
-			)}
-			{#each chosen as service (service)}
-				<input type="hidden" name="services" value={service} />
+			{@render locked('labels', labelNames(chosen, labels).join(' · ') || 'Ninguna')}
+			{#each chosen as key (key)}
+				<input type="hidden" name="labels" value={key} />
 			{/each}
 		{/if}
 	</Field>
@@ -241,8 +255,26 @@
 		gap: var(--space-5);
 	}
 
-	.services {
-		flex-wrap: wrap;
+	/* Columns, not a wrapping row, so one etiqueta is easy to find among twenty. */
+	.labels {
+		display: grid;
+		grid-template-rows: repeat(var(--rows-phone), auto);
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		grid-auto-flow: column;
+		gap: var(--space-4);
+	}
+
+	.labels :global(.chip) {
+		width: 100%;
+		min-height: 44px;
+		white-space: normal;
+	}
+
+	@container (width >= 1024px) {
+		.labels {
+			grid-template-rows: repeat(var(--rows-desktop), auto);
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+		}
 	}
 
 	textarea,

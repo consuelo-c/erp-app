@@ -22,7 +22,7 @@ let database: DatabaseSync;
 beforeEach(() => {
 	({ db, database } = createMemoryD1());
 	const contact = database.prepare(
-		`insert into contacts (phone, full_name, document_id, services, created_at, created_by, updated_at, updated_by) values (?, ?, ?, ?, ${AUDIT})`
+		`insert into contacts (phone, full_name, document_id, labels, created_at, created_by, updated_at, updated_by) values (?, ?, ?, ?, ${AUDIT})`
 	);
 	contact.run('573104428890', 'Luz Marina Restrepo', '@luz', '[]');
 	contact.run('573119085512', 'Wilson Muñoz', '@wilson', '["TRANSPORTER"]');
@@ -260,7 +260,7 @@ test('the phone however it is typed, compared whole against the order, on its ev
 test("a username, with or without its @ and in any case, against the order's own", async () => {
 	database
 		.prepare(
-			`insert into contacts (phone, whatsapp, full_name, document_id, services, created_at, created_by, updated_at, updated_by) values (null, 'MayC47', 'Mayra Castaño', '@9TNB5WQE', '[]', ${AUDIT})`
+			`insert into contacts (phone, whatsapp, full_name, document_id, labels, created_at, created_by, updated_at, updated_by) values (null, 'MayC47', 'Mayra Castaño', '@9TNB5WQE', '[]', ${AUDIT})`
 		)
 		.run();
 	const token = await create('CONFIRMED', {

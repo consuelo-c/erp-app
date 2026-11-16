@@ -1,4 +1,5 @@
 import { isHttpError } from '@sveltejs/kit';
+import { readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import type { Actor, Role } from '../actor';
@@ -14,7 +15,6 @@ import {
 	listTransporters,
 	newClientStatements,
 	searchClients,
-	servicesSchema,
 	updateContact
 } from './contacts';
 import { createEmployee } from './employees';
@@ -31,6 +31,7 @@ let database: DatabaseSync;
 
 beforeEach(() => {
 	({ db, database } = createMemoryD1());
+	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
 });
 
 const luzMarina = { phone: '310 442 8890', full_name: 'Luz Marina Restrepo' };
@@ -67,11 +68,13 @@ test('attributes take only their five keys: {} is valid, an unknown key is rejec
 	expect(contactAttributesSchema.safeParse({ notes: '' }).success).toBe(false);
 });
 
-test('services: no duplicates, only the fixed list, [] is valid', () => {
-	expect(servicesSchema.safeParse([]).success).toBe(true);
-	expect(servicesSchema.safeParse(['TRANSPORTER', 'WEDDING_PLANNER']).success).toBe(true);
-	expect(servicesSchema.safeParse(['CHEF', 'CHEF']).success).toBe(false);
-	expect(servicesSchema.safeParse(['PHOTOGRAPHER']).success).toBe(false);
+test('labels: a key not in CONTACTS_LABELS or a repeated one is refused on its field', async () => {
+	for (const labels of [['PHOTOGRAPHER'], ['CHEF', 'CHEF']]) {
+		expect(
+			await createContact(db, { ...luzMarina, document_id: '1036452118', labels }, manager)
+		).toMatchObject({ ok: false, errors: { labels: expect.any(String) } });
+	}
+	expect(database.prepare('select count(*) as count from contacts').get()).toEqual({ count: 0 });
 });
 
 test('a contact saves its phone normalized and its optional fields in attributes', async () => {
@@ -81,7 +84,7 @@ test('a contact saves its phone normalized and its optional fields in attributes
 		email: 'luzmarina.r@gmail.com',
 		address_1: 'Cra 43A #18-95',
 		address_2: '',
-		services: ['DECORATOR']
+		labels: ['DECORATOR', 'BANNED']
 	});
 	expect(await getContact(db, id, sales)).toEqual({
 		id,
@@ -89,7 +92,7 @@ test('a contact saves its phone normalized and its optional fields in attributes
 		whatsapp: null,
 		fullName: 'Luz Marina Restrepo',
 		documentId: '1036452118',
-		services: ['DECORATOR'],
+		labels: ['BANNED', 'DECORATOR'],
 		email: 'luzmarina.r@gmail.com',
 		address1: 'Cra 43A #18-95',
 		address2: null,
@@ -305,10 +308,10 @@ test('once real, only Manager and Admin change the document: Sales gets a 403', 
 	expect((await getContact(db, id, manager))?.documentId).toBe('9003125541');
 });
 
-test('search by name or by three digits of the phone, with the service filter, a page at a time', async () => {
+test('search by name or by three digits of the phone, with the etiqueta filter, a page at a time', async () => {
 	await create({ phone: '300 771 2043', full_name: 'Jorge Iván Betancur' });
-	await create({ ...luzMarina, services: ['DECORATOR'] });
-	await create({ phone: '311 908 5512', full_name: 'Wilson Muñoz', services: ['TRANSPORTER'] });
+	await create({ ...luzMarina, labels: ['DECORATOR'] });
+	await create({ phone: '311 908 5512', full_name: 'Wilson Muñoz', labels: ['TRANSPORTER'] });
 	const names = async (input: Record<string, unknown>) =>
 		(await listContacts(db, input, sales)).contacts.map((contact) => contact.fullName);
 
@@ -317,9 +320,11 @@ test('search by name or by three digits of the phone, with the service filter, a
 	expect(await names({ search: 'réstrepo  LUZ' })).toEqual(['Luz Marina Restrepo']);
 	expect(await names({ search: '442 8890' })).toEqual(['Luz Marina Restrepo']);
 	expect(await names({ search: '44' })).toHaveLength(3);
-	expect(await names({ service: 'TRANSPORTER' })).toEqual(['Wilson Muñoz']);
-	expect(await names({ service: 'TRANSPORTER', search: 'luz' })).toEqual([]);
-	expect(await names({ service: 'BOGUS', page: 'x' })).toHaveLength(3);
+	expect(await names({ label: 'TRANSPORTER' })).toEqual(['Wilson Muñoz']);
+	expect(await names({ label: 'TRANSPORTER', search: 'luz' })).toEqual([]);
+	expect(await names({ label: 'BOGUS', page: 'x' })).toHaveLength(3);
+	// The search never matches an etiqueta's name.
+	expect(await names({ search: 'Decorador' })).toEqual([]);
 
 	for (let i = 0; i < 19; i++) {
 		await create({ phone: `320 000 00${10 + i}`, full_name: `Zoila ${i}` });
@@ -337,13 +342,14 @@ const withAccount = {
 	...luzMarina,
 	document_id: '1036452118',
 	bank_account: 'Nequi 310 442 8890',
-	services: ['DECORATOR']
+	labels: ['DECORATOR']
 };
 
-test('Sales is rejected changing services, a set bank account or the document', async () => {
+test('Sales is rejected changing etiquetas, a set bank account or the document', async () => {
 	const id = await create(withAccount);
 	for (const change of [
-		{ services: [] },
+		{ labels: [] },
+		{ labels: ['DECORATOR', 'BANNED'] },
 		{ bank_account: 'Bancolombia 123' },
 		{ bank_account: '' },
 		{ document_id: '71384902' }
@@ -363,7 +369,7 @@ test("an employee's document is Manager's and Admin's, and never left empty", as
 	expect(await getContact(db, id, sales)).toMatchObject({ isEmployee: true });
 	expect((await listContacts(db, {}, sales)).contacts).toMatchObject([{ isEmployee: true }]);
 	await create({ phone: '300 771 2043', full_name: 'Jorge Iván Betancur' });
-	expect((await listContacts(db, { service: 'EMPLOYEE' }, sales)).contacts).toMatchObject([
+	expect((await listContacts(db, { label: 'EMPLOYEE' }, sales)).contacts).toMatchObject([
 		{ fullName: 'Ana Pérez' }
 	]);
 	expect(await rejection(updateContact(db, { ...ana, document_id: '1', id }, sales))).toBe(403);
@@ -392,6 +398,32 @@ test('an edit logs only the changed attributes key, old and new', async () => {
 			{ 'attributes.bank_account': 'Daviplata 1' }
 		]
 	]);
+});
+
+test("an edit logs the etiquetas' keys, old and new, and the order picked changes nothing", async () => {
+	const id = await create(withAccount);
+	await updateContact(db, { ...withAccount, labels: ['DECORATOR', 'BANNED'], id }, manager);
+	await updateContact(db, { ...withAccount, labels: ['BANNED', 'DECORATOR'], id }, manager);
+	const edit = database.prepare("select before, after from events where action = 'EDITED'").all();
+	expect(
+		edit.map(({ before, after }) => [JSON.parse(String(before)), JSON.parse(String(after))])
+	).toEqual([[{ labels: '["DECORATOR"]' }, { labels: '["BANNED","DECORATOR"]' }]]);
+});
+
+test('an etiqueta not in CONTACTS_LABELS, or an old service link, reads as every contact', async () => {
+	await create({ ...luzMarina, labels: ['DECORATOR'] });
+	await create({ phone: '311 908 5512', full_name: 'Wilson Muñoz' });
+	for (const input of [{ label: 'NO_EXISTE' }, { service: 'DECORATOR' }]) {
+		const page = await listContacts(db, input, sales);
+		expect(page.contacts).toHaveLength(2);
+		expect(page.filters.label).toBeUndefined();
+	}
+	const decorators = await listContacts(db, { label: 'DECORATOR' }, sales);
+	expect(decorators).toMatchObject({
+		contacts: [{ fullName: 'Luz Marina Restrepo', labels: ['DECORATOR'] }],
+		filters: { label: 'DECORATOR' }
+	});
+	expect(decorators.labels.map(({ name }) => name)).toContain('Vetado');
 });
 
 test('an edit that changes nothing writes nothing', async () => {
@@ -484,14 +516,14 @@ test('the transporters are the contacts with TRANSPORTER, by name, with phone an
 	await create({
 		whatsapp: '@WilsonMudanzas',
 		full_name: 'Wilson Muñoz',
-		services: ['TRANSPORTER']
+		labels: ['TRANSPORTER']
 	});
 	await create({
 		phone: '604 444 1290',
 		full_name: 'Transportes La 80',
-		services: ['TRANSPORTER', 'DECORATOR']
+		labels: ['TRANSPORTER', 'DECORATOR']
 	});
-	await create({ phone: '312 555 7788', full_name: 'Paula Andrea Ríos', services: ['DECORATOR'] });
+	await create({ phone: '312 555 7788', full_name: 'Paula Andrea Ríos', labels: ['DECORATOR'] });
 	await create(luzMarina);
 	expect((await listTransporters(db, sales)).map(({ fullName }) => fullName)).toEqual([
 		'Transportes La 80',
