@@ -46,7 +46,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 
-	// No tone is the neutral grey (Inactivo, Retirado, a contact's services); `info` marks an employee,
+	// No tone is the neutral grey (Inactivo, Retirado, a contact's etiquetas); `info` marks an employee,
 	// `error` an order «Con novedad», `warning` a stale count item, and each status tone an order's state.
 	interface Props {
 		tone?: 'success' | 'info' | 'warning' | 'error' | StatusTone;

@@ -32,11 +32,11 @@ WHERE NOT EXISTS (SELECT 1 FROM products WHERE name = 'Silla Rimax');
 
 -- A client who gave no document gets a fixed automatic one, `@` and 8 Crockford base32 symbols, as
 -- the app would make up; fixed so a second run finds it.
-INSERT INTO contacts (phone, full_name, document_id, services, attributes, created_at, created_by, updated_at, updated_by)
+INSERT INTO contacts (phone, full_name, document_id, labels, attributes, created_at, created_by, updated_at, updated_by)
 SELECT column1, column2, column3, column4, column5, unixepoch(), 'system', unixepoch(), 'system'
 FROM (VALUES
 	('573104428890', 'Luz Marina Restrepo', '1036452118', '[]', '{"email":"luzmarina.r@gmail.com","address_1":"Cra 43A #18-95, El Poblado","address_2":"Salón Social Torre Verde, piso 2","notes":"Prefiere que lo llamen después de las 2"}'),
-	('573007712043', 'Jorge Iván Betancur', '@7Q2M9KXA', '[]', '{}'),
+	('573007712043', 'Jorge Iván Betancur', '@7Q2M9KXA', '["BANNED"]', '{}'),
 	('573119085512', 'Wilson Muñoz', '98552017', '["TRANSPORTER"]', '{"bank_account":"Nequi 311 908 5512"}'),
 	('573125557788', 'Paula Andrea Ríos', '@3HWD8RNE', '["DECORATOR"]', '{"notes":"Arreglos florales y centros de mesa"}'),
 	('13055550142', 'Emily Carter', '@C5VB0PZT', '[]', '{"email":"emily.carter@example.com"}'),
@@ -50,7 +50,7 @@ FROM (VALUES
 	('573122268804', 'Hernán Darío Zapata', '15387620', '["TRANSPORTER"]', '{"bank_account":"Bancolombia ahorros 245-118903-41"}'),
 	('573137724518', 'Sebastián Mejía', '1017234590', '["WAITER"]', '{"bank_account":"Nequi 313 772 4518","notes":"Trae su propio uniforme"}'),
 	('573158841203', 'Valentina Arango', '1037619844', '["WEDDING_PLANNER"]', '{"email":"valentina@arangoeventos.co"}'),
-	('573176630492', 'Mateo Londoño', '1020456781', '["BARTENDER","BARISTA"]', '{"notes":"Coctelería y estación de café"}'),
+	('573176630492', 'Mateo Londoño', '1020456781', '["BARISTA","BARTENDER"]', '{"notes":"Coctelería y estación de café"}'),
 	('573189952074', 'Natalia Cardona', '43987125', '["BARISTA"]', '{}'),
 	('576045765100', 'Postobón S.A.', '8909039395', '[]', '{}')
 ) AS sample
@@ -59,7 +59,7 @@ ON CONFLICT (document_id) DO NOTHING;
 
 -- Two clients who wrote from WhatsApp: Mayra hid her number behind a username, so she has only that
 -- and an automatic document, as «Cliente nuevo» leaves it; Daniela gave both.
-INSERT INTO contacts (phone, whatsapp, full_name, document_id, services, attributes, created_at, created_by, updated_at, updated_by)
+INSERT INTO contacts (phone, whatsapp, full_name, document_id, labels, attributes, created_at, created_by, updated_at, updated_by)
 SELECT column1, column2, column3, column4, '[]', '{}', unixepoch(), 'system', unixepoch(), 'system'
 FROM (VALUES
 	(NULL, 'MayC47', 'Mayra Castaño', '@9TNB5WQE'),
@@ -70,7 +70,7 @@ ON CONFLICT (document_id) DO NOTHING;
 
 -- Five employees, each on its own contact with a real ID number: four still employed, one a login
 -- each below, and one who left in June, with no login and no punches.
-INSERT INTO contacts (phone, full_name, document_id, services, attributes, created_at, created_by, updated_at, updated_by)
+INSERT INTO contacts (phone, full_name, document_id, labels, attributes, created_at, created_by, updated_at, updated_by)
 SELECT column1, column2, column3, '[]', '{}', unixepoch(), 'system', unixepoch(), 'system'
 FROM (VALUES
 	('573158840271', 'Gloria Patricia Arango', '43562781'),

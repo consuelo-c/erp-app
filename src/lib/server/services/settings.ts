@@ -1,4 +1,5 @@
-// System settings, and PAYROLL_HOLIDAYS, HELP_FAQ and TERMS_CONDITIONS through their own editors.
+// System settings, and PAYROLL_HOLIDAYS, HELP_FAQ, TERMS_CONDITIONS and CONTACTS_LABELS through their
+// own editors.
 // One current value per key; each changed key is an `EDITED` event carrying the key in `entity_key`.
 
 import { z } from 'zod';
@@ -17,7 +18,12 @@ import { auditedUpdate } from '../audit';
 // A mistake here throws off all of payroll: only the ones who settle it edit settings.
 const EDITS_SETTINGS = ['ADMIN', 'MANAGER'] as const;
 
-const OWN_EDITOR_KEYS = ['PAYROLL_HOLIDAYS', 'HELP_FAQ', 'TERMS_CONDITIONS'] as const;
+const OWN_EDITOR_KEYS = [
+	'PAYROLL_HOLIDAYS',
+	'HELP_FAQ',
+	'TERMS_CONDITIONS',
+	'CONTACTS_LABELS'
+] as const;
 
 export type SystemSettingKey = Exclude<SettingKey, (typeof OWN_EDITOR_KEYS)[number]>;
 

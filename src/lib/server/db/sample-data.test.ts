@@ -7,7 +7,8 @@ import { calculateOrderTotals, receivableLine } from '$lib/orders';
 import { createMemoryD1 } from './memory-d1';
 import { openWeek } from '../services/payroll';
 import { movementSchema } from '../services/cash';
-import { contactAttributesSchema, isAutoDocument, servicesSchema } from '../services/contacts';
+import { SETTINGS } from '$lib/settings';
+import { contactAttributesSchema, isAutoDocument } from '../services/contacts';
 import { employeeAttributesSchema } from '../services/employees';
 import { inventoryItemsSchema, listCounts } from '../services/inventory';
 import {
@@ -81,15 +82,15 @@ test('the catalog products the orders use get stock', () => {
 	]);
 });
 
-test('loads clients, two transporters, a decorator, one of each newer service and a client with a US number', () => {
+test('loads clients, two transporters, a decorator, one banned, the other etiquetas and a US number', () => {
 	const contacts = database
 		.prepare(
 			'select * from contacts where id not in (select contact_id from employees) order by id'
 		)
 		.all();
-	expect(contacts.map((contact) => [contact.full_name, contact.phone, contact.services])).toEqual([
+	expect(contacts.map((contact) => [contact.full_name, contact.phone, contact.labels])).toEqual([
 		['Luz Marina Restrepo', '573104428890', '[]'],
-		['Jorge Iván Betancur', '573007712043', '[]'],
+		['Jorge Iván Betancur', '573007712043', '["BANNED"]'],
 		['Wilson Muñoz', '573119085512', '["TRANSPORTER"]'],
 		['Paula Andrea Ríos', '573125557788', '["DECORATOR"]'],
 		['Emily Carter', '13055550142', '[]'],
@@ -103,14 +104,23 @@ test('loads clients, two transporters, a decorator, one of each newer service an
 		['Hernán Darío Zapata', '573122268804', '["TRANSPORTER"]'],
 		['Sebastián Mejía', '573137724518', '["WAITER"]'],
 		['Valentina Arango', '573158841203', '["WEDDING_PLANNER"]'],
-		['Mateo Londoño', '573176630492', '["BARTENDER","BARISTA"]'],
+		['Mateo Londoño', '573176630492', '["BARISTA","BARTENDER"]'],
 		['Natalia Cardona', '573189952074', '["BARISTA"]'],
 		['Postobón S.A.', '576045765100', '[]'],
 		['Mayra Castaño', null, '[]'],
 		['Daniela Ospina', '573014456720', '[]']
 	]);
+	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
+	const setting = database
+		.prepare("select value from settings where key = 'CONTACTS_LABELS'")
+		.get();
+	const known = SETTINGS.CONTACTS_LABELS.schema.parse(setting?.value).map(({ key }) => key);
 	for (const contact of contacts) {
-		expect(servicesSchema.safeParse(JSON.parse(String(contact.services))).success).toBe(true);
+		const labels = JSON.parse(String(contact.labels)) as string[];
+		expect(
+			labels.every((key) => known.includes(key)),
+			String(contact.full_name)
+		).toBe(true);
 		const attributes = JSON.parse(String(contact.attributes));
 		expect(contactAttributesSchema.safeParse(attributes).success, String(contact.full_name)).toBe(
 			true
@@ -328,8 +338,8 @@ test('every order passes the Zod schemas, points to real rows and follows the to
 			.get(Number(order.client_id));
 		expect(client?.full_name).toBe(parseOrder(order).client.name);
 		for (const carrier of [delivery.carrier, pickup.carrier].filter((each) => null !== each)) {
-			const row = database.prepare('select services from contacts where id = ?').get(carrier.id);
-			expect(row?.services).toBe('["TRANSPORTER"]');
+			const row = database.prepare('select labels from contacts where id = ?').get(carrier.id);
+			expect(row?.labels).toBe('["TRANSPORTER"]');
 		}
 		for (const item of items) {
 			const product = database
@@ -518,7 +528,12 @@ test("Nº 4795 bills Postobón's cancelled #1073 alone, paid: «Anulada», and #
 test("Nº 4796 bills Postobón's CONFIRMED #1074 alone, with its advance paid on the order", async () => {
 	const db = openSeededD1();
 	const receivable = await getReceivableDetail(db, 4796, manager);
-	expect(receivable).toMatchObject({ total: 1115000, paid: 300000, balance: 815000, isVoid: false });
+	expect(receivable).toMatchObject({
+		total: 1115000,
+		paid: 300000,
+		balance: 815000,
+		isVoid: false
+	});
 	expect(receivable?.orders.map((order) => order.id)).toEqual([1074]);
 	const printout = await getReceivablePrintout(db, 4796, manager);
 	expect(printout).toMatchObject({ paid: 300000, balance: 815000 });

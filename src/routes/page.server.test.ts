@@ -22,7 +22,7 @@ let siteverify: ReturnType<typeof vi.fn>;
 beforeEach(() => {
 	({ db, database } = createMemoryD1());
 	database.exec(
-		`insert into contacts (phone, full_name, document_id, services, created_at, created_by, updated_at, updated_by) values ('573104428890', 'Luz Marina Restrepo', '@luz', '[]', ${AUDIT});
+		`insert into contacts (phone, full_name, document_id, labels, created_at, created_by, updated_at, updated_by) values ('573104428890', 'Luz Marina Restrepo', '@luz', '[]', ${AUDIT});
 		insert into products (name, category, rental_price, total_quantity, active, created_at, created_by, updated_at, updated_by) values ('Silla Tiffany dorada', 'CHAIRS_TABLES', 2500, 500, 1, ${AUDIT});
 		insert into settings (key, value, created_at, created_by, updated_at, updated_by) values ('COMPANY_WHATSAPP', '573105550142', ${AUDIT}), ('TERMS_CONDITIONS', '', ${AUDIT})`
 	);
@@ -147,7 +147,7 @@ test('text both helpers reject is a field error, and no query', async () => {
 
 test("a client with only a username finds the order with it; a phone still finds Luz Marina's", async () => {
 	database.exec(
-		`insert into contacts (phone, whatsapp, full_name, document_id, services, created_at, created_by, updated_at, updated_by) values (null, 'MayC47', 'Mayra Castaño', '@9TNB5WQE', '[]', ${AUDIT})`
+		`insert into contacts (phone, whatsapp, full_name, document_id, labels, created_at, created_by, updated_at, updated_by) values (null, 'MayC47', 'Mayra Castaño', '@9TNB5WQE', '[]', ${AUDIT})`
 	);
 	const luz = await create('CONFIRMED');
 	const mayra = await create('CONFIRMED', '2026-10-31', 2);

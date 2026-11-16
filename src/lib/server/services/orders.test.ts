@@ -40,12 +40,12 @@ let database: DatabaseSync;
 
 const AUDIT = "0, 'admin', 0, 'admin'";
 
-function insertContact(fullName: string, phone: string, services: string[] = []) {
+function insertContact(fullName: string, phone: string, labels: string[] = []) {
 	database
 		.prepare(
-			`insert into contacts (phone, full_name, document_id, services, created_at, created_by, updated_at, updated_by) values (?, ?, ?, ?, ${AUDIT})`
+			`insert into contacts (phone, full_name, document_id, labels, created_at, created_by, updated_at, updated_by) values (?, ?, ?, ?, ${AUDIT})`
 		)
-		.run(phone, fullName, `@${phone}`, JSON.stringify(services));
+		.run(phone, fullName, `@${phone}`, JSON.stringify(labels));
 }
 
 function insertProduct(name: string, rentalPrice: number, active = 1) {
@@ -1182,9 +1182,7 @@ test("the order's name is the one typed: it may say more than the contact, which
 
 function contactsByPhone(phone: string) {
 	return database
-		.prepare(
-			'select id, full_name, document_id, services, attributes from contacts where phone = ?'
-		)
+		.prepare('select id, full_name, document_id, labels, attributes from contacts where phone = ?')
 		.all(phone);
 }
 
@@ -1199,7 +1197,7 @@ test('«Cliente nuevo» makes the contact and the order in one batch, linked by 
 	const [contact] = contactsByPhone('573152207781');
 	expect(contact).toMatchObject({
 		full_name: 'Gloria Patricia Henao',
-		services: '[]',
+		labels: '[]',
 		attributes: '{}'
 	});
 	expect(String(contact.document_id)).toMatch(/^@[0-9A-HJKMNP-TV-Z]{8}$/);
@@ -1334,7 +1332,7 @@ test("the snapshots' Zod schemas require both the phone and the username, each a
 
 test("picking an external carrier freezes his username with his phone, null when he hasn't one", async () => {
 	database.exec(
-		`insert into contacts (phone, whatsapp, full_name, document_id, services, created_at, created_by, updated_at, updated_by)
+		`insert into contacts (phone, whatsapp, full_name, document_id, labels, created_at, created_by, updated_at, updated_by)
 		values (null, 'WilsonMudanzas', 'Wilson Mudanzas', '71555444', '["TRANSPORTER"]', ${AUDIT})`
 	);
 	const carrierId = Number(

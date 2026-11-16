@@ -3,12 +3,17 @@
 
 	// A label around a native checkbox or radio, so a form posts the selection without JS. A radio's
 	// `checked` isn't bound (a group binds across inputs): the caller sets it and listens to `onchange`.
-	type Props = HTMLInputAttributes & { label: string; type?: 'checkbox' | 'radio' };
+	// `error` is the danger tone, Vetado's: red text and border, a red fill when on.
+	type Props = HTMLInputAttributes & {
+		label: string;
+		type?: 'checkbox' | 'radio';
+		tone?: 'error';
+	};
 
-	let { label, type = 'checkbox', checked = $bindable(false), ...rest }: Props = $props();
+	let { label, type = 'checkbox', tone, checked = $bindable(false), ...rest }: Props = $props();
 </script>
 
-<label class="chip">
+<label class={['chip', tone && `chip--${tone}`]}>
 	{#if 'radio' === type}
 		<input {...rest} type="radio" {checked} />{label}
 	{:else}
@@ -41,6 +46,16 @@
 		color: var(--neutral-0);
 		background: var(--neutral-800);
 		border-color: var(--neutral-800);
+	}
+
+	.chip--error {
+		color: var(--error-fg);
+		border-color: var(--error-fg);
+	}
+
+	.chip--error:has(input:checked) {
+		background: var(--error-fg);
+		border-color: var(--error-fg);
 	}
 
 	.chip:has(input:focus-visible) {

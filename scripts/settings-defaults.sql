@@ -1,7 +1,8 @@
--- Default settings, 2026 and 2027 Colombian holidays and the help's first draft included. Not sample data: production needs
--- them too. deploy.yml applies this file on every deploy, and `npm run db:seed` loads it into the
--- local D1. Idempotent: an existing key is left as is, so an edit made in the app survives every
--- deploy. Writes no events row and creates no logins (phase 3's Worker creates admin).
+-- Default settings, 2026 and 2027 Colombian holidays, the contacts' etiquetas and the help's first
+-- draft included. Not sample data: production needs them too. deploy.yml applies this file on
+-- every deploy, and `npm run db:seed` loads it into the local D1. Idempotent: an existing key is
+-- left as is, so an edit made in the app survives every deploy. Writes no events row and creates
+-- no logins (phase 3's Worker creates admin).
 -- Every value must pass its Zod schema in src/lib/settings.ts; settings-defaults.test.ts checks it.
 INSERT INTO settings (key, value, created_at, created_by, updated_at, updated_by)
 SELECT column1, column2, unixepoch(), 'system', unixepoch(), 'system'
@@ -26,6 +27,16 @@ FROM (VALUES
 	('PAYROLL_NIGHT_SURCHARGE_FACTOR', '35'),
 	('PAYROLL_PENSION_RATE', '4'),
 	('PAYROLL_HEALTH_RATE', '4'),
+	('CONTACTS_LABELS', json('[
+		{"key": "BARISTA", "name": "Barista"},
+		{"key": "BARTENDER", "name": "Bartender"},
+		{"key": "CHEF", "name": "Chef"},
+		{"key": "DECORATOR", "name": "Decorador"},
+		{"key": "WAITER", "name": "Mesero"},
+		{"key": "TRANSPORTER", "name": "Transportador"},
+		{"key": "BANNED", "name": "Vetado"},
+		{"key": "WEDDING_PLANNER", "name": "Wedding planner"}
+	]')),
 	('PAYROLL_HOLIDAYS', json('[
 		{"date": "2026-01-01", "label": "Año Nuevo"},
 		{"date": "2026-01-12", "label": "Día de los Reyes Magos"},

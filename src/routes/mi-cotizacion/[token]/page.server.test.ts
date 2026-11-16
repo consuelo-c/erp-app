@@ -17,7 +17,7 @@ let database: DatabaseSync;
 beforeEach(() => {
 	({ db, database } = createMemoryD1());
 	database.exec(
-		`insert into contacts (phone, full_name, document_id, services, created_at, created_by, updated_at, updated_by) values ('576045765100', 'Postobón S.A.', '8909039395', '[]', ${AUDIT});
+		`insert into contacts (phone, full_name, document_id, labels, created_at, created_by, updated_at, updated_by) values ('576045765100', 'Postobón S.A.', '8909039395', '[]', ${AUDIT});
 		insert into settings (key, value, created_at, created_by, updated_at, updated_by) values ('COMPANY_WHATSAPP', '573105550142', ${AUDIT}), ('TERMS_CONDITIONS', '## Depósito', ${AUDIT})`
 	);
 	// Wednesday 28 October 2026 in Bogotá.

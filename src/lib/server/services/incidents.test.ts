@@ -28,7 +28,7 @@ beforeEach(() => {
 	({ db, database } = createMemoryD1());
 	database
 		.prepare(
-			`insert into contacts (phone, full_name, document_id, services, created_at, created_by, updated_at, updated_by) values ('573104428890', 'Luz Marina Restrepo', '@1', '[]', ${AUDIT})`
+			`insert into contacts (phone, full_name, document_id, labels, created_at, created_by, updated_at, updated_by) values ('573104428890', 'Luz Marina Restrepo', '@1', '[]', ${AUDIT})`
 		)
 		.run();
 	for (const name of ['Silla Tiffany dorada', 'Mesa redonda 10 puestos', 'Mantel blanco']) {

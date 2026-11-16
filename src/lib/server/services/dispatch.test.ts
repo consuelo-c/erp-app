@@ -19,7 +19,7 @@ let database: DatabaseSync;
 beforeEach(() => {
 	({ db, database } = createMemoryD1());
 	const contact = database.prepare(
-		`insert into contacts (phone, full_name, document_id, services, created_at, created_by, updated_at, updated_by) values (?, ?, ?, ?, ${AUDIT})`
+		`insert into contacts (phone, full_name, document_id, labels, created_at, created_by, updated_at, updated_by) values (?, ?, ?, ?, ${AUDIT})`
 	);
 	contact.run('573104428890', 'Luz Marina Restrepo', '@luz', '[]');
 	contact.run('573119085512', 'Wilson Muñoz', '@wilson', '["TRANSPORTER"]');

@@ -213,8 +213,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "services": {
-          "name": "services",
+        "labels": {
+          "name": "labels",
           "type": "text",
           "primaryKey": false,
           "notNull": true,

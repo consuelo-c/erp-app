@@ -12,7 +12,7 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 	}
 	const input = {
 		search: url.searchParams.get('texto') ?? undefined,
-		service: url.searchParams.get('servicio') ?? undefined,
+		label: url.searchParams.get('etiqueta') ?? undefined,
 		page: url.searchParams.get('pagina') ?? undefined
 	};
 	return listContacts(platform.env.DB, input, locals.user);

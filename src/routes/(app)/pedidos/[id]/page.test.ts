@@ -49,7 +49,7 @@ beforeEach(() => {
 	({ db, database } = createMemoryD1());
 	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
 	database.exec(
-		`insert into contacts (phone, full_name, document_id, services, created_at, created_by, updated_at, updated_by) values ('573104428890', 'Luz Marina Restrepo', '@573104428890', '[]', ${AUDIT});
+		`insert into contacts (phone, full_name, document_id, labels, created_at, created_by, updated_at, updated_by) values ('573104428890', 'Luz Marina Restrepo', '@573104428890', '[]', ${AUDIT});
 		insert into products (name, category, rental_price, total_quantity, active, created_at, created_by, updated_at, updated_by) values ('Silla Tiffany dorada', 'CHAIRS_TABLES', 2500, 500, 1, ${AUDIT})`
 	);
 });
@@ -64,7 +64,11 @@ async function newOrder(overrides: object = {}): Promise<number> {
 
 async function detailAt(id: number, query: string): Promise<string> {
 	state.page.url = new URL(`http://localhost/pedidos/${id}${query}`);
-	const event = { locals: { user: sales }, params: { id: String(id) }, platform: { env: { DB: db } } };
+	const event = {
+		locals: { user: sales },
+		params: { id: String(id) },
+		platform: { env: { DB: db } }
+	};
 	const data = await load(event as never);
 	return render(Page, { props: { data, form: null } as never }).body;
 }
@@ -139,7 +143,10 @@ test('«Convertir en pedido» › «Guardar pedido» lands on the new order with
 test('«Extender pedido» lands on the extension with `guardado=nuevo`', async () => {
 	const parent = await newOrder();
 	database.exec(`update orders set status = 'DELIVERED' where id = ${parent}`);
-	const post = { ...postOf({ ...orderInput, pickup_date: '2026-08-20' }), params: { id: String(parent) } };
+	const post = {
+		...postOf({ ...orderInput, pickup_date: '2026-08-20' }),
+		params: { id: String(parent) }
+	};
 	const location = await locationAfter(() => extensionActions.default(post as never));
 	expect(location).toMatch(/^\/pedidos\/\d+\?guardado=nuevo$/);
 	expect(location).not.toBe(`/pedidos/${parent}?guardado=nuevo`);

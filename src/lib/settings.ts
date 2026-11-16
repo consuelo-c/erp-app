@@ -1,7 +1,8 @@
 import { z } from 'zod';
+import { contactLabelsSchema } from './contact-labels';
 import { normalizePhone } from './phone';
 
-export type SettingModule = 'COMPANY' | 'HELP' | 'PAYROLL' | 'QUOTES' | 'TERMS';
+export type SettingModule = 'COMPANY' | 'CONTACTS' | 'HELP' | 'PAYROLL' | 'QUOTES' | 'TERMS';
 
 type SettingDefinition = {
 	module: SettingModule;
@@ -207,6 +208,13 @@ export const SETTINGS = {
 		label: 'Festivos',
 		unit: null,
 		schema: jsonTextSchema.pipe(holidaysSchema)
+	},
+	// The contacts' etiquetas, `{ key, name }` sorted by name; its own editor, Configuración › Etiquetas.
+	CONTACTS_LABELS: {
+		module: 'CONTACTS',
+		label: 'Etiquetas',
+		unit: null,
+		schema: jsonTextSchema.pipe(contactLabelsSchema)
 	},
 	// One Markdown text, each `##` a question; its own editor, like PAYROLL_HOLIDAYS.
 	HELP_FAQ: {

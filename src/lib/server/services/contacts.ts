@@ -4,32 +4,22 @@
 
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
+import {
+	EMPLOYEE_FILTER,
+	labelKeysSchema,
+	TRANSPORTER,
+	type ContactLabel
+} from '$lib/contact-labels';
 import { fold } from '$lib/format';
 import { normalizePhone } from '$lib/phone';
 import { INVALID_WHATSAPP, normalizeWhatsapp } from '$lib/whatsapp';
 import { isAdminOrManager, requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
 import { containing, foldedSql } from './cash';
+import { readSettings } from './settings';
 
 // Whoever takes orders adds the clients.
 const EDITS_CONTACTS = ['ADMIN', 'MANAGER', 'SALES'] as const;
-
-/** What a provider does; empty means the contact isn't one. A new kind of provider is a code change. */
-export const SERVICES = [
-	'TRANSPORTER',
-	'DECORATOR',
-	'CHEF',
-	'WAITER',
-	'WEDDING_PLANNER',
-	'BARTENDER',
-	'BARISTA'
-] as const;
-
-export type Service = (typeof SERVICES)[number];
-
-export const servicesSchema = z
-	.array(z.enum(SERVICES))
-	.refine((services) => new Set(services).size === services.length, 'Un servicio no se repite');
 
 const optionalText = z.string().min(1).optional();
 
@@ -54,7 +44,8 @@ export type Contact = {
 	documentId: string;
 	/** Still the automatic one: Contactos asks for the real one, and Sales may type it. */
 	hasAutoDocument: boolean;
-	services: Service[];
+	/** The keys of its etiquetas, from `CONTACTS_LABELS`. */
+	labels: string[];
 	email: string | null;
 	address1: string | null;
 	address2: string | null;
@@ -73,7 +64,7 @@ type Columns = {
 	whatsapp: string | null;
 	full_name: string;
 	document_id: string | null;
-	services: string;
+	labels: string;
 	attributes: string;
 };
 
@@ -182,7 +173,7 @@ const formSchema = z.object({
 	address_2: blankable,
 	bank_account: blankable,
 	notes: blankable,
-	services: servicesSchema.default([])
+	labels: labelKeysSchema.default([])
 });
 
 const updateSchema = formSchema.extend({ id: z.coerce.number().int().positive() });
@@ -190,8 +181,9 @@ const updateSchema = formSchema.extend({ id: z.coerce.number().int().positive() 
 type Form = z.output<typeof formSchema>;
 
 // Both in a fixed order, so an edit that changes nothing produces the same text and logs nothing.
-function servicesJson(services: Service[]): string {
-	return JSON.stringify(SERVICES.filter((service) => services.includes(service)));
+// Keys, not names: a rename changes no contact.
+function labelsJson(labels: string[]): string {
+	return JSON.stringify([...labels].sort());
 }
 
 function attributesJson(attributes: Attributes): string {
@@ -201,13 +193,13 @@ function attributesJson(attributes: Attributes): string {
 }
 
 function toColumns(form: Form): Columns {
-	const { phone, whatsapp, full_name, document_id, services, ...attributes } = form;
+	const { phone, whatsapp, full_name, document_id, labels, ...attributes } = form;
 	return {
 		phone,
 		whatsapp,
 		full_name,
 		document_id,
-		services: servicesJson(services),
+		labels: labelsJson(labels),
 		attributes: attributesJson(attributes)
 	};
 }
@@ -221,7 +213,7 @@ function toContact(row: ContactRow): Contact {
 		fullName: row.full_name,
 		documentId: row.document_id,
 		hasAutoDocument: isAutoDocument(row.document_id),
-		services: servicesSchema.parse(JSON.parse(row.services)),
+		labels: labelKeysSchema.parse(JSON.parse(row.labels)),
 		email: attributes.email ?? null,
 		address1: attributes.address_1 ?? null,
 		address2: attributes.address_2 ?? null,
@@ -236,7 +228,7 @@ const NEW_CONTACT: Columns = {
 	whatsapp: null,
 	full_name: '',
 	document_id: null,
-	services: '[]',
+	labels: '[]',
 	attributes: '{}'
 };
 
@@ -255,12 +247,13 @@ function realDocumentOf(columns: Columns): string | null {
 }
 
 // Redirected money: whoever pays copies the saved account without checking it, so changing one
-// that's set is the manager's, and so is a provider's services. The ID number goes with a refund
-// and is the contact's key: Sales fills in an empty or automatic one, as it fills an empty account,
-// and only the manager changes a real one.
+// that's set is the manager's, and so are the etiquetas: a provider's is what lets the company pay
+// it, and Vetado is the manager's call. The ID number goes with a refund and is the contact's key:
+// Sales fills in an empty or automatic one, as it fills an empty account, and only the manager
+// changes a real one.
 function changesLockedField(current: Columns, next: Columns): boolean {
 	return (
-		current.services !== next.services ||
+		current.labels !== next.labels ||
 		isOverwritten(realDocumentOf(current), next.document_id) ||
 		isOverwritten(bankAccountOf(current), bankAccountOf(next))
 	);
@@ -317,10 +310,36 @@ async function documentRefusalOf(
 	return documentTakenRefusal(db, documentId, exceptId);
 }
 
+async function readContactLabels(db: D1Database): Promise<ContactLabel[]> {
+	const { CONTACTS_LABELS } = await readSettings(db, ['CONTACTS_LABELS']);
+	return CONTACTS_LABELS;
+}
+
+/** Every etiqueta, A–Z: the contact form's chips, and the names of a contact's keys. */
+export async function listContactLabels(
+	db: D1Database,
+	actor: Actor | null
+): Promise<ContactLabel[]> {
+	requireRole(actor, EDITS_CONTACTS);
+	return readContactLabels(db);
+}
+
+// A key the form posts must still be in the setting: one deleted meanwhile, or forged, isn't saved.
+async function unknownLabelRefusal(db: D1Database, labels: string[]): Promise<SaveResult | null> {
+	if (0 === labels.length) {
+		return null;
+	}
+	const known = new Set((await readContactLabels(db)).map(({ key }) => key));
+	if (labels.every((key) => known.has(key))) {
+		return null;
+	}
+	return { ok: false, message: CHECK_FIELDS, errors: { labels: 'Esa etiqueta ya no existe' } };
+}
+
 async function findRow(db: D1Database, id: number): Promise<ContactRow | null> {
 	return db
 		.prepare(
-			`select id, phone, whatsapp, full_name, document_id, services, attributes,
+			`select id, phone, whatsapp, full_name, document_id, labels, attributes,
 			exists (select 1 from employees where contact_id = contacts.id) as is_employee
 			from contacts where id = ?`
 		)
@@ -350,7 +369,9 @@ export async function createContact(
 	}
 	const columns = toColumns({ ...parsed.data, full_name: capitalizeName(parsed.data.full_name) });
 	requireLockedFieldsKept(actor, NEW_CONTACT, columns);
-	const refusal = await documentRefusalOf(db, parsed.data.document_id, 0);
+	const refusal =
+		(await unknownLabelRefusal(db, parsed.data.labels)) ??
+		(await documentRefusalOf(db, parsed.data.document_id, 0));
 	if (null !== refusal) {
 		return refusal;
 	}
@@ -405,7 +426,9 @@ export async function updateContact(
 	}
 	const columns = toColumns(form);
 	requireLockedFieldsKept(actor, row, columns);
-	const refusal = await documentRefusalOf(db, form.document_id, id);
+	const refusal =
+		(await unknownLabelRefusal(db, form.labels)) ??
+		(await documentRefusalOf(db, form.document_id, id));
 	return refusal ?? applyEdit(db, actor, { row, columns });
 }
 
@@ -442,16 +465,11 @@ export async function findWhatsappOwner(
 /** One page of the list; it never loads the whole table. */
 export const CONTACTS_PAGE_SIZE = 20;
 
-/** The list's chips: a service, or `EMPLOYEE`, the contacts an employee points to. */
-export const CONTACT_KINDS = [...SERVICES, 'EMPLOYEE'] as const;
-
-export type ContactKind = (typeof CONTACT_KINDS)[number];
-
-// Filters come from the URL: an empty or tampered value is ignored, not an error. `page` past the
-// last one shows the last, as in Pedidos.
+// Filters come from the URL: an empty or tampered value is ignored, not an error, and so is an
+// etiqueta no longer in the setting. `page` past the last one shows the last, as in Pedidos.
 const listSchema = z.object({
 	search: z.string().trim().catch(''),
-	service: z.enum(CONTACT_KINDS).optional().catch(undefined),
+	label: z.string().optional().catch(undefined),
 	page: z.coerce.number().int().min(1).catch(1)
 });
 
@@ -460,7 +478,7 @@ export type ContactSummary = {
 	fullName: string;
 	phone: string | null;
 	whatsapp: string | null;
-	services: Service[];
+	labels: string[];
 	isEmployee: boolean;
 };
 
@@ -472,6 +490,8 @@ export type ContactPage = {
 	total: number;
 	pageCount: number;
 	filters: ContactFilters;
+	/** Every etiqueta, A–Z: the filter's options and the badges' names. */
+	labels: ContactLabel[];
 };
 
 type Clause = { sql: string; params: string[] };
@@ -506,17 +526,25 @@ export function searchClause(
 }
 
 // In SQL: this table holds every client, so it can reach thousands of rows.
-function serviceClause(service: ContactKind | undefined): Clause | null {
-	if (undefined === service) {
+function labelClause(label: string | undefined): Clause | null {
+	if (undefined === label) {
 		return null;
 	}
-	if ('EMPLOYEE' === service) {
+	if (EMPLOYEE_FILTER === label) {
 		return { sql: 'employees.id is not null', params: [] };
 	}
 	return {
-		sql: 'exists (select 1 from json_each(contacts.services) where value = ?)',
-		params: [service]
+		sql: 'exists (select 1 from json_each(contacts.labels) where value = ?)',
+		params: [label]
 	};
+}
+
+// The URL's filters, an etiqueta no longer in the setting dropped.
+function parseFilters(input: unknown, labels: ContactLabel[]) {
+	const parsed = listSchema.parse(input ?? {});
+	const { label } = parsed;
+	const isKnown = EMPLOYEE_FILTER === label || labels.some(({ key }) => key === label);
+	return { ...parsed, label: isKnown ? label : undefined };
 }
 
 type SummaryRow = {
@@ -524,7 +552,7 @@ type SummaryRow = {
 	full_name: string;
 	phone: string | null;
 	whatsapp: string | null;
-	services: string;
+	labels: string;
 	is_employee: number;
 };
 
@@ -534,24 +562,29 @@ function toSummary(row: SummaryRow): ContactSummary {
 		fullName: row.full_name,
 		phone: row.phone,
 		whatsapp: row.whatsapp,
-		services: servicesSchema.parse(JSON.parse(row.services)),
+		labels: labelKeysSchema.parse(JSON.parse(row.labels)),
 		isEmployee: 1 === row.is_employee
 	};
 }
 
-/** One page of contacts sorted by name, narrowed by name, phone or username and by service or employee. */
+function whereOf({ search, label }: ContactFilters): { where: string; params: string[] } {
+	const clauses = [searchClause(search), labelClause(label)].filter((clause) => null !== clause);
+	return {
+		where: clauses.map((clause) => `(${clause.sql})`).join(' and ') || '1',
+		params: clauses.flatMap((clause) => clause.params)
+	};
+}
+
+/** One page of contacts sorted by name, narrowed by name, phone or username and by etiqueta or employee. */
 export async function listContacts(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
 ): Promise<ContactPage> {
 	requireRole(actor, EDITS_CONTACTS);
-	const parsed = listSchema.parse(input ?? {});
-	const clauses = [searchClause(parsed.search), serviceClause(parsed.service)].filter(
-		(clause) => null !== clause
-	);
-	const where = clauses.map((clause) => `(${clause.sql})`).join(' and ') || '1';
-	const params = clauses.flatMap((clause) => clause.params);
+	const labels = await readContactLabels(db);
+	const parsed = parseFilters(input, labels);
+	const { where, params } = whereOf(parsed);
 	const from = 'from contacts left join employees on employees.contact_id = contacts.id';
 	const count = await db
 		.prepare(`select count(*) as total ${from} where ${where}`)
@@ -563,13 +596,13 @@ export async function listContacts(
 	// ponytail: nocase folds ASCII only, so «Ángela» sorts after Z; a sort key column if it bothers.
 	const { results } = await db
 		.prepare(
-			`select contacts.id, full_name, phone, contacts.whatsapp, services, employees.id is not null as is_employee
+			`select contacts.id, full_name, phone, contacts.whatsapp, labels, employees.id is not null as is_employee
 			${from} where ${where}
 			order by full_name collate nocase, contacts.id limit ? offset ?`
 		)
 		.bind(...params, CONTACTS_PAGE_SIZE, (filters.page - 1) * CONTACTS_PAGE_SIZE)
 		.all<SummaryRow>();
-	return { contacts: results.map(toSummary), total, pageCount, filters };
+	return { contacts: results.map(toSummary), total, pageCount, filters, labels };
 }
 
 /**
@@ -601,7 +634,7 @@ export function newClientStatements(
 			whatsapp: client.whatsapp,
 			full_name: client.fullName,
 			document_id: client.documentId,
-			services: '[]',
+			labels: '[]',
 			attributes: '{}'
 		}
 	});
@@ -644,7 +677,7 @@ export async function searchClients(
 	}
 	const { results } = await db
 		.prepare(
-			`select id, phone, whatsapp, full_name, document_id, services, attributes, 0 as is_employee
+			`select id, phone, whatsapp, full_name, document_id, labels, attributes, 0 as is_employee
 			from contacts where (${clause.sql}) order by full_name collate nocase, id limit ?`
 		)
 		.bind(...clause.params, CLIENT_MATCHES)
@@ -659,7 +692,7 @@ export async function searchClients(
 	}));
 }
 
-/** A carrier the order form offers: a contact with TRANSPORTER in its services. */
+/** A carrier the order form offers: a contact carrying the etiqueta TRANSPORTER. */
 export type Transporter = {
 	id: number;
 	fullName: string;
@@ -676,9 +709,10 @@ export async function listTransporters(
 	const { results } = await db
 		.prepare(
 			`select id, full_name as fullName, phone, whatsapp from contacts
-			where exists (select 1 from json_each(contacts.services) where value = 'TRANSPORTER')
+			where exists (select 1 from json_each(contacts.labels) where value = ?)
 			order by full_name collate nocase, id`
 		)
+		.bind(TRANSPORTER)
 		.all<Transporter>();
 	return results;
 }
