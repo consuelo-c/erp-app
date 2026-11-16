@@ -8,13 +8,17 @@ import {
 	capitalizeName,
 	contactAttributesSchema,
 	createContact,
+	createLabel,
+	deleteLabel,
 	findWhatsappOwner,
 	generateDocumentId,
 	getContact,
 	isBannedClient,
 	listContacts,
+	listLabelRows,
 	listTransporters,
 	newClientStatements,
+	renameLabel,
 	searchClients,
 	updateContact
 } from './contacts';
@@ -549,4 +553,129 @@ test('the transporters are the contacts with TRANSPORTER, by name, with phone an
 		phone: null,
 		whatsapp: 'WilsonMudanzas'
 	});
+});
+
+// Configuración › Etiquetas.
+
+const labelNames = async () => (await listLabelRows(db, manager)).map(({ name }) => name);
+
+function settingsEvents() {
+	return database
+		.prepare("select before, after from events where entity_type = 'SETTINGS'")
+		.all()
+		.map(({ before, after }) => [JSON.parse(String(before)), JSON.parse(String(after))]);
+}
+
+test('the editor lists every etiqueta A–Z with how many contacts carry it', async () => {
+	await create({ ...luzMarina, labels: ['DECORATOR', 'CHEF'] });
+	await create({ phone: '311 908 5512', full_name: 'Wilson Muñoz', labels: ['CHEF'] });
+	const rows = await listLabelRows(db, manager);
+	expect(rows.map(({ name }) => name)).toEqual([
+		'Barista',
+		'Bartender',
+		'Chef',
+		'Decorador',
+		'Mesero',
+		'Transportador',
+		'Vetado',
+		'Wedding planner'
+	]);
+	expect(rows.find(({ key }) => 'CHEF' === key)).toMatchObject({
+		contactCount: 2,
+		isBuiltIn: false
+	});
+	expect(rows.filter(({ isBuiltIn }) => isBuiltIn).map(({ key }) => key)).toEqual([
+		'TRANSPORTER',
+		'BANNED'
+	]);
+});
+
+test('«Nueva etiqueta» adds one sorted by name; a blank or repeated name is refused', async () => {
+	expect(await createLabel(db, { name: '  Proveedor de carpas ' }, manager)).toEqual({ ok: true });
+	expect(await labelNames()).toContain('Proveedor de carpas');
+	expect((await listLabelRows(db, manager)).map(({ key }) => key)).toContain('PROVEEDOR_DE_CARPAS');
+	expect(await createLabel(db, { name: '   ' }, manager)).toEqual({
+		ok: false,
+		message: 'Escribe el nombre'
+	});
+	expect(await createLabel(db, { name: 'vetado' }, manager)).toEqual({
+		ok: false,
+		message: 'Ya existe una etiqueta con ese nombre'
+	});
+	expect(settingsEvents()).toEqual([
+		[{ value: '[]' }, { value: '[{"key":"PROVEEDOR_DE_CARPAS","name":"Proveedor de carpas"}]' }]
+	]);
+});
+
+test('renaming changes only the name: the contacts keep the key and read the new name', async () => {
+	const id = await create({ ...luzMarina, labels: ['WEDDING_PLANNER'] });
+	const renamed = { key: 'WEDDING_PLANNER', name: 'Organizador de bodas' };
+	expect(await renameLabel(db, renamed, manager)).toEqual({ ok: true });
+	expect((await getContact(db, id, manager))?.labels).toEqual(['WEDDING_PLANNER']);
+	expect(
+		database
+			.prepare(
+				"select count(*) as count from events where entity_type = 'CONTACT' and action = 'EDITED'"
+			)
+			.get()
+	).toEqual({ count: 0 });
+	expect(await labelNames()).toContain('Organizador de bodas');
+	expect(await renameLabel(db, { key: 'BANNED', name: 'Bloqueado' }, manager)).toEqual({
+		ok: true
+	});
+	expect(await renameLabel(db, { key: 'CHEF', name: 'bloqueado' }, manager)).toMatchObject({
+		ok: false
+	});
+	expect(settingsEvents()[0]).toEqual([
+		{ value: '[{"key":"WEDDING_PLANNER","name":"Wedding planner"}]' },
+		{ value: JSON.stringify([renamed]) }
+	]);
+});
+
+test('deleting strips the key from every contact that carries it, in the same batch', async () => {
+	const carriers = [];
+	for (const name of ['Ana', 'Beto', 'Carla', 'Dora']) {
+		carriers.push(await create({ full_name: name, labels: ['BARISTA', 'CHEF'] }));
+	}
+	const other = await create({ ...luzMarina, labels: ['CHEF'] });
+	expect(await deleteLabel(db, { key: 'BARISTA' }, manager)).toEqual({ ok: true });
+	expect(await labelNames()).not.toContain('Barista');
+	for (const id of [...carriers, other]) {
+		expect((await getContact(db, id, manager))?.labels).toEqual(['CHEF']);
+	}
+	const contactEdits = database
+		.prepare(
+			"select entity_id, before, after from events where entity_type = 'CONTACT' and action = 'EDITED'"
+		)
+		.all();
+	expect(contactEdits).toEqual(
+		carriers.map((id) => ({
+			entity_id: id,
+			before: JSON.stringify({ labels: '["BARISTA","CHEF"]' }),
+			after: JSON.stringify({ labels: '["CHEF"]' })
+		}))
+	);
+	expect(settingsEvents()).toEqual([
+		[{ value: '[{"key":"BARISTA","name":"Barista"}]' }, { value: '[]' }]
+	]);
+});
+
+test('an etiqueta no contact carries is deleted too; Transportador and Vetado never', async () => {
+	expect(await deleteLabel(db, { key: 'BARTENDER' }, manager)).toEqual({ ok: true });
+	for (const key of ['TRANSPORTER', 'BANNED']) {
+		expect(await deleteLabel(db, { key }, manager)).toMatchObject({ ok: false });
+	}
+	expect(await labelNames()).toEqual(expect.arrayContaining(['Transportador', 'Vetado']));
+});
+
+test('only ADMIN and MANAGER read or change the etiquetas', async () => {
+	const admin = actorWith('ADMIN');
+	expect(await createLabel(db, { name: 'Fotógrafo' }, admin)).toEqual({ ok: true });
+	for (const role of ['SALES', 'WAREHOUSE', 'DRIVER'] as const) {
+		const actor = actorWith(role);
+		expect(await rejection(listLabelRows(db, actor))).toBe(403);
+		expect(await rejection(createLabel(db, { name: 'Florista' }, actor))).toBe(403);
+		expect(await rejection(renameLabel(db, { key: 'CHEF', name: 'Cocinero' }, actor))).toBe(403);
+		expect(await rejection(deleteLabel(db, { key: 'CHEF' }, actor))).toBe(403);
+	}
 });

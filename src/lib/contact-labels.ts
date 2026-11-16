@@ -20,6 +20,31 @@ const collator = new Intl.Collator('es', { sensitivity: 'base' });
 const isSortedByName = (labels: ContactLabel[]) =>
 	labels.every((label, i) => 0 === i || collator.compare(labels[i - 1].name, label.name) <= 0);
 
+/** `labels` A–Z, as the setting stores them. */
+export function sortByName(labels: ContactLabel[]): ContactLabel[] {
+	return [...labels].sort((first, second) => collator.compare(first.name, second.name));
+}
+
+/**
+ * A new etiqueta's key, from its first name: uppercased, accents off, anything but letters and digits
+ * turned to `_`, with `_2`, `_3`… when taken. `EMPLOYEE` counts as taken: the filter's.
+ */
+export function makeLabelKey(name: string, labels: ContactLabel[]): string {
+	const base =
+		name
+			.normalize('NFD')
+			.replace(/\p{M}/gu, '')
+			.toUpperCase()
+			.replace(/[^A-Z0-9]+/g, '_')
+			.replace(/^_|_$/g, '') || 'ETIQUETA';
+	const taken = new Set([EMPLOYEE_FILTER, ...labels.map(({ key }) => key)]);
+	let key = base;
+	for (let suffix = 2; taken.has(key); suffix++) {
+		key = `${base}_${suffix}`;
+	}
+	return key;
+}
+
 const hasDuplicates = (values: string[]) => new Set(values).size !== values.length;
 
 export const contactLabelsSchema = z
