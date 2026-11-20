@@ -120,7 +120,6 @@ gh label delete duplicate
 gh label delete enhancement
 gh label delete invalid
 gh label delete question
-gh label delete wontfix
 ```
 
 ### Creación de los _labels_ del proyecto
@@ -128,8 +127,13 @@ gh label delete wontfix
 ```bash
 gh label create bug  --color d73a4a --description "Errores"
 gh label create task --color 0075ca --description "Tareas"
-gh label create docs --color 5319e7 --description "Hallazgo que va a la próxima versión de los documentos"
-gh label create debt --color fbca04 --description "Pendientes o tareas a resolver"
+gh label create needs-triage --color fbca04 --description "Maintainer needs to evaluate this issue"
+gh label create needs-info --color d4c5f9 --description "Waiting on reporter for more information"
+gh label create ready-for-agent --color 0e8a16 --description "Fully specified, ready for an AFK agent"
+gh label create ready-for-human --color 1d76db --description "Requires human implementation"
+gh label create wontfix --color ffffff --description "Will not be actioned"
+for t in grilling prototype research task; do gh label create "wayfinder:$t"; done
+gh label create wayfinder:map
 ```
 
 > [!TIP]
@@ -418,28 +422,30 @@ Claude Code lo lee con la herramienta `Artifact`, con la misma cuenta de Claude 
 
 Las copias viejas de Claude Design (`claude.ai/design/p/…`) quedaron de solo lectura y conservan los chats y comentarios de antes del traslado. Claude Design independiente cierra el 14 de diciembre de 2026.
 
-## Flujo de trabajo con _issues_
+## Development workflow
 
-Las ramas se nombran `<tipo>/<issue>-<slug>`: el tipo es `feat`, `fix`, `chore` o `docs` (los mismos de los commits), luego el número del _issue_ y luego qué hace, en minúsculas con guiones. Por ejemplo `feat/12-timesheets-table`.
+Every session runs in this repository with Claude Code, using [Matt Pocock's skills](https://github.com/mattpocock/skills) (the `mattpocock-skills` plugin). Their per-repo configuration lives in `docs/agents/` and in the `## Agent skills` section of `CLAUDE.md`. Claude takes the work to a green pull request; the developer merges.
 
-Crear la rama desde el _issue_ para que quede vinculada a él (sección _Development_ del _issue_):
+### A phase (milestone)
 
-```bash
-gh issue develop 14 --name chore/14-brand-readme-markdownlint --checkout # Crea la rama en GitHub desde main, la vincula y cambia a ella
-# Cuando se termine el trabajo...
-git add README.md .markdownlint.json static/
-git commit -m "chore: add brand files, README and markdownlint config"
-git push
-gh pr create --fill --body "Closes #14" # El PR cierra el issue al hacer merge
-gh pr merge <N> --squash --delete-branch   # O hacer merge en la web de GH
-git checkout main && git pull
-```
+1. **Create the milestone and the map.** Create the `Phase NN` milestone if it doesn't exist, then start `claude` and run `/wayfinder` with a loose description of the phase. Claude grills you to name the destination and charts the map: an issue labelled `wayfinder:map` with one child ticket per open decision.
+2. **Work the map, one ticket per session.** In a fresh session, `/wayfinder <map>`: Claude takes the next ticket on the frontier (or the one you name) and resolves it with you. Research tickets run in parallel subagents. The canvas screens are drawn here, as `wayfinder:prototype` tickets. Repeat until no ticket is left.
+3. **Write the spec.** In the session that closed the last ticket, or a fresh one after reading the map, `/to-spec`. It confirms the test seams with you and publishes the spec as a sub-issue of the map, in the milestone.
+4. **Slice it into tickets.** `/to-tickets #<spec>`. Review the proposed slices and their blocking edges until they're right; Claude publishes them as sub-issues of the spec, in the milestone, with native blocking and no triage label.
+5. **Build it unattended.** Start `claude --permission-mode auto` (sessions start in plan mode otherwise) and run `/implement-spec #<spec>`. It builds the tickets one at a time on one branch, each in a fresh subagent with TDD, then runs a code review, fixes it, writes the PR body with `/pr` and waits until CI is green.
+   - If a ticket hits a gap in the planning, Claude posts the question as a comment on the spec and sends a push notification; answer it there and tell the session to continue. The other tickets keep going meanwhile.
+6. **Merge.** Review the pull request and merge it. The merge closes the spec and its tickets; close the map and the milestone.
 
-Al hacer _merge_ del PR a `main`, el _issue_ se cierra (y el Workflow del proyecto lo mueve a _Done_).
+### One-off work
+
+A bug, a request from the client, or a small change outside a phase:
+
+1. Create the issue (or ask Claude to), then `/triage #N` to label it.
+2. `/implement #N` in a fresh session: Claude branches as `<type>/<issue>-<slug>` (`feat`, `fix`, `chore` or `docs`, for example `fix/568-order-printout-title`), builds it with TDD, reviews it, and opens a pull request with `Closes #N`.
+3. Merge it.
 
 > [!TIP]
-> `gh issue develop 12 --list` muestra las ramas vinculadas a un _issue_
-> `gh pr list` Muestra los PRs que están abiertos
+> `gh issue list --label wayfinder:map` lists the maps; `gh issue list --milestone "Phase NN"` shows what is left in a phase.
 
 ## Creando la contraseña de `admin`
 
