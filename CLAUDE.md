@@ -15,7 +15,7 @@ SvelteKit app for Banquetes Consuelo C, a party rental business in Medellín, de
 
 All in [`erp-planning:working-methodology.md`](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md) (`methodology`) unless named.
 
-- **Sessions** — they start in plan mode (`defaultMode` in `.claude/settings.json`); an `/implement-spec` run needs `claude --permission-mode auto`, which project settings can't turn on
+- **Sessions** — every one is launched with `claude --permission-mode auto` (project settings can't turn it on; without it, `defaultMode` is `default` and a startup hook warns); planning sessions (`/wayfinder`, `/to-spec`, `/to-tickets`) also turn ponytail off with `--settings '{"enabledPlugins":{"ponytail@ponytail":false}}'`. `erp-planning` is read-only: the guard hook denies any write there
 - **Building a phase** — the workflow in [Agent skills](#agent-skills): `/wayfinder` → `/to-spec` → `/to-tickets` → `/implement-spec`. Asked to build a phase any other way, suggest it
 - **Starting a ticket** — its spec (the parent issue) and the decisions on the phase map, read with [`erp-planning:foundations.md`](https://github.com/consuelo-c/erp-planning/blob/main/foundations.md); extending a frozen phase's code, its `erp-planning:phase-NN/planning.md`, after the code
 - **Building a screen** — only the canvas pages (`project/<page>`, read with the Artifact tool) of the screens its issue names; ask before reading another of the same phase (in an `/implement-spec` run, build without it and say so)

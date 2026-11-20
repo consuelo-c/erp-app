@@ -426,13 +426,26 @@ Las copias viejas de Claude Design (`claude.ai/design/p/…`) quedaron de solo l
 
 Every session runs in this repository with Claude Code, using [Matt Pocock's skills](https://github.com/mattpocock/skills) (the `mattpocock-skills` plugin). Their per-repo configuration lives in `docs/agents/` and in the `## Agent skills` section of `CLAUDE.md`. Claude takes the work to a green pull request; the developer merges.
 
+### Starting a session
+
+Every session runs in auto mode; project settings can't turn it on, so it goes on the command line. Planning sessions (`/wayfinder`, `/to-spec`, `/to-tickets`) also turn ponytail off:
+
+```sh
+# Planning
+claude --permission-mode auto --settings '{"enabledPlugins":{"ponytail@ponytail":false}}'
+# Building (/implement-spec, /implement)
+claude --permission-mode auto
+```
+
+Two shell aliases save the typing. A session started without the flag runs in `default` mode, asking before anything outside the allow list, and a startup hook reminds you to restart.
+
 ### A phase (milestone)
 
 1. **Create the milestone and the map.** Create the `Phase NN` milestone if it doesn't exist, then start `claude` and run `/wayfinder` with a loose description of the phase. Claude grills you to name the destination and charts the map: an issue labelled `wayfinder:map` with one child ticket per open decision.
 2. **Work the map, one ticket per session.** In a fresh session, `/wayfinder <map>`: Claude takes the next ticket on the frontier (or the one you name) and resolves it with you. Research tickets run in parallel subagents. The canvas screens are drawn here, as `wayfinder:prototype` tickets. Repeat until no ticket is left.
 3. **Write the spec.** In the session that closed the last ticket, or a fresh one after reading the map, `/to-spec`. It confirms the test seams with you and publishes the spec as a sub-issue of the map, in the milestone.
 4. **Slice it into tickets.** `/to-tickets #<spec>`. Review the proposed slices and their blocking edges until they're right; Claude publishes them as sub-issues of the spec, in the milestone, with native blocking and no triage label.
-5. **Build it unattended.** Start `claude --permission-mode auto` (sessions start in plan mode otherwise) and run `/implement-spec #<spec>`. It builds the tickets one at a time on one branch, each in a fresh subagent with TDD, then runs a code review, fixes it, writes the PR body with `/pr` and waits until CI is green.
+5. **Build it unattended.** In a building session, run `/implement-spec #<spec>`. It builds the tickets one at a time on one branch, each in a fresh subagent with TDD, then runs a code review, fixes it, writes the PR body with `/pr` and waits until CI is green.
    - If a ticket hits a gap in the planning, Claude posts the question as a comment on the spec and sends a push notification; answer it there and tell the session to continue. The other tickets keep going meanwhile.
 6. **Merge.** Review the pull request and merge it. The merge closes the spec and its tickets; close the map and the milestone.
 
