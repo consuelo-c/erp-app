@@ -7,9 +7,9 @@ SvelteKit app for Banquetes Consuelo C, a party rental business in Medellín, de
 - **Claude takes the work from a branch to a green pull request; the developer merges.** Claude branches, commits, pushes, creates issues and pull requests, and runs `npm run test`, `lint`, `typecheck` and `db:generate`: exactly the `allow` list in `.claude/settings.json`. Never `gh pr merge`, a force push, a push to `main`, or deleting an issue (the `deny` list). npm install, wrangler writes, `db:reset`, priorities and board moves stay the developer's: propose the exact command and wait for the developer to say it ran. Issue bodies are written out in full, never compressed by a skill
 - **Language.** Everything in English: chat, code, docs, `README.md`, issues, comments, specs, pull requests and commits. Spanish only in the app's user-facing UI. Closed issues and old pull requests stay as they are
 - **Scope.** Build what the ticket needs to work end to end, glue included; a feature or screen another ticket or a later phase owns gets a stub, not an implementation
-- **No project state here or in Claude Code memory.** The plan and the state live in the issues: maps, specs and tickets. `erp-planning` holds the rules not yet moved here and the frozen phases
+- **No project state here or in Claude Code memory.** The plan and the state live in the issues: maps, specs and tickets. `erp-planning` holds the frozen phases and the planning not yet moved here
 - **Search** with `rg` and `fd`, never `grep` or `find`
-- **Planning references** are Markdown links: repository and path as text (`` `erp-planning:phase-06/planning.md` ``), GitHub URL as target; never a folder name. Only `hard-rules.md` is imported (below); every other planning file is read through its link when the moment comes, never `@import`ed
+- **Planning references** are Markdown links: repository and path as text (`` `erp-planning:phase-06/planning.md` ``), GitHub URL as target; never a folder name. Planning files are read through their link when the moment comes, never `@import`ed
 
 ## When to read what
 
@@ -17,7 +17,7 @@ All in [`erp-planning:working-methodology.md`](https://github.com/consuelo-c/erp
 
 - **Sessions** — every one is launched with `claude --permission-mode auto` (project settings can't turn it on; without it, `defaultMode` is `default` and a startup hook warns); planning sessions (`/wayfinder`, `/to-spec`, `/to-tickets`) also turn ponytail off with `--settings '{"enabledPlugins":{"ponytail@ponytail":false}}'`. `erp-planning` is read-only: the guard hook denies any write there
 - **Building a phase** — the workflow in [Agent skills](#agent-skills): `/wayfinder` → `/to-spec` → `/to-tickets` → `/implement-spec`. Asked to build a phase any other way, suggest it
-- **Starting a ticket** — its spec (the parent issue) and the decisions on the phase map, read with [`erp-planning:foundations.md`](https://github.com/consuelo-c/erp-planning/blob/main/foundations.md); extending a frozen phase's code, its `erp-planning:phase-NN/planning.md`, after the code
+- **Starting a ticket** — its spec (the parent issue) and the decisions on the phase map; extending a frozen phase's code, its `erp-planning:phase-NN/planning.md`, after the code
 - **Building a screen** — only the canvas pages (`project/<page>`, read with the Artifact tool) of the screens its issue names; ask before reading another of the same phase (in an `/implement-spec` run, build without it and say so)
 - **Needing something another ticket or phase owns** — `methodology` [Stubs are the way out](https://github.com/consuelo-c/erp-planning/blob/main/working-methodology.md#stubs-are-the-way-out)
 - **Finding a gap, ambiguity, error or contradiction in the planning** — in an `/implement-spec` run, see [Agent skills](#agent-skills); otherwise ask the developer
@@ -103,6 +103,4 @@ These override the skill's defaults:
 
 ## Hard rules
 
-Imported from the planning, so they are always current. Cited by name, not by number.
-
-@../erp-planning/hard-rules.md
+In [`.claude/rules/`](.claude/rules/), one file per area; Claude Code loads each only when working on the files its `paths` names.
