@@ -17,7 +17,7 @@ SvelteKit app for Banquetes Consuelo C, a party rental business in Medellín, de
 - **Language.** Everything in English: chat, code, docs, `README.md`, issues, comments, specs, pull requests and commits. Spanish only in the app's user-facing UI. Closed issues and old pull requests stay as they are
 - **Scope.** Build what the ticket needs to work end to end, glue included; a feature or screen another ticket or a later phase owns gets a stub, not an implementation
 - **No project state here or in Claude Code memory.** The plan and the state live in the issues: maps, specs and tickets
-- **Search** with `rg` and `fd`, instead of `grep` and `find`
+- **Search** with `rg` and `fd`, instead of `grep` and `find`; outside this repo add `-u` (`--no-ignore`)
 
 > [!NOTE]
 > We used to use the [`erp-planning`](https://github.com/consuelo-c/erp-planning/) repo for planning, but it is now archived
