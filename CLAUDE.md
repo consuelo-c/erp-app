@@ -80,7 +80,7 @@ GitHub Issues in `consuelo-c/erp-app`; phase specs and tickets hang from the pha
 
 ### Triage labels
 
-The five defaults, only on one-off issues. See `docs/agents/triage-labels.md`.
+The two categories and five states, only on one-off issues. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
