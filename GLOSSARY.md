@@ -38,6 +38,11 @@ One route of the app, drawn in one or more frames.
 **Printout**:
 A printed sheet (order, quote, receipt, payroll slip), drawn in frames like a screen.
 
+## Orders and quotes
+
+**Priced document**:
+A quote or an order: a client's snapshot, its lines at frozen prices, and the totals they make. An order adds its trips, its money and its status; a quote adds its validity.
+
 ## Money
 
 **Cuenta de cobro**:
