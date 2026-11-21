@@ -116,7 +116,7 @@
 {/snippet}
 
 <HalfLetterPrintout
-	title="Pedido #{order.id}"
+	title="Remisión #{order.id}"
 	{company}
 	items={order.items}
 	back={{ href: backHref, label: 'Volver al pedido' }}

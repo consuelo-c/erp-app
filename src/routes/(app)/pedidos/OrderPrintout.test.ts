@@ -133,3 +133,9 @@ test('the dates print as «Entrega aproximada» and «Recogida tentativa»; «Pr
 	expect(body).toContain('<span>Productos</span><span>1</span>');
 	expect(body).toContain('1 de 1');
 });
+
+test('the sheet is titled «Remisión #NN», not «Pedido #NN»', () => {
+	const body = sheetOf(printout);
+	expect(body).toContain(`Remisión #${printout.order.id}`);
+	expect(body).not.toContain(`Pedido #${printout.order.id}`);
+});
