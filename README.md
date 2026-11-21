@@ -179,20 +179,18 @@ Every run, the workflow does these steps in order:
 
 The app needs no config file in production. What grants **access** is stored as a secret, outside the repository; what only says **which resource** to use lives in `wrangler.jsonc`, since it's useless without credentials.
 
-| Name                   | What it's for                                                       | Where it lives               | How it's set                                   |
-| ---------------------- | ------------------------------------------------------------------- | ---------------------------- | ---------------------------------------------- |
-| `CLOUDFLARE_API_TOKEN` | Lets GitHub Actions deploy to Cloudflare                            | GitHub Secrets               | `gh secret set CLOUDFLARE_API_TOKEN`           |
-| `ADMIN_PASSWORD`       | The password the Worker creates the `admin` login with              | Worker secret                | `npx wrangler secret put ADMIN_PASSWORD`       |
-| `PASSWORD_PEPPER`      | A random value mixed into every password's hash                     | Worker secret                | `npx wrangler secret put PASSWORD_PEPPER`      |
-| `TURNSTILE_SECRET_KEY` | Validates the order lookup's Turnstile widget on the server         | Worker secret                | `npx wrangler secret put TURNSTILE_SECRET_KEY` |
-| `TURNSTILE_SITE_KEY`   | Shows the Turnstile widget on the public page. It's a public value  | `vars` in `wrangler.jsonc`   | Copied from the widget in Cloudflare's dashboard |
-| `account_id`           | Which Cloudflare account to deploy to                               | `wrangler.jsonc`             | Copied from `npx wrangler whoami`              |
-| `database_id`          | Which D1 database the Worker uses                                   | `wrangler.jsonc`             | Copied from `npx wrangler d1 info consueloc-erp-db` |
+| Name                   | What it's for                                          | Where it lives   | How it's set                                        |
+| ---------------------- | ------------------------------------------------------ | ---------------- | --------------------------------------------------- |
+| `CLOUDFLARE_API_TOKEN` | Lets GitHub Actions deploy to Cloudflare               | GitHub Secrets   | `gh secret set CLOUDFLARE_API_TOKEN`                |
+| `ADMIN_PASSWORD`       | The password the Worker creates the `admin` login with | Worker secret    | `npx wrangler secret put ADMIN_PASSWORD`            |
+| `PASSWORD_PEPPER`      | A random value mixed into every password's hash        | Worker secret    | `npx wrangler secret put PASSWORD_PEPPER`           |
+| `account_id`           | Which Cloudflare account to deploy to                  | `wrangler.jsonc` | Copied from `npx wrangler whoami`                   |
+| `database_id`          | Which D1 database the Worker uses                      | `wrangler.jsonc` | Copied from `npx wrangler d1 info consueloc-erp-db` |
 
-The `DB` (D1), `BUCKET` (R2) and `LOOKUP_RATE_LIMIT` (the public page's lookup limit) bindings are already declared in `wrangler.jsonc`, so they need no setup anywhere else.
+The `DB` (D1) and `BUCKET` (R2) bindings are already declared in `wrangler.jsonc`, so they need no setup anywhere else.
 
 > [!NOTE]
-> In development, the three Worker secrets go in `.dev.vars`, which stays out of the repository; `.env.example` lists their names. There, use a `PASSWORD_PEPPER` different from production's and Turnstile's test secret key.
+> In development, the two Worker secrets go in `.dev.vars`, which stays out of the repository; `.env.example` lists their names. There, use a `PASSWORD_PEPPER` different from production's.
 
 > [!TIP]
 > After editing `wrangler.jsonc`, run `npx wrangler types` to regenerate the types.
@@ -274,26 +272,16 @@ npx wrangler secret put ADMIN_PASSWORD
 openssl rand -base64 32 | npx wrangler secret put PASSWORD_PEPPER
 ```
 
-`TURNSTILE_SECRET_KEY` is created in the next step, because the Turnstile widget provides its value.
-
 > [!CAUTION]
 > If `PASSWORD_PEPPER` is already listed, **don't generate it again**. Replacing it breaks every password. See [Create the `admin` password](#create-the-admin-password).
 
 ### Step 4: Configure Cloudflare's dashboard
 
-Three things don't live in the repository and are set once from the dashboard. The domain must be added after the first deploy, because before it there's no Worker to point at.
+Two things don't live in the repository and are set once from the dashboard. The domain must be added after the first deploy, because before it there's no Worker to point at.
 
 **The app's domain.** Go to _Workers & Pages -> `consueloc-erp` -> Settings -> Domains & Routes -> Add -> Custom domain_ and add `app.consueloc.com`. Cloudflare creates the DNS record and issues the certificate itself, which can take a few minutes.
 
 **The login attempts limit.** This limit isn't in the code. Go to _`consueloc.com` -> Security -> WAF -> Rate limiting rules_ and create a rule covering `POST` requests to `app.consueloc.com/login`. The free plan includes one rule.
-
-**The Turnstile widget.** It protects the public page's order lookup. Go to _Turnstile -> Add widget_ and create it with these parameters:
-
-- Name: `consueloc-erp-lookup`
-- Hostname: `app.consueloc.com`
-- Mode: _Managed_, no _pre-clearance_
-
-The widget provides two keys: the _secret key_ is stored with `npx wrangler secret put TURNSTILE_SECRET_KEY`, and the _site key_ is copied into `wrangler.jsonc`'s `vars.TURNSTILE_SITE_KEY`. Since that file is part of the repository, changing the site key takes a new deploy.
 
 ### Step 5: Load the initial data
 
@@ -310,7 +298,7 @@ gh run list --workflow deploy.yml --limit 1 --repo consuelo-c/erp-app
 npx wrangler deployments list
 ```
 
-The three secrets must be listed: `ADMIN_PASSWORD`, `PASSWORD_PEPPER` and `TURNSTILE_SECRET_KEY`:
+The two secrets must be listed: `ADMIN_PASSWORD` and `PASSWORD_PEPPER`. `TURNSTILE_SECRET_KEY` may be listed too: it's kept, with its Turnstile widget in the dashboard, for a possible return of a public form, and the app doesn't read it:
 
 ```bash
 npx wrangler secret list
@@ -346,10 +334,9 @@ The Worker's `workers.dev` URL must not answer, because `wrangler.jsonc` turns `
 curl -sI https://consueloc-erp.<subdomain>.workers.dev | head -n 1
 ```
 
-Then check in the browser at `https://app.consueloc.com`, the only domain the Turnstile widget is authorized for.
+Then check in the browser at `https://app.consueloc.com`.
 
-- [ ] The `/` page loads and shows the Turnstile widget
-- [ ] A lookup with any phone and date answers «No encontramos un pedido con esos datos y esa fecha.». If it answers «No pudimos verificar la consulta. Intente de nuevo.» instead, check `TURNSTILE_SECRET_KEY` and the widget
+- [ ] The `/` page loads and shows the logo and the «Empleados» link
 - [ ] The `/login` page lets you in with the `admin` login and the password stored in `ADMIN_PASSWORD`
 - [ ] _Productos_ shows the imported catalog
 - [ ] _Configuración_ shows the company's details
@@ -364,8 +351,7 @@ This section is a recipe: **none of it is built**. Until someone follows it, the
 ### The design
 
 - **Domain:** `stg-app.consueloc.com`, added as a custom domain of the staging Worker (as in [Step 4](#step-4-configure-cloudflares-dashboard)).
-- **A `staging` environment in `wrangler.jsonc`** (`env.staging`), with its own D1 database and R2 bucket, created with the CLI as in [Create the D1 database and the R2 bucket](#create-the-d1-database-and-the-r2-bucket). Bindings aren't inherited between environments, so `env.staging` repeats each one: `DB`, `BUCKET`, `LOOKUP_RATE_LIMIT` and `TURNSTILE_SITE_KEY`.
-- **Turnstile:** the `stg-app.consueloc.com` hostname is added to the `consueloc-erp-lookup` widget.
+- **A `staging` environment in `wrangler.jsonc`** (`env.staging`), with its own D1 database and R2 bucket, created with the CLI as in [Create the D1 database and the R2 bucket](#create-the-d1-database-and-the-r2-bucket). Bindings aren't inherited between environments, so `env.staging` repeats each one: `DB` and `BUCKET`.
 - **No sample data:** `scripts/sample-data.sql` stays development-only. The `settings` come with the production copy.
 - **The R2 bucket stays empty:** nothing in the app reads R2 today; the bucket only exists so the binding resolves.
 - **Open:** the app's logins protect it, as they do production. No Cloudflare Access.
@@ -386,7 +372,7 @@ Staging is deployed from the terminal, not from GitHub Actions: `npm run deploy:
 
 ### Secrets
 
-**Staging's `PASSWORD_PEPPER` is production's**, so every employee logs into staging with their real password. With a different pepper, the hashes copied from production would let nobody in, not even `admin`, because the Worker only creates `admin` when it doesn't exist. The other secrets (`ADMIN_PASSWORD`, `TURNSTILE_SECRET_KEY`) are created with `npx wrangler secret put <NAME> --env staging`.
+**Staging's `PASSWORD_PEPPER` is production's**, so every employee logs into staging with their real password. With a different pepper, the hashes copied from production would let nobody in, not even `admin`, because the Worker only creates `admin` when it doesn't exist. The other secret, `ADMIN_PASSWORD`, is created with `npx wrangler secret put <NAME> --env staging`.
 
 ### When it's built
 
@@ -396,11 +382,11 @@ The documents that say there's no staging change: `CLAUDE.md`'s Stack section an
 
 The design lives in three places. Its terms are in [`GLOSSARY.md`](GLOSSARY.md).
 
-| Where                                                                                   | What it holds                                                                                                                  |
-| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| The brand, in [`consuelo-c/branding`](https://github.com/consuelo-c/branding)           | The company's logo, colors, font, radii, voice and messages                                                                    |
-| The Design System, in the code                                                          | The app's own tokens (`src/app.css`), components (`src/lib/components/`) and icons (`static/icons.svg`); its rules in `.claude/rules/ui.md` |
-| The canvas, [Consuelo C ERP Canvas](https://claude.ai/artifact/TBE5f1FaBxQJxkKwncJspg)  | The screens and printouts: one page per section (`project/08 Despachos, Recogidas y Transiciones.dc.html`), with its frames    |
+| Where                                                                                  | What it holds                                                                                                                               |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| The brand, in [`consuelo-c/branding`](https://github.com/consuelo-c/branding)          | The company's logo, colors, font, radii, voice and messages                                                                                 |
+| The Design System, in the code                                                         | The app's own tokens (`src/app.css`), components (`src/lib/components/`) and icons (`static/icons.svg`); its rules in `.claude/rules/ui.md` |
+| The canvas, [Consuelo C ERP Canvas](https://claude.ai/artifact/TBE5f1FaBxQJxkKwncJspg) | The screens and printouts: one page per section (`project/08 Despachos, Recogidas y Transiciones.dc.html`), with its frames                 |
 
 The canvas is a private artifact: only the Claude account that created it and the people it's shared with, from the artifact itself, can see it.
 

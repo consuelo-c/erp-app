@@ -634,7 +634,7 @@ function orderStatements(
 	{ resolved, status }: NewOrder
 ): OrderStatements {
 	const { values, computed, clientStatements } = clientWrite(db, actor, resolved);
-	// The public lookup's key: it stays out of events, which every role's timeline reads.
+	// The client link's key: it stays out of events, which every role's timeline reads.
 	const publicToken = crypto.randomUUID();
 	const statements = auditedInsert(db, {
 		table: 'orders',
