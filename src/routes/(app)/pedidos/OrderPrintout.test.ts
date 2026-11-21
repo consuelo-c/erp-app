@@ -20,8 +20,29 @@ let db: D1Database;
 let database: DatabaseSync;
 let printout: Printout;
 
-/** A CONFIRMED order agreeing `depositAmount`, with these deposit movements, read as its sheet. */
-async function printoutWith(depositAmount: number, deposits: number[] = []): Promise<Printout> {
+type Movements = { deposits?: number[]; installments?: number[] };
+
+/** A movement's concept, and its refund's for a negative amount. */
+type MovementKind = { concept: string; refundConcept: string };
+const DEPOSIT: MovementKind = { concept: 'SECURITY_DEPOSIT', refundConcept: 'DEPOSIT_REFUND' };
+const INSTALLMENT: MovementKind = { concept: 'INSTALLMENT', refundConcept: 'INSTALLMENT_REFUND' };
+
+/** A movement on order `orderId`, its refund's concept when `amount` is negative. */
+function insertMovement(orderId: number, { concept, refundConcept }: MovementKind, amount: number) {
+	database.exec(
+		`insert into cash_movements (concept, payment_method, amount, movement_date, entity_type, entity_id, payee, receipt_number, created_at, created_by, updated_at, updated_by)
+		values ('${amount > 0 ? concept : refundConcept}', 'CASH', ${amount}, '2026-08-10', 'ORDER', ${orderId}, 'Luz Marina Restrepo', (select coalesce(max(receipt_number), 0) + 1 from cash_movements), ${AUDIT})`
+	);
+}
+
+/**
+ * A CONFIRMED order agreeing `depositAmount`, with these deposit and installment movements (a
+ * negative one is its refund), read as its sheet.
+ */
+async function printoutWith(
+	depositAmount: number,
+	{ deposits = [], installments = [] }: Movements = {}
+): Promise<Printout> {
 	const created = await createOrder(
 		db,
 		{
@@ -44,10 +65,10 @@ async function printoutWith(depositAmount: number, deposits: number[] = []): Pro
 		throw new Error(JSON.stringify(created.errors));
 	}
 	for (const amount of deposits) {
-		database.exec(
-			`insert into cash_movements (concept, payment_method, amount, movement_date, entity_type, entity_id, payee, receipt_number, created_at, created_by, updated_at, updated_by)
-			values ('${amount > 0 ? 'SECURITY_DEPOSIT' : 'DEPOSIT_REFUND'}', 'CASH', ${amount}, '2026-08-10', 'ORDER', ${created.id}, 'Luz Marina Restrepo', (select coalesce(max(receipt_number), 0) + 1 from cash_movements), ${AUDIT})`
-		);
+		insertMovement(created.id, DEPOSIT, amount);
+	}
+	for (const amount of installments) {
+		insertMovement(created.id, INSTALLMENT, amount);
 	}
 	const read = await getOrderPrintout(db, String(created.id), sales);
 	if (null === read) {
@@ -73,20 +94,20 @@ function sheetOf(read: Printout, status: OrderStatus = 'CONFIRMED'): string {
 }
 
 test('«Depósito: $20.000 de $50.000», received of agreed, right after «Total»', async () => {
-	const body = sheetOf(await printoutWith(50000, [20000]));
+	const body = sheetOf(await printoutWith(50000, { deposits: [20000] }));
 	expect(body).toMatch(
 		/<span>Total<\/span><span>\$50\.000<\/span><\/div>\s*<!--\[0--><div class="print-row"><span>Depósito: \$20\.000 de \$50\.000<\/span><\/div>/
 	);
 });
 
 test('received is net of «Devolución de depósito», as «Depósito recibido» reads it', async () => {
-	const read = await printoutWith(50000, [50000, -30000]);
+	const read = await printoutWith(50000, { deposits: [50000, -30000] });
 	expect(read.order.depositHeld).toBe(20000);
 	expect(sheetOf(read)).toContain('<span>Depósito: $20.000 de $50.000</span>');
 });
 
 test('no deposit line with none agreed, nor on a COMPLETED or CANCELLED order', async () => {
-	const agreed = await printoutWith(50000, [50000]);
+	const agreed = await printoutWith(50000, { deposits: [50000] });
 	for (const body of [
 		sheetOf(printout),
 		sheetOf(agreed, 'COMPLETED'),
@@ -95,6 +116,31 @@ test('no deposit line with none agreed, nor on a COMPLETED or CANCELLED order', 
 		expect(body).toContain('<span>Total</span>');
 		expect(body).not.toContain('Depósito');
 	}
+});
+
+test('a CANCELLED order with nothing paid reads «A favor del cliente $0», never its total as «Saldo»', () => {
+	const body = sheetOf(printout, 'CANCELLED');
+	expect(body).toContain('<span>Pagado</span><span>$0</span>');
+	expect(body).toMatch(
+		/<div class="print-row print-row--strong"><span>A favor del cliente<\/span><span>\$0<\/span>/
+	);
+	expect(body).not.toContain('Saldo');
+});
+
+test('a CANCELLED order reads what the company holds: installments plus the deposit held', async () => {
+	const body = sheetOf(
+		await printoutWith(30000, { deposits: [30000], installments: [20000] }),
+		'CANCELLED'
+	);
+	expect(body).toContain('<span>Pagado</span><span>$20.000</span>');
+	expect(body).toContain('<span>A favor del cliente</span><span>$50.000</span>');
+	expect(body).not.toContain('Saldo');
+});
+
+test("an order that isn't CANCELLED still reads «Saldo»", async () => {
+	const body = sheetOf(await printoutWith(0, { installments: [20000] }));
+	expect(body).toContain('<span>Saldo</span><span>$30.000</span>');
+	expect(body).not.toContain('A favor del cliente');
 });
 
 function sheet(phone: string | null, whatsapp: string | null): string {

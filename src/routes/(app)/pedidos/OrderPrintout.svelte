@@ -99,9 +99,16 @@
 		{/if}
 		{#if null === receivable}
 			<div class="print-row"><span>Pagado</span><span>{formatBalance(order.paid)}</span></div>
-			<div class="print-row print-row--strong">
-				<span>Saldo</span><span>{formatBalance(order.balanceDue)}</span>
-			</div>
+			<!-- Cancelled, nothing is delivered: what's left is what the company holds for the client. -->
+			{#if 'CANCELLED' === order.status}
+				<div class="print-row print-row--strong">
+					<span>A favor del cliente</span><span>{formatPesos(order.owedToClient)}</span>
+				</div>
+			{:else}
+				<div class="print-row print-row--strong">
+					<span>Saldo</span><span>{formatBalance(order.balanceDue)}</span>
+				</div>
+			{/if}
 		{:else}
 			<div class="print-row print-row--strong">
 				<span>{receivable.label}</span><span>{receivable.amount}</span>

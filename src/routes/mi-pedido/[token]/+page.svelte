@@ -17,7 +17,11 @@
 
 	const order = $derived(data.order);
 	const receivable = $derived(readReceivableBalance(order));
+	// Cancelled, nothing is delivered: what's left is what the company holds, never an overpayment.
+	const isCancelledUnbilled = $derived(null === receivable && 'CANCELLED' === order.status);
 	const credit = $derived(receivable?.credit ?? -order.balanceDue);
+	// Over the order's own total: a billed order's credit is over its cuenta's.
+	const isPaidOverTotal = $derived(null === receivable && !isCancelledUnbilled && credit > 0);
 	const deposit = $derived(depositReceivedOfAgreed(order));
 </script>
 
@@ -109,7 +113,11 @@
 			<span>{receivable.label}</span><span>{receivable.amount}</span>
 		</li>
 	{/if}
-	{#if credit > 0}
+	{#if isCancelledUnbilled}
+		<li class="detail-list__row--strong">
+			<span>Saldo a su favor</span><span class="credit">{formatPesos(order.owedToClient)}</span>
+		</li>
+	{:else if credit > 0}
 		<li class="detail-list__row--strong">
 			<span>Saldo a su favor</span><span class="credit">{formatPesos(credit)}</span>
 		</li>
@@ -119,8 +127,7 @@
 		</li>
 	{/if}
 </ul>
-<!-- Over the order's own total: a billed order's credit is over its cuenta's. -->
-{#if null === receivable && credit > 0}
+{#if isPaidOverTotal}
 	<p class="note credit-note">Pagó {formatPesos(credit)} más del total del pedido.</p>
 {/if}
 
