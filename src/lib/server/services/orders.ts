@@ -25,6 +25,7 @@ import {
 import { ROLES, isAdminOrManager, requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, eventFieldsSchema, type Row } from '../audit';
 import { describeOrderEdit, type OrderChange } from '../order-changes';
+import { createPublicToken } from '../public-token';
 import { filterTimelineForActor } from '../timeline';
 import {
 	foldedSql,
@@ -635,7 +636,7 @@ function orderStatements(
 ): OrderStatements {
 	const { values, computed, clientStatements } = clientWrite(db, actor, resolved);
 	// The client link's key: it stays out of events, which every role's timeline reads.
-	const publicToken = crypto.randomUUID();
+	const publicToken = createPublicToken();
 	const statements = auditedInsert(db, {
 		table: 'orders',
 		entityType: 'ORDER',

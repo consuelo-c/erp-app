@@ -2,8 +2,8 @@
 // order's id; a quote's page too, only through its own token. No actor and no writes: a client
 // isn't a login, and reads aren't logged.
 
-import { z } from 'zod';
 import { addDays, getInstantDate, getTodaysDate } from '$lib/datetime';
+import { publicTokenSchema } from '../public-token';
 import {
 	BALANCE_DUE_SQL,
 	clientAttributesSchema,
@@ -27,9 +27,6 @@ export const CLIENT_WINDOW_DAYS = 30;
 export function getClientWindowStart(): string {
 	return addDays(getTodaysDate(), -CLIENT_WINDOW_DAYS);
 }
-
-// Every token is a `crypto.randomUUID()`: anything else, an order's id included, is no order.
-const tokenSchema = z.guid();
 
 type PublicItem = Pick<OrderItem, 'name' | 'qty' | 'unit_price' | 'line_total'>;
 
@@ -124,7 +121,7 @@ function toPublicOrder(row: PublicOrderRow): PublicOrder {
  * `CLIENT_WINDOW_DAYS` past, so a saved link stops showing the order a month after it.
  */
 export async function getPublicOrder(db: D1Database, token: unknown): Promise<PublicOrder | null> {
-	const parsed = tokenSchema.safeParse(token);
+	const parsed = publicTokenSchema.safeParse(token);
 	if (!parsed.success) {
 		return null;
 	}
@@ -147,7 +144,7 @@ export async function getPublicOrder(db: D1Database, token: unknown): Promise<Pu
  * the client's WhatsApp: the window protects the client's page, not the staff's.
  */
 export async function findOrderIdByToken(db: D1Database, token: unknown): Promise<number | null> {
-	const parsed = tokenSchema.safeParse(token);
+	const parsed = publicTokenSchema.safeParse(token);
 	if (!parsed.success) {
 		return null;
 	}
@@ -181,7 +178,7 @@ export type PublicQuote = {
 };
 
 async function findQuoteByToken(db: D1Database, token: unknown) {
-	const parsed = tokenSchema.safeParse(token);
+	const parsed = publicTokenSchema.safeParse(token);
 	if (!parsed.success) {
 		return null;
 	}
@@ -234,7 +231,7 @@ export async function findConvertedOrderToken(
 	db: D1Database,
 	token: unknown
 ): Promise<string | null> {
-	const parsed = tokenSchema.safeParse(token);
+	const parsed = publicTokenSchema.safeParse(token);
 	if (!parsed.success) {
 		return null;
 	}

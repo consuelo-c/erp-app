@@ -8,7 +8,7 @@ paths:
 # Server rules
 
 - Business logic lives in `src/lib/server/services/`: a service takes `(input, actor)` and knows nothing about transport (no cookies, `locals` or `Request`). Routes only resolve the actor, call the service and render.
-- `requireRole(actor, [...])` is the first line of every endpoint and server `load`, except `/`, `/login` and `/mi-pedido/[token]`. Roles are checked with `hasAnyRole`, never compared directly: a login holds several.
+- `requireRole(actor, [...])` is the first line of every endpoint and server `load`, except `/`, `/login`, `/mi-pedido/[token]` and `/mi-cotizacion/[token]`. Roles are checked with `hasAnyRole`, never compared directly: a login holds several.
 - An employee's own resources (their hours punches) are filtered by the actor's employee. An `employee_id` from the client is trusted only from `ADMIN` or `MANAGER`.
 - Every write goes through `auditedInsert` / `auditedUpdate`, their statements in one `db.batch()`, so the row and its `events` row never drift apart.
 - Zod validates every form and endpoint input on the server, and every JSON on write and on read.
@@ -18,5 +18,5 @@ paths:
 - A `settings` key carries its module as prefix; its module, label, unit and Zod schema live in `src/lib/settings.ts`. Only `ADMIN` and `MANAGER` edit values.
 - `cash_movements` and `events` have no edit or delete routes. A correction is an offsetting movement: same concept and link, opposite sign, `reverses_id` pointing to the original, once.
 - An order's money in: `SALES`, `MANAGER`, `ADMIN`. Money out, refunds included, and everything recorded in Caja: only `MANAGER` and `ADMIN`.
-- A public URL never carries an id: it carries a `public_token` from `crypto.randomUUID()`.
+- A public URL never carries an id: it carries a `public_token` from `createPublicToken()` (`src/lib/server/public-token.ts`).
 - Warnings never block: no transactions, no inventory reservations, no blocking on overbooking, a minimum amount or a schedule clash.

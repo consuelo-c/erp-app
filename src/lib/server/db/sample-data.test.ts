@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import { rolesSchema, type Actor } from '../actor';
+import { publicTokenSchema } from '../public-token';
 import { verifyPassword } from '../password';
 import { calculateOrderTotals, receivableLine } from '$lib/orders';
 import { createMemoryD1 } from './memory-d1';
@@ -330,9 +331,7 @@ test('every order passes the Zod schemas, points to real rows and follows the to
 		});
 		expect(items.map((item) => item.line_total)).toEqual(totals.lineTotals);
 		expect([order.items_total, order.order_total]).toEqual([totals.itemsTotal, totals.orderTotal]);
-		expect(String(order.public_token)).toMatch(
-			/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
-		);
+		expect(publicTokenSchema.safeParse(order.public_token).success).toBe(true);
 		const client = database
 			.prepare('select full_name from contacts where id = ?')
 			.get(Number(order.client_id));
@@ -458,9 +457,7 @@ test('every quote passes the Zod schemas and follows the totals formula, «por a
 		});
 		expect(items.map((item) => item.line_total)).toEqual(totals.lineTotals);
 		expect([quote.items_total, quote.quote_total]).toEqual([totals.itemsTotal, totals.orderTotal]);
-		expect(String(quote.public_token)).toMatch(
-			/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
-		);
+		expect(publicTokenSchema.safeParse(quote.public_token).success).toBe(true);
 	}
 	const tokens = readAll('quotes').map((quote) => quote.public_token);
 	expect(new Set(tokens).size).toBe(tokens.length);

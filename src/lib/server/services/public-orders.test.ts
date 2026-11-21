@@ -4,6 +4,7 @@ import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
 import { movementStatements } from './cash';
 import { createOrder } from '../db/test-orders';
+import { createPublicToken } from '../public-token';
 import {
 	findOrderIdByToken,
 	getClientTerms,
@@ -186,7 +187,7 @@ test('never the carrier, trip dates, times, notes, list prices, phone, incident 
 });
 
 test('an unknown token, an event 31 days past or an id: no page', async () => {
-	expect(await getPublicOrder(db, crypto.randomUUID())).toBeNull();
+	expect(await getPublicOrder(db, createPublicToken())).toBeNull();
 	const thirtyOneDaysAgo = await create('COMPLETED', { event_date: '2026-09-16' });
 	expect(await getPublicOrder(db, thirtyOneDaysAgo)).toBeNull();
 	expect(await getPublicOrder(db, '1')).toBeNull();
@@ -201,10 +202,10 @@ test('an event 30 days past and a cancelled order still open', async () => {
 	});
 });
 
-test("the staff's lookup finds any order by its token, old included, never by its id", async () => {
+test("the staff's link finds any order by its token, old included, never by its id", async () => {
 	const old = await create('COMPLETED', { event_date: '2026-01-10' });
 	expect(await findOrderIdByToken(db, old)).toBe(1);
-	expect(await findOrderIdByToken(db, crypto.randomUUID())).toBeNull();
+	expect(await findOrderIdByToken(db, createPublicToken())).toBeNull();
 	expect(await findOrderIdByToken(db, '1')).toBeNull();
 });
 

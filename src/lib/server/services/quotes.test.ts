@@ -735,9 +735,7 @@ test('nothing is written until saved; the copy takes the next number and leaves 
 test('the client link token is set once: editing keeps it, a duplicate gets its own', async () => {
 	const id = await create();
 	const token = await getQuotePublicToken(db, id, sales);
-	expect(String(token)).toMatch(
-		/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
-	);
+	expect(String(token)).toMatch(/^[0-9a-z]{13}$/);
 	expect(await updateQuote(db, { ...quote1043, id, discount: 0 }, sales)).toMatchObject({
 		ok: true
 	});

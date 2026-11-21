@@ -3,6 +3,7 @@
 // would), and converts it with the order as typed, so the order's own validation answers. `force`
 // skips the shortage check, as «Guardar de todos modos» does.
 import type { Actor } from '../actor';
+import { createPublicToken } from '../public-token';
 import { convertQuote } from '../services/quotes';
 
 export async function createOrder(db: D1Database, input: object, actor: Actor | null) {
@@ -19,7 +20,7 @@ export async function createOrder(db: D1Database, input: object, actor: Actor | 
 			from products where active = 1 order by id limit 1
 			returning id`
 		)
-		.bind(crypto.randomUUID(), clientId)
+		.bind(createPublicToken(), clientId)
 		.first<{ id: number }>();
 	// A quote's order types its transport; the tests' orders leave it out for $0.
 	const order = { quote: quote?.id, order: { transport_cost: 0, ...input }, force: true };

@@ -166,12 +166,10 @@ test('a client carrying Vetado saves an order like any other, with no extra step
 	expect((await read(await create())).clientId).toBe(LUZ_MARINA);
 });
 
-test('the public token is a UUID kept out of the CREATED event', async () => {
+test('the public token is 13 base36 characters, kept out of the CREATED event', async () => {
 	const id = await create();
 	const { public_token } = database.prepare('select public_token from orders').get() ?? {};
-	expect(String(public_token)).toMatch(
-		/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
-	);
+	expect(String(public_token)).toMatch(/^[0-9a-z]{13}$/);
 	const [created] = orderEvents();
 	expect(created).toMatchObject({ action: 'CREATED', before: null });
 	expect(created.after).toMatchObject({ status: 'CONFIRMED', order_total: 1180000 });
