@@ -199,7 +199,7 @@ export const orders = sqliteTable(
 	'orders',
 	{
 		id: integer('id').primaryKey({ autoIncrement: true }),
-		publicToken: text('public_token').notNull().unique(), // crypto.randomUUID()
+		publicToken: text('public_token').notNull().unique(), // createPublicToken()
 		clientId: integer('client_id')
 			.notNull()
 			.references(() => contacts.id),
@@ -271,7 +271,7 @@ export const quotes = sqliteTable(
 	'quotes',
 	{
 		id: integer('id').primaryKey({ autoIncrement: true }),
-		publicToken: text('public_token').notNull().unique(), // crypto.randomUUID(), never changed
+		publicToken: text('public_token').notNull().unique(), // createPublicToken(), never changed
 		clientId: integer('client_id')
 			.notNull()
 			.references(() => contacts.id),

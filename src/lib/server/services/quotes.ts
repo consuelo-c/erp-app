@@ -11,6 +11,7 @@ import { getQuoteState, QUOTE_STATE_SQL, QUOTE_STATES, type QuoteState } from '$
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, eventFieldsSchema } from '../audit';
 import { describeQuoteEdit, type OrderChange } from '../order-changes';
+import { createPublicToken } from '../public-token';
 import {
 	blankable,
 	clientAttributesSchema,
@@ -294,7 +295,7 @@ async function insertQuote(
 		entityType: 'QUOTE',
 		actor,
 		values,
-		unlogged: { public_token: crypto.randomUUID() },
+		unlogged: { public_token: createPublicToken() },
 		computed
 	});
 	const results = await db.batch([...clientStatements, ...statements]);

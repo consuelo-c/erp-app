@@ -4,6 +4,7 @@ import { render } from 'svelte/server';
 import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
 import type { Actor, Role } from '$lib/server/actor';
 import { createMemoryD1 } from '$lib/server/db/memory-d1';
+import { createPublicToken } from '$lib/server/public-token';
 import { createOrder } from '$lib/server/db/test-orders';
 import { handle } from '../../../hooks.server';
 import { load as loadLayout } from './+layout.server';
@@ -99,7 +100,7 @@ test("an event 31 days past: the employee still goes to it, the client doesn't s
 
 test('an unknown token or an id: the same 404, with a session or without', async () => {
 	await create('CONFIRMED');
-	for (const token of [crypto.randomUUID(), '1']) {
+	for (const token of [createPublicToken(), '1']) {
 		await expect(open(token, actor('SALES'))).rejects.toSatisfy(isUnavailable);
 		await expect(open(token)).rejects.toSatisfy(isUnavailable);
 	}
@@ -195,7 +196,7 @@ test("the terms under the order: rendered by renderTerms' rules, empty while the
 
 test("the WhatsApp message carries the page's own URL, from the request's origin", async () => {
 	const token = await create('CONFIRMED');
-	for (const path of [`/mi-pedido/${token}`, `/mi-pedido/${crypto.randomUUID()}`]) {
+	for (const path of [`/mi-pedido/${token}`, `/mi-pedido/${createPublicToken()}`]) {
 		const url = new URL(`https://pedidos.example.com${path}`);
 		const data = await loadLayout({ platform: { env: { DB: db } }, url } as never);
 		const href = new URL(String(data?.whatsAppHref));

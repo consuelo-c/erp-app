@@ -244,7 +244,7 @@ sample (id, token, document_id, status, event_date, venue, rental_days, discount
 	(1019, NULL, '@7Q2M9KXA', 'DELIVERED', '2026-10-14', 'laureles', 2, 0, 60000, 50000,
 		'2026-10-13', 'COMPANY_DELIVERY', '09:00', NULL, '2026-10-15', 'COMPANY_PICKUP', NULL, NULL,
 		'[["Sillas Tiffany",30],["Mesas Redondas",3],["Manteles para Mesas Cuadradas — Rojo",3]]', NULL),
-	(1047, '9a6e4d21-5b7c-4f3e-8a1d-2c4b6e8f1047', '@4MZT7QJD', 'DELIVERED', '2026-10-14', 'las-palmas', 2, 0, 220000, 150000,
+	(1047, 'k7f2q9m4x1047', '@4MZT7QJD', 'DELIVERED', '2026-10-14', 'las-palmas', 2, 0, 220000, 150000,
 		'2026-10-13', 'EXTERNAL_CARRIER', '14:00', '98552017', '2026-10-16', 'EXTERNAL_CARRIER', '09:00', '98552017',
 		'[["Sillas Tiffany",100],["Mesas Redondas",10],["Copas para Vino Tinto",100]]', 'Montaje en la terraza del salón.'),
 	(1020, NULL, '42889016', 'DELIVERED', '2026-10-15', 'chuscal', 1, 0, 150000, 100000,
@@ -274,7 +274,7 @@ sample (id, token, document_id, status, event_date, venue, rental_days, discount
 	(1028, NULL, '1036452118', 'DELIVERED', '2026-10-11', 'torre-verde', 2, 0, 0, 50000,
 		'2026-10-10', 'CLIENT_PICKUP', '09:00', NULL, '2026-10-14', 'CLIENT_RETURN', NULL, NULL,
 		'[["Sillas Tiffany",30],["Copas para Vino Tinto",30]]', NULL),
-	(1051, '5d2b8f16-0e3a-4b7c-9d4f-6a8c0e2b1051', '@7Q2M9KXA', 'CONFIRMED', '2026-10-17', 'laureles', 2, 28000, 60000, 100000,
+	(1051, 'r3w8d1z6p1051', '@7Q2M9KXA', 'CONFIRMED', '2026-10-17', 'laureles', 2, 28000, 60000, 100000,
 		'2026-10-15', 'CLIENT_PICKUP', '08:00', NULL, '2026-10-18', 'EXTERNAL_CARRIER', '09:00', '98552017',
 		'[["Sillas Tiffany",60],["Mesas Redondas",6]]', 'Recoge en camioneta propia.'),
 	(1029, NULL, '42889016', 'PICKED', '2026-10-16', 'chuscal', 2, 0, 150000, 100000,
@@ -283,7 +283,7 @@ sample (id, token, document_id, status, event_date, venue, rental_days, discount
 	(1030, NULL, '@8KDN4TWR', 'CONFIRMED', '2026-10-15', 'salon-laureles', 1, 0, 60000, 50000,
 		'2026-10-15', 'COMPANY_DELIVERY', '14:00', NULL, '2026-10-16', 'COMPANY_PICKUP', '16:00', NULL,
 		'[["Sillas Tiffany",30],["Manteles para Mesas Cuadradas — Rojo",3]]', NULL),
-	(1043, '3f1c2b7a-8d4e-4c1a-9b2f-0a1d5e7c1043', '1036452118', 'CONFIRMED', '2026-10-17', 'torre-verde', 2, 91200, 180000, 200000,
+	(1043, 'b5n0t4h8j1043', '1036452118', 'CONFIRMED', '2026-10-17', 'torre-verde', 2, 91200, 180000, 200000,
 		'2026-10-16', 'COMPANY_DELIVERY', '14:00', NULL, '2026-10-18', 'COMPANY_PICKUP', '09:00', NULL,
 		'[["Sillas Tiffany",120],["Mesas Redondas",12],["Copas para Vino Tinto",120]]',
 		'Entrar por el portón de servicio. Llamar 30 minutos antes de llegar.'),
@@ -363,7 +363,7 @@ totalled AS (
 )
 INSERT INTO orders (id, public_token, client_id, status, event_date, delivery_date, pickup_date, rental_days, client_attributes, delivery_attributes, pickup_attributes, order_items, items_total, discount, transport_cost, order_total, deposit_amount, attributes, receivable_id, created_at, created_by, updated_at, updated_by)
 SELECT
-	totalled.id, coalesce(totalled.token, printf('00000000-0000-4000-8000-%012d', totalled.id)), contacts.id, totalled.status,
+	totalled.id, coalesce(totalled.token, printf('o%012d', totalled.id)), contacts.id, totalled.status,
 	totalled.event_date, totalled.delivery_date, totalled.pickup_date, totalled.rental_days,
 	json_object('name', contacts.full_name, 'phone', contacts.phone, 'whatsapp', contacts.whatsapp),
 	json_object('method', totalled.delivery_method, 'time', totalled.delivery_time,
@@ -457,7 +457,7 @@ ORDER BY column1;
 -- and #3, #1043's lines and terms, converted into it. Each line is `[name, qty]` priced from the
 -- catalog with the formula, or `[name, qty, unit_price]` when the price was negotiated. created_at
 -- is fixed, not unixepoch(): it's the date the quote prints, and «Válida hasta» counts from it. Each
--- has its own fixed token, so «Su cotización» opens at /mi-cotizacion/00000000-0000-4000-9000-000000000001.
+-- has its own fixed token, so «Su cotización» opens at /mi-cotizacion/q000000000001.
 WITH sample (id, document_id, order_id, event_date, valid_until, rental_days, discount, transport_cost, lines, attributes, created_at) AS (VALUES
 	(1, '8909039395', NULL, '2026-12-12', '2027-12-31', 1, 203600, 250000,
 		'[["Sillas Tiffany",200],["Mesas Redondas",20],["Manteles para Mesas Redondas de 1.20 diámetro — Blanco lino",20],["Copas para Vino Tinto",200],["Samovares 12 Litros",4]]',
@@ -490,7 +490,7 @@ totalled AS (
 )
 INSERT INTO quotes (id, public_token, client_id, order_id, event_date, valid_until, rental_days, client_attributes, quote_items, items_total, discount, transport_cost, quote_total, attributes, created_at, created_by, updated_at, updated_by)
 SELECT
-	totalled.id, printf('00000000-0000-4000-9000-%012d', totalled.id), contacts.id, totalled.order_id, totalled.event_date, totalled.valid_until, totalled.rental_days,
+	totalled.id, printf('q%012d', totalled.id), contacts.id, totalled.order_id, totalled.event_date, totalled.valid_until, totalled.rental_days,
 	json_object('name', contacts.full_name, 'phone', contacts.phone, 'whatsapp', contacts.whatsapp),
 	totalled.quote_items, totalled.items_total, totalled.discount, totalled.transport_cost,
 	totalled.items_total - totalled.discount + coalesce(totalled.transport_cost, 0), totalled.attributes,

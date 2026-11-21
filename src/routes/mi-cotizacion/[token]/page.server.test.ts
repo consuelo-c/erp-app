@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
 import type { Actor, Role } from '$lib/server/actor';
 import { createMemoryD1 } from '$lib/server/db/memory-d1';
+import { createPublicToken } from '$lib/server/public-token';
 import { handle } from '../../../hooks.server';
 import { load as loadLayout } from './+layout.server';
 import { load } from './+page.server';
@@ -60,10 +61,10 @@ function insertQuote({
 	orderStatus = 'CONFIRMED',
 	transportCost = 250000
 }: QuoteRow = {}) {
-	const token = crypto.randomUUID();
+	const token = createPublicToken();
 	const total = 440000 - 40000 + (transportCost ?? 0);
 	if (undefined !== orderId) {
-		orderTokens.set(orderId, crypto.randomUUID());
+		orderTokens.set(orderId, createPublicToken());
 		database.exec(
 			`insert into orders (id, public_token, client_id, status, event_date, delivery_date, pickup_date, rental_days, client_attributes, delivery_attributes, pickup_attributes, order_items, items_total, order_total, created_at, created_by, updated_at, updated_by)
 			values (${orderId}, '${orderTokens.get(orderId)}', 1, '${orderStatus}', '2026-12-12', '2026-12-11', '2026-12-13', 1, '{}', '{"method":"COMPANY_DELIVERY"}', '{"method":"COMPANY_PICKUP"}', '[]', 0, 0, ${AUDIT})`
@@ -169,7 +170,7 @@ test('«por acordar» transport: no price, and the total leaves it out', async (
 
 test('expired, unknown, or a quote id: the same 404, «ya no está disponible»', async () => {
 	const expired = insertQuote({ validUntil: '2026-10-27' });
-	for (const token of [expired, crypto.randomUUID(), '12', '1']) {
+	for (const token of [expired, createPublicToken(), '12', '1']) {
 		await expect(open(token)).rejects.toSatisfy(isUnavailable);
 	}
 });
@@ -238,7 +239,7 @@ test("WAREHOUSE and DRIVER get the client's page; an unknown token is the same 4
 		expect((await open(valid, actor(role))).quote.id).toBe(1);
 		await expect(open(expired, actor(role))).rejects.toSatisfy(isUnavailable);
 	}
-	const unknown = crypto.randomUUID();
+	const unknown = createPublicToken();
 	for (const user of [null, ...(['SALES', 'MANAGER', 'ADMIN', 'WAREHOUSE', 'DRIVER'] as const)]) {
 		await expect(open(unknown, null === user ? null : actor(user))).rejects.toSatisfy(
 			isUnavailable
@@ -261,7 +262,7 @@ test("the two buttons and the floating icon carry their messages and the page's 
 		`Hola. Quiero solicitar cambios en la cotización #1 ${page}`
 	);
 	expect(data.confirmHref).toContain(encodeURIComponent(`la cotización #1 ${page}`));
-	for (const path of [`/mi-cotizacion/${token}`, `/mi-cotizacion/${crypto.randomUUID()}`]) {
+	for (const path of [`/mi-cotizacion/${token}`, `/mi-cotizacion/${createPublicToken()}`]) {
 		const url = new URL(`${ORIGIN}${path}`);
 		const layout = await loadLayout({ platform: { env: { DB: db } }, url } as never);
 		expect(textOf(layout?.whatsAppHref ?? null)).toBe(
