@@ -11,6 +11,7 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
   - Tickets are sub-issues of the spec, milestone `Phase NN`, with native blocking edges; acceptance criteria live in each ticket.
   - The phase PR closes the spec and every ticket (`Closes #N`, one line each); the developer closes the map after merging.
 - **One-off work** (from the developer or the client) goes through `/triage`, then `/implement`: one branch and one PR each.
+- **A manual action** found while working (a missing secret, a Cloudflare dashboard setting, a seed to re-run) becomes an issue before the session ends, with the exact command, or the full menu path, in its body.
 
 ## Conventions
 
