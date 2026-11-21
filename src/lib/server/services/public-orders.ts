@@ -1,10 +1,9 @@
-// The client's side of an order, with no session: the lookup by phone or WhatsApp username and event date, and its page
-// through `public_token`, never the order's id; a quote's page too, only through its own token. No actor and no writes: a client isn't a login, and reads aren't logged.
+// The client's side of an order, with no session: its page through `public_token`, never the
+// order's id; a quote's page too, only through its own token. No actor and no writes: a client
+// isn't a login, and reads aren't logged.
 
 import { z } from 'zod';
 import { addDays, getInstantDate, getTodaysDate } from '$lib/datetime';
-import { normalizePhone } from '$lib/phone';
-import { normalizeWhatsapp } from '$lib/whatsapp';
 import {
 	BALANCE_DUE_SQL,
 	clientAttributesSchema,
@@ -22,11 +21,11 @@ import { SELECT_QUOTE, toQuote, type QuoteRow } from './quotes';
 import { readSettings } from './settings';
 
 /** How many days after its event a client still sees the order. A constant, not a setting. */
-export const LOOKUP_WINDOW_DAYS = 30;
+export const CLIENT_WINDOW_DAYS = 30;
 
-/** The earliest event a client still finds: Bogotá's today less the window. */
-export function getLookupWindowStart(): string {
-	return addDays(getTodaysDate(), -LOOKUP_WINDOW_DAYS);
+/** The earliest event a client's page still shows: Bogotá's today less the window. */
+export function getClientWindowStart(): string {
+	return addDays(getTodaysDate(), -CLIENT_WINDOW_DAYS);
 }
 
 // Every token is a `crypto.randomUUID()`: anything else, an order's id included, is no order.
@@ -122,7 +121,7 @@ function toPublicOrder(row: PublicOrderRow): PublicOrder {
 
 /**
  * The client's page: null for an unknown token, or an event more than
- * `LOOKUP_WINDOW_DAYS` past, so a saved link stops showing the order a month after it.
+ * `CLIENT_WINDOW_DAYS` past, so a saved link stops showing the order a month after it.
  */
 export async function getPublicOrder(db: D1Database, token: unknown): Promise<PublicOrder | null> {
 	const parsed = tokenSchema.safeParse(token);
@@ -138,7 +137,7 @@ export async function getPublicOrder(db: D1Database, token: unknown): Promise<Pu
 			${ORDER_RECEIVABLE_BALANCE_SQL} as receivable_balance
 			from orders where public_token = ? and event_date >= ?`
 		)
-		.bind(parsed.data, getLookupWindowStart())
+		.bind(parsed.data, getClientWindowStart())
 		.first<PublicOrderRow>();
 	return null === row ? null : toPublicOrder(row);
 }
@@ -263,55 +262,4 @@ export async function getClientTerms(db: D1Database): Promise<string> {
 export async function getWhatsAppHref(db: D1Database, text: string): Promise<string | null> {
 	const { COMPANY_WHATSAPP: number } = await readSettings(db, ['COMPANY_WHATSAPP']);
 	return '' === number ? null : `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
-}
-
-const UNKNOWN_REACH = 'Escriba el teléfono o el usuario de WhatsApp con el que hizo el pedido.';
-
-/** What the client typed, as the order stores it: a username when it has a letter, else a phone. */
-type Reach = { column: '$.phone' | '$.whatsapp'; value: string };
-
-const lookupSchema = z.object({
-	phone_or_username: z.string().transform((typed, context): Reach => {
-		const isUsername = /[a-z]/i.test(typed);
-		const value = isUsername ? normalizeWhatsapp(typed) : normalizePhone(typed);
-		if (null === value) {
-			context.addIssue({ code: 'custom', message: UNKNOWN_REACH });
-			return z.NEVER;
-		}
-		return { column: isUsername ? '$.whatsapp' : '$.phone', value };
-	}),
-	event_date: z.iso.date('Escoja la fecha del evento')
-});
-
-/** One of the lookup's matches, as its list names it and links to its page. */
-export type LookupMatch = { id: number; status: OrderStatus; token: string };
-
-export type LookupResult =
-	| { ok: true; matches: LookupMatch[] }
-	| { ok: false; errors: Partial<Record<'phone_or_username' | 'event_date', string>> };
-
-/**
- * The orders of a phone or a WhatsApp username and an event date, by `id`: compared against the
- * order's own snapshot, never the contact; the phone whole, the username ignoring case; every
- * status; an event no older than the window. No match is the one miss, whatever failed; a field
- * the client mistyped runs no query.
- */
-export async function lookupOrders(db: D1Database, input: unknown): Promise<LookupResult> {
-	const parsed = lookupSchema.safeParse(input);
-	if (!parsed.success) {
-		const errors = Object.fromEntries(
-			parsed.error.issues.map((issue) => [String(issue.path[0]), issue.message])
-		);
-		return { ok: false, errors };
-	}
-	const { column, value } = parsed.data.phone_or_username;
-	const { results } = await db
-		.prepare(
-			`select id, status, public_token as token from orders
-			where event_date = ? and event_date >= ?
-			and lower(json_extract(client_attributes, ?)) = lower(?) order by id`
-		)
-		.bind(parsed.data.event_date, getLookupWindowStart(), column, value)
-		.all<LookupMatch>();
-	return { ok: true, matches: results };
 }
