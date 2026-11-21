@@ -84,10 +84,11 @@
 			"Bash(gh secret:*)",
 			"Bash(gh variable:*)",
 			"Edit(/.claude/settings*.json)",
-			"Edit(/.claude/hooks/**)"
+			"Edit(/.claude/hooks/**)",
+			"Edit(../erp-planning/**)"
 		],
-		"defaultMode": "plan",
-		"additionalDirectories": ["../erp-planning", "../branding"]
+		"defaultMode": "default",
+		"additionalDirectories": ["../branding"]
 	},
 	"enabledPlugins": {
 		"svelte@svelte": true,

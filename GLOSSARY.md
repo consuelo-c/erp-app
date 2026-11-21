@@ -1,0 +1,39 @@
+# Banquetes Consuelo C ERP
+
+The ERP for a party rental business in Medellín. One name per concept: the code, the issues and the chat use these and no synonyms.
+
+## Design
+
+**Brand**:
+The company's logo, colors, font, radii, voice and messages, kept in `consuelo-c/branding`. It knows nothing about the app and wins over it.
+
+**Design System**:
+The app's own tokens and components, on top of the brand, as the code holds them. It wins over the canvas.
+_Avoid_: style guide, UI kit
+
+**Canvas**:
+The Claude artifact "Consuelo C ERP Canvas", where the screens and printouts are drawn.
+_Avoid_: mockups, design file
+
+**Page**:
+A canvas file of kind `page`, one per section of the app, found by its name.
+_Avoid_: canvas screen
+
+**Component page**:
+A canvas file of kind `component` that pages embed. Not a Svelte component.
+
+**Frame**:
+One drawn screen or state on a page.
+_Avoid_: artboard
+
+**Frame ID**:
+A frame's label, `<page>-<frame>` with two digits each (`07-12` is page 07's twelfth frame); a new frame takes its page's next free number.
+
+**Design-system copy**:
+The Design System as frozen into the canvas, under `project/_ds/`. Where it disagrees with the brand or the code, it loses.
+
+**Screen**:
+One route of the app, drawn in one or more frames.
+
+**Printout**:
+A printed sheet (order, quote, receipt, payroll slip), drawn in frames like a screen.

@@ -17,7 +17,7 @@ process.stdout.write(
 		systemMessage: message,
 		hookSpecificOutput: {
 			hookEventName: 'SessionStart',
-			additionalContext: `${message}. If the developer asks for an unattended run (e.g. /build-phase) outside auto mode, remind them of this once before starting.`
+			additionalContext: `${message}. If the developer asks for an unattended run (e.g. /implement-spec) outside auto mode, remind them of this once before starting.`
 		}
 	})
 );

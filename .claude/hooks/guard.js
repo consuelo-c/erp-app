@@ -23,7 +23,7 @@ const reason =
 				roots,
 				depth: 0
 			})
-		: checkFileTool(input.tool_input?.file_path ?? input.tool_input?.notebook_path ?? '');
+		: checkFileTool(input.tool_input?.file_path ?? input.tool_input?.notebook_path ?? '', roots);
 
 if (reason) {
 	process.stderr.write(`Blocked by .claude/hooks/guard.js: ${reason}`);

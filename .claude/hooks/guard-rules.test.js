@@ -24,16 +24,15 @@ test('gh api only reads', () => {
 	expect(check('gh api -X GET search/issues -f q=x')).toBeNull();
 });
 
-test('deletes only inside the three repos and the temp folders', () => {
+test('deletes only inside erp-app, branding and the temp folders', () => {
 	expect(check('rm ~/x')).toMatch(/outside/);
 	expect(check('rm -rf ../website-planning/x')).toMatch(/outside/);
 	expect(check(`bash -c 'rm /etc/x'`)).toMatch(/outside/);
-	expect(check('/bin/rm -rf ../erp-planning')).toMatch(/outside/);
 	expect(check('cd .. && rm -rf website-planning/x')).toMatch(/outside/);
 	expect(check('find ~ -name x -delete')).toMatch(/outside/);
 	expect(check('mv src/a.ts ~/Desktop/')).toMatch(/outside/);
 	expect(check('rm src/x')).toBeNull();
-	expect(check('rm -rf ../erp-planning/x ../branding/y')).toBeNull();
+	expect(check('rm -rf ../branding/y')).toBeNull();
 	expect(check('rm -f /tmp/guard-temp/x')).toBeNull();
 	expect(check('find src -name "*.orig" -delete')).toBeNull();
 	expect(check('mv src/a.ts src/b.ts')).toBeNull();
@@ -46,11 +45,26 @@ test('deletes it cannot resolve are denied', () => {
 	expect(check('rm -rf .git')).toMatch(/\.git/);
 });
 
-test('erp-planning and branding commit locally, never push', () => {
-	expect(check('git -C ../erp-planning push')).toMatch(/commit there locally/);
+test('branding commits locally, never pushes', () => {
 	expect(check('cd ../branding && git push origin main')).toMatch(/commit there locally/);
-	expect(check('git -C ../erp-planning commit -m x')).toBeNull();
+	expect(check('git -C ../branding commit -m x')).toBeNull();
 	expect(check('git push -u origin chore/533-afk-settings')).toBeNull();
+});
+
+test('erp-planning is read-only', () => {
+	expect(check('/bin/rm -rf ../erp-planning')).toMatch(/read-only/);
+	expect(check('find ../erp-planning -name x -delete')).toMatch(/read-only/);
+	expect(check('mv ../erp-planning/a.md src/')).toMatch(/read-only/);
+	expect(check('echo x > ../erp-planning/a.md')).toMatch(/read-only/);
+	expect(check(`sed -i '' s/a/b/ ../erp-planning/a.md`)).toMatch(/read-only/);
+	expect(check('cp src/a.ts ../erp-planning/')).toMatch(/read-only/);
+	expect(check('git -C ../erp-planning commit -m x')).toMatch(/read-only/);
+	expect(check('cd ../erp-planning && git push')).toMatch(/read-only/);
+	expect(check('git -C ../erp-planning log --oneline')).toBeNull();
+	expect(check('rg foo ../erp-planning && cat ../erp-planning/a.md')).toBeNull();
+	expect(check('cp ../erp-planning/a.md docs/')).toBeNull();
+	expect(checkFileTool(join(workspace, 'erp-planning', 'a.md'), roots)).toMatch(/read-only/);
+	expect(checkFileTool(join(project, 'docs', 'a.md'), roots)).toBeNull();
 });
 
 test('no deleting or force-updating remote branches', () => {
@@ -73,9 +87,19 @@ test('issues close but are never deleted; merging is the developer’s', () => {
 test('the safety rules themselves are the developer’s', () => {
 	expect(check(`sed -i '' s/x/y/ .claude/settings.json`)).toMatch(/safety rules/);
 	expect(check('echo {} > .claude/hooks/guard.js')).toMatch(/safety rules/);
+	expect(check('cp /tmp/x.js .claude/hooks/guard.js')).toMatch(/safety rules/);
+	expect(check('git checkout -- .claude/settings.json')).toMatch(/safety rules/);
 	expect(check('cat .claude/settings.json | jq .')).toBeNull();
 	expect(check('git add .claude/settings.json .claude/hooks/guard.js')).toBeNull();
+	expect(check('cp .claude/settings.json /tmp/guard-temp/')).toBeNull();
 	expect(checkFileTool('/x/erp-app/.claude/settings.json')).toMatch(/safety rules/);
 	expect(checkFileTool('/x/erp-app/.claude/hooks/guard-rules.js')).toMatch(/safety rules/);
 	expect(checkFileTool('/x/erp-app/src/a.ts')).toBeNull();
+});
+
+test('mentioning the safety rules is not writing them', () => {
+	expect(
+		check('gh issue comment 1 --body "see .claude/settings.json" > /dev/null 2>&1')
+	).toBeNull();
+	expect(check('git status --short .claude && echo done > /tmp/guard-temp/log')).toBeNull();
 });
