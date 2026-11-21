@@ -17,9 +17,38 @@ const WRAPPERS = new Set([
 	'doas'
 ]);
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish']);
-const GUARDED_PATH = /\.claude\/(settings[^/\s'"]*\.json|hooks\/)/;
-const WRITE_HINT =
-	/(^|\s)(sed\s+-i|perl\s+-[a-z]*i|tee|mv|cp|rm|ln|chmod|truncate|install|dd)\b|>|git\s+(checkout|restore|reset|stash|apply|am)\b/;
+const GUARDED_PATH = /(^|\/)\.claude\/(settings[^/]*\.json|hooks(\/|$))/;
+// Verbs that write every operand; cp, install and ln write only the last one, dd its of=.
+const WRITE_VERBS = new Set([
+	'rm',
+	'rmdir',
+	'unlink',
+	'shred',
+	'trash',
+	'mv',
+	'tee',
+	'touch',
+	'mkdir',
+	'chmod',
+	'truncate'
+]);
+const LAST_OPERAND_VERBS = new Set(['cp', 'install', 'ln']);
+const IN_PLACE_VERBS = new Set(['sed', 'perl']);
+const GIT_PATH_WRITES = new Set(['checkout', 'restore', 'reset', 'stash', 'apply', 'am']);
+const GIT_READS = new Set([
+	'status',
+	'log',
+	'diff',
+	'show',
+	'blame',
+	'grep',
+	'ls-files',
+	'rev-parse',
+	'describe',
+	'shortlog',
+	'remote',
+	'fetch'
+]);
 const GH_BANNED = {
 	'pr merge': "merging is the developer's.",
 	'pr close': "closing a pull request is the developer's.",
@@ -61,18 +90,23 @@ export function realPath(path) {
 	return path;
 }
 
-/** The allowed roots for a session whose project is `projectDirectory`. */
+/**
+ * The roots for a session whose project is `projectDirectory`: `repos` may be
+ * written (branding only committed locally), `readOnly` never.
+ */
 export function rootsFor(projectDirectory, temporaryDirectories) {
 	const workspace = dirname(projectDirectory);
-	const repos = [
-		projectDirectory,
-		join(workspace, 'erp-planning'),
-		join(workspace, 'branding')
-	].map(realPath);
-	return { repos, pushBlocked: repos.slice(1), temp: temporaryDirectories.map(realPath) };
+	const repos = [projectDirectory, join(workspace, 'branding')].map(realPath);
+	return {
+		repos,
+		pushBlocked: repos.slice(1),
+		readOnly: [realPath(join(workspace, 'erp-planning'))],
+		temp: temporaryDirectories.map(realPath)
+	};
 }
 
 const isInside = (path, root) => path.startsWith(root + sep);
+const isWithin = (path, root) => path === root || isInside(path, root);
 
 function expandHome(path) {
 	if ('~' === path) {
@@ -81,12 +115,18 @@ function expandHome(path) {
 	return path.startsWith('~/') ? join(homedir(), path.slice(2)) : path;
 }
 
-/** Denies Edit/Write on the files that hold the session's safety rules. */
-export function checkFileTool(filePath) {
-	if (/(^|\/)\.claude\/(settings[^/]*\.json|hooks\/)/.test(filePath)) {
-		return `${filePath} holds the session's safety rules; the developer edits it by hand.`;
+/** Why writing `absolute` is denied: the safety rules, or a read-only repo. */
+function protectedPathReason(absolute, roots) {
+	if (GUARDED_PATH.test(absolute)) {
+		return `${absolute} holds the session's safety rules; the developer edits it by hand.`;
 	}
-	return null;
+	const readOnly = roots?.readOnly?.find((root) => isWithin(absolute, root));
+	return readOnly ? `${readOnly} is read-only: nothing is written there.` : null;
+}
+
+/** Denies Edit/Write on the files that hold the session's safety rules and in read-only repos. */
+export function checkFileTool(filePath, roots) {
+	return filePath ? protectedPathReason(realPath(resolve(filePath)), roots) : null;
 }
 
 function readQuoted(text, start, quote) {
@@ -102,12 +142,15 @@ function readQuoted(text, start, quote) {
 
 function operatorLength(text, index) {
 	const char = text[index];
-	if ('<' === char || '>' === char) {
+	if ('<' === char) {
+		return { kind: 'input', length: 1 };
+	}
+	if ('>' === char) {
 		let end = index + 1;
 		while ('>' === text[end] || '&' === text[end]) {
 			end++;
 		}
-		return { kind: 'redirect', length: end - index };
+		return { kind: 'output', length: end - index };
 	}
 	if ('\n;|&()'.includes(char)) {
 		const pair = text.slice(index, index + 2);
@@ -162,22 +205,25 @@ export function tokenize(text) {
 	return state.tokens;
 }
 
-/** Splits a shell string into simple commands (arrays of words), dropping redirect targets. */
+/** Splits a shell string into simple commands: their words, and the targets of their output redirects. */
 export function simpleCommands(text) {
-	const commands = [[]];
-	let skipNext = false;
+	const commands = [{ words: [], outputs: [] }];
+	let redirect = null;
 	for (const token of tokenize(text)) {
 		if ('separator' === token.operator) {
-			commands.push([]);
-		} else if ('redirect' === token.operator) {
-			skipNext = true;
-		} else if (skipNext) {
-			skipNext = false;
+			commands.push({ words: [], outputs: [] });
+		} else if (token.operator) {
+			redirect = token.operator;
+		} else if ('output' === redirect) {
+			commands.at(-1).outputs.push(token);
+			redirect = null;
+		} else if (redirect) {
+			redirect = null;
 		} else {
-			commands.at(-1).push(token);
+			commands.at(-1).words.push(token);
 		}
 	}
-	return commands.filter((words) => words.length > 0);
+	return commands.filter((command) => command.words.length > 0 || command.outputs.length > 0);
 }
 
 /** Drops leading VAR=value assignments and wrapper commands such as sudo or env. */
@@ -197,6 +243,8 @@ function stripWrappers(words) {
 	return rest;
 }
 
+const absoluteOf = (text, context) => realPath(resolve(context.directory, expandHome(text)));
+
 function checkDeleteTarget(target, context, verb) {
 	if (target.dynamic) {
 		return `${verb} with a computed path (${target.text}) can't be checked; use a literal path.`;
@@ -210,11 +258,14 @@ function checkDeleteTarget(target, context, verb) {
 	if (/(^|\/)\.git(\/|$)/.test(absolute)) {
 		return `${verb} on a .git directory (${absolute}).`;
 	}
-	const { repos, temp } = context.roots;
+	const { repos, readOnly, temp } = context.roots;
+	if (readOnly.some((root) => isWithin(absolute, root))) {
+		return `${verb} in ${absolute}: erp-planning is read-only.`;
+	}
 	if ([...repos, ...temp].some((root) => isInside(absolute, root))) {
 		return null;
 	}
-	return `${verb} outside erp-app, erp-planning, branding and the temp folders (${absolute}). Deleting there is the developer's.`;
+	return `${verb} outside erp-app, branding and the temp folders (${absolute}). Deleting there is the developer's.`;
 }
 
 const firstReason = (items, check) => items.map(check).find(Boolean) ?? null;
@@ -252,8 +303,10 @@ function checkFind(words, context) {
 
 function repositoryOf(directory, roots) {
 	const absolute = realPath(directory);
-	const longestFirst = [...roots.repos].sort((first, second) => second.length - first.length);
-	return longestFirst.find((root) => absolute === root || isInside(absolute, root)) ?? null;
+	const longestFirst = [...roots.repos, ...roots.readOnly].sort(
+		(first, second) => second.length - first.length
+	);
+	return longestFirst.find((root) => isWithin(absolute, root)) ?? null;
 }
 
 /** Reads git's global options (-C, -c…) and returns the directory it works in and the rest of the words. */
@@ -292,10 +345,17 @@ function checkPush(target, rest, roots) {
 
 function checkGit(words, context) {
 	const { target, subcommand, rest } = gitTarget(words, context.directory);
+	const repository = repositoryOf(target, context.roots);
+	if (context.roots.readOnly.includes(repository) && !GIT_READS.has(subcommand)) {
+		return `git ${subcommand} in ${repository}: erp-planning is read-only.`;
+	}
+	if (GIT_PATH_WRITES.has(subcommand) && rest.some((text) => GUARDED_PATH.test(text))) {
+		return `git ${subcommand} on .claude/settings*.json or .claude/hooks: the session's safety rules; the developer edits them by hand.`;
+	}
 	if ('push' === subcommand) {
 		return checkPush(target, rest, context.roots);
 	}
-	if (['clean', 'rm'].includes(subcommand) && !repositoryOf(target, context.roots)) {
+	if (['clean', 'rm'].includes(subcommand) && !repository) {
 		return `git ${subcommand} outside the allowed repos (${target}).`;
 	}
 	return null;
@@ -419,13 +479,34 @@ const verbCheck = (verb) => {
 	return 'cd' === verb || 'pushd' === verb ? changeDirectory : VERB_CHECKS[verb];
 };
 
-/** Checks one simple command; `cd` updates the directory later commands run in. */
-function checkSimpleCommand(words, context) {
-	const [first, ...rest] = stripWrappers(words);
-	if (!first) {
-		return null;
+/** The words a command writes to: its output redirects and its verb's file operands. */
+function writtenPaths(verb, rest, outputs) {
+	const files = operands(rest);
+	if (WRITE_VERBS.has(verb)) {
+		return [...outputs, ...files];
 	}
-	return verbCheck(basename(first.text))?.(rest, context) ?? null;
+	if (LAST_OPERAND_VERBS.has(verb)) {
+		return [...outputs, ...files.slice(-1)];
+	}
+	if (IN_PLACE_VERBS.has(verb) && rest.some((word) => /^-[a-z]*i/.test(word.text))) {
+		return [...outputs, ...files];
+	}
+	if ('dd' === verb) {
+		const target = rest.find((word) => word.text.startsWith('of='));
+		return [...outputs, ...(target ? [{ ...target, text: target.text.slice(3) }] : [])];
+	}
+	return outputs;
+}
+
+/** Checks one simple command; `cd` updates the directory later commands run in. */
+function checkSimpleCommand({ words, outputs }, context) {
+	const [first, ...rest] = stripWrappers(words);
+	const verb = first ? basename(first.text) : '';
+	const written = writtenPaths(verb, rest, outputs).filter((word) => !word.dynamic);
+	const reason = firstReason(written, (word) =>
+		protectedPathReason(absoluteOf(word.text, context), context.roots)
+	);
+	return reason ?? (first ? (verbCheck(verb)?.(rest, context) ?? null) : null);
 }
 
 /**
@@ -436,12 +517,9 @@ export function checkBash(command, context) {
 	if (context.depth > 4) {
 		return 'nested shells too deep to check.';
 	}
-	if (GUARDED_PATH.test(command) && WRITE_HINT.test(command)) {
-		return "changing .claude/settings*.json or .claude/hooks: the session's safety rules; the developer edits them by hand.";
-	}
 	if (/\bxargs\b[^|;&]*\b(rm|rmdir|unlink|mv|shred)\b/.test(command)) {
 		return "a delete fed by xargs can't be checked; delete literal paths instead.";
 	}
 	const local = { ...context };
-	return firstReason(simpleCommands(command), (words) => checkSimpleCommand(words, local));
+	return firstReason(simpleCommands(command), (command) => checkSimpleCommand(command, local));
 }

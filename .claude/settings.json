@@ -84,9 +84,10 @@
 			"Bash(gh secret:*)",
 			"Bash(gh variable:*)",
 			"Edit(/.claude/settings*.json)",
-			"Edit(/.claude/hooks/**)"
+			"Edit(/.claude/hooks/**)",
+			"Edit(../erp-planning/**)"
 		],
-		"defaultMode": "plan",
+		"defaultMode": "default",
 		"additionalDirectories": ["../erp-planning", "../branding"]
 	},
 	"enabledPlugins": {
