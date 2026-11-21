@@ -7,7 +7,7 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 - **Phase work** (`/to-spec`, `/to-tickets`) carries no triage label, never `ready-for-agent`:
   - The spec is an issue created as a sub-issue of its phase map (`gh issue create --parent <map>`), milestone `Phase NN`.
   - Tickets are sub-issues of the spec, milestone `Phase NN`, with native blocking edges; acceptance criteria live in each ticket.
-  - The phase PR closes the spec and every ticket (`Closes #N`, one line each); the developer closes the map after merging.
+  - The phase PR closes the spec and every ticket (`Closes #N`, one line each); the developer closes the map and the `Phase NN` milestone after merging.
 - **One-off work** (from the developer or the client) goes through `/triage`, then `/implement`: one branch and one PR each.
 - **A manual action** found while working (a missing secret, a Cloudflare dashboard setting, a seed to re-run) becomes an issue before the session ends, with the exact command, or the full menu path, in its body.
 
