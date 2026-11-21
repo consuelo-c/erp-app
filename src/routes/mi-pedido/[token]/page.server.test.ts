@@ -129,6 +129,7 @@ test("the load sends neither the client's phone nor username: its keys, listed",
 			'depositHeld',
 			'paid',
 			'balanceDue',
+			'owedToClient',
 			'receivableId',
 			'receivableBalance'
 		].sort()
@@ -139,27 +140,47 @@ test("the load sends neither the client's phone nor username: its keys, listed",
 	}
 });
 
-/** «Su pedido» as the client reads it: the order agreeing `depositAmount`, with these deposit movements. */
-async function pageWith(status: string, depositAmount: number, deposits: number[]) {
+/** A movement's concept, and its refund's for a negative amount. */
+type MovementKind = { concept: string; refundConcept: string };
+const DEPOSIT: MovementKind = { concept: 'SECURITY_DEPOSIT', refundConcept: 'DEPOSIT_REFUND' };
+const INSTALLMENT: MovementKind = { concept: 'INSTALLMENT', refundConcept: 'INSTALLMENT_REFUND' };
+
+/** A movement on order 1, its refund's concept when `amount` is negative. */
+function insertMovement({ concept, refundConcept }: MovementKind, amount: number) {
+	database.exec(
+		`insert into cash_movements (concept, payment_method, amount, movement_date, entity_type, entity_id, payee, receipt_number, created_at, created_by, updated_at, updated_by)
+		values ('${amount > 0 ? concept : refundConcept}', 'CASH', ${amount}, '2026-10-20', 'ORDER', 1, 'Luz Marina Restrepo', (select coalesce(max(receipt_number), 0) + 1 from cash_movements), ${AUDIT})`
+	);
+}
+
+/**
+ * «Su pedido» as the client reads it: the order agreeing `depositAmount`, with these deposit and
+ * installment movements (a negative one is its refund).
+ */
+async function pageWith(
+	status: string,
+	depositAmount: number,
+	{ deposits = [], installments = [] }: { deposits?: number[]; installments?: number[] } = {}
+) {
 	const token = await create(status);
 	database.prepare('update orders set deposit_amount = ? where id = 1').run(depositAmount);
 	for (const amount of deposits) {
-		database.exec(
-			`insert into cash_movements (concept, payment_method, amount, movement_date, entity_type, entity_id, payee, receipt_number, created_at, created_by, updated_at, updated_by)
-			values ('${amount > 0 ? 'SECURITY_DEPOSIT' : 'DEPOSIT_REFUND'}', 'CASH', ${amount}, '2026-10-20', 'ORDER', 1, 'Luz Marina Restrepo', (select coalesce(max(receipt_number), 0) + 1 from cash_movements), ${AUDIT})`
-		);
+		insertMovement(DEPOSIT, amount);
+	}
+	for (const amount of installments) {
+		insertMovement(INSTALLMENT, amount);
 	}
 	return render(Page, { props: { data: await open(token) } as never }).body;
 }
 
 test('«Depósito» reads «$20.000 de $50.000», received of agreed, right after «Total»', async () => {
-	expect(await pageWith('CONFIRMED', 50000, [20000])).toMatch(
+	expect(await pageWith('CONFIRMED', 50000, { deposits: [20000] })).toMatch(
 		/<span>Total<\/span><span>\$25\.000<\/span><\/li>\s*<!--\[0--><li class="detail-list__row--plain"><span>Depósito<\/span><span>\$20\.000 de \$50\.000<\/span><\/li>/
 	);
 });
 
 test('received is net of «Devolución de depósito»', async () => {
-	const body = await pageWith('CONFIRMED', 50000, [50000, -30000]);
+	const body = await pageWith('CONFIRMED', 50000, { deposits: [50000, -30000] });
 	expect(body).toContain('<span>Depósito</span><span>$20.000 de $50.000</span>');
 });
 
@@ -168,9 +189,48 @@ test.each([
 	['COMPLETED', 50000, [50000, -50000]],
 	['CANCELLED', 50000, [50000]]
 ])('no deposit line on a %s order agreeing %i', async (status, depositAmount, deposits) => {
-	const body = await pageWith(status, depositAmount, deposits);
+	const body = await pageWith(status, depositAmount, { deposits });
 	expect(body).toContain('<span>Total</span>');
 	expect(body).not.toContain('<span>Depósito</span>');
+});
+
+test('a CANCELLED order with nothing paid reads «Saldo a su favor $0», never its total as «Saldo»', async () => {
+	const body = await pageWith('CANCELLED', 0);
+	expect(body).toContain('<span>Pagado</span><span>$0</span>');
+	expect(body).toMatch(
+		/<li class="detail-list__row--strong"><span>Saldo a su favor<\/span><span class="credit[^"]*">\$0<\/span>/
+	);
+	expect(body).not.toContain('<span>Saldo</span>');
+});
+
+test('a CANCELLED order reads what the company holds: installments net of refunds, plus the deposit held', async () => {
+	const body = await pageWith('CANCELLED', 50000, {
+		deposits: [50000],
+		installments: [20000, -10000]
+	});
+	expect(body).toContain('<span>Pagado</span><span>$10.000</span>');
+	expect(body).toMatch(/<span>Saldo a su favor<\/span><span class="credit[^"]*">\$60\.000<\/span>/);
+	expect(body).not.toContain('<span>Saldo</span>');
+});
+
+test('a CANCELLED order paid above its total has no «más del total» note', async () => {
+	const body = await pageWith('CANCELLED', 0, { installments: [30000] });
+	expect(body).toMatch(/<span>Saldo a su favor<\/span><span class="credit[^"]*">\$30\.000<\/span>/);
+	expect(body).not.toContain('más del total');
+});
+
+test("an order that isn't CANCELLED still reads «Saldo»", async () => {
+	expect(await pageWith('CONFIRMED', 0, { installments: [10000] })).toContain(
+		'<span>Saldo</span><span>$15.000</span>'
+	);
+});
+
+test("an order that isn't CANCELLED, paid above its total, reads the overpayment", async () => {
+	const overpaid = await pageWith('CONFIRMED', 0, { installments: [30000] });
+	expect(overpaid).toMatch(
+		/<span>Saldo a su favor<\/span><span class="credit[^"]*">\$5\.000<\/span>/
+	);
+	expect(overpaid).toContain('Pagó $5.000 más del total del pedido.');
 });
 
 test('with no session, the page, writing nothing: events and sessions unchanged', async () => {

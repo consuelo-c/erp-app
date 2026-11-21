@@ -11,6 +11,7 @@ import {
 	deliveryAttributesSchema,
 	ORDER_RECEIVABLE_BALANCE_SQL,
 	orderItemsSchema,
+	OWED_TO_CLIENT_SQL,
 	pickupAttributesSchema,
 	type DeliveryMethod,
 	type OrderItem,
@@ -52,6 +53,8 @@ export type PublicOrder = {
 	depositHeld: number;
 	paid: number;
 	balanceDue: number;
+	/** What the company holds for the client, as the staff's detail reads it: a figure only. */
+	owedToClient: number;
 	/** The cuenta de cobro billing it: only its balance line reaches the page, never a link. */
 	receivableId: number | null;
 	receivableBalance: number | null;
@@ -73,6 +76,7 @@ type PublicOrderRow = {
 	deposit_amount: number;
 	deposit_held: number;
 	balance_due: number;
+	owed_to_client: number;
 	receivable_id: number | null;
 	receivable_balance: number | null;
 };
@@ -111,6 +115,7 @@ function toPublicOrder(row: PublicOrderRow): PublicOrder {
 		depositHeld: row.deposit_held,
 		paid: row.order_total - row.balance_due,
 		balanceDue: row.balance_due,
+		owedToClient: row.owed_to_client,
 		receivableId: row.receivable_id,
 		receivableBalance: row.receivable_balance
 	};
@@ -130,7 +135,7 @@ export async function getPublicOrder(db: D1Database, token: unknown): Promise<Pu
 			`select id, status, event_date, rental_days, client_attributes, delivery_attributes,
 			pickup_attributes, order_items, items_total, discount, transport_cost, order_total,
 			deposit_amount, ${DEPOSIT_HELD_SQL} as deposit_held, ${BALANCE_DUE_SQL} as balance_due,
-			receivable_id,
+			${OWED_TO_CLIENT_SQL} as owed_to_client, receivable_id,
 			${ORDER_RECEIVABLE_BALANCE_SQL} as receivable_balance
 			from orders where public_token = ? and event_date >= ?`
 		)

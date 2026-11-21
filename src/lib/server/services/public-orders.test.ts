@@ -109,6 +109,7 @@ test("#1043's page: the printout's figures, and exactly the fields the client se
 		depositHeld: 0,
 		paid: 500000,
 		balanceDue: 680000,
+		owedToClient: 500000,
 		receivableId: null,
 		receivableBalance: null
 	});
