@@ -4,8 +4,6 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 
 ## Conventions in this repo
 
-- Every `gh` command takes `--repo consuelo-c/erp-app`.
-- Issues, comments, specs and PRs are written in English; only the app's UI is Spanish.
 - **Phase work** (`/to-spec`, `/to-tickets`) carries no triage label, never `ready-for-agent`:
   - The spec is an issue created as a sub-issue of its phase map (`gh issue create --parent <map>`), milestone `Phase NN`.
   - Tickets are sub-issues of the spec, milestone `Phase NN`, with native blocking edges; acceptance criteria live in each ticket.

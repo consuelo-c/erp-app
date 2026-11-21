@@ -1,48 +1,48 @@
 # ERP Banquetes Consuelo C
 
-## Requisitos
+## Requirements
 
-- Cuenta de Cloudflare
-- Cuenta de GitHub
-- Node y npm (Puede ser a través de un manejador de versiones como mise o nvm)
-- Comando `gh`
-- Cuenta de Claude con acceso al _canvas_ del diseño (ver [Diseño](#diseño))
+- A Cloudflare account
+- A GitHub account
+- Node and npm (a version manager such as mise or nvm works)
+- The `gh` command
+- A Claude account with access to the design canvas (see [Design](#design))
 
 ## Cloudflare
 
-### Crear el `API Token`
+### Create the `API Token`
 
-Necesario para poder hacer despliegues desde GitHub
+Needed to deploy from GitHub.
 
-Acceder _My Profile -> API Tokens -> Create Token -> Create Custom Token_
+Go to _My Profile -> API Tokens -> Create Token -> Create Custom Token_
 
-Agregar el permiso de `Edit` con tipo `Account` a:
+Add the `Edit` permission, of type `Account`, to:
 
 - Workers Scripts
 - D1
 - Workers R2 Storage
 
 > [!CAUTION]
-> Hay que copiar el `API Token` ya que no se vuelve a mostrar y lo vamos a necesitar en la configuración de **secretos** de GitHub
+> Copy the `API Token`: it is never shown again, and the GitHub **secrets** setup needs it
 
-### Crear la base de datos D1 y el Bucket R2
+### Create the D1 database and the R2 bucket
 
 ```bash
 npx wrangler login
-npx wrangler whoami # Asegurarse que es la cuenta correcta
+npx wrangler whoami # Make sure it's the right account
 ```
 
 > [!IMPORTANT]
-> Necesitaremos el `Account ID` para la llave `account_id` de `wrangler.jsonc` (el `Account ID` es público, por lo que no es necesario guardarlo como un secreto). Va en ese archivo y no en una variable de ambiente o de GitHub, para que el despliegue no termine en la cuenta equivocada
+> The `Account ID` goes in `wrangler.jsonc`'s `account_id` key (the `Account ID` is public, so it doesn't need to be a secret). It lives in that file, not in an environment or GitHub variable, so the deploy can't land in the wrong account
 
-Crear la base de datos
+Create the database
 
 ```bash
 npx wrangler d1 create consueloc-erp-db
 npx wrangler d1 list --json
 ```
 
-Y el _bucket_
+And the bucket
 
 ```bash
 npx wrangler r2 bucket create consueloc-erp-arch
@@ -50,67 +50,66 @@ npx wrangler r2 bucket list --json
 ```
 
 > [!TIP]
-> `npm run env:create` crea ambos (la base de datos y el bucket) en la cuenta de Cloudflare. El `database_id` que imprime se copia en `wrangler.jsonc`
+> `npm run env:create` creates both (the database and the bucket) in the Cloudflare account. Copy the `database_id` it prints into `wrangler.jsonc`
 
-## Github
+## GitHub
 
-Se asume que ya existe el repositorio
+The repository is assumed to exist.
 
-### Proteger la rama `main` de GitHub
+### Protect the `main` branch
 
-Acceder _Settings -> Rules -> Rulesets -> New branch ruleset_ y crear una nueva regla con los siguientes parámetros:
+Go to _Settings -> Rules -> Rulesets -> New branch ruleset_ and create a rule with these parameters:
 
 - _Enforcement status_: `Active`
-- Rama `main`
-- _Restrict deletions_ y _Block force pushes_
+- Branch `main`
+- _Restrict deletions_ and _Block force pushes_
 - _Require a pull request before merging_
-- **Pendiente** _Require status checks to pass -> Test_
+- **Pending**: _Require status checks to pass -> Test_
 
 > [!NOTE]
-> La regla pendiente solo se puede crear luego que corra GitHub actions por primera vez
+> The pending rule can only be created after GitHub Actions has run once
 
-### Crear proyecto en GitHub
+### Create the GitHub project
 
-Crear el Proyecto **ERP Banquetes Consuelo C** y modificar las columnas y opcionalmente los Workflows
+Create the **ERP Banquetes Consuelo C** project and adjust its columns and, optionally, its workflows.
 
 > [!TIP]
-> Los proyectos se pueden crear en la terminal también, pero no es posible gestionar los tableros. Por eso se recomienda hacer todo este paso directamente en la Web.
+> Projects can be created from the terminal too, but boards can't be managed there, so this whole step is best done on the web.
 >
 > ```bash
 > gh project create --owner "consuelo-c" --title "ERP Banquetes Consuelo C"
 > gh project list --owner "consuelo-c"
 > ```
 
-- Crear columnas de proyecto (campo _Status_: renombrar _In Progress_ a _Doing_ y agregar _Pending_)
+- Create the project's columns (the _Status_ field: rename _In Progress_ to _Doing_ and add _Pending_)
   - Todo
   - Doing
   - Pending
   - Done
-- Crear vistas de proyecto
-  - Tablero -> Kanban y revisar que tenga las columnas _Todo_, _Doing_, _Pending_, _Done_
-  - Docs -> Tabla -> filtro `label:docs`
-  - Fases -> Tabla -> Agrupada por milestones
+- Create the project's views
+  - Board -> Kanban, checking it has the _Todo_, _Doing_, _Pending_ and _Done_ columns
+  - Phases -> Table -> grouped by milestone
 
 > [!NOTE]
-> Revisar que existan dos Workflows específicos: Que al crear un issue, este sea agregado a _Todo_ y que al cerrar un issue este sea movido a Done
+> Check that two workflows exist: one that adds a new issue to _Todo_, and one that moves a closed issue to _Done_
 
-### Darle a `gh` propiedades para leer y modificar proyectos
+### Let `gh` read and edit projects
 
 ```bash
 gh auth login
 gh auth refresh -s project,read:project
 ```
 
-### Agregar el `API Token` de Cloudflare como secreto
+### Add Cloudflare's `API Token` as a secret
 
 ```bash
-gh secret set CLOUDFLARE_API_TOKEN # Ten a mano el token
+gh secret set CLOUDFLARE_API_TOKEN # Have the token at hand
 gh secret list
 ```
 
-### Depurar las etiquetas de _issues_
+### Clean up the issue labels
 
-Borrar los _labels_ de _Issues_ que no vamos a usar
+Delete the issue labels we won't use
 
 ```bash
 gh label delete 'good first issue'
@@ -122,11 +121,11 @@ gh label delete invalid
 gh label delete question
 ```
 
-### Creación de los _labels_ del proyecto
+### Create the project's labels
+
+The five triage labels and the wayfinder labels:
 
 ```bash
-gh label create bug  --color d73a4a --description "Errores"
-gh label create task --color 0075ca --description "Tareas"
 gh label create needs-triage --color fbca04 --description "Maintainer needs to evaluate this issue"
 gh label create needs-info --color d4c5f9 --description "Waiting on reporter for more information"
 gh label create ready-for-agent --color 0e8a16 --description "Fully specified, ready for an AFK agent"
@@ -137,9 +136,9 @@ gh label create wayfinder:map
 ```
 
 > [!TIP]
-> `gh issue list --web` abre la lista de tareas en un navegador
+> `gh issue list --web` opens the issue list in a browser
 
-### Crear los milestones
+### Create the milestones
 
 ```bash
 for i in $(seq 0 16); do
@@ -149,77 +148,77 @@ gh api repos/:owner/:repo/milestones --jq '.[].title'
 ```
 
 > [!NOTE]
-> Los milestones pertenecen al repositorio (Issues -> Milestones) mientras que los proyectos pertenecen a la organización (Org -> Projects). Esto es importante a la hora de gestionar el proyecto
+> Milestones belong to the repository (Issues -> Milestones), while projects belong to the organization (Org -> Projects). This matters when managing the project
 
-## Desplegar en Cloudflare
+## Deploy to Cloudflare
 
-Esta sección explica cómo poner la aplicación en producción, qué datos necesita para funcionar y cómo asegurarse de que el despliegue quedó bien. Se asume que ya se completaron los pasos de las secciones [Cloudflare](#cloudflare) y [Github](#github), es decir, que ya existen la base de datos, el _bucket_, el `API Token` y el repositorio.
+This section explains how to put the app in production, what data it needs to work, and how to check that the deploy went well. It assumes the steps in [Cloudflare](#cloudflare) and [GitHub](#github) are done: the database, the bucket, the `API Token` and the repository exist.
 
-Solo existe un ambiente: no hay _staging_ (ver [Montar un ambiente de _staging_](#montar-un-ambiente-de-staging)), por lo que la rama `main` es producción. El despliegue no se hace a mano desde la terminal, sino a través del workflow `.github/workflows/deploy.yml` de GitHub Actions. Un `npx wrangler deploy` manual solo tiene sentido para depurar un problema puntual.
+There is a single environment: no staging (see [Set up a staging environment](#set-up-a-staging-environment)), so `main` is production. Deploys aren't run by hand from the terminal but through GitHub Actions' `.github/workflows/deploy.yml` workflow. A manual `npx wrangler deploy` only makes sense to debug a specific problem.
 
-### Qué hace el despliegue
+### What the deploy does
 
-Cada vez que corre, el workflow ejecuta estos pasos en orden:
+Every run, the workflow does these steps in order:
 
-1. Instala las dependencias con `npm ci`.
-1. Ejecuta las pruebas. Si alguna falla el proceso se detiene ahí, antes de tocar la base de datos.
-1. Compara las migraciones aplicadas en D1 con las de la carpeta `migrations/` y, si dejaron de coincidir, borra la base de datos (ver la advertencia de abajo).
-1. Aplica en D1 las migraciones pendientes.
-1. Carga los `settings` por defecto desde `scripts/settings-defaults.sql`.
-1. Compila la aplicación y la publica con `wrangler deploy`.
+1. Installs the dependencies with `npm ci`.
+1. Runs the tests. If one fails, it stops there, before touching the database.
+1. Compares the migrations applied in D1 with those in `migrations/` and, if they no longer match, wipes the database (see the warning below).
+1. Applies the pending migrations to D1.
+1. Loads the default `settings` from `scripts/settings-defaults.sql`.
+1. Builds the app and publishes it with `wrangler deploy`.
 
 > [!WARNING]
-> Antes del lanzamiento las migraciones se pueden aplastar. Cuando eso pasa, las migraciones aplicadas en D1 dejan de coincidir con las de `migrations/` y el despliegue reacciona según el contenido de la tabla `orders`:
+> Before launch, migrations can be squashed. When that happens, the migrations applied in D1 stop matching those in `migrations/`, and the deploy reacts according to the `orders` table:
 >
-> - Si `orders` está vacía o no existe, **borra todas las tablas de producción** y las crea de nuevo. Esto incluye los usuarios, el catálogo de productos y las secuencias de numeración.
-> - Si `orders` tiene filas, el despliegue falla y no borra nada.
+> - If `orders` is empty or doesn't exist, it **drops every production table** and creates them again. That includes the logins, the product catalog and the numbering sequences.
+> - If `orders` has rows, the deploy fails and deletes nothing.
 >
-> Por eso los datos que se cargan a mano deben cargarse después del último despliegue con migraciones aplastadas.
+> So data loaded by hand must be loaded after the last deploy with squashed migrations.
 
-### Variables de ambiente y secretos
+### Environment variables and secrets
 
-La aplicación no necesita un archivo de configuración en producción. Lo que da **acceso** se guarda como secreto, fuera del repositorio, y lo que solo dice **cuál recurso** usar vive en `wrangler.jsonc`, porque sin credenciales no sirve de nada.
+The app needs no config file in production. What grants **access** is stored as a secret, outside the repository; what only says **which resource** to use lives in `wrangler.jsonc`, since it's useless without credentials.
 
-| Nombre                 | Para qué sirve                                                             | Dónde vive                 | Cómo se define                                      |
-| ---------------------- | -------------------------------------------------------------------------- | -------------------------- | --------------------------------------------------- |
-| `CLOUDFLARE_API_TOKEN` | Le permite a GitHub Actions desplegar en Cloudflare                        | GitHub Secrets             | `gh secret set CLOUDFLARE_API_TOKEN`                |
-| `ADMIN_PASSWORD`       | Contraseña con la que el Worker crea el login `admin`                      | Secreto del Worker         | `npx wrangler secret put ADMIN_PASSWORD`            |
-| `PASSWORD_PEPPER`      | Valor aleatorio que se mezcla con el _hash_ de todas las contraseñas       | Secreto del Worker         | `npx wrangler secret put PASSWORD_PEPPER`           |
-| `TURNSTILE_SECRET_KEY` | Valida en el servidor el _widget_ de Turnstile de la consulta de pedidos   | Secreto del Worker         | `npx wrangler secret put TURNSTILE_SECRET_KEY`      |
-| `TURNSTILE_SITE_KEY`   | Muestra el _widget_ de Turnstile en la página pública. Es un valor público | `vars` en `wrangler.jsonc` | Se copia del _widget_ en el dashboard de Cloudflare |
-| `account_id`           | Indica en qué cuenta de Cloudflare se despliega                            | `wrangler.jsonc`           | Se copia de `npx wrangler whoami`                   |
-| `database_id`          | Indica cuál base de datos D1 usa el Worker                                 | `wrangler.jsonc`           | Se copia de `npx wrangler d1 info consueloc-erp-db` |
+| Name                   | What it's for                                                       | Where it lives               | How it's set                                   |
+| ---------------------- | ------------------------------------------------------------------- | ---------------------------- | ---------------------------------------------- |
+| `CLOUDFLARE_API_TOKEN` | Lets GitHub Actions deploy to Cloudflare                            | GitHub Secrets               | `gh secret set CLOUDFLARE_API_TOKEN`           |
+| `ADMIN_PASSWORD`       | The password the Worker creates the `admin` login with              | Worker secret                | `npx wrangler secret put ADMIN_PASSWORD`       |
+| `PASSWORD_PEPPER`      | A random value mixed into every password's hash                     | Worker secret                | `npx wrangler secret put PASSWORD_PEPPER`      |
+| `TURNSTILE_SECRET_KEY` | Validates the order lookup's Turnstile widget on the server         | Worker secret                | `npx wrangler secret put TURNSTILE_SECRET_KEY` |
+| `TURNSTILE_SITE_KEY`   | Shows the Turnstile widget on the public page. It's a public value  | `vars` in `wrangler.jsonc`   | Copied from the widget in Cloudflare's dashboard |
+| `account_id`           | Which Cloudflare account to deploy to                               | `wrangler.jsonc`             | Copied from `npx wrangler whoami`              |
+| `database_id`          | Which D1 database the Worker uses                                   | `wrangler.jsonc`             | Copied from `npx wrangler d1 info consueloc-erp-db` |
 
-Los _bindings_ `DB` (D1), `BUCKET` (R2) y `LOOKUP_RATE_LIMIT` (el límite de consultas de la página pública) ya están declarados en `wrangler.jsonc`, así que no hay que configurarlos en ningún otro lugar.
+The `DB` (D1), `BUCKET` (R2) and `LOOKUP_RATE_LIMIT` (the public page's lookup limit) bindings are already declared in `wrangler.jsonc`, so they need no setup anywhere else.
 
 > [!NOTE]
-> En desarrollo los tres secretos del Worker van en el archivo `.dev.vars`, que no entra al repositorio. El archivo `.env.example` lista los nombres. Allí se usa un `PASSWORD_PEPPER` distinto al de producción y la clave secreta de prueba de Turnstile.
+> In development, the three Worker secrets go in `.dev.vars`, which stays out of the repository; `.env.example` lists their names. There, use a `PASSWORD_PEPPER` different from production's and Turnstile's test secret key.
 
 > [!TIP]
-> Si se modifica `wrangler.jsonc` hay que ejecutar `npx wrangler types` para regenerar los tipos.
+> After editing `wrangler.jsonc`, run `npx wrangler types` to regenerate the types.
 
-### Datos iniciales
+### Initial data
 
-Una instalación nueva arranca sin información de negocio. Algunos datos llegan solos con el despliegue y otros hay que cargarlos a mano.
+A new install starts with no business data. Some data arrives with the deploy and some is loaded by hand.
 
-Llegan automáticamente:
+Arrives on its own:
 
-- **Configuración por defecto:** cada despliegue aplica `scripts/settings-defaults.sql`, que trae los datos de la empresa, los parámetros de nómina, los festivos y el primer borrador de la ayuda. Solo agrega las llaves que falten, así que nunca sobrescribe un valor editado en la aplicación.
-- **El login `admin`:** no viene en ningún _seed_. El Worker lo crea con el valor de `ADMIN_PASSWORD` en el primer intento de inicio de sesión. De esta forma el `PASSWORD_PEPPER` de producción nunca sale de Cloudflare.
+- **Default settings:** every deploy applies `scripts/settings-defaults.sql`, which brings the company's details, the payroll parameters, the holidays and the help's first draft. It only adds missing keys, so it never overwrites a value edited in the app.
+- **The `admin` login:** it's in no seed. The Worker creates it with `ADMIN_PASSWORD`'s value on the first login attempt, so production's `PASSWORD_PEPPER` never leaves Cloudflare.
 
-Se cargan a mano:
+Loaded by hand:
 
-- **WhatsApp y términos y condiciones:** `COMPANY_WHATSAPP` y `TERMS_CONDITIONS` llegan vacíos y se llenan desde _Configuración_ en la aplicación.
-- **Catálogo de productos:** siguiendo la sección [Cargar el catálogo](#cargar-el-catálogo).
-- **Numeración de los pedidos:** siguiendo la sección [Fijar la secuencia de los pedidos](#fijar-la-secuencia-de-los-pedidos).
-- **Numeración de las cuentas de cobro:** siguiendo la sección [Fijar la secuencia de las cuentas de cobro](#fijar-la-secuencia-de-las-cuentas-de-cobro).
+- **WhatsApp and terms and conditions:** `COMPANY_WHATSAPP` and `TERMS_CONDITIONS` arrive empty and are filled in from _Configuración_ in the app.
+- **The product catalog:** following [Load the catalog](#load-the-catalog).
+- **Order numbering:** following [Set the orders sequence](#set-the-orders-sequence).
+- **Receivable numbering:** following [Set the receivables sequence](#set-the-receivables-sequence).
 
 > [!CAUTION]
-> El archivo `scripts/sample-data.sql`, que se carga con `npm run db:seed`, tiene datos de ejemplo y es solo para desarrollo. Nunca se debe ejecutar en producción.
+> `scripts/sample-data.sql`, loaded by `npm run db:seed`, holds sample data and is for development only. Never run it in production.
 
-### Paso 1: Confirmar la cuenta y los recursos
+### Step 1: Confirm the account and the resources
 
-Antes de desplegar hay que asegurarse de estar trabajando en la cuenta correcta. Esto es importante cuando se manejan varias cuentas de Cloudflare, porque el error es silencioso: el despliegue puede fallar con un mensaje que parece un problema de permisos o, peor aún, funcionar en la cuenta equivocada.
+Before deploying, make sure you're working in the right account. This matters when handling several Cloudflare accounts, because the mistake is silent: the deploy may fail with what looks like a permissions problem or, worse, succeed in the wrong account.
 
 ```bash
 npx wrangler whoami
@@ -228,23 +227,23 @@ npx wrangler r2 bucket list
 gh secret list --repo consuelo-c/erp-app
 ```
 
-Con la salida de esos comandos se revisa que:
+With those commands' output, check that:
 
-- El `Account ID` de la cuenta sea igual al `account_id` de `wrangler.jsonc`
-- El ID de la base de datos sea igual al `database_id` de `wrangler.jsonc`
-- Aparezca el _bucket_ `consueloc-erp-arch`
-- Aparezca el secreto `CLOUDFLARE_API_TOKEN`
+- The account's `Account ID` equals `wrangler.jsonc`'s `account_id`
+- The database's ID equals `wrangler.jsonc`'s `database_id`
+- The `consueloc-erp-arch` bucket is listed
+- The `CLOUDFLARE_API_TOKEN` secret is listed
 
-### Paso 2: Ejecutar el despliegue
+### Step 2: Run the deploy
 
-El workflow se puede ejecutar de dos formas: automáticamente al hacer _merge_ a `main` o manualmente con `gh workflow run`. Ninguna de las dos funciona mientras el workflow esté deshabilitado, y ese es su estado actual, así que primero hay que revisarlo y habilitarlo.
+The workflow runs in two ways: automatically on a merge to `main`, or by hand with `gh workflow run`. Neither works while the workflow is disabled, so check its state first and enable it if needed.
 
 ```bash
 gh workflow list --all --repo consuelo-c/erp-app
 gh workflow enable deploy.yml --repo consuelo-c/erp-app
 ```
 
-El primer comando muestra `active` si el workflow está habilitado y `disabled_manually` si no lo está. Una vez habilitado se lanza el despliegue y se sigue su avance en la terminal. Si `gh run watch` pregunta cuál ejecución seguir, se elige la de _Deploy_.
+The first command shows `active` if the workflow is enabled and `disabled_manually` if not. Once enabled, launch the deploy and follow it in the terminal. If `gh run watch` asks which run to follow, pick _Deploy_.
 
 ```bash
 gh workflow run deploy.yml --ref main --repo consuelo-c/erp-app
@@ -252,175 +251,175 @@ gh run watch --exit-status --repo consuelo-c/erp-app
 ```
 
 > [!IMPORTANT]
-> Mientras el workflow esté habilitado **cada _merge_ a `main` despliega a producción**. Si se prefiere desplegar solo a propósito, hay que deshabilitarlo de nuevo al terminar:
+> While the workflow is enabled, **every merge to `main` deploys to production**. To deploy only on purpose, disable it again when done:
 >
 > ```bash
 > gh workflow disable deploy.yml --repo consuelo-c/erp-app
 > ```
 
-### Paso 3: Crear los secretos del Worker
+### Step 3: Create the Worker's secrets
 
-Los secretos se guardan en el Worker y se conservan entre despliegues, así que este paso solo se hace la primera vez. Sin ellos la página pública carga, pero nadie puede iniciar sesión ni consultar un pedido.
+Secrets are stored in the Worker and survive deploys, so this step is only done once. Without them the public page loads, but nobody can log in or look up an order.
 
-Primero se revisa cuáles existen, para crear únicamente los que falten:
+First check which exist, to create only the missing ones:
 
 ```bash
 npx wrangler secret list
 ```
 
-Luego se crean los que no aparezcan en la lista. `wrangler` pide la contraseña en la terminal, mientras que el _pepper_ se genera con `openssl`:
+Then create the ones not listed. `wrangler` asks for the password in the terminal, while the pepper is generated with `openssl`:
 
 ```bash
 npx wrangler secret put ADMIN_PASSWORD
 openssl rand -base64 32 | npx wrangler secret put PASSWORD_PEPPER
 ```
 
-`TURNSTILE_SECRET_KEY` se crea en el paso siguiente, porque su valor lo entrega el _widget_ de Turnstile.
+`TURNSTILE_SECRET_KEY` is created in the next step, because the Turnstile widget provides its value.
 
 > [!CAUTION]
-> Si `PASSWORD_PEPPER` ya aparece en la lista **no se debe volver a generar**. Reemplazarlo hace que todas las contraseñas dejen de funcionar. Ver [Creando la contraseña de `admin`](#creando-la-contraseña-de-admin).
+> If `PASSWORD_PEPPER` is already listed, **don't generate it again**. Replacing it breaks every password. See [Create the `admin` password](#create-the-admin-password).
 
-### Paso 4: Configurar el dashboard de Cloudflare
+### Step 4: Configure Cloudflare's dashboard
 
-Hay tres cosas que no viven en el repositorio y se configuran una sola vez desde el dashboard. El dominio debe agregarse después del primer despliegue, porque antes no existe un Worker al cual apuntar.
+Three things don't live in the repository and are set once from the dashboard. The domain must be added after the first deploy, because before it there's no Worker to point at.
 
-**El dominio de la aplicación.** Acceder _Workers & Pages -> `consueloc-erp` -> Settings -> Domains & Routes -> Add -> Custom domain_ y agregar `app.consueloc.com`. Cloudflare crea el registro DNS y emite el certificado por su cuenta, lo cual puede tardar unos minutos.
+**The app's domain.** Go to _Workers & Pages -> `consueloc-erp` -> Settings -> Domains & Routes -> Add -> Custom domain_ and add `app.consueloc.com`. Cloudflare creates the DNS record and issues the certificate itself, which can take a few minutes.
 
-**El límite de intentos de inicio de sesión.** Este límite no está en el código. Acceder _`consueloc.com` -> Security -> WAF -> Rate limiting rules_ y crear una regla que cubra las peticiones `POST` a `app.consueloc.com/login`. El plan gratuito incluye una regla.
+**The login attempts limit.** This limit isn't in the code. Go to _`consueloc.com` -> Security -> WAF -> Rate limiting rules_ and create a rule covering `POST` requests to `app.consueloc.com/login`. The free plan includes one rule.
 
-**El _widget_ de Turnstile.** Protege la consulta de pedidos de la página pública. Acceder _Turnstile -> Add widget_ y crearlo con estos parámetros:
+**The Turnstile widget.** It protects the public page's order lookup. Go to _Turnstile -> Add widget_ and create it with these parameters:
 
-- Nombre: `consueloc-erp-lookup`
+- Name: `consueloc-erp-lookup`
 - Hostname: `app.consueloc.com`
-- Modo: _Managed_, sin _pre-clearance_
+- Mode: _Managed_, no _pre-clearance_
 
-El _widget_ entrega dos llaves: la _secret key_ se guarda con `npx wrangler secret put TURNSTILE_SECRET_KEY`, y la _site key_ se copia en `vars.TURNSTILE_SITE_KEY` de `wrangler.jsonc`. Como ese archivo hace parte del repositorio, cambiar la _site key_ requiere un nuevo despliegue.
+The widget provides two keys: the _secret key_ is stored with `npx wrangler secret put TURNSTILE_SECRET_KEY`, and the _site key_ is copied into `wrangler.jsonc`'s `vars.TURNSTILE_SITE_KEY`. Since that file is part of the repository, changing the site key takes a new deploy.
 
-### Paso 5: Cargar los datos iniciales
+### Step 5: Load the initial data
 
-Por último se cargan los datos que se hacen a mano, descritos en [Datos iniciales](#datos-iniciales). Como se explicó en la advertencia de [Qué hace el despliegue](#qué-hace-el-despliegue), esto debe hacerse después del último despliegue con migraciones aplastadas, ya que de lo contrario esos datos se pierden.
+Last, load the data done by hand, described in [Initial data](#initial-data). As the warning in [What the deploy does](#what-the-deploy-does) explains, this must happen after the last deploy with squashed migrations, or that data is lost.
 
-### Verificar el despliegue
+### Verify the deploy
 
-Para estar seguros de que todo quedó bien, primero se revisa desde la terminal que el despliegue terminó y que el Worker y la base de datos están como se espera.
+To be sure everything went well, first check from the terminal that the deploy finished and that the Worker and the database are as expected.
 
-El último despliegue debe aparecer con estado `success`, y la versión más reciente del Worker debe corresponder a ese despliegue:
+The last deploy must show as `success`, and the Worker's latest version must match it:
 
 ```bash
 gh run list --workflow deploy.yml --limit 1 --repo consuelo-c/erp-app
 npx wrangler deployments list
 ```
 
-Deben aparecer los tres secretos: `ADMIN_PASSWORD`, `PASSWORD_PEPPER` y `TURNSTILE_SECRET_KEY`:
+The three secrets must be listed: `ADMIN_PASSWORD`, `PASSWORD_PEPPER` and `TURNSTILE_SECRET_KEY`:
 
 ```bash
 npx wrangler secret list
 ```
 
-No debe quedar ninguna migración pendiente:
+No migration may be pending:
 
 ```bash
 npx wrangler d1 migrations list consueloc-erp-db --remote
 ```
 
-La tabla `settings` debe tener filas:
+The `settings` table must have rows:
 
 ```bash
 npx wrangler d1 execute consueloc-erp-db --remote --command "SELECT count(*) AS total FROM settings"
 ```
 
-Esta consulta lista los datos de la empresa que siguen vacíos. Antes del lanzamiento no debe devolver filas:
+This query lists the company details still empty. Before launch it must return no rows:
 
 ```bash
 npx wrangler d1 execute consueloc-erp-db --remote --command "SELECT key FROM settings WHERE key IN ('COMPANY_WHATSAPP', 'TERMS_CONDITIONS') AND value = ''"
 ```
 
-El dominio debe responder con estado `200`:
+The domain must answer with status `200`:
 
 ```bash
 curl -sI https://app.consueloc.com | head -n 1
 ```
 
-La URL de `workers.dev` del Worker no debe responder, porque `wrangler.jsonc` apaga `workers_dev` y `preview_urls` para que producción solo responda en `app.consueloc.com`. `npx wrangler deployments list` no la muestra; si se conoce, esta petición debe fallar o devolver un error de Cloudflare:
+The Worker's `workers.dev` URL must not answer, because `wrangler.jsonc` turns `workers_dev` and `preview_urls` off so production only answers on `app.consueloc.com`. `npx wrangler deployments list` doesn't show it; if you know it, this request must fail or return a Cloudflare error:
 
 ```bash
-curl -sI https://consueloc-erp.<subdominio>.workers.dev | head -n 1
+curl -sI https://consueloc-erp.<subdomain>.workers.dev | head -n 1
 ```
 
-Después se hace una revisión en el navegador en `https://app.consueloc.com`, el único dominio para el que está autorizado el _widget_ de Turnstile.
+Then check in the browser at `https://app.consueloc.com`, the only domain the Turnstile widget is authorized for.
 
-- [ ] La página `/` carga y muestra el _widget_ de Turnstile
-- [ ] Una consulta con cualquier teléfono y fecha responde «No encontramos un pedido con esos datos y esa fecha.». Si en cambio responde «No pudimos verificar la consulta. Intente de nuevo.», hay que revisar `TURNSTILE_SECRET_KEY` y el _widget_
-- [ ] La página `/login` permite entrar con el usuario `admin` y la contraseña guardada en `ADMIN_PASSWORD`
-- [ ] _Productos_ muestra el catálogo importado
-- [ ] _Configuración_ muestra los datos de la empresa
-
-> [!WARNING]
-> No se deben crear pedidos de prueba en producción. Un pedido consume un número de la secuencia de `orders`, y una vez que `orders` tiene filas el despliegue ya no puede borrar la base de datos después de aplastar las migraciones.
-
-## Montar un ambiente de _staging_
-
-Esta sección es una receta: **nada de esto está construido**. Mientras nadie la siga, sigue existiendo un único ambiente y `main` es producción. El _staging_ sirve para mostrarles a los usuarios trabajo en progreso, incluso una rama sin _merge_, sin tocar producción.
-
-### El diseño
-
-- **Dominio:** `stg-app.consueloc.com`, agregado como _custom domain_ del Worker de _staging_ (igual que en el [Paso 4](#paso-4-configurar-el-dashboard-de-cloudflare)).
-- **Un ambiente `staging` en `wrangler.jsonc`** (`env.staging`), con su propia base de datos D1 y su propio _bucket_ R2, creados con la CLI como en [Crear la base de datos D1 y el Bucket R2](#crear-la-base-de-datos-d1-y-el-bucket-r2). Los _bindings_ no se heredan entre ambientes, así que `env.staging` repite cada uno: `DB`, `BUCKET`, `LOOKUP_RATE_LIMIT` y `TURNSTILE_SITE_KEY`.
-- **Turnstile:** al _widget_ `consueloc-erp-lookup` se le agrega el hostname `stg-app.consueloc.com`.
-- **Sin datos de ejemplo:** `scripts/sample-data.sql` sigue siendo solo para desarrollo. Los `settings` llegan con la copia de producción.
-- **El _bucket_ R2 queda vacío:** hoy nada en la aplicación lee R2, y el _bucket_ existe solo para que el _binding_ resuelva.
-- **Abierto:** lo protegen los logins de la aplicación, igual que a producción. No se usa Cloudflare Access.
-- **Una franja fija en todas las páginas, «Ambiente de pruebas: lo que se haga aquí se borra»**, tanto en las que piden sesión como en las públicas. La activa una variable que solo define el ambiente `staging`. Evita que se tome un pedido real en _staging_ o que se le envíe por error a un cliente un enlace de _staging_.
-
-### Desplegar
-
-El _staging_ se despliega desde la terminal, no desde GitHub Actions: `npm run deploy:staging`, ejecutado desde la rama que se quiere mostrar, corre las pruebas, compila y despliega con `--env staging`.
-
-**Cada despliegue arranca de una copia fresca de la D1 de producción.** El _script_ exporta la base de datos de producción, vacía la de _staging_, importa la exportación, aplica las migraciones de la rama y luego despliega. Todo lo que se haga en _staging_ se pierde en el siguiente despliegue. El paso lee producción y nunca escribe en ella, y lo único que vacía es la base de datos de _staging_. `scripts/wipe-d1-if-squashed.js` no se usa en _staging_, porque la copia ya reemplaza la base de datos completa.
+- [ ] The `/` page loads and shows the Turnstile widget
+- [ ] A lookup with any phone and date answers «No encontramos un pedido con esos datos y esa fecha.». If it answers «No pudimos verificar la consulta. Intente de nuevo.» instead, check `TURNSTILE_SECRET_KEY` and the widget
+- [ ] The `/login` page lets you in with the `admin` login and the password stored in `ADMIN_PASSWORD`
+- [ ] _Productos_ shows the imported catalog
+- [ ] _Configuración_ shows the company's details
 
 > [!WARNING]
-> Riesgos de desplegar desde la terminal:
+> Don't create test orders in production. An order takes a number from the `orders` sequence, and once `orders` has rows the deploy can no longer wipe the database after squashing migrations.
+
+## Set up a staging environment
+
+This section is a recipe: **none of it is built**. Until someone follows it, there is still a single environment and `main` is production. Staging is for showing users work in progress, even an unmerged branch, without touching production.
+
+### The design
+
+- **Domain:** `stg-app.consueloc.com`, added as a custom domain of the staging Worker (as in [Step 4](#step-4-configure-cloudflares-dashboard)).
+- **A `staging` environment in `wrangler.jsonc`** (`env.staging`), with its own D1 database and R2 bucket, created with the CLI as in [Create the D1 database and the R2 bucket](#create-the-d1-database-and-the-r2-bucket). Bindings aren't inherited between environments, so `env.staging` repeats each one: `DB`, `BUCKET`, `LOOKUP_RATE_LIMIT` and `TURNSTILE_SITE_KEY`.
+- **Turnstile:** the `stg-app.consueloc.com` hostname is added to the `consueloc-erp-lookup` widget.
+- **No sample data:** `scripts/sample-data.sql` stays development-only. The `settings` come with the production copy.
+- **The R2 bucket stays empty:** nothing in the app reads R2 today; the bucket only exists so the binding resolves.
+- **Open:** the app's logins protect it, as they do production. No Cloudflare Access.
+- **A fixed banner on every page, «Ambiente de pruebas: lo que se haga aquí se borra»**, on both the session pages and the public ones. A variable only the `staging` environment defines turns it on. It keeps anyone from taking a real order in staging or sending a client a staging link by mistake.
+
+### Deploying
+
+Staging is deployed from the terminal, not from GitHub Actions: `npm run deploy:staging`, run from the branch to show, runs the tests, builds and deploys with `--env staging`.
+
+**Every deploy starts from a fresh copy of production's D1.** The script exports the production database, empties staging's, imports the export, applies the branch's migrations and then deploys. Everything done in staging is lost on the next deploy. The step reads production and never writes to it, and the only thing it empties is staging's database. `scripts/wipe-d1-if-squashed.js` isn't used in staging, because the copy already replaces the whole database.
+
+> [!WARNING]
+> Risks of deploying from the terminal:
 >
-> - Se despliega la carpeta de trabajo tal como está, **incluidos los cambios sin _commit_**.
-> - Nada registra quién desplegó qué.
-> - Un `npx wrangler deploy` sin `--env staging` **publica en producción**.
+> - The working folder is deployed as it is, **uncommitted changes included**.
+> - Nothing records who deployed what.
+> - An `npx wrangler deploy` without `--env staging` **publishes to production**.
 
-### Secretos
+### Secrets
 
-**El `PASSWORD_PEPPER` de _staging_ es el de producción**, para que cada empleado entre a _staging_ con su contraseña real. Con un _pepper_ distinto, los _hashes_ copiados de producción no dejarían entrar a nadie, ni siquiera a `admin`, porque el Worker solo crea `admin` cuando no existe. Los demás secretos (`ADMIN_PASSWORD`, `TURNSTILE_SECRET_KEY`) se crean con `npx wrangler secret put <NOMBRE> --env staging`.
+**Staging's `PASSWORD_PEPPER` is production's**, so every employee logs into staging with their real password. With a different pepper, the hashes copied from production would let nobody in, not even `admin`, because the Worker only creates `admin` when it doesn't exist. The other secrets (`ADMIN_PASSWORD`, `TURNSTILE_SECRET_KEY`) are created with `npx wrangler secret put <NAME> --env staging`.
 
-### Cuando se construya
+### When it's built
 
-Los documentos que dicen que no hay _staging_ cambian: `hard-rules.md`, `working-methodology.md` y `delivery-index.md` en `erp-planning`, y este `README.md`.
+The documents that say there's no staging change: `CLAUDE.md`'s Stack section and this `README.md`.
 
-## Diseño
+## Design
 
-El diseño vive fuera de este repositorio, en tres lugares. Los términos están en el [glosario](https://github.com/consuelo-c/erp-planning/blob/main/GLOSSARY.md).
+The design lives in three places. Its terms are in [`GLOSSARY.md`](GLOSSARY.md).
 
-| Dónde                                                                                                      | Qué tiene                                                                                                                         |
-| ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| La marca, en [`consuelo-c/branding`](https://github.com/consuelo-c/branding)                               | El logo, los colores, la fuente, los radios, la voz y los mensajes de la empresa                                                  |
-| El Design System, en [`erp-planning:design/`](https://github.com/consuelo-c/erp-planning/tree/main/design) | Los _tokens_ y componentes propios de la app, lo que comparten todas las pantallas y los datos de ejemplo                         |
-| El _canvas_, [Consuelo C ERP Canvas](https://claude.ai/artifact/TBE5f1FaBxQJxkKwncJspg)                    | Las pantallas y los impresos: una página por sección (`project/08 Despachos, Recogidas y Transiciones.dc.html`), con sus _frames_ |
+| Where                                                                                   | What it holds                                                                                                                  |
+| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| The brand, in [`consuelo-c/branding`](https://github.com/consuelo-c/branding)           | The company's logo, colors, font, radii, voice and messages                                                                    |
+| The Design System, in the code                                                          | The app's own tokens (`src/app.css`), components (`src/lib/components/`) and icons (`static/icons.svg`); its rules in `.claude/rules/ui.md` |
+| The canvas, [Consuelo C ERP Canvas](https://claude.ai/artifact/TBE5f1FaBxQJxkKwncJspg)  | The screens and printouts: one page per section (`project/08 Despachos, Recogidas y Transiciones.dc.html`), with its frames    |
 
-El _canvas_ es un _artifact_ privado: lo ve la cuenta de Claude que lo creó y las personas con quienes se comparta desde el mismo _artifact_.
+The canvas is a private artifact: only the Claude account that created it and the people it's shared with, from the artifact itself, can see it.
 
-### Desde el navegador
+### From the browser
 
-Se abre el enlace con la sesión de Claude iniciada. En el _canvas_ se diseñan las pantallas: se abre en su editor, en Claude, y se pide el cambio en el chat, por ejemplo con el _prompt_ que escribe Claude Code al abrir una fase. La galería de _artifacts_ está en <https://claude.ai/code/artifacts>.
+Open the link while signed into Claude. Screens are designed in the canvas: open it in its editor, in Claude, and ask for the change in the chat. A phase's screens are drawn while working its map (`/wayfinder`). The artifact gallery is at <https://claude.ai/code/artifacts>.
 
-### Desde Claude Code
+### From Claude Code
 
-Claude Code lo lee con la herramienta `Artifact`, con la misma cuenta de Claude con la que se inició sesión en `claude`. No hace falta exportar nada ni abrir un navegador:
+Claude Code reads it with the `Artifact` tool, using the Claude account `claude` is signed into. Nothing needs exporting and no browser is needed:
 
-- El _canvas_ se lee por rutas: primero la lista de páginas, `project/compat.json`, y luego solo las páginas de las pantallas que nombra el _issue_.
-- Claude Code publica en él solo cuando una página tiene que coincidir con el código, y avisa cada vez. Nada se escribe hasta que el desarrollador aprueba el aviso de publicación.
-- El Design System no es un _artifact_: Claude Code lo edita en `erp-planning:design/` cuando el código lo requiere.
+- The canvas is read by path: first the page list, `project/compat.json`, then only the pages of the screens the issue names.
+- Claude Code publishes to it only when a page has to match the code, and says which pages it changed.
+- The Design System isn't an artifact: it lives in the code and changes with it.
 
 > [!TIP]
-> En la terminal de `claude`, el comando `/artifacts` lista los _artifacts_ de la cuenta: la tecla `o` abre uno en el navegador y la `c` copia su enlace.
+> In the `claude` terminal, the `/artifacts` command lists the account's artifacts: `o` opens one in the browser and `c` copies its link.
 
-Las copias viejas de Claude Design (`claude.ai/design/p/…`) quedaron de solo lectura y conservan los chats y comentarios de antes del traslado. Claude Design independiente cierra el 14 de diciembre de 2026.
+The old Claude Design copies (`claude.ai/design/p/…`) are read-only and keep the chats and comments from before the move. Standalone Claude Design shuts down on December 14, 2026.
 
 ## Development workflow
 
@@ -437,7 +436,7 @@ claude --permission-mode auto --settings '{"enabledPlugins":{"ponytail@ponytail"
 claude --permission-mode auto
 ```
 
-Two shell aliases save the typing. A session started without the flag runs in `default` mode, asking before anything outside the allow list, and a startup hook reminds you to restart.
+A shell alias for each saves the typing. A session started without the flag runs in `default` mode, asking before anything outside the allow list, and a startup hook reminds you to restart.
 
 ### A phase (milestone)
 
@@ -448,6 +447,8 @@ Two shell aliases save the typing. A session started without the flag runs in `d
 5. **Build it unattended.** In a building session, run `/implement-spec #<spec>`. It builds the tickets one at a time on one branch, each in a fresh subagent with TDD, then runs a code review, fixes it, writes the PR body with `/pr` and waits until CI is green.
    - If a ticket hits a gap in the planning, Claude posts the question as a comment on the spec and sends a push notification; answer it there and tell the session to continue. The other tickets keep going meanwhile.
 6. **Merge.** Review the pull request and merge it. The merge closes the spec and its tickets; close the map and the milestone.
+
+The phases built before this workflow are frozen: their planning is in the archived [`consuelo-c/erp-planning`](https://github.com/consuelo-c/erp-planning), one `phase-NN/planning.md` each, read-only.
 
 ### One-off work
 
@@ -460,16 +461,16 @@ A bug, a request from the client, or a small change outside a phase:
 > [!TIP]
 > `gh issue list --label wayfinder:map` lists the maps; `gh issue list --milestone "Phase NN"` shows what is left in a phase.
 
-## Creando la contraseña de `admin`
+## Create the `admin` password
 
-En ambiente local `npm run dev` buscará estos datos en las variables de ambiente o en el archivo `.dev.vars`.
+Locally, `npm run dev` looks for these values in the environment variables or in `.dev.vars`.
 
 ```bash
 echo "ADMIN_PASSWORD=..." >> .dev.vars
 echo "PASSWORD_PEPPER=$(openssl rand -base64 32)" >> .dev.vars
 ```
 
-En Cloudflare la contraseña es un _secret_, al igual que `PASSWORD_PEPPER` por lo que debemos usar `wrangler`
+On Cloudflare the password is a secret, as is `PASSWORD_PEPPER`, so use `wrangler`:
 
 ```bash
 npx wrangler secret put ADMIN_PASSWORD
@@ -477,31 +478,31 @@ openssl rand -base64 32 | npx wrangler secret put PASSWORD_PEPPER
 ```
 
 > [!CAUTION]
-> Si se cambia el `PASSWORD_PEPPER` en producción todos los usuarios perderán acceso. Por eso podría ser buena idea guardar la salida de `openssl` en Bitwarden
+> If production's `PASSWORD_PEPPER` changes, every user loses access. Keeping `openssl`'s output in Bitwarden may be a good idea
 
 > [!IMPORTANT]
-> `ADMIN_PASSWORD` solo se lee mientras no exista el login `admin`, es decir, hasta el primer intento de inicio de sesión. Después, cambiar el _secret_ no cambia la contraseña: se cambia en la aplicación, en _Logins → `admin` → Cambiar contraseña_.
+> `ADMIN_PASSWORD` is only read while the `admin` login doesn't exist, that is, until the first login attempt. After that, changing the secret doesn't change the password: it's changed in the app, in _Logins → `admin` → Cambiar contraseña_.
 
-## Cargar el catálogo
+## Load the catalog
 
-El catálogo real está en `scripts/catalog.sql`, armado a mano una sola vez con la exportación de WooCommerce y el inventario de manteles. De ahí en adelante el catálogo se mantiene en _Productos_, no en WooCommerce. En desarrollo, `npm run db:seed` lo carga solo. En producción se carga una única vez, a mano, con la tabla `products` vacía:
+The real catalog is in `scripts/catalog.sql`, built by hand once from the WooCommerce export and the tablecloth inventory. From then on the catalog is kept in _Productos_, not in WooCommerce. In development, `npm run db:seed` loads it. In production it's loaded once, by hand, with the `products` table empty:
 
 ```bash
 npx wrangler d1 execute consueloc-erp-db --remote --file scripts/catalog.sql
 ```
 
-- Se ejecuta después del último despliegue con migraciones aplastadas, porque ese despliegue borra la base de datos mientras `orders` esté vacía.
-- `deploy.yml` nunca lo aplica: un producto renombrado en _Productos_ volvería como duplicado.
-- Se puede ejecutar varias veces: un producto cuyo nombre ya existe (sin importar mayúsculas) se omite.
+- Run it after the last deploy with squashed migrations, because that deploy wipes the database while `orders` is empty.
+- `deploy.yml` never applies it: a product renamed in _Productos_ would come back as a duplicate.
+- It can run several times: a product whose name already exists (case-insensitive) is skipped.
 
-## Fijar la secuencia de los pedidos
+## Set the orders sequence
 
-Para que el primer pedido que cree la aplicación siga la numeración en papel, la secuencia de `orders` se fija una sola vez en producción con el último número en papel.
+So the app's first order follows the paper numbering, the `orders` sequence is set once in production to the last paper number.
 
-Se hace antes del primer pedido real y después del último despliegue con migraciones aplastadas: mientras `orders` esté vacía, ese despliegue borra la base de datos y con ella la secuencia.
+Do it before the first real order and after the last deploy with squashed migrations: while `orders` is empty, that deploy wipes the database and the sequence with it.
 
 > [!NOTE]
-> Reemplazar `NNNN` por el último número en papel:
+> Replace `NNNN` with the last paper number:
 
 ```bash
 npx wrangler d1 execute consueloc-erp-db --remote --command "SELECT seq FROM sqlite_sequence WHERE name = 'orders'"
@@ -510,16 +511,16 @@ npx wrangler d1 execute consueloc-erp-db --remote --command "SELECT seq FROM sql
 ```
 
 > [!WARNING]
-> El primer `SELECT` no debe devolver filas. Si devuelve una, ya se creó un pedido y no se debe ejecutar el `INSERT`. El último `SELECT` debe devolver `NNNN`.
+> The first `SELECT` must return no rows. If it returns one, an order already exists: don't run the `INSERT`. The last `SELECT` must return `NNNN`.
 
-## Fijar la secuencia de las cuentas de cobro
+## Set the receivables sequence
 
-Para que la primera cuenta de cobro que emita la aplicación siga la numeración en papel, la secuencia de `receivables` se fija una sola vez en producción con el último número en papel.
+So the app's first receivable follows the paper numbering, the `receivables` sequence is set once in production to the last paper number.
 
-Se hace después del lanzamiento y antes de emitir la primera cuenta de cobro
+Do it after launch and before issuing the first receivable.
 
 > [!NOTE]
-> Reemplazar `NNNN` por el último número en papel:
+> Replace `NNNN` with the last paper number:
 
 ```bash
 npx wrangler d1 execute consueloc-erp-db --remote --command "SELECT seq FROM sqlite_sequence WHERE name = 'receivables'"
@@ -528,8 +529,4 @@ npx wrangler d1 execute consueloc-erp-db --remote --command "SELECT seq FROM sql
 ```
 
 > [!WARNING]
-> El primer `SELECT` no debe devolver filas. Si devuelve una, ya se emitió una cuenta de cobro y no se debe ejecutar el `INSERT`. El último `SELECT` debe devolver `NNNN`.
-
-<!-- vim: spelllang=es
-n,
--->
+> The first `SELECT` must return no rows. If it returns one, a receivable has already been issued: don't run the `INSERT`. The last `SELECT` must return `NNNN`.
