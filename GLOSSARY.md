@@ -37,3 +37,22 @@ One route of the app, drawn in one or more frames.
 
 **Printout**:
 A printed sheet (order, quote, receipt, payroll slip), drawn in frames like a screen.
+
+## Money
+
+**Cuenta de cobro**:
+A bill grouping one client's orders, paid in one payment for its whole balance. It holds no money of its own: its payment is recorded on each of its orders.
+_Avoid_: invoice
+
+**Pagado**:
+What an order's client has paid on it, net of what was given back. The deposit isn't in it.
+
+**Saldo**:
+What an order's client still owes: its total less Pagado.
+
+**A favor del cliente**:
+What the company holds for the client of a cancelled order: Pagado plus the deposit received. Every reader, the client included, sees it under this name.
+_Avoid_: Saldo a favor, Saldo a su favor
+
+**Money statement**:
+The rows an order's money reads as (Total, Pagado, Saldo or A favor del cliente, its cuenta de cobro, the deposit agreed and received), the same for every reader.
