@@ -23,13 +23,6 @@ test("the landing's WhatsApp carries no order", async () => {
 	expect(href.searchParams.get('text')).toBe('Hola. Tengo una duda con mi pedido.');
 });
 
-test('no WhatsApp while the number is empty', async () => {
-	database.exec(
-		`insert into settings (key, value, created_at, created_by, updated_at, updated_by) values ('COMPANY_WHATSAPP', '', ${AUDIT})`
-	);
-	expect((await load())?.whatsAppHref).toBeNull();
-});
-
 test('the landing takes no form: no actions', () => {
 	expect('actions' in landing).toBe(false);
 });

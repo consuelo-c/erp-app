@@ -3,6 +3,7 @@
 	import Button from '$lib/components/Button.svelte';
 	import { formatLongDay, formatShortDay } from '$lib/datetime';
 	import { formatIdNumber, formatPesos } from '$lib/format';
+	import { formatPhone } from '$lib/phone';
 	import { DEDUCTION_LABELS, EARNING_LABELS } from '$lib/labels';
 	import type { PageProps } from './$types';
 
@@ -55,7 +56,9 @@
 			/>
 			<div class="print-head__company">
 				<div class="print-head__title">PAGO DE NÓMINA · SEMANA {draft.weekNumber}</div>
-				<div class="print-small">{company.COMPANY_ADDRESS} · {company.COMPANY_PHONE}</div>
+				<div class="print-small">
+					{company.COMPANY_ADDRESS} · {formatPhone(company.COMPANY_WHATSAPP)}
+				</div>
 			</div>
 		</header>
 		<div class="print-small print-page">1 de 1</div>

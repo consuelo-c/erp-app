@@ -6,7 +6,7 @@ import Page from './+page@.svelte';
 const company = {
 	COMPANY_NAME: 'Banquetes Consuelo C',
 	COMPANY_ADDRESS: 'Calle 38a #79-18, Medellín, Colombia',
-	COMPANY_PHONE: '(+57) 604 411 44 29'
+	COMPANY_WHATSAPP: '573006113392'
 };
 
 function itemsOf(count: number) {
@@ -128,4 +128,12 @@ test('the sheets print on a portrait letter page with no margin', () => {
 	const data = { printout: { quote, document: null, company } };
 	const { head } = render(Page, { props: { data } as never });
 	expect(head).toMatch(/@page\s*\{\s*size:\s*letter;\s*margin:\s*0;?\s*\}/);
+});
+
+test("the header reads the company's address and bare WhatsApp, no phone", () => {
+	const body = printout();
+	expect(body).toContain(
+		'<div class="print-small">Calle 38a #79-18, Medellín, Colombia · 300 611 3392</div>'
+	);
+	expect(body).not.toContain('WhatsApp');
 });

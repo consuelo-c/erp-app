@@ -2,7 +2,7 @@ import { render } from 'svelte/server';
 import { expect, test } from 'vitest';
 import Page from './+page.svelte';
 
-const data = { whatsAppHref: null };
+const data = { whatsAppHref: 'https://wa.me/573105550142?text=Hola' };
 
 function landing(props: { data?: object } = {}) {
 	return render(Page, { props: { data, ...props } as never }).body;
@@ -17,10 +17,8 @@ test('the landing shows the logo and an icon link to /login named Empleados, and
 	expect(body).not.toContain('tel:');
 });
 
-test('the WhatsApp button from the start, and none while the number is empty', () => {
-	expect(landing()).not.toContain('Escríbanos por WhatsApp');
-	const whatsAppHref = 'https://wa.me/573105550142?text=Hola';
-	expect(landing({ data: { ...data, whatsAppHref } })).toMatch(
+test('the WhatsApp button from the start', () => {
+	expect(landing()).toMatch(
 		/<a[^>]*href="https:\/\/wa.me\/573105550142\?text=Hola"[^>]*aria-label="Escríbanos por WhatsApp"/
 	);
 });

@@ -210,16 +210,12 @@ test("the staff's link finds any order by its token, old included, never by its 
 	expect(await findOrderIdByToken(db, '1')).toBeNull();
 });
 
-test('the WhatsApp link: none while COMPANY_WHATSAPP is empty, its text encoded otherwise', async () => {
-	const setWhatsApp = (value: string) =>
-		database
-			.prepare(
-				`insert or replace into settings (key, value, created_at, created_by, updated_at, updated_by) values ('COMPANY_WHATSAPP', ?, ${AUDIT})`
-			)
-			.run(value);
-	setWhatsApp('');
-	expect(await getWhatsAppHref(db, 'Hola.')).toBeNull();
-	setWhatsApp('573105550142');
+test("the WhatsApp link: the company's number, its text encoded", async () => {
+	database
+		.prepare(
+			`insert or replace into settings (key, value, created_at, created_by, updated_at, updated_by) values ('COMPANY_WHATSAPP', ?, ${AUDIT})`
+		)
+		.run('573105550142');
 	const href = new URL(String(await getWhatsAppHref(db, 'Hola. ¿Y mi pedido #1043?')));
 	expect(`${href.origin}${href.pathname}`).toBe('https://wa.me/573105550142');
 	expect(href.searchParams.get('text')).toBe('Hola. ¿Y mi pedido #1043?');

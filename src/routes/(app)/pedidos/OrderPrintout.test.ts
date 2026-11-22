@@ -202,3 +202,13 @@ test('the dispatch sheets print on a portrait letter page with no margin', () =>
 	const { head } = render(DispatchPrintoutPage, { props: { data: { printout } } as never });
 	expect(head).toMatch(/@page\s*\{\s*size:\s*letter;\s*margin:\s*0;?\s*\}/);
 });
+
+test("the order and dispatch headers read the company's address and bare WhatsApp, no phone", () => {
+	const dispatch = render(DispatchPrintoutPage, { props: { data: { printout } } as never }).body;
+	for (const body of [sheetOf(printout), dispatch]) {
+		expect(body).toContain(
+			'<div class="print-small">Calle 38a #79-18, Medellín, Colombia · 300 611 3392</div>'
+		);
+		expect(body).not.toContain('604 411 44 29');
+	}
+});

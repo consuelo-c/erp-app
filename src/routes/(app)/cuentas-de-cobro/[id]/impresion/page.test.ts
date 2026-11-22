@@ -42,7 +42,7 @@ const base: ReceivablePrintout = {
 	company: {
 		COMPANY_NAME: 'Banquetes Consuelo C.',
 		COMPANY_ADDRESS: 'Calle 38a #79-18, Medellín, Colombia',
-		COMPANY_PHONE: '(+57) 604 411 44 29'
+		COMPANY_WHATSAPP: '573006113392'
 	}
 };
 
@@ -173,4 +173,12 @@ test('one contact line: the phone, the username without one, or a blank «Teléf
 	expect(username).not.toContain('Teléfono');
 	const neither = printout({ client: { ...base.client, phone: null } });
 	expect(neither).toMatch(/>Teléfono<\/span><span[^>]*><\/span>/);
+});
+
+test("the cuenta de cobro's header reads the company's address and bare WhatsApp, no phone", () => {
+	const body = printout();
+	expect(body).toMatch(
+		/<div class="print-small[^"]*">Calle 38a #79-18, Medellín, Colombia · 300 611 3392<\/div>/
+	);
+	expect(body).not.toContain('604 411 44 29');
 });

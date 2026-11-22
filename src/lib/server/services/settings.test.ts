@@ -132,6 +132,17 @@ test('an invalid field saves nothing and comes back with its message', async () 
 	expect(readEvents()).toEqual([]);
 });
 
+test('an empty WhatsApp is refused; a valid one is stored normalized', async () => {
+	const form = toForm(await getSystemSettings(db, modules, manager));
+	expect(
+		await updateSystemSettings(db, { modules, values: { ...form, COMPANY_WHATSAPP: ' ' } }, manager)
+	).toMatchObject({ ok: false, errors: { COMPANY_WHATSAPP: expect.any(String) } });
+	expect(readValue('COMPANY_WHATSAPP')).toEqual({ value: '573006113392', updated_by: 'system' });
+	const typed = { ...form, COMPANY_WHATSAPP: '310 555 0142' };
+	expect(await updateSystemSettings(db, { modules, values: typed }, manager)).toEqual({ ok: true });
+	expect(readValue('COMPANY_WHATSAPP')).toEqual({ value: '573105550142', updated_by: 'gerente' });
+});
+
 test('each tab reads and saves only its own modules: Nómina ignores a general field', async () => {
 	const values = await getSystemSettings(db, ['PAYROLL'], manager);
 	expect(values).not.toHaveProperty('COMPANY_NAME');

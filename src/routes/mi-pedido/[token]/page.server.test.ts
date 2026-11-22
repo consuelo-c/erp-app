@@ -265,11 +265,6 @@ test("the WhatsApp message carries the page's own URL, from the request's origin
 			`Hola. Tengo una duda con mi pedido https://pedidos.example.com${path}`
 		);
 	}
-	database.prepare("update settings set value = '' where key = 'COMPANY_WHATSAPP'").run();
-	const url = new URL(`https://pedidos.example.com/mi-pedido/${token}`);
-	expect(await loadLayout({ platform: { env: { DB: db } }, url } as never)).toEqual({
-		whatsAppHref: null
-	});
 });
 
 test('the client page never leaks its token, is never indexed and never kept', async () => {

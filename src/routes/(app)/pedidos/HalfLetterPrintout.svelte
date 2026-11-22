@@ -2,6 +2,7 @@
 	import type { Snippet } from 'svelte';
 	import Button from '$lib/components/Button.svelte';
 	import { formatPesos } from '$lib/format';
+	import { formatPhone } from '$lib/phone';
 	import { splitIntoColumns, splitIntoPages } from '$lib/orders';
 	import type { OrderItem } from '$lib/server/services/orders';
 	import type { CompanySettings } from '$lib/server/services/settings';
@@ -56,7 +57,9 @@
 				/>
 				<div class="print-head__company">
 					<div class="print-head__title">{title}</div>
-					<div class="print-small">{company.COMPANY_ADDRESS} · {company.COMPANY_PHONE}</div>
+					<div class="print-small">
+						{company.COMPANY_ADDRESS} · {formatPhone(company.COMPANY_WHATSAPP)}
+					</div>
 				</div>
 			</header>
 			<div class="print-small print-page">{index + 1} de {pages.length}</div>

@@ -88,14 +88,12 @@
 {/if}
 
 <!-- Plain links to WhatsApp: no form, no endpoint, nothing written. -->
-{#if data.confirmHref && data.changesHref}
-	<div class="answers">
-		<Button href={data.confirmHref} target="_blank" rel="noopener">Confirmar cotización</Button>
-		<Button variant="secondary" href={data.changesHref} target="_blank" rel="noopener">
-			Solicitar cambios
-		</Button>
-	</div>
-{/if}
+<div class="answers">
+	<Button href={data.confirmHref} target="_blank" rel="noopener">Confirmar cotización</Button>
+	<Button variant="secondary" href={data.changesHref} target="_blank" rel="noopener">
+		Solicitar cambios
+	</Button>
+</div>
 
 {#if data.terms}
 	<h2 class="section-title terms-title">Términos y condiciones</h2>

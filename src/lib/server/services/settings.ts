@@ -389,6 +389,6 @@ export async function updateTerms(
 }
 
 // The printed formats' header.
-export const COMPANY_SETTINGS = ['COMPANY_NAME', 'COMPANY_ADDRESS', 'COMPANY_PHONE'] as const;
+export const COMPANY_SETTINGS = ['COMPANY_NAME', 'COMPANY_ADDRESS', 'COMPANY_WHATSAPP'] as const;
 
 export type CompanySettings = SettingValues<(typeof COMPANY_SETTINGS)[number]>;

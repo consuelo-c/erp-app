@@ -19,7 +19,11 @@ const receipt = {
 		employeePosition: null,
 		preparedBy: 'gerente'
 	},
-	company: { COMPANY_NAME: 'Banquetes Consuelo C', COMPANY_ADDRESS: '', COMPANY_PHONE: '' },
+	company: {
+		COMPANY_NAME: 'Banquetes Consuelo C',
+		COMPANY_ADDRESS: 'Calle 38a #79-18, Medellín, Colombia',
+		COMPANY_WHATSAPP: '573006113392'
+	},
 	periodStart: '2026-10-05',
 	periodEnd: '2026-10-11',
 	extraHours: { start: '2026-09-28', end: '2026-10-04' }
@@ -42,4 +46,11 @@ test('the slip prints no «Horas extras» nor the company name, and numbers itse
 test('the slip prints on a portrait letter page with no margin', () => {
 	const { head } = render(Page, { props: { data: { receipt } } as never });
 	expect(head).toMatch(/@page\s*\{\s*size:\s*letter;\s*margin:\s*0;?\s*\}/);
+});
+
+test("the slip's header reads the company's address and bare WhatsApp, no phone", () => {
+	const { body } = render(Page, { props: { data: { receipt } } as never });
+	expect(body).toMatch(
+		/<div class="print-small[^"]*">Calle 38a #79-18, Medellín, Colombia · 300 611 3392<\/div>/
+	);
 });

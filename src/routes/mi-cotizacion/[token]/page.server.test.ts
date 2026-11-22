@@ -271,16 +271,6 @@ test("the two buttons and the floating icon carry their messages and the page's 
 	}
 });
 
-test('with COMPANY_WHATSAPP empty, no button and no icon', async () => {
-	const token = insertQuote();
-	database.exec("update settings set value = '' where key = 'COMPANY_WHATSAPP'");
-	expect(await open(token)).toMatchObject({ confirmHref: null, changesHref: null });
-	const url = new URL(`${ORIGIN}/mi-cotizacion/${token}`);
-	expect(await loadLayout({ platform: { env: { DB: db } }, url } as never)).toEqual({
-		whatsAppHref: null
-	});
-});
-
 test('the quote page never leaks its token, is never indexed and never kept', async () => {
 	const event = {
 		cookies: { get: () => undefined },
