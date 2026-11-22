@@ -6,28 +6,35 @@ import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { getTodaysDate } from '$lib/datetime';
 import { parsePesos } from '$lib/payroll';
-import { hasAnyRole, requireRole, type Actor, type Role } from '../actor';
+import { hasAnyRole, hasCashTab, requireRole, type Actor } from '../actor';
 import { auditedInsert } from '../audit';
-import { optional, type CashConcept, type PaymentMethod, type RecordResult } from './cash';
+import {
+	movementAttributesSchema,
+	optional,
+	type CashConcept,
+	type PaymentMethod,
+	type RecordResult
+} from './cash';
 import { invalidForm } from './contacts';
 import { SELECT_LOGIN, toLogin, type Login, type LoginRow } from './logins';
 
-// Whose tab a movement is on: whoever recorded it, or, for an offset (only the manager records
-// one), whoever recorded the movement it offsets, so correcting a mistake corrects their tab.
-const HOLDER = `coalesce((select original.created_by from cash_movements as original
-	where original.id = cash_movements.reverses_id), cash_movements.created_by)`;
+// Whose tab a movement is on, the one rule every reader of Efectivo por entregar shares. An
+// expense the manager records «Pagado por» someone is on that person's tab; anything else is on
+// whoever recorded it. An offset (only the manager records one) follows the movement it offsets,
+// so correcting a mistake corrects the same tab.
+const HOLDER = `coalesce(
+	(select json_extract(original.attributes, '$.paid_by') from cash_movements as original
+		where original.id = cash_movements.reverses_id),
+	json_extract(cash_movements.attributes, '$.paid_by'),
+	(select original.created_by from cash_movements as original
+		where original.id = cash_movements.reverses_id),
+	cash_movements.created_by)`;
 
 // The drawer: their cash is already the company's, so they have no tab.
 const MANAGES_CASH = ['ADMIN', 'MANAGER'] as const;
 
 // The roles that take cash for the company: the warehouse never does.
 const TAKES_CASH = ['SALES', 'DRIVER'] as const;
-
-/** Whether a login has an Efectivo por entregar: it takes cash and isn't the drawer. */
-export function hasCashTab(roles: readonly Role[]): boolean {
-	const holds = (role: Role) => roles.includes(role);
-	return TAKES_CASH.some(holds) && !MANAGES_CASH.some(holds);
-}
 
 // The range comes from the URL: missing or unreadable, an end is today.
 const statementInputSchema = z.object({
@@ -45,9 +52,15 @@ export type StatementMovement = {
 	receiptNumber: number;
 	/** Only cash counts: a transfer is in the bank. */
 	isCounted: boolean;
+	/** What a movement with no order or cuenta de cobro was for. */
+	description: string | null;
+	recordedBy: string;
 };
 
-/** The movements of one order, or of one cuenta de cobro, newest first. */
+/**
+ * The movements of one order, or of one cuenta de cobro, newest first. A movement with neither (an
+ * expense paid out of the tab) is a group of its own, with its offset.
+ */
 export type StatementGroup = {
 	orderId: number | null;
 	receivableId: number | null;
@@ -95,6 +108,9 @@ type MovementRow = {
 	receipt_number: number;
 	entity_type: string | null;
 	entity_id: number | null;
+	reverses_id: number | null;
+	attributes: string;
+	created_by: string;
 };
 
 async function listGroups(
@@ -103,7 +119,8 @@ async function listGroups(
 ): Promise<StatementGroup[]> {
 	const { results } = await db
 		.prepare(
-			`select id, concept, payment_method, amount, movement_date, receipt_number, entity_type, entity_id
+			`select id, concept, payment_method, amount, movement_date, receipt_number, entity_type,
+				entity_id, reverses_id, attributes, created_by
 			from cash_movements
 			where ${HOLDER} = ? and movement_date between ? and ?
 			order by movement_date desc, id desc`
@@ -113,10 +130,17 @@ async function listGroups(
 	return groupByEntity(results);
 }
 
+// An order's or a cuenta de cobro's movements share a group; a standalone one shares its offset's.
+function groupKey(row: MovementRow): string {
+	return null === row.entity_type
+		? `movement:${row.reverses_id ?? row.id}`
+		: `${row.entity_type}:${row.entity_id}`;
+}
+
 function groupByEntity(rows: MovementRow[]): StatementGroup[] {
 	const groups = new Map<string, StatementGroup>();
 	for (const row of rows) {
-		const key = `${row.entity_type}:${row.entity_id}`;
+		const key = groupKey(row);
 		const group = groups.get(key) ?? {
 			orderId: 'ORDER' === row.entity_type ? row.entity_id : null,
 			receivableId: 'RECEIVABLE' === row.entity_type ? row.entity_id : null,
@@ -129,7 +153,9 @@ function groupByEntity(rows: MovementRow[]): StatementGroup[] {
 			amount: row.amount,
 			movementDate: row.movement_date,
 			receiptNumber: row.receipt_number,
-			isCounted: 'CASH' === row.payment_method
+			isCounted: 'CASH' === row.payment_method,
+			description: movementAttributesSchema.parse(JSON.parse(row.attributes)).description ?? null,
+			recordedBy: row.created_by
 		});
 		groups.set(key, group);
 	}
@@ -170,12 +196,14 @@ function canReadTab(actor: Actor, username: string): boolean {
 	return hasAnyRole(actor, MANAGES_CASH) || actor.username === username;
 }
 
-async function findLogin(db: D1Database, username: string): Promise<Login | null> {
+/** The login `username` names, when it has an Efectivo por entregar; null otherwise. */
+async function findLoginWithTab(db: D1Database, username: string): Promise<Login | null> {
 	const row = await db
 		.prepare(`${SELECT_LOGIN} where users.username = ?`)
 		.bind(username)
 		.first<LoginRow>();
-	return null === row ? null : toLogin(row);
+	const login = null === row ? null : toLogin(row);
+	return null !== login && hasCashTab(login.roles) ? login : null;
 }
 
 export type PersonWithTab = { username: string; name: string; pending: number };
@@ -216,8 +244,7 @@ export async function getCashStatement(
 	if (!canReadTab(actor, range.username)) {
 		error(403, 'No tienes permiso para esta acción');
 	}
-	const login = await findLogin(db, range.username);
-	if (null === login || !hasCashTab(login.roles)) {
+	if (null === (await findLoginWithTab(db, range.username))) {
 		error(404, 'Esa persona no tiene efectivo por entregar');
 	}
 	const [pending, groups, handovers] = await Promise.all([
@@ -259,8 +286,8 @@ export async function recordHandover(
 	if (!form.success) {
 		return invalidForm(form.error);
 	}
-	const login = await findLogin(db, form.data.username);
-	if (null === login || !hasCashTab(login.roles)) {
+	const login = await findLoginWithTab(db, form.data.username);
+	if (null === login) {
 		const message = 'Esa persona no tiene efectivo por entregar';
 		return { ok: false, message, errors: { username: message } };
 	}

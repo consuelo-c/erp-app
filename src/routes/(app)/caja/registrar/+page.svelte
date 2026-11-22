@@ -12,7 +12,13 @@
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import Select from '$lib/components/Select.svelte';
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
-	import { formatInteger, formatPesos, formatReceiptNumber, formatSignedPesos } from '$lib/format';
+	import {
+		formatBalance,
+		formatInteger,
+		formatPesos,
+		formatReceiptNumber,
+		formatSignedPesos
+	} from '$lib/format';
 	import { CASH_CONCEPT_LABELS, PAYMENT_METHOD_LABELS } from '$lib/labels';
 	import { parsePesos } from '$lib/payroll';
 	import type { CashConcept, MovementDetail } from '$lib/server/services/cash';
@@ -53,11 +59,23 @@
 	const isStandalone = $derived(STANDALONE_CONCEPTS.includes(conceptKey));
 	const party = $derived(original?.employeeName ?? original?.payee ?? '');
 	const amount = $derived(original ? Math.abs(original.amount) : parsePesos(typed('amount', '')));
+	// «Pagado por»: a cash «Salida» may come out of what an employee holds; '' is «La caja».
+	const isPaidByShown = $derived(isConceptPicked && 'CASH' === method);
+	const payer = $derived(
+		isPaidByShown
+			? data.people.find(({ username }) => username === typed('paid_by', ''))
+			: undefined
+	);
 	const methodLabel = $derived(
 		'OTHER' === method
 			? typed('other_method', '') || PAYMENT_METHOD_LABELS.OTHER
 			: PAYMENT_METHOD_LABELS[method as keyof typeof PAYMENT_METHOD_LABELS]
 	);
+
+	function personOption({ username, name, pending }: (typeof data.people)[number]): string {
+		const who = name === username ? [username] : [username, name];
+		return [...who, `por entregar ${formatBalance(pending)}`].join(' · ');
+	}
 
 	function oppositeDirection(amount: number): 'IN' | 'OUT' {
 		return amount < 0 ? 'IN' : 'OUT';
@@ -194,6 +212,22 @@
 				{/each}
 			</Choice>
 
+			{#if isPaidByShown}
+				<Field
+					label="Pagado por"
+					id="paid_by"
+					hint="Si un empleado lo pagó con el efectivo que tiene, el gasto se descuenta de su «Efectivo por entregar». «La caja»: salió del cajón."
+					error={errorOf('paid_by')}
+				>
+					<Select id="paid_by" name="paid_by" value={payer?.username ?? ''}>
+						<option value="">La caja</option>
+						{#each data.people as person (person.username)}
+							<option value={person.username}>{personOption(person)}</option>
+						{/each}
+					</Select>
+				</Field>
+			{/if}
+
 			{#if 'OTHER' === method}
 				<Field label="¿Cuál medio de pago?" id="other_method" error={errorOf('other_method')}>
 					<Input
@@ -284,7 +318,8 @@
 
 {#snippet confirmation()}
 	{concept} de <b>{formatPesos(amount)}</b> usando <b>{methodLabel}</b>
-	{isInflow ? 'de' : 'a'} <b>{typed('payee', party)}</b>. Este movimiento
+	{isInflow ? 'de' : 'a'} <b>{typed('payee', party)}</b>{#if payer}, pagado por <b>{payer.name}</b> con
+		su efectivo por entregar{/if}. Este movimiento
 	<b>no se puede corregir</b>: para corregirlo se registra un movimiento contrario.
 {/snippet}
 
