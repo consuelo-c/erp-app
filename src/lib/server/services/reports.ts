@@ -3,10 +3,10 @@
 
 import { z } from 'zod';
 import { resolve } from '$app/paths';
-import { addDays, getDayStartInstant, getTodaysDate } from '$lib/datetime';
+import { addDays, getDayStartInstant, getMonthRange, getTodaysDate } from '$lib/datetime';
 import { requireRole, type Actor } from '../actor';
 import { eventFieldsSchema } from '../audit';
-import { optional } from './cash';
+import { optional, type CashConcept } from './cash';
 import { HELD_LINES_SQL } from './orders';
 
 const MANAGERS = ['ADMIN', 'MANAGER'] as const;
@@ -370,4 +370,168 @@ export async function getSubLending(
 				second.missing - first.missing || first.name.localeCompare(second.name, 'es')
 		);
 	return { from, to, products };
+}
+
+// Missing or unreadable, the period is the current Bogotá month.
+const profitAndLossSchema = z.object({
+	from: optional(z.iso.date()),
+	to: optional(z.iso.date())
+});
+
+// Each line of the P&L and the concepts it sums: the page links each line to Movimientos caja
+// filtered by these, so the report and the book can't disagree on what a line holds.
+const PROFIT_AND_LOSS_CONCEPTS = {
+	collected: ['INSTALLMENT', 'INSTALLMENT_REFUND', 'CANCELLATION_FEE'],
+	otherIncome: ['OTHER_INCOME'],
+	damageCharges: ['DAMAGE_CHARGE'],
+	transport: ['TRANSPORT_EXPENSE', 'CARRIER_PAYMENT'],
+	supplies: ['SUPPLIES_EXPENSE'],
+	salaries: ['PAYROLL'],
+	rent: ['RENT'],
+	other: ['OTHER_EXPENSE']
+} as const satisfies Record<string, readonly CashConcept[]>;
+
+/** A line's net by movement date, offsets included, and the concepts it sums. */
+export type ProfitAndLossLine = { amount: number; concepts: CashConcept[] };
+
+export type ProfitAndLoss = {
+	from: string;
+	to: string;
+	income: {
+		/** Recaudado: deposits never in it. */
+		collected: ProfitAndLossLine;
+		otherIncome: ProfitAndLossLine;
+		/** Cobrado por novedades, and how many orders it came from. */
+		damageCharges: ProfitAndLossLine & { orderCount: number };
+		total: number;
+	};
+	/** Every amount negative, or zero. */
+	expenses: {
+		transport: ProfitAndLossLine & { transportExpenses: number; carrierPayments: number };
+		supplies: ProfitAndLossLine;
+		/** Nómina, and how many payroll weeks it pays. */
+		salaries: ProfitAndLossLine & { weekCount: number };
+		rent: ProfitAndLossLine;
+		other: ProfitAndLossLine;
+		total: number;
+	};
+	/** Income plus expenses: only money that came in or went out, so it matches Caja. */
+	result: number;
+	/** Vendido: orders with their event in the period, cancelled ones left out, paid or not. */
+	sold: { count: number; rental: number; transport: number; total: number };
+};
+
+// Deposits and their refunds are never read: a retention paired with a fee or a damage charge
+// already nets inside that concept's own movements.
+const READ_CONCEPTS = Object.values(PROFIT_AND_LOSS_CONCEPTS).flat();
+
+async function sumByConcept(db: D1Database, from: string, to: string) {
+	const { results } = await db
+		.prepare(
+			`select concept, sum(amount) as amount from cash_movements
+			where movement_date between ? and ? and concept in (${READ_CONCEPTS.map(() => '?').join(', ')})
+			group by concept`
+		)
+		.bind(from, to, ...READ_CONCEPTS)
+		.all<{ concept: CashConcept; amount: number }>();
+	const sums = new Map(results.map(({ concept, amount }) => [concept, amount]));
+	return (concept: CashConcept) => sums.get(concept) ?? 0;
+}
+
+// The links whose movements of `concept` in the period don't cancel out: a charge or a payroll
+// run offset in full paid nothing.
+const NET_LINKS_SQL = `select entity_id from cash_movements
+	where concept = ? and movement_date between ? and ?
+	group by entity_id having sum(amount) <> 0`;
+
+async function countDamagedOrders(db: D1Database, from: string, to: string): Promise<number> {
+	const row = await db
+		.prepare(`select count(*) as total from (${NET_LINKS_SQL})`)
+		.bind('DAMAGE_CHARGE', from, to)
+		.first<{ total: number }>();
+	return row?.total ?? 0;
+}
+
+// A week's runs are one per employee: the sub-line counts weeks, not people.
+async function countPayrollWeeks(db: D1Database, from: string, to: string): Promise<number> {
+	const row = await db
+		.prepare(
+			`select count(distinct payroll_runs.period_start) as total from (${NET_LINKS_SQL}) paid
+			join payroll_runs on payroll_runs.id = paid.entity_id`
+		)
+		.bind('PAYROLL', from, to)
+		.first<{ total: number }>();
+	return row?.total ?? 0;
+}
+
+async function sumSold(db: D1Database, from: string, to: string): Promise<ProfitAndLoss['sold']> {
+	const row = await db
+		.prepare(
+			`select count(*) as count, coalesce(sum(items_total - discount), 0) as rental,
+				coalesce(sum(transport_cost), 0) as transport, coalesce(sum(order_total), 0) as total
+			from orders where event_date between ? and ? and status <> 'CANCELLED'`
+		)
+		.bind(from, to)
+		.first<ProfitAndLoss['sold']>();
+	return row ?? { count: 0, rental: 0, transport: 0, total: 0 };
+}
+
+type SumOf = (concept: CashConcept) => number;
+
+function totalOf(lines: Record<string, ProfitAndLossLine>): number {
+	return Object.values(lines).reduce((sum, line) => sum + line.amount, 0);
+}
+
+function lineOf(sumOf: SumOf, line: keyof typeof PROFIT_AND_LOSS_CONCEPTS): ProfitAndLossLine {
+	const concepts = [...PROFIT_AND_LOSS_CONCEPTS[line]];
+	return { amount: concepts.reduce((sum, concept) => sum + sumOf(concept), 0), concepts };
+}
+
+function incomeOf(sumOf: SumOf, damagedOrders: number): ProfitAndLoss['income'] {
+	const lines = {
+		collected: lineOf(sumOf, 'collected'),
+		otherIncome: lineOf(sumOf, 'otherIncome'),
+		damageCharges: { ...lineOf(sumOf, 'damageCharges'), orderCount: damagedOrders }
+	};
+	return { ...lines, total: totalOf(lines) };
+}
+
+function expensesOf(sumOf: SumOf, payrollWeeks: number): ProfitAndLoss['expenses'] {
+	const lines = {
+		transport: {
+			...lineOf(sumOf, 'transport'),
+			transportExpenses: sumOf('TRANSPORT_EXPENSE'),
+			carrierPayments: sumOf('CARRIER_PAYMENT')
+		},
+		supplies: lineOf(sumOf, 'supplies'),
+		salaries: { ...lineOf(sumOf, 'salaries'), weekCount: payrollWeeks },
+		rent: lineOf(sumOf, 'rent'),
+		other: lineOf(sumOf, 'other')
+	};
+	return { ...lines, total: totalOf(lines) };
+}
+
+/**
+ * Pérdidas y ganancias: what came in and went out in the period, on cash and by movement date so
+ * it matches Movimientos caja, and apart from the result, what was sold for events in it.
+ */
+export async function getProfitAndLoss(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<ProfitAndLoss> {
+	requireRole(actor, MANAGERS);
+	const parsed = profitAndLossSchema.parse(input ?? {});
+	const month = getMonthRange(getTodaysDate());
+	const from = parsed.from ?? month.start;
+	const to = parsed.to ?? month.end;
+	const [sumOf, damagedOrders, payrollWeeks, sold] = await Promise.all([
+		sumByConcept(db, from, to),
+		countDamagedOrders(db, from, to),
+		countPayrollWeeks(db, from, to),
+		sumSold(db, from, to)
+	]);
+	const income = incomeOf(sumOf, damagedOrders);
+	const expenses = expensesOf(sumOf, payrollWeeks);
+	return { from, to, income, expenses, result: income.total + expenses.total, sold };
 }
