@@ -59,5 +59,27 @@ What an order's client still owes: its total less Pagado.
 What the company holds for the client of a cancelled order: Pagado plus the deposit received. Every reader, the client included, sees it under this name.
 _Avoid_: Saldo a favor, Saldo a su favor
 
+**Entrega de efectivo**:
+Cash a driver or Sales rep hands to the manager, recorded by the manager as received. It moves the company's own cash from a pocket to the drawer, so it isn't income or expense.
+_Avoid_: reconciliation, settlement
+
+**Efectivo por entregar**:
+The cash a driver or Sales rep is holding for the company: the cash they've collected, less the cash they've given back, less their entregas de efectivo. The manager and admin don't have one: they are the drawer.
+_Avoid_: cash on hand, running balance
+
 **Money statement**:
 The rows an order's money reads as (Total, Pagado, Saldo or A favor del cliente, its cuenta de cobro, the deposit agreed and received), the same for every reader.
+
+## Inventory
+
+**Count**:
+A partial physical count of what the company owns, sent by whoever counted it and applied to the inventory only when the manager or admin approves it.
+_Avoid_: stocktake, audit
+
+**Corrected quantity**:
+The quantity the reviewer sets on a counted product before approving its count, applied instead of what was counted. What the counter sent stays on the count beside it. Shown as «Corregido».
+_Avoid_: approved quantity, adjusted quantity
+
+**Incident**:
+Damage or loss found on an order's return, each product with what happened to it (lost, unrecoverable, recoverable). Whoever reported it can correct or reverse it until the manager sets who is responsible; from then on only the manager can reverse it. Shown as «Novedad».
+_Avoid_: pickup event, damage report
