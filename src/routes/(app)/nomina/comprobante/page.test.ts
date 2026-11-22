@@ -38,3 +38,8 @@ test('the slip prints no «Horas extras» nor the company name, and numbers itse
 	expect(body).not.toMatch(/<div class="print-small[^"]*">Banquetes Consuelo C</);
 	expect(body).toContain('1 de 1');
 });
+
+test('the slip prints on a portrait letter page with no margin', () => {
+	const { head } = render(Page, { props: { data: { receipt } } as never });
+	expect(head).toMatch(/@page\s*\{\s*size:\s*letter;\s*margin:\s*0;?\s*\}/);
+});

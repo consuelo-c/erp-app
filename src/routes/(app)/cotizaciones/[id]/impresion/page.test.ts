@@ -123,3 +123,9 @@ test('one sheet is numbered «1 de 1», and «Productos» counts the lines', () 
 	expect(body).toContain('1 de 1');
 	expect(body).toContain('<span>Productos</span><span>3</span>');
 });
+
+test('the sheets print on a portrait letter page with no margin', () => {
+	const data = { printout: { quote, document: null, company } };
+	const { head } = render(Page, { props: { data } as never });
+	expect(head).toMatch(/@page\s*\{\s*size:\s*letter;\s*margin:\s*0;?\s*\}/);
+});

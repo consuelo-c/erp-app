@@ -28,6 +28,15 @@
 
 <svelte:head>
 	<title>{title} · {company.COMPANY_NAME}</title>
+	<!-- Portrait letter, edge to edge: Chrome on macOS prints it unscaled on letter or half-letter
+	paper with the dialog's defaults; the sheet carries its own margins. In the head, so it leaves
+	with the printout. -->
+	<style>
+		@page {
+			size: letter;
+			margin: 0;
+		}
+	</style>
 </svelte:head>
 
 <div class="printout">
@@ -93,12 +102,6 @@
 </div>
 
 <style>
-	/* Half-letter landscape, edge to edge: the sheet carries its own margins. */
-	@page {
-		size: 8.5in 5.5in;
-		margin: 0;
-	}
-
 	.printout {
 		display: flex;
 		flex-direction: column;
