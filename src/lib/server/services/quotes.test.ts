@@ -97,6 +97,7 @@ const quote1043 = {
 	],
 	discount: 104000,
 	transport_cost: 180000,
+	transported_by: 'COMPANY',
 	address_1: 'Cra 43A #18-95, El Poblado',
 	address_2: 'Salón Social Torre Verde, piso 2',
 	notes: 'Precios incluyen montaje y desmontaje'
@@ -1103,7 +1104,7 @@ test('«Quién transporta» is saved and edited; left out, a new quote is the co
 });
 
 test('«Quién transporta» is required: empty or anything but the company or the client fails on its field', async () => {
-	for (const transportedBy of [null, '', 'EXTERNAL_CARRIER']) {
+	for (const transportedBy of [undefined, null, '', 'EXTERNAL_CARRIER']) {
 		const result = await createQuote(db, { ...quote1043, transported_by: transportedBy }, sales);
 		expect(errorsOf(result)).toEqual({ transported_by: 'Escoge quién transporta' });
 	}

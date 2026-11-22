@@ -39,6 +39,7 @@ import { filterTimelineForActor } from '../timeline';
 import {
 	foldedSql,
 	optional,
+	PAYMENT_METHODS,
 	recordLinkedMovement,
 	type CashConcept,
 	type LinkedMovement,
@@ -48,16 +49,17 @@ import { listProducts, type Product } from './products';
 import {
 	capitalizeName,
 	generateDocumentId,
-	getContactBankAccount,
 	INVALID_PHONE,
 	listTransporters,
 	newClientStatements,
 	phoneSchema,
+	readBankAccount,
 	searchClause,
 	whatsappSchema,
 	type NewClient,
 	type Transporter
 } from './contacts';
+import { hasCashTab } from './cash-handovers';
 import { COMPANY_SETTINGS, readSettings, type CompanySettings } from './settings';
 
 // The commercial side: whoever takes orders creates and edits them.
@@ -68,7 +70,7 @@ const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
 const PAYS_OUT = ['ADMIN', 'MANAGER'] as const;
 
 // Whoever records an order's payments: the office, and the driver on the road.
-const RECORDS_PAYMENTS = [...TAKES_ORDERS, 'DRIVER'] as const;
+export const RECORDS_PAYMENTS = [...TAKES_ORDERS, 'DRIVER'] as const;
 
 export const ORDER_STATUSES = [
 	'CONFIRMED',
@@ -341,6 +343,11 @@ const NOT_A_CARRIER = 'Escoge un transportador de la lista';
 
 export function refusal(field: string, message: string): Refusal {
 	return { ok: false, message: CHECK_FIELDS, errors: { [field]: message } };
+}
+
+/** A refusal of the whole entry, with no field to mark. */
+function messageRefusal(message: string): Refusal {
+	return { ok: false, message, errors: {} };
 }
 
 /** Each field's message under its whole path, as `order_items.2.qty` or `delivery_attributes.carrier_id`. */
@@ -1694,7 +1701,7 @@ const paymentInputSchema = z.object({
 	order_id: orderIdSchema,
 	concept: z.enum(ORDER_PAYMENT_CONCEPTS, 'Escoge el concepto'),
 	// Checked again, with the rest of the entry, by the cash book; read here for the driver's rules.
-	payment_method: z.string().optional(),
+	payment_method: z.enum(PAYMENT_METHODS, 'Escoge el método').optional(),
 	amount: z.string().default(''),
 	trip: z.enum(['DELIVERY', 'PICKUP']).optional(),
 	fee_source: z.enum(FEE_SOURCES).optional(),
@@ -1838,7 +1845,7 @@ const DRIVER_CONCEPTS: readonly OrderPaymentConcept[] = [
 // The driver collects only on the road, and gives the deposit back only at pickup.
 const ON_THE_ROAD: readonly OrderStatus[] = ['OUT_FOR_DELIVERY', 'DELIVERED', 'OUT_FOR_PICKUP'];
 
-const DRIVER_METHODS: readonly string[] = ['CASH', 'TRANSFER'];
+const DRIVER_METHODS: readonly PaymentMethod[] = ['CASH', 'TRANSFER'];
 
 /** What the driver's rules read: the order's status, incidents, billing and balances. */
 type PaymentState = Pick<
@@ -1851,7 +1858,7 @@ const ACTIVE_INCIDENT_REFUND_MESSAGE =
 	'El pedido tiene una novedad activa: la devolución del depósito la hace la oficina.';
 
 // A billed order's payments are the cuenta's: the driver only hands the cuenta over.
-function driverConcepts(order: PaymentState): Partial<Record<OrderPaymentConcept, boolean>> {
+function onTheRoadConcepts(order: PaymentState): Partial<Record<OrderPaymentConcept, boolean>> {
 	const isCollecting = null === order.receivableId && ON_THE_ROAD.includes(order.status);
 	return {
 		INSTALLMENT: isCollecting && 0 < order.balanceDue,
@@ -1864,30 +1871,26 @@ function isDriverRefundable(order: PaymentState): boolean {
 	return 'OUT_FOR_PICKUP' === order.status && !order.hasIncident && 0 < order.depositHeld;
 }
 
-function refused(message: string): Refusal {
-	return { ok: false, message, errors: {} };
-}
-
 // Why the driver can't record this entry, or null: the service's own check, not just the screen's.
 function driverRefusal(order: PaymentState, payment: PaymentInput): Refusal | null {
-	if (!DRIVER_METHODS.includes(payment.payment_method ?? '')) {
+	if (undefined === payment.payment_method || !DRIVER_METHODS.includes(payment.payment_method)) {
 		return refusal('payment_method', 'Escoge «Efectivo» o «Transferencia»');
 	}
 	if (null !== order.receivableId) {
-		return refused(`El pago va en la cuenta de cobro Nº ${order.receivableId}.`);
+		return messageRefusal(`El pago va en la cuenta de cobro Nº ${order.receivableId}.`);
 	}
 	if (!ON_THE_ROAD.includes(order.status)) {
-		return refused(
+		return messageRefusal(
 			'En Despachos, los pagos se registran con el pedido en ruta de entrega, entregado o en ruta de recogida.'
 		);
 	}
 	if ('DEPOSIT_REFUND' === payment.concept) {
 		return driverRefundRefusal(order, parsePesos(payment.amount));
 	}
-	if (driverConcepts(order)[payment.concept]) {
+	if (onTheRoadConcepts(order)[payment.concept]) {
 		return null;
 	}
-	return refused(
+	return messageRefusal(
 		'INSTALLMENT' === payment.concept
 			? 'Este pedido ya está pagado.'
 			: 'El depósito ya está completo.'
@@ -1897,13 +1900,13 @@ function driverRefusal(order: PaymentState, payment: PaymentInput): Refusal | nu
 // Only the whole deposit held, at pickup, with no active incident: anything else is the office's.
 function driverRefundRefusal(order: PaymentState, amount: number): Refusal | null {
 	if ('OUT_FOR_PICKUP' !== order.status) {
-		return refused('El depósito se devuelve en la recogida.');
+		return messageRefusal('El depósito se devuelve en la recogida.');
 	}
 	if (order.hasIncident) {
-		return refused(ACTIVE_INCIDENT_REFUND_MESSAGE);
+		return messageRefusal(ACTIVE_INCIDENT_REFUND_MESSAGE);
 	}
 	if (order.depositHeld <= 0) {
-		return refused('Este pedido no tiene depósito para devolver.');
+		return messageRefusal('Este pedido no tiene depósito para devolver.');
 	}
 	if (amount !== order.depositHeld) {
 		return refusal(
@@ -1938,15 +1941,13 @@ async function linkOf(
 }
 
 /**
- * What the payment entry offers: «Pago» while there's a balance and no cuenta de cobro, the deposit
- * while it isn't complete, and money out to the manager only, as a cancelled order's fee. The driver
- * gets the first two on the road and the whole deposit back at pickup, with no active incident;
- * the warehouse, nothing. Empty, the entry isn't offered.
+ * What the office's payment entry offers: «Pago» while there's a balance and no cuenta de cobro, the
+ * deposit while it isn't complete, and money out to the manager only, as a cancelled order's fee.
+ * Whoever doesn't take orders, nothing: Despachos has its own entry. Empty, the entry isn't offered.
  */
 export function offeredPaymentConcepts(order: OrderDetail, actor: Actor): OrderPaymentConcept[] {
 	const isOffice = hasAnyRole(actor, TAKES_ORDERS);
 	const canPayOut = isAdminOrManager(actor);
-	const driver = hasRole(actor, 'DRIVER') ? driverConcepts(order) : undefined;
 	const offered: Record<OrderPaymentConcept, boolean> = {
 		INSTALLMENT: isOffice && null === order.receivableId && 0 < order.balanceDue,
 		SECURITY_DEPOSIT: isOffice && order.depositHeld < order.depositAmount,
@@ -1955,7 +1956,57 @@ export function offeredPaymentConcepts(order: OrderDetail, actor: Actor): OrderP
 		CARRIER_PAYMENT: canPayOut && 0 < carriersOf(order).length,
 		CANCELLATION_FEE: canPayOut && 'CANCELLED' === order.status
 	};
-	return ORDER_PAYMENT_CONCEPTS.filter((concept) => offered[concept] || true === driver?.[concept]);
+	return ORDER_PAYMENT_CONCEPTS.filter((concept) => offered[concept]);
+}
+
+/** Despachos' «Registrar pago»: what it offers this login now, and what the screen says about it. */
+export type DespachosPaymentEntry = {
+	concepts: OrderPaymentConcept[];
+	methods: readonly PaymentMethod[];
+	/** Why an offered concept's Valor is fixed: the whole deposit, for whoever isn't the manager. */
+	amountLocks: Partial<Record<OrderPaymentConcept, string>>;
+	/** What a method's choice means for this login: cash stays on their tab until handed in. */
+	methodHints: Partial<Record<PaymentMethod, string>>;
+	/** Why the deposit isn't offered back at pickup, or null. */
+	notice: string | null;
+};
+
+const WHOLE_REFUND_NOTE =
+	'Se devuelve todo el depósito recibido. Una devolución parcial la hace la oficina.';
+
+const CASH_TAB_HINT =
+	'El efectivo queda en tu cuenta de «Efectivo por entregar» hasta que lo entregues en la oficina.';
+
+// The office's rights hold on the road, and a driver adds the driver's: Sales gives nothing back.
+function canRecordOnTheRoad(actor: Actor, concept: OrderPaymentConcept): boolean {
+	return hasAnyRole(actor, officeRolesFor(concept)) || hasRole(actor, 'DRIVER');
+}
+
+// The refund the actor would otherwise be offered at pickup, held back by an active incident.
+function isRefundHeldByIncident(order: PaymentState, actor: Actor): boolean {
+	const wouldRefund =
+		null === order.receivableId && 'OUT_FOR_PICKUP' === order.status && 0 < order.depositHeld;
+	return wouldRefund && order.hasIncident && canRecordOnTheRoad(actor, 'DEPOSIT_REFUND');
+}
+
+/**
+ * Despachos' payment entry, the same for every role: what's collected on the road and the whole
+ * deposit back at pickup with no active incident, under what the service lets the login record,
+ * in cash or by transfer. Empty, «Registrar pago» isn't shown.
+ */
+export function getDespachosPaymentEntry(order: OrderDetail, actor: Actor): DespachosPaymentEntry {
+	const onTheRoad = onTheRoadConcepts(order);
+	const concepts = DRIVER_CONCEPTS.filter(
+		(concept) => true === onTheRoad[concept] && canRecordOnTheRoad(actor, concept)
+	);
+	const isRefundWhole = !hasAnyRole(actor, PAYS_OUT);
+	return {
+		concepts,
+		methods: DRIVER_METHODS,
+		amountLocks: isRefundWhole ? { DEPOSIT_REFUND: WHOLE_REFUND_NOTE } : {},
+		methodHints: hasCashTab(actor.roles) ? { CASH: CASH_TAB_HINT } : {},
+		notice: isRefundHeldByIncident(order, actor) ? ACTIVE_INCIDENT_REFUND_MESSAGE : null
+	};
 }
 
 /** A carrier the order can pay, with the account its contact keeps. */
@@ -1973,7 +2024,7 @@ export async function getPaymentOptions(
 	const carriers = carriersOf(order);
 	const [clientBankAccount, ...accounts] = await Promise.all(
 		[order.clientId, ...carriers.map((entry) => entry.carrier.id)].map((id) =>
-			getContactBankAccount(db, id, actor)
+			findBankAccount(db, id)
 		)
 	);
 	return {
@@ -1984,6 +2035,15 @@ export async function getPaymentOptions(
 			bankAccount: accounts[index]
 		}))
 	};
+}
+
+// Only the order's own client and carriers: the driver reads their accounts and nothing else of them.
+async function findBankAccount(db: D1Database, contactId: number): Promise<string | null> {
+	const row = await db
+		.prepare('select attributes from contacts where id = ?')
+		.bind(contactId)
+		.first<{ attributes: string }>();
+	return null === row ? null : readBankAccount(row.attributes);
 }
 
 /** A product the order form can add: active, with its catalog price and stock. */

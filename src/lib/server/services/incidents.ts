@@ -60,7 +60,7 @@ const reportSchema = z.object({
 
 type Refusal = Extract<SaveResult, { ok: false }>;
 
-function refusal(errors: Record<string, string>, message = 'Revisa los campos marcados'): Refusal {
+function refusal(errors: Record<string, string>, message = 'Revisa los campos marcados.'): Refusal {
 	return { ok: false, message, errors };
 }
 
@@ -155,12 +155,12 @@ async function checkReport(db: D1Database, report: ReportInput): Promise<Inciden
 		.bind(report.order_id)
 		.first<ReportedOrder>();
 	if (null === order) {
-		return refusal({}, 'Ese pedido no existe');
+		return refusal({}, 'Ese pedido no existe.');
 	}
 	const cancellation =
 		null === order.cancelled_from ? null : { cancelledFrom: order.cancelled_from };
 	if (!isIncidentReportable({ status: order.status, cancellation })) {
-		return refusal({}, 'Una novedad se reporta cuando el pedido ya se entregó');
+		return refusal({}, 'Una novedad se reporta cuando el pedido ya se entregó.');
 	}
 	const lines = orderItemsSchema.parse(JSON.parse(order.order_items));
 	const resolved = resolveItems(report.items, lines);
@@ -385,9 +385,9 @@ async function findActive(db: D1Database, id: number): Promise<IncidentRow | Ref
 		.bind(id)
 		.first<IncidentRow>();
 	if (null === row) {
-		return refusal({}, 'Esa novedad no existe');
+		return refusal({}, 'Esa novedad no existe.');
 	}
-	return 'ACTIVE' === row.status ? row : refusal({}, 'Esa novedad ya fue revertida');
+	return 'ACTIVE' === row.status ? row : refusal({}, 'Esa novedad ya fue revertida.');
 }
 
 // Run on an ACTIVE incident only. `reversed_by` apart from `updated_by`: a later write would
@@ -427,8 +427,8 @@ function reversalRefusal(row: IncidentRow, actor: Actor): Refusal | null {
 		return null;
 	}
 	return isReporter(row, actor)
-		? refusal({}, 'El Gerente ya le puso responsable: no se puede revertir')
-		: refusal({}, 'Solo quien la reportó o el Gerente puede revertirla');
+		? refusal({}, 'El Gerente ya le puso responsable: no se puede revertir.')
+		: refusal({}, 'Solo quien la reportó o el Gerente puede revertirla.');
 }
 
 /**
@@ -517,7 +517,7 @@ function correctionRefusal(row: IncidentRow, actor: Actor): Refusal | null {
 	}
 	return isFrozen(row)
 		? refusal({}, 'El Gerente ya le puso responsable: no se puede corregir.')
-		: refusal({}, 'Solo quien la reportó o el Gerente puede corregirla');
+		: refusal({}, 'Solo quien la reportó o el Gerente puede corregirla.');
 }
 
 // A correction never undoes a count: a product whose lost and unusable total moves is refused

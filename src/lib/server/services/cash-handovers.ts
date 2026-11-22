@@ -6,9 +6,11 @@ import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { getTodaysDate } from '$lib/datetime';
 import { parsePesos } from '$lib/payroll';
-import { hasAnyRole, requireRole, rolesSchema, type Actor, type Role } from '../actor';
+import { hasAnyRole, requireRole, type Actor, type Role } from '../actor';
 import { auditedInsert } from '../audit';
 import { optional, type CashConcept, type PaymentMethod, type RecordResult } from './cash';
+import { invalidForm } from './contacts';
+import { SELECT_LOGIN, toLogin, type Login, type LoginRow } from './logins';
 
 // Whose tab a movement is on: whoever recorded it, or, for an offset (only the manager records
 // one), whoever recorded the movement it offsets, so correcting a mistake corrects their tab.
@@ -22,7 +24,7 @@ const MANAGES_CASH = ['ADMIN', 'MANAGER'] as const;
 const TAKES_CASH = ['SALES', 'DRIVER'] as const;
 
 /** Whether a login has an Efectivo por entregar: it takes cash and isn't the drawer. */
-function hasTab(roles: readonly Role[]): boolean {
+export function hasCashTab(roles: readonly Role[]): boolean {
 	const holds = (role: Role) => roles.includes(role);
 	return TAKES_CASH.some(holds) && !MANAGES_CASH.some(holds);
 }
@@ -68,7 +70,8 @@ export type CashStatement = {
 	handovers: Handover[];
 };
 
-type Range = { username: string; from: string; to: string };
+/** Whose tab, and the dates its movements and handovers are read between. */
+type StatementQuery = { username: string; from: string; to: string };
 
 async function sumPending(db: D1Database, username: string): Promise<number> {
 	const row = await db
@@ -96,7 +99,7 @@ type MovementRow = {
 
 async function listGroups(
 	db: D1Database,
-	{ username, from, to }: Range
+	{ username, from, to }: StatementQuery
 ): Promise<StatementGroup[]> {
 	const { results } = await db
 		.prepare(
@@ -133,7 +136,10 @@ function groupByEntity(rows: MovementRow[]): StatementGroup[] {
 	return [...groups.values()];
 }
 
-async function listHandovers(db: D1Database, { username, from, to }: Range): Promise<Handover[]> {
+async function listHandovers(
+	db: D1Database,
+	{ username, from, to }: StatementQuery
+): Promise<Handover[]> {
 	const { results } = await db
 		.prepare(
 			`select cash_handovers.id, cash_handovers.amount, cash_handovers.handover_date,
@@ -164,26 +170,6 @@ function canReadTab(actor: Actor, username: string): boolean {
 	return hasAnyRole(actor, MANAGES_CASH) || actor.username === username;
 }
 
-type Login = { id: number; username: string; name: string; roles: Role[]; isActive: boolean };
-
-const SELECT_LOGIN = `select users.id, users.username, users.roles, users.active,
-		coalesce(contacts.full_name, users.username) as name
-	from users
-	left join employees on employees.id = users.employee_id
-	left join contacts on contacts.id = employees.contact_id`;
-
-type LoginRow = { id: number; username: string; roles: string; active: number; name: string };
-
-function toLogin(row: LoginRow): Login {
-	return {
-		id: row.id,
-		username: row.username,
-		name: row.name,
-		roles: rolesSchema.parse(JSON.parse(row.roles)),
-		isActive: 1 === row.active
-	};
-}
-
 async function findLogin(db: D1Database, username: string): Promise<Login | null> {
 	const row = await db
 		.prepare(`${SELECT_LOGIN} where users.username = ?`)
@@ -204,12 +190,16 @@ export async function listPeopleWithTab(
 ): Promise<PersonWithTab[]> {
 	requireRole(actor, MANAGES_CASH);
 	const { results } = await db.prepare(SELECT_LOGIN).all<LoginRow>();
-	const logins = results.map(toLogin).filter(({ roles }) => hasTab(roles));
+	const logins = results.map(toLogin).filter(({ roles }) => hasCashTab(roles));
 	const held = await Promise.all(logins.map(({ username }) => sumPending(db, username)));
 	return logins
 		.map((login, index) => ({ ...login, pending: held[index] }))
 		.filter(({ isActive, pending }) => isActive || 0 !== pending)
-		.map(({ username, name, pending }) => ({ username, name, pending }))
+		.map(({ username, employee, pending }) => ({
+			username,
+			name: employee?.fullName ?? username,
+			pending
+		}))
 		.sort((first, second) => first.name.localeCompare(second.name, 'es'));
 }
 
@@ -227,7 +217,7 @@ export async function getCashStatement(
 		error(403, 'No tienes permiso para esta acción');
 	}
 	const login = await findLogin(db, range.username);
-	if (null === login || !hasTab(login.roles)) {
+	if (null === login || !hasCashTab(login.roles)) {
 		error(404, 'Esa persona no tiene efectivo por entregar');
 	}
 	const [pending, groups, handovers] = await Promise.all([
@@ -255,13 +245,6 @@ const handoverSchema = z.object({
 		.transform((value) => value || null)
 });
 
-function invalid(error: z.ZodError): RecordResult {
-	const errors = Object.fromEntries(
-		error.issues.map((issue) => [String(issue.path[0]), issue.message])
-	);
-	return { ok: false, message: 'Revisa los campos marcados en rojo antes de guardar.', errors };
-}
-
 /**
  * Records the cash a person handed in: their tab goes down by it. Only the drawer records one, and
  * whatever it falls short of stays on the tab: nothing else moves.
@@ -274,10 +257,10 @@ export async function recordHandover(
 	requireRole(actor, MANAGES_CASH);
 	const form = handoverSchema.safeParse(input);
 	if (!form.success) {
-		return invalid(form.error);
+		return invalidForm(form.error);
 	}
 	const login = await findLogin(db, form.data.username);
-	if (null === login || !hasTab(login.roles)) {
+	if (null === login || !hasCashTab(login.roles)) {
 		const message = 'Esa persona no tiene efectivo por entregar';
 		return { ok: false, message, errors: { username: message } };
 	}
