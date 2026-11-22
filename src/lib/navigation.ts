@@ -16,11 +16,14 @@ type MenuPage = {
 	hiddenFrom?: readonly Role[];
 };
 
-/** A parent of the menu tree: Pagos and Reportes have no page of their own. */
+/**
+ * A parent of the menu tree: Pagos and Reportes have no page of their own. The own page's `label`,
+ * when it has one, is how it lists among the parent's pages; without it, it lists under the parent's.
+ */
 type MenuParent = {
 	label: string;
 	icon: IconName;
-	page?: Omit<MenuPage, 'label'>;
+	page?: Omit<MenuPage, 'label'> & { label?: string };
 	children: MenuPage[];
 };
 
@@ -30,6 +33,7 @@ export type MenuEntry = {
 	icon: IconName;
 	href: string;
 	ownHref?: string;
+	ownLabel?: string;
 	children: MenuPageLink[];
 };
 
@@ -42,15 +46,15 @@ const SELLERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
 const MENU: MenuParent[] = [
 	{ label: 'Despachos', icon: 'truck', page: { href: resolve('/despachos') }, children: [] },
 	{
-		label: 'Cotizaciones',
+		label: 'Pedidos',
 		icon: 'file',
-		page: { href: resolve('/cotizaciones'), roles: SELLERS },
-		children: [{ label: 'Pedidos', href: resolve('/pedidos'), roles: SELLERS }]
+		page: { href: resolve('/pedidos'), roles: SELLERS },
+		children: [{ label: 'Cotizaciones', href: resolve('/cotizaciones'), roles: SELLERS }]
 	},
 	{
-		label: 'Productos',
+		label: 'Inventario',
 		icon: 'package',
-		page: { href: resolve('/productos'), roles: SELLERS },
+		page: { label: 'Productos', href: resolve('/productos'), roles: SELLERS },
 		children: [
 			{
 				label: 'Nuevo conteo',
@@ -83,9 +87,9 @@ const MENU: MenuParent[] = [
 		children: []
 	},
 	{
-		label: 'Personal',
+		label: 'Nómina',
 		icon: 'users',
-		page: { href: resolve('/personal'), roles: MANAGERS },
+		page: { label: 'Personal', href: resolve('/personal'), roles: MANAGERS },
 		children: [
 			{ label: 'Nómina', href: resolve('/nomina'), roles: MANAGERS },
 			{ label: 'Horas', href: resolve('/horas') },
@@ -100,7 +104,6 @@ const MENU: MenuParent[] = [
 			{ label: 'Movimientos caja', href: resolve('/caja'), roles: MANAGERS }
 		]
 	},
-	{ label: 'Ayuda', icon: 'help', page: { href: resolve('/ayuda') }, children: [] },
 	{
 		label: 'Configuración',
 		icon: 'settings',
@@ -112,7 +115,8 @@ const MENU: MenuParent[] = [
 			{ label: 'Términos', href: resolve('/configuracion/terminos'), roles: MANAGERS },
 			{ label: 'Etiquetas', href: resolve('/configuracion/etiquetas'), roles: MANAGERS }
 		]
-	}
+	},
+	{ label: 'Ayuda', icon: 'help', page: { href: resolve('/ayuda') }, children: [] }
 ];
 
 function canOpen(
@@ -124,24 +128,32 @@ function canOpen(
 	return isLetIn && !isHidden;
 }
 
+/** A parent's own page as one login sees it: both keys undefined when it has none it can open. */
+function getOwnPage(page: MenuParent['page'], roles: readonly Role[]) {
+	const isOpen = undefined !== page && canOpen(page, roles);
+	return { ownHref: isOpen ? page.href : undefined, ownLabel: isOpen ? page.label : undefined };
+}
+
 /** The menu one login sees: only what its roles open, and no parent left with nothing to open. */
 export function getMenu(roles: readonly Role[]): MenuEntry[] {
 	return MENU.flatMap(({ label, icon, page, children }) => {
-		const ownPage = page && canOpen(page, roles) ? page : undefined;
+		const own = getOwnPage(page, roles);
 		const openChildren = children
 			.filter((child) => canOpen(child, roles))
 			.map((child) => ({ label: child.label, href: child.href }));
-		const href = ownPage?.href ?? openChildren[0]?.href;
+		const href = own.ownHref ?? openChildren[0]?.href;
 		if (undefined === href) {
 			return [];
 		}
-		return [{ label, icon, href, ownHref: ownPage?.href, children: openChildren }];
+		return [{ label, icon, href, ...own, children: openChildren }];
 	});
 }
 
-/** Every page a parent lists, in order: its own page under its label, then its children. */
-export function getParentPages({ label, ownHref, children }: MenuEntry): MenuPageLink[] {
-	return undefined === ownHref ? children : [{ label, href: ownHref }, ...children];
+/** Every page a parent lists, in order: its own page under its own label or the parent's, then its children. */
+export function getParentPages({ label, ownHref, ownLabel, children }: MenuEntry): MenuPageLink[] {
+	return undefined === ownHref
+		? children
+		: [{ label: ownLabel ?? label, href: ownHref }, ...children];
 }
 
 /** The page among `pages` that holds the path: the most specific, so Planilla horas beats Horas. */
@@ -159,7 +171,7 @@ export function findCurrentHref(menu: MenuEntry[], pathname: string): string | u
 /** The menu label of the page that holds the path, whatever the login: the no-permission title. */
 export function findPageLabel(pathname: string): string | undefined {
 	const pages = MENU.flatMap(({ label, page, children }) =>
-		page ? [{ label, href: page.href }, ...children] : children
+		page ? [{ label: page.label ?? label, href: page.href }, ...children] : children
 	);
 	return findPageOf(pages, pathname)?.label;
 }
