@@ -15,6 +15,7 @@ const product: ListedProduct = {
 	variantName: null,
 	description: null,
 	websiteUrl: 'https://consueloc.com/producto/silla-tiffany-dorada/',
+	replacementCost: null,
 	rentalPrice: 8000,
 	totalQuantity: 120,
 	isActive: false,

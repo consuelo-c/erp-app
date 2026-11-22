@@ -10,6 +10,7 @@ const product = (name: string, extra: Partial<Product> = {}): Product => ({
 	variantName: null,
 	description: null,
 	websiteUrl: null,
+	replacementCost: null,
 	rentalPrice: 8000,
 	totalQuantity: 10,
 	isActive: true,

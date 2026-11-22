@@ -45,6 +45,7 @@
 			description: saved.description,
 			website_url: saved.websiteUrl,
 			rental_price: formatPesos(saved.rentalPrice),
+			replacement_cost: null === saved.replacementCost ? '' : formatPesos(saved.replacementCost),
 			active: saved.isActive ? 'on' : 'off'
 		};
 	}
@@ -64,6 +65,7 @@
 			websiteUrl: text('website_url'),
 			rentalPrice: text('rental_price'),
 			totalQuantity: text('total_quantity'),
+			replacementCost: text('replacement_cost'),
 			isActive: 'on' === posted.active
 		};
 		const composed = compose(isNewGroup ? fields.newGroup.trim() : fields.group, fields.variant);
@@ -262,6 +264,21 @@
 			{/if}
 		</Field>
 	</div>
+	<Field
+		label="Costo de reposición (opcional)"
+		id="replacement_cost"
+		hint="Lo que cuesta reponer una unidad perdida o irrecuperable. Valora las «Pérdidas» del reporte de pérdidas y ganancias."
+		error={errorOf('replacement_cost')}
+	>
+		<Input
+			id="replacement_cost"
+			name="replacement_cost"
+			inputmode="numeric"
+			value={fields.replacementCost}
+			placeholder="Ej. $95.000"
+			aria-invalid={undefined !== errorOf('replacement_cost')}
+		/>
+	</Field>
 	<Choice
 		legend="Estado"
 		hint="Los productos no se eliminan. Un producto inactivo no se ofrece en pedidos nuevos."
