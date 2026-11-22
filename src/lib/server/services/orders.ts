@@ -1569,7 +1569,7 @@ export type PaymentRow = {
 	other_method: string | null;
 	payee: string | null;
 	receipt_number: number;
-	description?: string | null;
+	description: string | null;
 };
 
 export function toPayment(row: PaymentRow): OrderPayment {
@@ -1582,20 +1582,35 @@ export function toPayment(row: PaymentRow): OrderPayment {
 		otherMethod: row.other_method,
 		payee: row.payee,
 		receiptNumber: row.receipt_number,
-		description: row.description ?? null,
+		description: row.description,
 		pairedReceiptNumber: null
 	};
 }
 
-/**
- * Whether `retention` is the deposit refund written with `charge`, kept from the deposit: the
- * same batch writes the refund right before it, on its date, for its amount.
- */
-function isDepositRetention(charge: OrderPayment, retention: OrderPayment | undefined): boolean {
+// Both halves of a retention record no method: an ordinary refund or new money never matches.
+function isMarkedRetained(payment: OrderPayment): boolean {
+	return 'OTHER' === payment.method && RETAINED_FROM_DEPOSIT === payment.otherMethod;
+}
+
+// The halves' concepts and markers: a positive charge kept, and the deposit refund behind it.
+function isRetainedPair(charge: OrderPayment, retention: OrderPayment): boolean {
 	return (
 		'DAMAGE_CHARGE' === charge.concept &&
 		0 < charge.amount &&
-		'DEPOSIT_REFUND' === retention?.concept &&
+		'DEPOSIT_REFUND' === retention.concept &&
+		isMarkedRetained(charge) &&
+		isMarkedRetained(retention)
+	);
+}
+
+/**
+ * Whether `retention` is the deposit refund written with `charge`, kept from the deposit: the
+ * same batch writes the refund right before it, on its date, for its amount, both marked retained.
+ */
+function isDepositRetention(charge: OrderPayment, retention: OrderPayment | undefined): boolean {
+	return (
+		undefined !== retention &&
+		isRetainedPair(charge, retention) &&
 		charge.id - 1 === retention.id &&
 		charge.movementDate === retention.movementDate &&
 		-charge.amount === retention.amount
@@ -1899,7 +1914,7 @@ function isRetainedFromDeposit(payment: PaymentInput): boolean {
 }
 
 // Kept from the deposit, no money changes hands: whatever method was posted, it records none.
-function formOf(input: unknown, payment: PaymentInput): unknown {
+function withRetainedMethod(input: unknown, payment: PaymentInput): unknown {
 	if (!isRetainedFromDeposit(payment)) {
 		return input;
 	}
@@ -2059,7 +2074,7 @@ async function linkOf(
 	}
 	const description = 'DAMAGE_CHARGE' === concept ? (payment.description ?? undefined) : undefined;
 	return {
-		form: formOf(form, payment),
+		form: withRetainedMethod(form, payment),
 		concept,
 		entityType: 'ORDER',
 		entityId: order.id,
@@ -2133,8 +2148,9 @@ function isRefundHeldByIncident(order: PaymentState, actor: Actor): boolean {
 
 /**
  * Despachos' payment entry, the same for every role: what's collected on the road, a damage
- * charge while there's an active incident, and the whole deposit back at pickup with none, under what the service lets the login record,
- * in cash or by transfer. Empty, «Registrar pago» isn't shown.
+ * charge while there's an active incident, and the whole deposit back at pickup with none, under
+ * what the service lets the login record, in cash or by transfer. Empty, «Registrar pago» isn't
+ * shown.
  */
 export function getDespachosPaymentEntry(order: OrderDetail, actor: Actor): DespachosPaymentEntry {
 	const onTheRoad = onTheRoadConcepts(order);

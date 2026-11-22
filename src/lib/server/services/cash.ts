@@ -5,12 +5,9 @@ import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { getMonthRange, getTodaysDate } from '$lib/datetime';
 import { parsePesos } from '$lib/payroll';
-import { hasCashTab, requireRole, rolesSchema, type Actor } from '../actor';
+import { hasCashTab, MANAGES_CASH, requireRole, rolesSchema, type Actor } from '../actor';
 import { auditedInsert } from '../audit';
 import { COMPANY_SETTINGS, readSettings, type CompanySettings } from './settings';
-
-// The cash book, its receipts and every movement recorded by hand.
-const MANAGES_CASH = ['ADMIN', 'MANAGER'] as const;
 
 // Whoever records an order's money in prints its receipt from the order.
 const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
@@ -216,33 +213,36 @@ async function insertMovement(
 	return { ok: true, id: inserted.meta.last_row_id };
 }
 
-// «Entrada» is always an `OTHER_INCOME`; «Salida» picks its expense concept, «Otro egreso» unless
-// told otherwise.
-function conceptShape(isInflow: boolean) {
-	const message = 'Escoge el concepto';
-	return {
-		concept: isInflow
-			? z.literal('OTHER_INCOME', message).default('OTHER_INCOME')
-			: z.enum(EXPENSE_CONCEPTS, message).default('OTHER_EXPENSE')
-	};
-}
-
+const CONCEPT_MESSAGE = 'Escoge el concepto';
 const PAID_BY_MESSAGE = 'Solo un gasto en efectivo sale del efectivo por entregar de un empleado';
 const NO_TAB_MESSAGE = 'Esa persona no tiene efectivo por entregar';
 
-// «Pagado por»: only cash going out can come out of what an employee holds; empty is «La caja».
-function standaloneSchema(isInflow: boolean) {
-	const schema = entryBase.extend({
-		...conceptShape(isInflow),
-		...partyShape(isInflow),
+// «Entrada» is always an `OTHER_INCOME`, and cash coming in comes out of nobody's pocket: it
+// takes no «Pagado por».
+const inflowSchema = checkMethod(
+	true,
+	entryBase.extend({
+		concept: z.literal('OTHER_INCOME', CONCEPT_MESSAGE).default('OTHER_INCOME'),
+		...partyShape(true),
 		amount: amountSchema,
 		paid_by: optionalText
-	});
-	return checkMethod(isInflow, schema).refine(
-		(form) => undefined === form.paid_by || (!isInflow && 'CASH' === form.payment_method),
-		{ path: ['paid_by'], message: PAID_BY_MESSAGE }
-	);
-}
+	})
+).refine((form) => undefined === form.paid_by, { path: ['paid_by'], message: PAID_BY_MESSAGE });
+
+// «Salida» picks its expense concept, «Otro egreso» unless told otherwise. «Pagado por»: only
+// cash going out can come out of what an employee holds; empty is «La caja».
+const outflowSchema = checkMethod(
+	false,
+	entryBase.extend({
+		concept: z.enum(EXPENSE_CONCEPTS, CONCEPT_MESSAGE).default('OTHER_EXPENSE'),
+		...partyShape(false),
+		amount: amountSchema,
+		paid_by: optionalText
+	})
+).refine((form) => undefined === form.paid_by || 'CASH' === form.payment_method, {
+	path: ['paid_by'],
+	message: PAID_BY_MESSAGE
+});
 
 /** Whether «Pagado por» names someone who holds cash for the company: the drawer doesn't. */
 async function isPaidByValid(db: D1Database, paidBy: string | undefined): Promise<boolean> {
@@ -271,7 +271,7 @@ export async function recordMovement(
 		return invalid(direction.error);
 	}
 	const isInflow = 'IN' === direction.data.direction;
-	const form = standaloneSchema(isInflow).safeParse(input);
+	const form = (isInflow ? inflowSchema : outflowSchema).safeParse(input);
 	if (!form.success) {
 		return invalid(form.error);
 	}

@@ -39,10 +39,10 @@ export function isAdminOrManager(actor: Actor): boolean {
 }
 
 // The drawer: their cash is already the company's, so they have no tab.
-const MANAGES_CASH: readonly Role[] = ['ADMIN', 'MANAGER'];
+export const MANAGES_CASH: readonly Role[] = ['ADMIN', 'MANAGER'];
 
 // The roles that take cash for the company: the warehouse never does.
-const TAKES_CASH: readonly Role[] = ['SALES', 'DRIVER'];
+export const TAKES_CASH: readonly Role[] = ['SALES', 'DRIVER'];
 
 /** Whether a login has an Efectivo por entregar: it takes cash and isn't the drawer. */
 export function hasCashTab(roles: readonly Role[]): boolean {

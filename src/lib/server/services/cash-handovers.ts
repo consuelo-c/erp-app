@@ -6,7 +6,14 @@ import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { getTodaysDate } from '$lib/datetime';
 import { parsePesos } from '$lib/payroll';
-import { hasAnyRole, hasCashTab, requireRole, type Actor } from '../actor';
+import {
+	hasAnyRole,
+	hasCashTab,
+	MANAGES_CASH,
+	requireRole,
+	TAKES_CASH,
+	type Actor
+} from '../actor';
 import { auditedInsert } from '../audit';
 import {
 	movementAttributesSchema,
@@ -29,12 +36,6 @@ const HOLDER = `coalesce(
 	(select original.created_by from cash_movements as original
 		where original.id = cash_movements.reverses_id),
 	cash_movements.created_by)`;
-
-// The drawer: their cash is already the company's, so they have no tab.
-const MANAGES_CASH = ['ADMIN', 'MANAGER'] as const;
-
-// The roles that take cash for the company: the warehouse never does.
-const TAKES_CASH = ['SALES', 'DRIVER'] as const;
 
 // The range comes from the URL: missing or unreadable, an end is today.
 const statementInputSchema = z.object({

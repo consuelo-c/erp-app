@@ -354,12 +354,8 @@ export async function getSubLending(
 	requireRole(actor, TAKES_ORDERS);
 	const parsed = subLendingSchema.parse(input ?? {});
 	const today = getTodaysDate();
-	const from = parsed.from ?? today;
-	const to = parsed.to ?? today;
-	// An inverted period holds no day, as in the other date-range readers.
-	if (to < from) {
-		return { from, to, products: [] };
-	}
+	// Hasta typed before Desde still means the days between them.
+	const [from, to] = [parsed.from ?? today, parsed.to ?? today].sort();
 	const { results } = await db.prepare(SUB_LENDING_SQL).bind(from, to, null).all<HeldRow>();
 	const byProduct = Map.groupBy(results, (row) => row.productId);
 	const products = [...byProduct.values()]

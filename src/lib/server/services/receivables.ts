@@ -437,7 +437,8 @@ async function findPayments(db: D1Database, id: number): Promise<ReceivablePayme
 		.prepare(
 			`select cash_movements.id, movement_date, concept, amount, payment_method,
 			json_extract(cash_movements.attributes, '$.other_method') as other_method, payee,
-			receipt_number, iif('ORDER' = entity_type, entity_id, null) as order_id
+			receipt_number, json_extract(cash_movements.attributes, '$.description') as description,
+			iif('ORDER' = entity_type, entity_id, null) as order_id
 			from cash_movements join receivables on receivables.id = ?
 			where ${RECEIVABLE_PAID_MOVEMENT_SQL}
 			order by movement_date, cash_movements.id`
