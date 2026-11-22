@@ -27,13 +27,21 @@
 
 	let { statement, username, status, cardHint, footnote }: Props = $props();
 
-	// «#1043 · Pago»: the order, or the cuenta de cobro, it belongs to, and what it was.
+	// «#1043 · Pago»: the order, or the cuenta de cobro, it belongs to, and what it was. An expense
+	// paid out of the tab has neither: «Insumos · Compra de jabón».
 	function title(group: StatementGroup, movement: StatementMovement): string {
 		const concept = CASH_CONCEPT_LABELS[movement.concept];
 		if (null !== group.orderId) {
 			return `#${group.orderId} · ${concept}`;
 		}
-		return null === group.receivableId ? concept : `Nº ${group.receivableId} · ${concept}`;
+		if (null !== group.receivableId) {
+			return `Nº ${group.receivableId} · ${concept}`;
+		}
+		return null === movement.description ? concept : `${concept} · ${movement.description}`;
+	}
+
+	function isStandalone(group: StatementGroup): boolean {
+		return null === group.orderId && null === group.receivableId;
 	}
 
 	function receipt({ amount, receiptNumber }: StatementMovement): string {
@@ -41,12 +49,14 @@
 		return `${name} # ${formatReceiptNumber(receiptNumber)}`;
 	}
 
-	// A transfer says why it doesn't count instead of its receipt.
-	function movementMeta(movement: StatementMovement): string {
+	// A transfer says why it doesn't count instead of its receipt. An expense paid out of the tab
+	// says who recorded it: the manager, on the person's behalf.
+	function movementMeta(group: StatementGroup, movement: StatementMovement): string {
 		return [
 			formatShortDay(movement.movementDate),
 			PAYMENT_METHOD_LABELS[movement.paymentMethod],
-			movement.isCounted ? receipt(movement) : 'no cuenta: está en el banco'
+			movement.isCounted ? receipt(movement) : 'no cuenta: está en el banco',
+			...(isStandalone(group) ? [`registró ${movement.recordedBy}`] : [])
 		].join(' · ');
 	}
 
@@ -91,12 +101,12 @@
 
 <h2 class="section-title">Movimientos</h2>
 <ul class="detail-list">
-	{#each statement.groups as group (`${group.orderId}:${group.receivableId}`)}
+	{#each statement.groups as group (group.movements[0].id)}
 		{#each group.movements as movement (movement.id)}
 			<li class={['movement', !movement.isCounted && 'movement--uncounted']}>
 				<span class="movement__text">
 					<span>{title(group, movement)}</span>
-					<span class="meta">{movementMeta(movement)}</span>
+					<span class="meta">{movementMeta(group, movement)}</span>
 				</span>
 				{#if movement.isCounted}
 					<b>{formatSignedPesos(movement.amount)}</b>

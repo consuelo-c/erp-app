@@ -108,7 +108,9 @@ test("the range lists the person's movements grouped by order, transfers marked 
 					amount: 300000,
 					movementDate: '2026-11-20',
 					receiptNumber: 3,
-					isCounted: false
+					isCounted: false,
+					description: null,
+					recordedBy: 'conductor'
 				}
 			]
 		},
@@ -123,7 +125,9 @@ test("the range lists the person's movements grouped by order, transfers marked 
 					amount: 90000,
 					movementDate: '2026-11-20',
 					receiptNumber: 2,
-					isCounted: true
+					isCounted: true,
+					description: null,
+					recordedBy: 'conductor'
 				}
 			]
 		}
@@ -258,4 +262,67 @@ test('only a manager or an admin records a handover, and only for someone with a
 	expect((await getCashStatement(db, { ...today, username: 'conductor' }, manager)).pending).toBe(
 		-100000
 	);
+});
+
+const supplies: Partial<Movement> = {
+	concept: 'SUPPLIES_EXPENSE',
+	amount: -85000,
+	entity_type: null,
+	entity_id: null,
+	payee: 'Almacén Éxito Laureles',
+	attributes: { description: 'Compra de jabón y desinfectante', paid_by: 'conductor' }
+};
+
+test('an expense «Pagado por» the person comes off their tab and shows in their statement, recorded by the manager', async () => {
+	await record(driver, {});
+	await record(manager, supplies);
+	const statement = await getCashStatement(db, today, driver);
+	expect(statement.pending).toBe(595000);
+	expect(statement.groups[0]).toEqual({
+		orderId: null,
+		receivableId: null,
+		movements: [
+			{
+				id: 2,
+				concept: 'SUPPLIES_EXPENSE',
+				paymentMethod: 'CASH',
+				amount: -85000,
+				movementDate: '2026-11-20',
+				receiptNumber: 1,
+				isCounted: true,
+				description: 'Compra de jabón y desinfectante',
+				recordedBy: 'gerente'
+			}
+		]
+	});
+	expect(await listPeopleWithTab(db, manager)).toEqual([
+		{ username: 'conductor', name: 'conductor', pending: 595000 }
+	]);
+});
+
+test('the offset of an expense «Pagado por» the person lands on their tab and restores it', async () => {
+	await record(driver, {});
+	await record(manager, supplies);
+	await record(manager, {
+		...supplies,
+		amount: 85000,
+		reverses_id: 2,
+		attributes: { description: 'Corrige el comprobante de egreso # 0001' }
+	});
+	const statement = await getCashStatement(db, today, driver);
+	expect(statement.pending).toBe(680000);
+	expect(statement.groups.flatMap(({ movements }) => movements.map(({ id }) => id))).toEqual([
+		3, 2, 1
+	]);
+});
+
+test('an expense without «Pagado por» leaves every tab unchanged', async () => {
+	addLogin('vendedora', ['SALES']);
+	await record(driver, {});
+	await record(manager, { ...supplies, attributes: { description: 'Jabón' } });
+	expect((await getCashStatement(db, today, driver)).pending).toBe(680000);
+	expect(await listPeopleWithTab(db, manager)).toEqual([
+		{ username: 'conductor', name: 'conductor', pending: 680000 },
+		{ username: 'vendedora', name: 'vendedora', pending: 0 }
+	]);
 });

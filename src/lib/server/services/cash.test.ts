@@ -618,3 +618,49 @@ test('the concept filter takes several concepts at once', async () => {
 	expect(none.filters.concepts).toEqual([]);
 	expect(none.entries).toHaveLength(4);
 });
+
+function addLogin(username: string, roles: string[]): void {
+	database
+		.prepare(
+			`insert into users (username, roles, password_hash, password_salt, password_iterations, active,
+				created_at, created_by, updated_at, updated_by) values (?, ?, 'hash', 'salt', 1, 1, 0, 'admin', 0, 'admin')`
+		)
+		.run(username, JSON.stringify(roles));
+}
+
+test('«Pagado por» keeps the login that paid a cash «Salida» out of their Efectivo por entregar', async () => {
+	addLogin('conductor', ['DRIVER']);
+	const paid = { ...typedExpense, concept: 'SUPPLIES_EXPENSE', paid_by: 'conductor' };
+	expect(await recordMovement(db, paid, manager)).toEqual({ ok: true, id: 1 });
+	expect(JSON.parse(String(storedMovement(1).attributes))).toEqual({
+		description: 'Compra de jabón y desinfectante',
+		paid_by: 'conductor'
+	});
+	expect(await recordMovement(db, { ...typedExpense, paid_by: '' }, manager)).toEqual({
+		ok: true,
+		id: 2
+	});
+	expect(JSON.parse(String(storedMovement(2).attributes))).not.toHaveProperty('paid_by');
+});
+
+test('«Pagado por» is refused on a transfer or an «Entrada», for the drawer and for an unknown login', async () => {
+	addLogin('conductor', ['DRIVER']);
+	addLogin('gerente', ['MANAGER']);
+	addLogin('bodega', ['WAREHOUSE']);
+	const account = 'Bancolombia ahorros 123-456789-01';
+	const refused = [
+		{ ...typedExpense, paid_by: 'conductor', payment_method: 'TRANSFER', bank_account: account },
+		{ ...typedExpense, paid_by: 'conductor', payment_method: 'OTHER', other_method: 'Nequi' },
+		{ ...typedExpense, paid_by: 'conductor', direction: 'IN' },
+		{ ...typedExpense, paid_by: 'gerente' },
+		{ ...typedExpense, paid_by: 'bodega' },
+		{ ...typedExpense, paid_by: 'nadie' }
+	];
+	for (const input of refused) {
+		expect(await recordMovement(db, input, manager)).toMatchObject({
+			ok: false,
+			errors: { paid_by: expect.any(String) }
+		});
+	}
+	expect(storedMovement(1)).toEqual({});
+});

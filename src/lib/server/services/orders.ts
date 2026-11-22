@@ -26,6 +26,7 @@ import {
 import {
 	ROLES,
 	hasAnyRole,
+	hasCashTab,
 	hasRole,
 	isAdminOrManager,
 	requireRole,
@@ -59,7 +60,6 @@ import {
 	type NewClient,
 	type Transporter
 } from './contacts';
-import { hasCashTab } from './cash-handovers';
 import { COMPANY_SETTINGS, readSettings, type CompanySettings } from './settings';
 
 // The commercial side: whoever takes orders creates and edits them.

@@ -5,7 +5,7 @@ import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { getMonthRange, getTodaysDate } from '$lib/datetime';
 import { parsePesos } from '$lib/payroll';
-import { requireRole, type Actor } from '../actor';
+import { hasCashTab, requireRole, rolesSchema, type Actor } from '../actor';
 import { auditedInsert } from '../audit';
 import { COMPANY_SETTINGS, readSettings, type CompanySettings } from './settings';
 
@@ -63,7 +63,9 @@ export const movementAttributesSchema = z.object({
 	description: z.string().min(1).optional(),
 	bank_account: z.string().min(1).optional(),
 	other_method: z.string().min(1).optional(),
-	notes: z.string().min(1).optional()
+	notes: z.string().min(1).optional(),
+	/** The login whose Efectivo por entregar paid a cash expense: it comes off their tab. */
+	paid_by: z.string().min(1).optional()
 });
 
 export const movementSchema = z
@@ -182,12 +184,15 @@ function isTransfer(form: { payment_method: PaymentMethod }): boolean {
 }
 
 // Only the keys the method uses: which one «Otro» was, and a transfer's bank or account.
-function toAttributes(form: EntryForm & { description?: string }): Movement['attributes'] {
+function toAttributes(
+	form: EntryForm & { description?: string; paid_by?: string }
+): Movement['attributes'] {
 	return {
 		description: form.description,
 		other_method: 'OTHER' === form.payment_method ? form.other_method : undefined,
 		bank_account: isTransfer(form) ? form.bank_account : undefined,
-		notes: form.notes
+		notes: form.notes,
+		paid_by: form.paid_by
 	};
 }
 
@@ -222,13 +227,33 @@ function conceptShape(isInflow: boolean) {
 	};
 }
 
+const PAID_BY_MESSAGE = 'Solo un gasto en efectivo sale del efectivo por entregar de un empleado';
+const NO_TAB_MESSAGE = 'Esa persona no tiene efectivo por entregar';
+
+// «Pagado por»: only cash going out can come out of what an employee holds; empty is «La caja».
 function standaloneSchema(isInflow: boolean) {
 	const schema = entryBase.extend({
 		...conceptShape(isInflow),
 		...partyShape(isInflow),
-		amount: amountSchema
+		amount: amountSchema,
+		paid_by: optionalText
 	});
-	return checkMethod(isInflow, schema);
+	return checkMethod(isInflow, schema).refine(
+		(form) => undefined === form.paid_by || (!isInflow && 'CASH' === form.payment_method),
+		{ path: ['paid_by'], message: PAID_BY_MESSAGE }
+	);
+}
+
+/** Whether «Pagado por» names someone who holds cash for the company: the drawer doesn't. */
+async function isPaidByValid(db: D1Database, paidBy: string | undefined): Promise<boolean> {
+	if (undefined === paidBy) {
+		return true;
+	}
+	const login = await db
+		.prepare('select roles from users where username = ?')
+		.bind(paidBy)
+		.first<{ roles: string }>();
+	return null !== login && hasCashTab(rolesSchema.parse(JSON.parse(login.roles)));
 }
 
 /**
@@ -249,6 +274,9 @@ export async function recordMovement(
 	const form = standaloneSchema(isInflow).safeParse(input);
 	if (!form.success) {
 		return invalid(form.error);
+	}
+	if (!(await isPaidByValid(db, form.data.paid_by))) {
+		return { ok: false, message: NO_TAB_MESSAGE, errors: { paid_by: NO_TAB_MESSAGE } };
 	}
 	return insertMovement(db, actor, {
 		concept: form.data.concept,

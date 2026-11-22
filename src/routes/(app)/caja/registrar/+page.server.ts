@@ -3,9 +3,10 @@ import { resolve } from '$app/paths';
 import { getTodaysDate } from '$lib/datetime';
 import { requireRole } from '$lib/server/actor';
 import { getOffsetOriginal, recordMovement, recordOffset } from '$lib/server/services/cash';
+import { listPeopleWithTab } from '$lib/server/services/cash-handovers';
 import type { Actions, PageServerLoad } from './$types';
 
-// `?corrige=` opens the tab as that movement's offsetting movement, pre-filled from it.
+// «Pagado por» lists who holds cash, with how much. `?corrige=` opens the tab as that movement's offsetting movement, pre-filled from it.
 export const load: PageServerLoad = async ({ locals, platform, url }) => {
 	requireRole(locals.user, ['ADMIN', 'MANAGER']);
 	if (undefined === platform) {
@@ -14,6 +15,7 @@ export const load: PageServerLoad = async ({ locals, platform, url }) => {
 	const correctedId = url.searchParams.get('corrige');
 	return {
 		today: getTodaysDate(),
+		people: await listPeopleWithTab(platform.env.DB, locals.user),
 		original:
 			null === correctedId
 				? null

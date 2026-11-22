@@ -38,6 +38,18 @@ export function isAdminOrManager(actor: Actor): boolean {
 	return hasAnyRole(actor, ['ADMIN', 'MANAGER']);
 }
 
+// The drawer: their cash is already the company's, so they have no tab.
+const MANAGES_CASH: readonly Role[] = ['ADMIN', 'MANAGER'];
+
+// The roles that take cash for the company: the warehouse never does.
+const TAKES_CASH: readonly Role[] = ['SALES', 'DRIVER'];
+
+/** Whether a login has an Efectivo por entregar: it takes cash and isn't the drawer. */
+export function hasCashTab(roles: readonly Role[]): boolean {
+	const holds = (role: Role) => roles.includes(role);
+	return TAKES_CASH.some(holds) && !MANAGES_CASH.some(holds);
+}
+
 /** Throws a 401 without an actor (no session), a 403 unless it holds at least one of `roles`. */
 export function requireRole(actor: Actor | null, roles: readonly Role[]): asserts actor is Actor {
 	if (null === actor) {
