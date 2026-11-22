@@ -94,11 +94,19 @@
 		isApproveOpen = true;
 	}
 
-	function appliedText(item: InventoryItem): string {
-		const counted = `Contado ${formatInteger(item.counted_qty)}`;
+	function appliedChange(item: InventoryItem): string {
+		return `${formatInteger(item.system_qty)} → ${formatInteger(appliedQuantity(item))}`;
+	}
+
+	// What the counter sent beside the correction, only on a corrected row.
+	function correctionText(item: InventoryItem): string | null {
 		return undefined === item.corrected_qty
-			? counted
-			: `${counted} · Corregido ${formatInteger(item.corrected_qty)}`;
+			? null
+			: `Contado ${formatInteger(item.counted_qty)} · Corregido ${formatInteger(item.corrected_qty)}`;
+	}
+
+	function countedText(item: InventoryItem): string {
+		return `Contado ${formatInteger(item.counted_qty)}`;
 	}
 
 	function signed(difference: number): string {
@@ -130,13 +138,19 @@
 {#snippet itemGroup(
 	groupTitle: string,
 	items: InventoryItem[],
-	value: (item: InventoryItem) => string
+	value: (item: InventoryItem) => string,
+	meta?: (item: InventoryItem) => string | null
 )}
 	{#if items.length}
 		<h2 class="section-title group">{groupTitle}</h2>
 		<ul class="detail-list">
 			{#each items as item (item.product_id)}
-				<li><span>{item.name}</span><span>{value(item)}</span></li>
+				{@const itemMeta = meta?.(item)}
+				<li>
+					<span
+						>{item.name}{#if itemMeta}<span class="meta item-meta">{itemMeta}</span>{/if}</span
+					><span>{value(item)}</span>
+				</li>
 			{/each}
 		</ul>
 	{/if}
@@ -165,7 +179,7 @@
 		</div>
 	{/if}
 
-	<p class="meta lead">Contó {count.createdBy} · {formatInstant(count.createdAt)}</p>
+	<p class="meta lead">Envió {count.createdBy} · {formatInstant(count.createdAt)}</p>
 
 	{#if preview}
 		{#if preview.overlaps.length}
@@ -192,14 +206,10 @@
 						<td>
 							<span class="name">{item.name}</span>
 							{#if isRemoved}
-								<div class="badge-line"><Badge>Eliminado</Badge></div>
+								<div class="badge-line"><Badge tone="draft">Eliminado</Badge></div>
 							{:else if stale}
 								<div class="badge-line"><Badge tone="warning">Desactualizado</Badge></div>
-								<div class="meta">
-									Al contar: {formatInteger(stale.system_qty)} · Ahora: {formatInteger(
-										stale.current
-									)}
-								</div>
+								<div class="meta">Cambió después del conteo</div>
 							{:else}
 								<div class={['meta', { difference: 0 !== difference }]}>
 									Diferencia {signed(difference)}
@@ -207,9 +217,11 @@
 							{/if}
 						</td>
 						<td class="num">{formatInteger(current)}</td>
-						<td class="num">{formatInteger(item.counted_qty)}</td>
+						<td class="num counted">{formatInteger(item.counted_qty)}</td>
 						<td class="num">
-							{#if !stale && !isRemoved}
+							{#if stale || isRemoved}
+								—
+							{:else}
 								<Input
 									id="corrected-{item.product_id}"
 									form="approve"
@@ -218,7 +230,7 @@
 									min="0"
 									step="1"
 									autocomplete="off"
-									aria-label="Corregido de {item.name}"
+									aria-label="Corregido, {item.name}"
 									placeholder={String(item.counted_qty)}
 									bind:value={corrected[item.product_id]}
 								/>
@@ -229,6 +241,8 @@
 								<Button
 									type="button"
 									variant="secondary"
+									size="sm"
+									inline
 									form="approve"
 									onclick={(event) => toggleRemoved(event, item)}
 								>
@@ -257,6 +271,18 @@
 				pide un conteo nuevo.
 			</p>
 		{/if}
+		<div class="review-note">
+			<Field label="Nota (opcional)" id="approve-note">
+				<textarea
+					class="textarea"
+					id="approve-note"
+					name="note"
+					form="approve"
+					rows="2"
+					placeholder="Ej. Se contaron 700 sillas de menos"
+					bind:value={note}></textarea>
+			</Field>
+		</div>
 		{#if approvalMessage}
 			<div class="after"><Notice tone="error">{approvalMessage}</Notice></div>
 		{/if}
@@ -302,19 +328,11 @@
 			{@render itemGroup(
 				'REVERSED' === count.status ? 'Aplicados y revertidos' : 'Aplicados',
 				applied,
-				appliedText
+				appliedChange,
+				correctionText
 			)}
-			{@render itemGroup(
-				'Desactualizados, sin aplicar',
-				skipped,
-				(item) =>
-					`Contado ${formatInteger(item.counted_qty)} · Sistema ${formatInteger(item.system_qty)}`
-			)}
-			{@render itemGroup(
-				'Eliminados del conteo',
-				deleted,
-				(item) => `Contado ${formatInteger(item.counted_qty)}`
-			)}
+			{@render itemGroup('Desactualizados, sin aplicar', skipped, countedText)}
+			{@render itemGroup('Eliminados del conteo', deleted, countedText)}
 		{/if}
 
 		{#if 'APPROVED' === count.status}
@@ -352,8 +370,10 @@
 				<ul class="changes">
 					{#each approval.changes as change (change.product_id)}
 						<li>
-							{change.name}: {formatInteger(change.from)} → {formatInteger(change.to)}
-							{#if change.isCorrected}<span class="corrected">(corregido)</span>{/if}
+							{change.name}: {formatInteger(change.from)} → {formatInteger(
+								change.to
+							)}{#if change.isCorrected}
+								(corregido){/if}
 						</li>
 					{/each}
 				</ul>
@@ -367,16 +387,7 @@
 			{#if approval?.overlaps.length}
 				<OverlapNotice overlaps={approval.overlaps} />
 			{/if}
-			<Field label="Nota (opcional)" id="approve-note">
-				<textarea
-					class="textarea"
-					id="approve-note"
-					name="note"
-					rows="2"
-					placeholder="Ej. Cuadra con lo que volvió del #1047"
-					bind:value={note}></textarea>
-			</Field>
-			<p class="note">
+			<p>
 				Un Gerente o Administrador puede revertirlo mientras sea el último movimiento de estos
 				productos.
 			</p>
@@ -499,8 +510,16 @@
 		margin: var(--space-10) 0 var(--space-4);
 	}
 
+	.review-note {
+		margin-top: var(--space-9);
+	}
+
 	.badge-line {
 		margin-top: var(--space-2);
+	}
+
+	.item-meta {
+		display: block;
 	}
 
 	.difference {
@@ -509,7 +528,7 @@
 	}
 
 	.removed .name,
-	.removed td.num {
+	.removed td.counted {
 		color: var(--text-secondary);
 		text-decoration: line-through;
 	}
@@ -523,11 +542,6 @@
 	.table td.num :global(.input) {
 		width: 6em;
 		text-align: right;
-	}
-
-	.corrected {
-		font-weight: var(--weight-regular);
-		color: var(--text-secondary);
 	}
 
 	.changes {

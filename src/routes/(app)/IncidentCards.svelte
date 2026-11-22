@@ -7,7 +7,7 @@
 	import Field from '$lib/components/Field.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Notice from '$lib/components/Notice.svelte';
-	import { formatInstant } from '$lib/datetime';
+	import { formatInstant, formatInstantTime, formatShortDay, getInstantDate } from '$lib/datetime';
 	import {
 		INCIDENT_OUTCOME_LABELS,
 		INCIDENT_STATUS_LABELS,
@@ -41,6 +41,10 @@
 		selected = incident;
 		reversalReason = '';
 		isReverseOpen = true;
+	}
+
+	function reportedWhen({ reportedAt }: Incident): string {
+		return `${formatShortDay(getInstantDate(reportedAt))} · ${formatInstantTime(reportedAt)}`;
 	}
 
 	function reporterLine(incident: Incident): string {
@@ -77,8 +81,8 @@
 {#each incidents as incident (incident.id)}
 	<Card dimmed={null !== incident.reversal}>
 		{#snippet head()}
-			<span>Reportada el {formatInstant(incident.reportedAt)}</span>
-			<Badge tone={'ACTIVE' === incident.status ? 'error' : undefined}>
+			<b class="incident__when">{reportedWhen(incident)}</b>
+			<Badge tone={'ACTIVE' === incident.status ? 'warning' : undefined}>
 				{INCIDENT_STATUS_LABELS[incident.status]}
 			</Badge>
 		{/snippet}
@@ -93,6 +97,7 @@
 				</li>
 			{/each}
 		</ul>
+		<p class="incident__label">Descripción</p>
 		<p class="incident__description">{incident.description}</p>
 		{#if incident.reversal}
 			<p class="note">
@@ -190,15 +195,25 @@
 		margin-bottom: var(--space-4);
 	}
 
+	.incident__when {
+		font-size: var(--text-base);
+	}
+
+	.incident__label {
+		margin-top: var(--space-6);
+		font: var(--type-label);
+		color: var(--text-secondary);
+	}
+
 	.incident__description {
-		margin: var(--space-4) 0;
+		margin: var(--space-1) 0 var(--space-4);
 		font-size: var(--text-base);
 		line-height: 1.4;
 	}
 
 	.incident__actions {
-		display: flex;
-		flex-wrap: wrap;
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
 		gap: var(--space-4);
 		margin-top: var(--space-4);
 	}

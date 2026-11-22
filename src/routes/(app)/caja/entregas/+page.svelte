@@ -43,13 +43,14 @@
 		<CashStatementView statement={data.statement} username={data.person.username}>
 			{#snippet status()}
 				{#if 0 === data.statement?.pending}
-					<Badge tone="success">Al día</Badge>
+					<Badge tone="completed">Al día</Badge>
 				{/if}
 			{/snippet}
 		</CashStatementView>
 
 		<div class="screen__action">
 			<Button
+				variant="secondary"
 				href="{resolve('/(app)/caja/entregas/registrar')}?{new URLSearchParams({
 					persona: data.person.username
 				})}"

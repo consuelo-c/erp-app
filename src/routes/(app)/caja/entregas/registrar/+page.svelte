@@ -9,7 +9,6 @@
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
-	import Select from '$lib/components/Select.svelte';
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import { formatBalance, formatPesos } from '$lib/format';
 	import { parsePesos } from '$lib/payroll';
@@ -74,27 +73,19 @@
 		oninput={(event) => (entered = new FormData(event.currentTarget))}
 	>
 		<div class="form-stack">
-			<Field label="Entregó" id="username" error={errorOf('username')}>
-				<Select
-					id="username"
-					name="username"
-					value={initialUsername}
-					required
-					aria-invalid={undefined !== errorOf('username')}
-				>
-					{#each data.people as option (option.username)}
-						<option value={option.username}>{option.name}</option>
-					{/each}
-				</Select>
+			<!-- The person whose tab the manager was reading: another one is chosen there. -->
+			<Field
+				label="Entregó"
+				id="username_name"
+				hint={person ? `Por entregar: ${formatBalance(person.pending)}` : undefined}
+				error={errorOf('username')}
+			>
+				<input type="hidden" name="username" value={initialUsername} />
+				<Input id="username_name" value={person?.name ?? ''} readonly />
 			</Field>
 
 			<div class="field-row">
-				<Field
-					label="Recibido"
-					id="amount"
-					hint={person ? `Por entregar ${formatBalance(person.pending)}` : undefined}
-					error={errorOf('amount')}
-				>
+				<Field label="Recibido" id="amount" error={errorOf('amount')}>
 					<Input
 						id="amount"
 						name="amount"
@@ -117,7 +108,7 @@
 			</div>
 
 			<Field label="Nota (opcional)" id="note">
-				<Input id="note" name="note" />
+				<Input id="note" name="note" placeholder="Ej. Viene con el sobre del #1061" />
 			</Field>
 		</div>
 
@@ -128,11 +119,22 @@
 		{/if}
 
 		<div class="screen__action">
-			<Button type="button" onclick={askToConfirm}>Registrar entrega</Button>
+			<Button type="button" onclick={askToConfirm}>Guardar entrega</Button>
 		</div>
 	</form>
 
-	<Modal bind:open={isConfirmOpen} title="Confirmar entrega" body={confirmation}>
+	<Modal
+		bind:open={isConfirmOpen}
+		title="Confirmar entrega"
+		body="La entrega no cambia la caja ni lleva número de recibo."
+	>
+		<ul class="detail-list">
+			<li class="detail-list__row--plain"><span>Entregó</span><span>{person?.name}</span></li>
+			<li><span>Recibido</span><span>{formatPesos(amount)}</span></li>
+			<li class="detail-list__row--plain">
+				<span>Queda por entregar</span><span>{formatBalance((person?.pending ?? 0) - amount)}</span>
+			</li>
+		</ul>
 		{#snippet actions()}
 			<Button type="button" variant="secondary" onclick={() => (isConfirmOpen = false)}>
 				Cancelar
@@ -141,12 +143,6 @@
 		{/snippet}
 	</Modal>
 </Screen>
-
-{#snippet confirmation()}
-	{person?.name} entregó <b>{formatPesos(amount)}</b>. Queda por entregar
-	<b>{formatBalance((person?.pending ?? 0) - amount)}</b>.<br />
-	La entrega no cambia la caja ni lleva número de recibo.
-{/snippet}
 
 <style>
 	.field-row {

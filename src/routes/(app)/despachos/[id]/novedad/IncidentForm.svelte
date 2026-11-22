@@ -16,6 +16,7 @@
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
+	import { formatInstantTime, formatShortDay, getInstantDate } from '$lib/datetime';
 	import { INCIDENT_OUTCOME_LABELS } from '$lib/labels';
 	import type { Incident, IncidentOutcome } from '$lib/server/services/incidents';
 	import type { OrderDetail, OrderItem } from '$lib/server/services/orders';
@@ -135,6 +136,27 @@
 		return `Antes ${before} · ${stockChange(before, now)}`;
 	}
 
+	// The confirmation's line: «Silla Tiffany dorada: vuelven 2».
+	function stockChangeLine({ name, before, now }: { name: string; before: number; now: number }) {
+		return before > now ? `${name}: vuelven ${before - now}` : `${name}: salen ${now - before} más`;
+	}
+
+	// The hint under Resultado: a correction says what the product's change does, a report what
+	// the outcome does.
+	function resultHint(row: Row): string | undefined {
+		return correctionHint(row) ?? outcomeHint(row);
+	}
+
+	function isResultHintStrong(row: Row): boolean {
+		return undefined !== correctionHint(row) || isSubtracting(row);
+	}
+
+	const lead = $derived(
+		undefined === incident
+			? `Pedido #${order.id} · ${order.client.name}`
+			: `Pedido #${order.id} · ${order.client.name} · reportada ${formatShortDay(getInstantDate(incident.reportedAt))} · ${formatInstantTime(incident.reportedAt)}`
+	);
+
 	// What the correction does to the inventory, product by product, the removed ones included.
 	const stockChanges = $derived(
 		[...new Set([...Object.keys(takenBefore), ...Object.keys(takenNow)].map(Number))]
@@ -188,7 +210,7 @@
 	<UnsavedChangesGuard form="incident" />
 
 	<form id="incident" class="incident" method="POST" use:enhance={keepValues}>
-		<p class="meta incident__lead">Pedido #{order.id} · {order.client.name}</p>
+		<p class="meta incident__lead">{lead}</p>
 		<div class="incident__notice">
 			{#if incident}
 				<Notice tone="info">
@@ -240,11 +262,7 @@
 					>
 					<span class="meta">de {row.line.qty} en el pedido</span>
 				</div>
-				{@const hint = correctionHint(row)}
-				{#if hint}
-					<p class="meta item__before">{hint}</p>
-				{/if}
-				<Choice legend="Resultado" hint={outcomeHint(row)} strongHint={isSubtracting(row)}>
+				<Choice legend="Resultado" hint={resultHint(row)} strongHint={isResultHintStrong(row)}>
 					{#each OUTCOMES as outcome (outcome)}
 						<Chip
 							type="radio"
@@ -290,14 +308,18 @@
 			</Field>
 		</div>
 
-		<div class="incident__section">
-			<ul class="detail-list">
-				<li class="detail-list__row--plain"><span>Responsable</span><span>Por determinar</span></li>
-			</ul>
-			<p class="note incident__responsible">
-				Lo define un Gerente o Administrador desde el pedido.
-			</p>
-		</div>
+		{#if undefined === incident}
+			<div class="incident__section">
+				<ul class="detail-list">
+					<li class="detail-list__row--plain">
+						<span>Responsable</span><span>Por determinar</span>
+					</li>
+				</ul>
+				<p class="note incident__responsible">
+					Lo define un Gerente o Administrador desde el pedido.
+				</p>
+			</div>
+		{/if}
 
 		{#if form?.message}
 			<div class="incident__section">
@@ -337,15 +359,16 @@
 		{#if stockChanges.length}
 			<ul class="confirm__items">
 				{#each stockChanges as change (change.productId)}
-					<li>{change.name}: antes {change.before} · {stockChange(change.before, change.now)}</li>
+					<li>{stockChangeLine(change)}</li>
 				{/each}
 			</ul>
 		{/if}
+		<p class="confirm__text">Puedes corregirla mientras el Gerente no le ponga responsable.</p>
 		{#snippet actions()}
 			<Button type="button" variant="secondary" onclick={() => (isConfirmOpen = false)}>
-				Cancelar
+				Volver
 			</Button>
-			<Button type="submit" form="incident" size="md">Guardar corrección</Button>
+			<Button type="submit" form="incident" size="md">Guardar</Button>
 		{/snippet}
 	</Modal>
 {:else}
@@ -405,10 +428,6 @@
 
 	.item__name {
 		font-size: var(--text-base);
-	}
-
-	.item__before {
-		margin-bottom: var(--space-4);
 	}
 
 	.item__error {
