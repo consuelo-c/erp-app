@@ -454,21 +454,154 @@ test('the responsible party: changed on an active incident, logged, a save with 
 	expect((await listIncidents(db, id, manager))[0].responsibleParty).toBe('CARRIER');
 });
 
-test('SALES, WAREHOUSE and DRIVER get a 403 reversing, changing the responsible party or listing', async () => {
+test('listing is open to every role, each incident with whether the actor may correct and reverse it', async () => {
+	const id = await createOrderIn('DELIVERED');
+	await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], driver);
+	await report(id, [{ product_id: TABLE, qty: 1, outcome: 'RECOVERABLE' }], driver);
+	await report(id, [{ product_id: CHAIR, qty: 1, outcome: 'RECOVERABLE' }], sales);
+	await reverse(1);
+	await setResponsibleParty(db, { id: 2, responsible_party: 'CLIENT' }, manager);
+	const rights = async (actor: Actor) =>
+		(await listIncidents(db, id, actor)).map((incident) => ({
+			id: incident.id,
+			isReportedByActor: incident.isReportedByActor,
+			isFrozen: incident.isFrozen,
+			canCorrect: incident.canCorrect,
+			canReverse: incident.canReverse,
+			canSetResponsibleParty: incident.canSetResponsibleParty
+		}));
+	expect(await rights(driver)).toEqual([
+		{
+			id: 3,
+			isReportedByActor: false,
+			isFrozen: false,
+			canCorrect: false,
+			canReverse: false,
+			canSetResponsibleParty: false
+		},
+		{
+			id: 2,
+			isReportedByActor: true,
+			isFrozen: true,
+			canCorrect: false,
+			canReverse: false,
+			canSetResponsibleParty: false
+		},
+		{
+			id: 1,
+			isReportedByActor: true,
+			isFrozen: false,
+			canCorrect: false,
+			canReverse: false,
+			canSetResponsibleParty: false
+		}
+	]);
+	expect(await rights(sales)).toEqual([
+		{
+			id: 3,
+			isReportedByActor: true,
+			isFrozen: false,
+			canCorrect: true,
+			canReverse: true,
+			canSetResponsibleParty: false
+		},
+		{
+			id: 2,
+			isReportedByActor: false,
+			isFrozen: true,
+			canCorrect: false,
+			canReverse: false,
+			canSetResponsibleParty: false
+		},
+		{
+			id: 1,
+			isReportedByActor: false,
+			isFrozen: false,
+			canCorrect: false,
+			canReverse: false,
+			canSetResponsibleParty: false
+		}
+	]);
+	expect(await rights(warehouse)).toEqual(
+		(await rights(driver)).map((incident) => ({ ...incident, isReportedByActor: false }))
+	);
+	expect(await rights(manager)).toEqual([
+		{
+			id: 3,
+			isReportedByActor: false,
+			isFrozen: false,
+			canCorrect: true,
+			canReverse: true,
+			canSetResponsibleParty: true
+		},
+		{
+			id: 2,
+			isReportedByActor: false,
+			isFrozen: true,
+			canCorrect: false,
+			canReverse: true,
+			canSetResponsibleParty: true
+		},
+		{
+			id: 1,
+			isReportedByActor: false,
+			isFrozen: false,
+			canCorrect: false,
+			canReverse: false,
+			canSetResponsibleParty: false
+		}
+	]);
+});
+
+test('the reporter reverses their own unfrozen incident, with a reason', async () => {
+	const id = await createOrderIn('DELIVERED');
+	await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], driver);
+	const blank = await reverseIncident(db, { id: '1', reason: ' ' }, driver);
+	expect(blank).toMatchObject({ ok: false, errors: { reason: expect.any(String) } });
+	expect(await reverse(1, driver)).toEqual({ ok: true, id: 1 });
+	expect(stock(CHAIR)).toBe(500);
+	expect(hasIncident(id)).toBe(0);
+	expect(events('INCIDENT', 'REVERSED')[0]).toMatchObject({ actor: 'conductor' });
+});
+
+test("a reporter can't reverse someone else's incident nor their own once frozen", async () => {
+	const id = await createOrderIn('DELIVERED');
+	await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], driver);
+	await report(id, [{ product_id: TABLE, qty: 1, outcome: 'LOST' }], driver);
+	await setResponsibleParty(db, { id: 2, responsible_party: 'CARRIER' }, manager);
+	expect(await reverse(1, sales)).toMatchObject({ ok: false });
+	expect(await reverse(2, driver)).toEqual({
+		ok: false,
+		message: 'El Gerente ya le puso responsable: no se puede revertir',
+		errors: {}
+	});
+	expect([stock(CHAIR), stock(TABLE)]).toEqual([498, 499]);
+	expect(events('INCIDENT', 'REVERSED')).toEqual([]);
+});
+
+test('the manager reverses any active incident, frozen or not', async () => {
+	const id = await createOrderIn('DELIVERED');
+	await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], driver);
+	await report(id, [{ product_id: TABLE, qty: 1, outcome: 'LOST' }], sales);
+	await setResponsibleParty(db, { id: 2, responsible_party: 'CLIENT' }, manager);
+	expect(await reverse(1)).toMatchObject({ ok: true });
+	expect(await reverse(2)).toMatchObject({ ok: true });
+	expect(hasIncident(id)).toBe(0);
+});
+
+test('SALES, WAREHOUSE and DRIVER get a 403 changing the responsible party', async () => {
 	const id = await createOrderIn('DELIVERED');
 	await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }]);
 	for (const role of ['SALES', 'WAREHOUSE', 'DRIVER'] satisfies Role[]) {
 		const actor: Actor = { ...sales, roles: [role] };
-		const refusals = await Promise.all([
-			reverse(1, actor).catch((caught: unknown) => caught),
-			setResponsibleParty(db, { id: 1, responsible_party: 'CLIENT' }, actor).catch(
-				(caught: unknown) => caught
-			),
-			listIncidents(db, id, actor).catch((caught: unknown) => caught)
-		]);
-		for (const refusal of refusals) {
-			expect(isHttpError(refusal, 403)).toBe(true);
-		}
+		const refusal = await setResponsibleParty(
+			db,
+			{ id: 1, responsible_party: 'CLIENT' },
+			actor
+		).catch((caught: unknown) => caught);
+		expect(isHttpError(refusal, 403)).toBe(true);
 	}
-	expect(hasIncident(id)).toBe(1);
+	expect(await listIncidents(db, id, manager)).toMatchObject([
+		{ responsibleParty: 'UNDETERMINED' }
+	]);
 });

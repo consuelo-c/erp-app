@@ -1,12 +1,12 @@
 import { error, json } from '@sveltejs/kit';
-import { isAdminOrManager, requireRole, ROLES } from '$lib/server/actor';
+import { requireRole, ROLES } from '$lib/server/actor';
 import { listIncidents } from '$lib/server/services/incidents';
 import { getOrderDetail } from '$lib/server/services/orders';
 import type { RequestHandler } from './$types';
 
 // The operational detail as JSON, for its universal load: the whole order, prices included, for
-// every role. ADMIN and MANAGER also learn whether it has incidents, active or reversed, to reach
-// them in the order's «Novedades».
+// every role, with its «Novedades». Never kept in the offline copy: offline, only the order's
+// «Con novedad» badge shows.
 export const GET: RequestHandler = async ({ locals, params, platform }) => {
 	requireRole(locals.user, ROLES);
 	if (undefined === platform) {
@@ -17,7 +17,6 @@ export const GET: RequestHandler = async ({ locals, params, platform }) => {
 	if (null === order) {
 		error(404, 'Ese pedido no existe');
 	}
-	const hasIncidents =
-		isAdminOrManager(locals.user) && 0 < (await listIncidents(db, order.id, locals.user)).length;
-	return json({ order, hasIncidents });
+	const incidents = await listIncidents(db, order.id, locals.user);
+	return json({ order, incidents });
 };
