@@ -62,6 +62,7 @@ test('creating stores digits only and writes a PRODUCT / CREATED event', async (
 		variantName: null,
 		description: null,
 		websiteUrl: null,
+		replacementCost: null,
 		rentalPrice: 8000,
 		totalQuantity: 120,
 		isActive: true
@@ -280,4 +281,44 @@ test('the list dates each product by the last event that changed its total_quant
 			['Copa', 1_800_000_000]
 		])
 	);
+});
+
+test('a replacement cost is saved in whole pesos and read back', async () => {
+	const id = await create({ ...chair, replacement_cost: '$95.000' });
+	expect((await getProduct(db, id, manager))?.replacementCost).toBe(95000);
+});
+
+test('clearing the replacement cost removes the key, leaving the product without a cost', async () => {
+	const id = await create({ ...chair, replacement_cost: '95.000' });
+	await updateProduct(db, { ...chair, id, replacement_cost: ' ' }, manager);
+	const attributes = database.prepare('select attributes from products where id = ?').get(id);
+	expect(attributes?.attributes).toBe('{}');
+	expect((await getProduct(db, id, manager))?.replacementCost).toBeNull();
+});
+
+test('a replacement cost that is not whole pesos above zero is refused on its field', async () => {
+	for (const typed of ['0', '$0', '-5.000', '95.000,50', '95,5', '12.5', 'mucho']) {
+		expect(await createProduct(db, { ...chair, replacement_cost: typed }, manager)).toEqual({
+			ok: false,
+			message: 'Escribe el costo en pesos enteros, mayor que cero',
+			field: 'replacement_cost'
+		});
+	}
+});
+
+test('a change of replacement cost is logged in the product EDITED event', async () => {
+	const id = await create({ ...chair, replacement_cost: '95.000' });
+	await updateProduct(db, { ...chair, id, replacement_cost: '$110.000' }, manager);
+	const edited = events()[1];
+	expect(edited).toMatchObject({ entity_type: 'PRODUCT', action: 'EDITED' });
+	expect(JSON.parse(String(edited.before))).toEqual({ 'attributes.replacement_cost': 95000 });
+	expect(JSON.parse(String(edited.after))).toEqual({ 'attributes.replacement_cost': 110000 });
+});
+
+test('a stored replacement cost that is not whole pesos above zero fails on read', async () => {
+	const id = await create(chair);
+	database
+		.prepare('update products set attributes = ? where id = ?')
+		.run('{"replacement_cost":-3}', id);
+	await expect(getProduct(db, id, manager)).rejects.toThrow();
 });

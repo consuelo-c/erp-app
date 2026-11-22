@@ -32,6 +32,8 @@ export type Product = {
 	description: string | null;
 	/** The product's page on consueloc.com, or anywhere: a reference for the team, never shown to clients. */
 	websiteUrl: string | null;
+	/** What replacing one lost or unrecoverable unit costs, in whole pesos; null when unknown. */
+	replacementCost: number | null;
 	rentalPrice: number;
 	totalQuantity: number;
 	isActive: boolean;
@@ -68,15 +70,16 @@ const blankableTextSchema = z
 /** What the app only reads about a product: nothing filters, sorts or indexes by these keys. */
 const productAttributesSchema = z.strictObject({
 	description: blankableTextSchema,
-	website_url: blankableTextSchema
+	website_url: blankableTextSchema,
+	replacement_cost: z.number().int().positive().optional()
 });
 
 type ProductAttributes = z.input<typeof productAttributesSchema>;
 
 // In a fixed key order, so an edit that changes nothing produces the same text and logs nothing.
 function attributesJson(attributes: ProductAttributes): string {
-	const { description, website_url } = productAttributesSchema.parse(attributes);
-	return JSON.stringify({ description, website_url });
+	const { description, website_url, replacement_cost } = productAttributesSchema.parse(attributes);
+	return JSON.stringify({ description, website_url, replacement_cost });
 }
 
 const WEBSITE_URL_MESSAGE = 'Escribe una dirección web válida, que empiece con https://';
@@ -116,6 +119,18 @@ const wholeNumberSchema = (message: string) =>
 		.pipe(z.string().min(1, message))
 		.transform(Number);
 
+const REPLACEMENT_COST_MESSAGE = 'Escribe el costo en pesos enteros, mayor que cero';
+
+// Blank is no cost, not zero: an unknown cost isn't guessed. Dots are thousands separators (95.000),
+// so a comma, a minus sign or any other character is refused rather than silently dropped.
+const replacementCostSchema = z
+	.string()
+	.optional()
+	.transform((value) => value?.replace(/[\s$]/g, '') || undefined)
+	.refine((value) => undefined === value || /^\d+(\.\d{3})*$/.test(value), REPLACEMENT_COST_MESSAGE)
+	.transform((value) => (undefined === value ? undefined : Number(value.replace(/\./g, ''))))
+	.refine((value) => undefined === value || 0 < value, REPLACEMENT_COST_MESSAGE);
+
 // `variant_group` is the picker's existing group; `new_variant_group` is «Nuevo grupo»'s text.
 const productSchema = z
 	.object({
@@ -126,6 +141,7 @@ const productSchema = z
 		variant_name: optionalTextSchema,
 		description: z.string().optional(),
 		website_url: websiteUrlSchema,
+		replacement_cost: replacementCostSchema,
 		rental_price: wholeNumberSchema('Escribe el precio por día').pipe(
 			z.number().positive('El precio por día debe ser mayor que cero')
 		),
@@ -136,12 +152,12 @@ const productSchema = z
 			.transform((value) => ('on' === value ? 1 : 0))
 	})
 	.transform((typed) => {
-		const { new_variant_group, description, website_url, ...columns } = typed;
+		const { new_variant_group, description, website_url, replacement_cost, ...columns } = typed;
 		return {
 			columns: {
 				...columns,
 				variant_group: new_variant_group ?? columns.variant_group,
-				attributes: attributesJson({ description, website_url })
+				attributes: attributesJson({ description, website_url, replacement_cost })
 			},
 			isNewGroup: null !== new_variant_group
 		};
@@ -188,6 +204,7 @@ function toProduct(row: ProductRow): Product {
 		variantName: row.variant_name,
 		description: attributes.description ?? null,
 		websiteUrl: attributes.website_url ?? null,
+		replacementCost: attributes.replacement_cost ?? null,
 		rentalPrice: row.rental_price,
 		totalQuantity: row.total_quantity,
 		isActive: 1 === row.active
