@@ -17,14 +17,28 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	return { count };
 };
 
+// The reviewer's edits are a list the browser builds, posted as JSON in one field.
+function readPostedEdits(value: FormDataEntryValue | null): unknown {
+	try {
+		return JSON.parse(String(value));
+	} catch {
+		return null;
+	}
+}
+
 export const actions: Actions = {
 	aprobar: async ({ locals, params, platform, request }) => {
 		requireRole(locals.user, REVIEWS);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}
-		const { note } = Object.fromEntries(await request.formData());
-		const result = await approveCount(platform.env.DB, { id: params.id, note }, locals.user);
+		const formData = await request.formData();
+		const input = {
+			id: params.id,
+			note: formData.get('note'),
+			edits: readPostedEdits(formData.get('edits'))
+		};
+		const result = await approveCount(platform.env.DB, input, locals.user);
 		return result.ok ? { approved: true } : fail(400, { approveMessage: result.message });
 	},
 	rechazar: async ({ locals, params, platform, request }) => {

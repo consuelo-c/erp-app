@@ -36,7 +36,9 @@ function hasDistinctProducts(items: { product_id: number }[]): boolean {
 const ONCE_PER_COUNT = 'Ese producto ya está en el conteo';
 
 // SQLite validates nothing: checked on write and on read. `system_qty` is `total_quantity` when
-// counted, negative included; `applied` stays unset until a review decides it.
+// counted, negative included; `applied` stays unset until a review decides it. The reviewer's
+// edits sit beside what was counted, never over it: `corrected_qty` only on a row they changed,
+// `removed` on a row they deleted.
 export const inventoryItemsSchema = z
 	.array(
 		z.strictObject({
@@ -44,6 +46,8 @@ export const inventoryItemsSchema = z
 			name: z.string().min(1),
 			system_qty: z.number().int(),
 			counted_qty: countedSchema,
+			corrected_qty: countedSchema.optional(),
+			removed: z.literal(true).optional(),
 			applied: z.boolean().nullish()
 		})
 	)
@@ -51,6 +55,25 @@ export const inventoryItemsSchema = z
 	.refine(hasDistinctProducts, ONCE_PER_COUNT);
 
 export type InventoryItem = z.infer<typeof inventoryItemsSchema>[number];
+
+/** What approving sets an applied item's product to: the reviewer's correction, else the count. */
+function appliedQuantity(item: InventoryItem): number {
+	return item.corrected_qty ?? item.counted_qty;
+}
+
+// The reviewer's edits to a pending count, per product: a corrected quantity or its removal.
+// Rejecting reads none of them.
+const editsSchema = z
+	.array(
+		z.union([
+			z.strictObject({ product_id: idSchema, corrected_qty: countedSchema }),
+			z.strictObject({ product_id: idSchema, removed: z.literal(true) })
+		])
+	)
+	.refine(hasDistinctProducts, ONCE_PER_COUNT)
+	.default([]);
+
+type Edits = z.infer<typeof editsSchema>;
 
 // What the count screen sends, its blank rows already left out: the name and the system's
 // quantity come from the catalog, never from the form.
@@ -148,10 +171,12 @@ export function isStale(item: InventoryItem, currentTotal: number): boolean {
 export type Overlap = { id: number; createdAt: number; createdBy: string; products: string[] };
 
 export type ApprovalPreview = {
-	/** Each applied item that changes its product: `from` → `to`. */
-	changes: { product_id: number; name: string; from: number; to: number }[];
+	/** Each applied item that changes its product: `from` → `to`, and whether the reviewer set `to`. */
+	changes: { product_id: number; name: string; from: number; to: number; isCorrected: boolean }[];
 	/** Each item approval skips: what the system said when counted, and what it says now. */
 	stale: { product_id: number; name: string; system_qty: number; current: number }[];
+	/** Each item the reviewer deleted: never applied. */
+	removed: { product_id: number; name: string }[];
 	overlaps: Overlap[];
 };
 
@@ -179,30 +204,89 @@ async function findOverlaps(
 	}));
 }
 
-// What approving would do to `items` now: each one applied or skipped against the current totals.
+// The count's items with the reviewer's edits on them. A correction equal to what was counted
+// changes nothing, so it isn't kept.
+function editItems(items: InventoryItem[], edits: Edits): InventoryItem[] | Refusal {
+	const byProduct = new Map(edits.map((edit) => [edit.product_id, edit]));
+	if (edits.some((edit) => items.every((item) => item.product_id !== edit.product_id))) {
+		return { ok: false, message: 'Ese producto no está en el conteo', errors: {} };
+	}
+	return items.map((item) => {
+		const edit = byProduct.get(item.product_id);
+		if (undefined === edit) {
+			return item;
+		}
+		if ('removed' in edit) {
+			return { ...item, removed: true };
+		}
+		return edit.corrected_qty === item.counted_qty
+			? item
+			: { ...item, corrected_qty: edit.corrected_qty };
+	});
+}
+
+const pick = (item: InventoryItem) => ({ product_id: item.product_id, name: item.name });
+
+// Each applied item that moves its product off `current`.
+function changesOf(
+	items: InventoryItem[],
+	current: (item: InventoryItem) => number
+): ApprovalPreview['changes'] {
+	return items
+		.filter((item) => item.applied && appliedQuantity(item) !== current(item))
+		.map((item) => ({
+			...pick(item),
+			from: current(item),
+			to: appliedQuantity(item),
+			isCorrected: undefined !== item.corrected_qty
+		}));
+}
+
+// What approving would do to `items` now: each one applied, or skipped as removed or stale against
+// the current totals. A removed item doesn't overlap.
 async function planApproval(
 	db: D1Database,
 	items: InventoryItem[],
 	countId: number | null
 ): Promise<Plan> {
+	const kept = items.filter((item) => !item.removed);
 	const [products, overlaps] = await Promise.all([
 		readProducts(db, items),
-		findOverlaps(db, items, countId)
+		findOverlaps(db, kept, countId)
 	]);
 	const current = (item: InventoryItem) => products.get(item.product_id)?.total_quantity ?? 0;
-	const planned = items.map((item) => ({ ...item, applied: !isStale(item, current(item)) }));
-	const pick = (item: InventoryItem) => ({ product_id: item.product_id, name: item.name });
+	const isSkippedStale = (item: InventoryItem) => !item.removed && isStale(item, current(item));
+	const planned = items.map((item) => ({
+		...item,
+		applied: !item.removed && !isStale(item, current(item))
+	}));
 	return {
 		items: planned,
 		products,
-		changes: planned
-			.filter((item) => item.applied && item.counted_qty !== current(item))
-			.map((item) => ({ ...pick(item), from: current(item), to: item.counted_qty })),
+		changes: changesOf(planned, current),
 		stale: planned
-			.filter((item) => !item.applied)
+			.filter(isSkippedStale)
 			.map((item) => ({ ...pick(item), system_qty: item.system_qty, current: current(item) })),
+		removed: planned.filter((item) => item.removed).map(pick),
 		overlaps
 	};
+}
+
+// A stale item is only removable: its figure was counted before a later change, so a correction
+// to it would apply a quantity nobody counted against the current stock.
+function staleCorrection({ items, stale }: Plan): Refusal | null {
+	const corrected = items.find(
+		(item) =>
+			undefined !== item.corrected_qty &&
+			stale.some((other) => other.product_id === item.product_id)
+	);
+	return undefined === corrected
+		? null
+		: {
+				ok: false,
+				message: `${corrected.name} está desactualizado: solo se puede eliminar`,
+				errors: {}
+			};
 }
 
 type CountRow = {
@@ -234,6 +318,8 @@ const noteSchema = z
 
 const reviewSchema = z.object({ id: countIdSchema, note: noteSchema });
 
+const approvalSchema = reviewSchema.extend({ edits: editsSchema });
+
 // Only a pending count is reviewed: an approved, rejected or reversed one is read-only.
 async function findPending(db: D1Database, id: number): Promise<CountRow | Refusal> {
 	const row = await db
@@ -248,9 +334,20 @@ async function findPending(db: D1Database, id: number): Promise<CountRow | Refus
 		: { ok: false, message: 'Ese conteo ya fue revisado', errors: {} };
 }
 
+// A pending count's plan with the reviewer's edits on it, or why it can't be approved as edited.
+async function planReview(db: D1Database, row: CountRow, edits: Edits): Promise<Plan | Refusal> {
+	const items = editItems(parseItems(row), edits);
+	if ('ok' in items) {
+		return items;
+	}
+	const plan = await planApproval(db, items, row.id);
+	return staleCorrection(plan) ?? plan;
+}
+
 /**
- * What approving would apply, skip and overlap, for its confirmation: a pending count by `id`, or,
- * for «Guardar y aprobar», the `items` about to be sent. A missing or reviewed count is refused.
+ * What approving would apply, skip and overlap, for its confirmation: a pending count by `id`,
+ * with the reviewer's `edits`, or, for «Guardar y aprobar», the `items` about to be sent. A missing
+ * or reviewed count, or a correction to a stale item, is refused.
  */
 export async function previewApproval(
 	db: D1Database,
@@ -258,10 +355,14 @@ export async function previewApproval(
 	actor: Actor | null
 ): Promise<ApprovalPreview | Refusal> {
 	requireRole(actor, REVIEWS);
-	const byId = z.object({ id: countIdSchema }).safeParse(input);
+	const byId = z.object({ id: countIdSchema, edits: editsSchema }).safeParse(input);
 	if (byId.success) {
 		const row = await findPending(db, byId.data.id);
-		return 'ok' in row ? row : toPreview(await planApproval(db, parseItems(row), row.id));
+		if ('ok' in row) {
+			return row;
+		}
+		const plan = await planReview(db, row, byId.data.edits);
+		return 'ok' in plan ? plan : toPreview(plan);
 	}
 	const parsed = countSchema.safeParse(input);
 	if (!parsed.success) {
@@ -271,8 +372,8 @@ export async function previewApproval(
 	return 'ok' in items ? items : toPreview(await planApproval(db, items, null));
 }
 
-function toPreview({ changes, stale, overlaps }: Plan): ApprovalPreview {
-	return { changes, stale, overlaps };
+function toPreview({ changes, stale, removed, overlaps }: Plan): ApprovalPreview {
+	return { changes, stale, removed, overlaps };
 }
 
 type Review = {
@@ -313,12 +414,16 @@ function reviewStatements(db: D1Database, actor: Actor, review: Review): D1Prepa
 	});
 }
 
-// Each applied item's product set to `counted_qty`: auditedUpdate writes nothing for one that
+// Each applied item's product set to `quantity(item)`: auditedUpdate writes nothing for one that
 // already says so.
 function adjustmentStatements(
 	db: D1Database,
 	actor: Actor,
-	{ items, products }: Pick<Plan, 'items' | 'products'>
+	{
+		items,
+		products,
+		quantity
+	}: Pick<Plan, 'items' | 'products'> & { quantity: (item: InventoryItem) => number }
 ): D1PreparedStatement[] {
 	return items
 		.filter((item) => item.applied)
@@ -330,10 +435,13 @@ function adjustmentStatements(
 				actor,
 				id: item.product_id,
 				current: { total_quantity: products.get(item.product_id)?.total_quantity ?? 0 },
-				changes: { total_quantity: item.counted_qty }
+				changes: { total_quantity: quantity(item) }
 			})
 		);
 }
+
+const NOTHING_APPLIED =
+	'Ningún producto se aplica: todos están desactualizados o eliminados. Este conteo solo se puede rechazar';
 
 // ponytail: read-then-write, so whatever moves a product between the read and the batch is lost:
 // two counts sharing a product, approved at once, both pass the stale check and the second one
@@ -342,26 +450,29 @@ function adjustmentStatements(
 // events. One manager reviews at a time; a conditional `update` per product if that ever changes.
 async function approve(
 	db: D1Database,
-	{ row, note }: { row: CountRow; note: string | null },
+	{ row, note, edits }: { row: CountRow; note: string | null; edits: Edits },
 	actor: Actor
 ): Promise<SaveResult> {
-	const plan = await planApproval(db, parseItems(row), row.id);
+	const plan = await planReview(db, row, edits);
+	if ('ok' in plan) {
+		return plan;
+	}
 	if (plan.items.every((item) => !item.applied)) {
-		const message = 'Todos los productos están desactualizados: este conteo solo se puede rechazar';
-		return { ok: false, message, errors: {} };
+		return { ok: false, message: NOTHING_APPLIED, errors: {} };
 	}
 	await db.batch([
 		...reviewStatements(db, actor, { row, status: 'APPROVED', note, items: plan.items }),
-		...adjustmentStatements(db, actor, plan)
+		...adjustmentStatements(db, actor, { ...plan, quantity: appliedQuantity })
 	]);
 	return { ok: true, id: row.id };
 }
 
 /**
- * Approves a pending count, `ADMIN` and `MANAGER` only: its stale items are skipped (`applied:
- * false`) and every other one sets its product's `total_quantity` to what was counted. A count
- * whose items are all stale can only be rejected. The count, its adjustments and their events go
- * in one batch.
+ * Approves a pending count, `ADMIN` and `MANAGER` only, with the reviewer's `edits`: its removed
+ * and stale items are skipped (`applied: false`) and every other one sets its product's
+ * `total_quantity` to its corrected quantity, else what was counted. A stale item only takes a
+ * removal. A count whose items are all stale or removed can only be rejected. The count, its
+ * adjustments and their events go in one batch.
  */
 export async function approveCount(
 	db: D1Database,
@@ -369,15 +480,16 @@ export async function approveCount(
 	actor: Actor | null
 ): Promise<SaveResult> {
 	requireRole(actor, REVIEWS);
-	const parsed = reviewSchema.safeParse(input);
+	const parsed = approvalSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalid(parsed.error);
 	}
-	const row = await findPending(db, parsed.data.id);
-	return 'ok' in row ? row : approve(db, { row, note: parsed.data.note }, actor);
+	const { id, note, edits } = parsed.data;
+	const row = await findPending(db, id);
+	return 'ok' in row ? row : approve(db, { row, note, edits }, actor);
 }
 
-/** Rejects a pending count, `ADMIN` and `MANAGER` only: no product changes. */
+/** Rejects a pending count as it was sent, `ADMIN` and `MANAGER` only: no product changes. */
 export async function rejectCount(
 	db: D1Database,
 	input: unknown,
@@ -416,7 +528,7 @@ export async function submitAndApproveCount(
 		return sent;
 	}
 	const row = await findPending(db, sent.id);
-	return 'ok' in row ? row : approve(db, { row, note: parsed.data.note }, actor);
+	return 'ok' in row ? row : approve(db, { row, note: parsed.data.note, edits: [] }, actor);
 }
 
 type ReversibleRow = CountRow & { approval: number | null };
@@ -476,7 +588,6 @@ async function reversalStatements(
 	{ row, reason }: { row: CountRow; reason: string }
 ): Promise<D1PreparedStatement[]> {
 	const items = parseItems(row);
-	const restored = items.map((item) => ({ ...item, counted_qty: item.system_qty }));
 	const current = {
 		status: row.status,
 		reversal_reason: null,
@@ -492,7 +603,11 @@ async function reversalStatements(
 	const write = { table: 'inventory_counts', entityType: 'INVENTORY_COUNT', action: 'REVERSED' };
 	return [
 		...auditedUpdate(db, { ...write, actor, id: row.id, current, changes, reason }),
-		...adjustmentStatements(db, actor, { items: restored, products: await readProducts(db, items) })
+		...adjustmentStatements(db, actor, {
+			items,
+			products: await readProducts(db, items),
+			quantity: (item) => item.system_qty
+		})
 	];
 }
 

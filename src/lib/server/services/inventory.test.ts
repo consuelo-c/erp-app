@@ -90,6 +90,10 @@ test('the items: at least one, whole counted quantities, known keys, a product o
 	for (const applied of [true, false, null]) {
 		expect(valid([{ ...item, applied }])).toBe(true);
 	}
+	expect(valid([{ ...item, corrected_qty: 808, applied: true }])).toBe(true);
+	expect(valid([{ ...item, corrected_qty: -1 }])).toBe(false);
+	expect(valid([{ ...item, removed: true, applied: false }])).toBe(true);
+	expect(valid([{ ...item, removed: false }])).toBe(false);
 });
 
 test('a warehouse login sends a count pending approval, changing no product', async () => {
@@ -269,8 +273,11 @@ test('a lost incident between the count and its approval makes its item stale: s
 	const id = await send([CHAIR, 790], [TABLECLOTH, 118]);
 	await loseChairs(4);
 	expect(await previewApproval(db, { id }, manager)).toEqual({
-		changes: [{ product_id: TABLECLOTH, name: 'Mantel blanco 3×3', from: 120, to: 118 }],
+		changes: [
+			{ product_id: TABLECLOTH, name: 'Mantel blanco 3×3', from: 120, to: 118, isCorrected: false }
+		],
 		stale: [{ product_id: CHAIR, name: 'Silla Tiffany dorada', system_qty: 800, current: 796 }],
+		removed: [],
 		overlaps: []
 	});
 	expect(await approveCount(db, { id }, manager)).toMatchObject({ ok: true });
@@ -308,8 +315,11 @@ test('overlapping counts warn; approving one makes the other stale only where it
 	expect([stock(CHAIR), stock(TABLECLOTH)]).toEqual([800, 110]);
 	// The chairs landed on the first count's system_qty: still applicable.
 	expect(await previewApproval(db, { id: first }, manager)).toEqual({
-		changes: [{ product_id: CHAIR, name: 'Silla Tiffany dorada', from: 800, to: 790 }],
+		changes: [
+			{ product_id: CHAIR, name: 'Silla Tiffany dorada', from: 800, to: 790, isCorrected: false }
+		],
 		stale: [{ product_id: TABLECLOTH, name: 'Mantel blanco 3×3', system_qty: 120, current: 110 }],
+		removed: [],
 		overlaps: []
 	});
 	expect(await approveCount(db, { id: first }, manager)).toMatchObject({ ok: true });
@@ -388,6 +398,132 @@ test('«Guardar y aprobar» sends and approves one count, both events on its id'
 	]);
 });
 
+test('a corrected quantity is applied and what was counted is kept beside it', async () => {
+	const id = await send([CHAIR, 110], [TABLECLOTH, 118]);
+	const edits = [{ product_id: CHAIR, corrected_qty: 808 }];
+	expect(await previewApproval(db, { id, edits }, manager)).toEqual({
+		changes: [
+			{ product_id: CHAIR, name: 'Silla Tiffany dorada', from: 800, to: 808, isCorrected: true },
+			{ product_id: TABLECLOTH, name: 'Mantel blanco 3×3', from: 120, to: 118, isCorrected: false }
+		],
+		stale: [],
+		removed: [],
+		overlaps: []
+	});
+	expect(await approveCount(db, { id, edits }, manager)).toEqual({ ok: true, id });
+	expect([stock(CHAIR), stock(TABLECLOTH)]).toEqual([808, 118]);
+	expect(count(id).inventory_items).toEqual([
+		{
+			product_id: CHAIR,
+			name: 'Silla Tiffany dorada',
+			system_qty: 800,
+			counted_qty: 110,
+			corrected_qty: 808,
+			applied: true
+		},
+		{
+			product_id: TABLECLOTH,
+			name: 'Mantel blanco 3×3',
+			system_qty: 120,
+			counted_qty: 118,
+			applied: true
+		}
+	]);
+	const [approval] = events('INVENTORY_COUNT', 'APPROVED');
+	expect(JSON.parse(String(approval.before)).inventory_items).not.toContain('corrected_qty');
+	expect(JSON.parse(String(approval.after)).inventory_items).toContain('"corrected_qty":808');
+});
+
+test('a removed row is never applied and overlaps no other count', async () => {
+	const other = await send([TABLECLOTH, 115]);
+	const id = await send([CHAIR, 790], [TABLECLOTH, 118]);
+	const edits = [{ product_id: TABLECLOTH, removed: true }];
+	expect(await previewApproval(db, { id }, manager)).toMatchObject({
+		overlaps: [{ id: other, products: ['Mantel blanco 3×3'] }]
+	});
+	expect(await previewApproval(db, { id, edits }, manager)).toEqual({
+		changes: [
+			{ product_id: CHAIR, name: 'Silla Tiffany dorada', from: 800, to: 790, isCorrected: false }
+		],
+		stale: [],
+		removed: [{ product_id: TABLECLOTH, name: 'Mantel blanco 3×3' }],
+		overlaps: []
+	});
+	expect(await approveCount(db, { id, edits }, manager)).toMatchObject({ ok: true });
+	expect([stock(CHAIR), stock(TABLECLOTH)]).toEqual([790, 120]);
+	expect(count(id).inventory_items[1]).toEqual({
+		product_id: TABLECLOTH,
+		name: 'Mantel blanco 3×3',
+		system_qty: 120,
+		counted_qty: 118,
+		removed: true,
+		applied: false
+	});
+	// Nothing verified it: the other count's tablecloths still apply.
+	expect(await approveCount(db, { id: other }, manager)).toMatchObject({ ok: true });
+	expect(stock(TABLECLOTH)).toBe(115);
+});
+
+test('a stale row only takes a removal: a correction to it is refused and saves nothing', async () => {
+	const id = await send([CHAIR, 790], [TABLECLOTH, 118]);
+	await loseChairs(4);
+	const edits = [{ product_id: CHAIR, corrected_qty: 792 }];
+	const refusal = {
+		ok: false,
+		message: 'Silla Tiffany dorada está desactualizado: solo se puede eliminar'
+	};
+	expect(await previewApproval(db, { id, edits }, manager)).toMatchObject(refusal);
+	expect(await approveCount(db, { id, edits }, manager)).toMatchObject(refusal);
+	expect(count(id).status).toBe('PENDING_APPROVAL');
+	expect(stock(CHAIR)).toBe(796);
+	const removal = [{ product_id: CHAIR, removed: true }];
+	expect(await previewApproval(db, { id, edits: removal }, manager)).toMatchObject({
+		stale: [],
+		removed: [{ product_id: CHAIR }]
+	});
+	expect(await approveCount(db, { id, edits: removal }, manager)).toMatchObject({ ok: true });
+	expect(stock(CHAIR)).toBe(796);
+	expect(applied(id)).toEqual([false, true]);
+});
+
+test("edits name the count's products once, each corrected or removed", async () => {
+	const id = await send([CHAIR, 790]);
+	for (const edits of [
+		[{ product_id: TABLECLOTH, removed: true }],
+		[{ product_id: CHAIR, corrected_qty: -1 }],
+		[{ product_id: CHAIR, corrected_qty: 1, removed: true }],
+		[
+			{ product_id: CHAIR, removed: true },
+			{ product_id: CHAIR, corrected_qty: 4 }
+		]
+	]) {
+		expect(await approveCount(db, { id, edits }, manager)).toMatchObject({ ok: false });
+	}
+	expect(count(id).status).toBe('PENDING_APPROVAL');
+	// A correction equal to what was counted changes nothing.
+	const edits = [{ product_id: CHAIR, corrected_qty: 790 }];
+	expect(await approveCount(db, { id, edits }, manager)).toMatchObject({ ok: true });
+	expect(count(id).inventory_items[0]).not.toHaveProperty('corrected_qty');
+});
+
+test('a count whose rows are all stale or removed can only be rejected, and rejecting ignores edits', async () => {
+	const id = await send([CHAIR, 790], [TABLECLOTH, 118]);
+	await loseChairs(4);
+	const edits = [{ product_id: TABLECLOTH, removed: true }];
+	expect(await approveCount(db, { id, edits }, manager)).toMatchObject({
+		ok: false,
+		message:
+			'Ningún producto se aplica: todos están desactualizados o eliminados. Este conteo solo se puede rechazar'
+	});
+	expect(count(id).status).toBe('PENDING_APPROVAL');
+	expect(await rejectCount(db, { id, edits }, manager)).toEqual({ ok: true, id });
+	expect(count(id).inventory_items).toEqual([
+		{ product_id: CHAIR, name: 'Silla Tiffany dorada', system_qty: 800, counted_qty: 790 },
+		{ product_id: TABLECLOTH, name: 'Mantel blanco 3×3', system_qty: 120, counted_qty: 118 }
+	]);
+	expect([stock(CHAIR), stock(TABLECLOTH)]).toEqual([796, 120]);
+});
+
 async function approved(...counted: [number, number][]): Promise<number> {
 	const id = await send(...counted);
 	expect(await approveCount(db, { id }, manager)).toMatchObject({ ok: true });
@@ -430,6 +566,19 @@ test('reversing sets each applied product back, records who and why, and logs wh
 			after: '{"total_quantity":120}'
 		})
 	]);
+});
+
+test('reversing a corrected approval restores the stock as it was before the count', async () => {
+	const id = await send([CHAIR, 110], [TABLECLOTH, 118]);
+	const edits = [
+		{ product_id: CHAIR, corrected_qty: 808 },
+		{ product_id: TABLECLOTH, removed: true }
+	];
+	expect(await approveCount(db, { id, edits }, manager)).toMatchObject({ ok: true });
+	expect([stock(CHAIR), stock(TABLECLOTH)]).toEqual([808, 120]);
+	expect(await reverseCount(db, { id, reason: 'Error' }, manager)).toMatchObject({ ok: true });
+	expect([stock(CHAIR), stock(TABLECLOTH)]).toEqual([800, 120]);
+	expect(count(id).inventory_items[0]).toMatchObject({ counted_qty: 110, corrected_qty: 808 });
 });
 
 test('a skipped stale item is left as it is: only the applied ones are restored', async () => {
