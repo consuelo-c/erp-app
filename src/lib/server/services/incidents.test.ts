@@ -6,6 +6,7 @@ import { createMemoryD1 } from '../db/memory-d1';
 import {
 	correctIncident,
 	incidentItemsSchema,
+	listActiveIncidents,
 	listIncidents,
 	reportIncident,
 	reverseIncident,
@@ -778,4 +779,20 @@ test("a count approved after it blocks changing that product's lost total, and o
 	expect(database.prepare('select incident_description from incidents').get()).toEqual({
 		incident_description: 'Llegaron rotas'
 	});
+});
+
+test('the active incidents a damage charge names: what was lost and whose fault, never a reversed one', async () => {
+	const id = await createOrderIn('OUT_FOR_PICKUP');
+	await report(id, [{ product_id: CHAIR, qty: 4, outcome: 'LOST' }]);
+	await report(id, [{ product_id: TABLE, qty: 1, outcome: 'UNRECOVERABLE' }]);
+	expect(await reverse(1)).toMatchObject({ ok: true });
+	expect(await listActiveIncidents(db, id, driver)).toEqual([
+		{
+			id: 2,
+			items: [
+				{ product_id: TABLE, name: 'Mesa redonda 10 puestos', qty: 1, outcome: 'UNRECOVERABLE' }
+			],
+			responsibleParty: 'UNDETERMINED'
+		}
+	]);
 });

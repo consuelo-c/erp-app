@@ -11,6 +11,7 @@ import { INVALID_WHATSAPP } from '$lib/whatsapp';
 import {
 	calculateOrderTotals,
 	clientLockedMessage,
+	DAMAGE_CHARGE_SOURCES,
 	FEE_SOURCES,
 	isEditableStatus,
 	isLegalTransition,
@@ -18,6 +19,7 @@ import {
 	isPickupStatus,
 	OPERATIONAL_STATUSES,
 	ORDER_PAYMENT_CONCEPTS,
+	RETAINED_FROM_DEPOSIT,
 	type FeeSource,
 	type OrderPaymentConcept,
 	type OrderTotals,
@@ -1430,6 +1432,14 @@ export const DEPOSIT_HELD_SQL = `coalesce((select sum(amount) from cash_movement
 	and concept in ('SECURITY_DEPOSIT', 'DEPOSIT_REFUND')), 0)`;
 
 /**
+ * «Cobrado por novedades»: the damage charges' net, offsets included. Apart from the rental's money:
+ * never in Pagado, Saldo or what the client is owed. A charge kept from the deposit already lowered
+ * the deposit held through its paired refund.
+ */
+export const DAMAGE_CHARGED_SQL = `coalesce((select sum(amount) from cash_movements
+	where entity_type = 'ORDER' and entity_id = orders.id and concept = 'DAMAGE_CHARGE'), 0)`;
+
+/**
  * The only rule for what a CANCELLED order owes its client, over `orders` in the caller's query: its
  * installments net of their refunds, plus the deposit held. A billed order's payments are its
  * cuenta's, so it reads the cuenta's credit, `−receivable_balance`, in their place. A
@@ -1454,6 +1464,13 @@ export type OrderPayment = {
 	/** The client's name, or the carrier's for a carrier payment, as it was recorded. */
 	payee: string | null;
 	receiptNumber: number;
+	/** What it's for, when its order doesn't say it: a damage charge's. */
+	description: string | null;
+	/**
+	 * A damage charge kept from the deposit and its paired retention: each names the other's
+	 * receipt. Null for any other movement.
+	 */
+	pairedReceiptNumber: number | null;
 };
 
 /** Who cancelled the order, when, and why: its CANCELLED event. */
@@ -1482,6 +1499,8 @@ export type OrderDetail = Order & {
 	paid: number;
 	balanceDue: number;
 	depositHeld: number;
+	/** «Cobrado por novedades»: the damage charges' net, shown apart from Pagado and Saldo. */
+	damageCharged: number;
 	/** «A favor del cliente»: what it owes the client, read only once it's CANCELLED. */
 	owedToClient: number;
 	/** The balance of the cuenta de cobro billing it, or null. Negative is the client's credit. */
@@ -1550,6 +1569,7 @@ export type PaymentRow = {
 	other_method: string | null;
 	payee: string | null;
 	receipt_number: number;
+	description?: string | null;
 };
 
 export function toPayment(row: PaymentRow): OrderPayment {
@@ -1561,21 +1581,55 @@ export function toPayment(row: PaymentRow): OrderPayment {
 		method: row.payment_method,
 		otherMethod: row.other_method,
 		payee: row.payee,
-		receiptNumber: row.receipt_number
+		receiptNumber: row.receipt_number,
+		description: row.description ?? null,
+		pairedReceiptNumber: null
 	};
+}
+
+/**
+ * Whether `retention` is the deposit refund written with `charge`, kept from the deposit: the
+ * same batch writes the refund right before it, on its date, for its amount.
+ */
+function isDepositRetention(charge: OrderPayment, retention: OrderPayment | undefined): boolean {
+	return (
+		'DAMAGE_CHARGE' === charge.concept &&
+		0 < charge.amount &&
+		'DEPOSIT_REFUND' === retention?.concept &&
+		charge.id - 1 === retention.id &&
+		charge.movementDate === retention.movementDate &&
+		-charge.amount === retention.amount
+	);
+}
+
+function pairRetentions(payments: OrderPayment[]): OrderPayment[] {
+	const byId = new Map(payments.map((payment) => [payment.id, payment]));
+	const paired = new Map<number, number>();
+	for (const charge of payments) {
+		const retention = byId.get(charge.id - 1);
+		if (isDepositRetention(charge, retention)) {
+			paired.set(charge.id, retention!.receiptNumber);
+			paired.set(retention!.id, charge.receiptNumber);
+		}
+	}
+	return payments.map((payment) => ({
+		...payment,
+		pairedReceiptNumber: paired.get(payment.id) ?? null
+	}));
 }
 
 async function findPayments(db: D1Database, orderId: number): Promise<OrderPayment[]> {
 	const { results } = await db
 		.prepare(
 			`select id, movement_date, concept, amount, payment_method,
-			json_extract(attributes, '$.other_method') as other_method, payee, receipt_number
+			json_extract(attributes, '$.other_method') as other_method, payee, receipt_number,
+			json_extract(attributes, '$.description') as description
 			from cash_movements where entity_type = 'ORDER' and entity_id = ?
 			order by movement_date, id`
 		)
 		.bind(orderId)
 		.all<PaymentRow>();
-	return results.map(toPayment);
+	return pairRetentions(results.map(toPayment));
 }
 
 // Only while it's cancelled: nothing leaves CANCELLED, so it's the order's one cancellation.
@@ -1594,20 +1648,28 @@ async function findCancellation(db: D1Database, orderId: number): Promise<Cancel
 
 type OrderBalances = Pick<
 	OrderDetail,
-	'balanceDue' | 'depositHeld' | 'owedToClient' | 'receivableBalance'
+	'balanceDue' | 'depositHeld' | 'damageCharged' | 'owedToClient' | 'receivableBalance'
 >;
 
 async function findBalances(db: D1Database, orderId: number): Promise<OrderBalances> {
 	const balances = await db
 		.prepare(
 			`select ${BALANCE_DUE_SQL} as balanceDue, ${DEPOSIT_HELD_SQL} as depositHeld,
-			${OWED_TO_CLIENT_SQL} as owedToClient,
+			${DAMAGE_CHARGED_SQL} as damageCharged, ${OWED_TO_CLIENT_SQL} as owedToClient,
 			${ORDER_RECEIVABLE_BALANCE_SQL} as receivableBalance
 			from orders where id = ?`
 		)
 		.bind(orderId)
 		.first<OrderBalances>();
-	return balances ?? { balanceDue: 0, depositHeld: 0, owedToClient: 0, receivableBalance: null };
+	return (
+		balances ?? {
+			balanceDue: 0,
+			depositHeld: 0,
+			damageCharged: 0,
+			owedToClient: 0,
+			receivableBalance: null
+		}
+	);
 }
 
 const orderIdSchema = z.coerce.number().int().positive();
@@ -1714,7 +1776,8 @@ const paymentInputSchema = z.object({
 	amount: z.string().default(''),
 	trip: z.enum(['DELIVERY', 'PICKUP']).optional(),
 	fee_source: z.enum(FEE_SOURCES).optional(),
-	payee: blankable
+	payee: blankable,
+	description: blankable
 });
 
 type PaymentInput = z.output<typeof paymentInputSchema>;
@@ -1801,6 +1864,48 @@ async function feeRetention(
 	return { concept: 'INSTALLMENT_REFUND', available: paid, message };
 }
 
+const NO_ACTIVE_INCIDENT_MESSAGE = 'El cobro por novedad necesita una novedad activa en el pedido.';
+
+/**
+ * «Cobro por novedad», only while the order has an active incident, whoever's fault: new money, or
+ * kept from the deposit through a paired refund, up to the deposit held. Never from the payments,
+ * which pay the order's Total.
+ */
+async function damageRetention(
+	db: D1Database,
+	order: Order,
+	payment: PaymentInput
+): Promise<Retention | undefined | Refusal> {
+	if (!order.hasIncident) {
+		return messageRefusal(NO_ACTIVE_INCIDENT_MESSAGE);
+	}
+	if (null === payment.description) {
+		return refusal('description', 'Escribe qué se cobra');
+	}
+	const source = DAMAGE_CHARGE_SOURCES.find((each) => each === payment.fee_source);
+	if (undefined === source) {
+		return refusal('fee_source', 'Escoge de dónde sale el cobro');
+	}
+	if ('NEW' === source) {
+		return undefined;
+	}
+	const { depositHeld } = await findBalances(db, order.id);
+	const message = `Supera el depósito recibido (${formatPesos(depositHeld)}). Cobra el resto con «Dinero nuevo».`;
+	return { concept: 'DEPOSIT_REFUND', available: depositHeld, message };
+}
+
+function isRetainedFromDeposit(payment: PaymentInput): boolean {
+	return 'DAMAGE_CHARGE' === payment.concept && 'DEPOSIT' === payment.fee_source;
+}
+
+// Kept from the deposit, no money changes hands: whatever method was posted, it records none.
+function formOf(input: unknown, payment: PaymentInput): unknown {
+	if (!isRetainedFromDeposit(payment)) {
+		return input;
+	}
+	return { ...(input as object), payment_method: 'OTHER', other_method: RETAINED_FROM_DEPOSIT };
+}
+
 /**
  * Records one of the order's movements, in any state, cancelled included. «Pago» needs a balance
  * to pay, but never blocks on going over it. Valor is typed positive; the concept gives the sign.
@@ -1833,8 +1938,8 @@ export async function recordOrderPayment(
 			return driverRefused;
 		}
 	}
-	const link = await linkOf(db, order, parsed.data);
-	return 'ok' in link ? link : recordLinkedMovement(db, { form: input, ...link }, actor);
+	const link = await linkOf(db, order, { form: input, payment: parsed.data });
+	return 'ok' in link ? link : recordLinkedMovement(db, link, actor);
 }
 
 // Sales records the money in; the manager the money out and the fee.
@@ -1848,7 +1953,8 @@ const DRIVER_ONLY = ['DRIVER'] as const;
 const DRIVER_CONCEPTS: readonly OrderPaymentConcept[] = [
 	'INSTALLMENT',
 	'SECURITY_DEPOSIT',
-	'DEPOSIT_REFUND'
+	'DEPOSIT_REFUND',
+	'DAMAGE_CHARGE'
 ];
 
 // The driver collects only on the road, and gives the deposit back only at pickup.
@@ -1872,7 +1978,8 @@ function onTheRoadConcepts(order: PaymentState): Partial<Record<OrderPaymentConc
 	return {
 		INSTALLMENT: isCollecting && 0 < order.balanceDue,
 		SECURITY_DEPOSIT: isCollecting && order.depositHeld < order.depositAmount,
-		DEPOSIT_REFUND: isCollecting && isDriverRefundable(order)
+		DEPOSIT_REFUND: isCollecting && isDriverRefundable(order),
+		DAMAGE_CHARGE: isCollecting && order.hasIncident
 	};
 }
 
@@ -1882,7 +1989,7 @@ function isDriverRefundable(order: PaymentState): boolean {
 
 // Why the driver can't record this entry, or null: the service's own check, not just the screen's.
 function driverRefusal(order: PaymentState, payment: PaymentInput): Refusal | null {
-	if (undefined === payment.payment_method || !DRIVER_METHODS.includes(payment.payment_method)) {
+	if (!isRetainedFromDeposit(payment) && !isDriverMethod(payment.payment_method)) {
 		return refusal('payment_method', 'Escoge «Efectivo» o «Transferencia»');
 	}
 	if (null !== order.receivableId) {
@@ -1899,11 +2006,16 @@ function driverRefusal(order: PaymentState, payment: PaymentInput): Refusal | nu
 	if (onTheRoadConcepts(order)[payment.concept]) {
 		return null;
 	}
-	return messageRefusal(
-		'INSTALLMENT' === payment.concept
-			? 'Este pedido ya está pagado.'
-			: 'El depósito ya está completo.'
-	);
+	return messageRefusal(DRIVER_REFUSALS[payment.concept] ?? 'El depósito ya está completo.');
+}
+
+const DRIVER_REFUSALS: Partial<Record<OrderPaymentConcept, string>> = {
+	INSTALLMENT: 'Este pedido ya está pagado.',
+	DAMAGE_CHARGE: NO_ACTIVE_INCIDENT_MESSAGE
+};
+
+function isDriverMethod(method: PaymentMethod | undefined): boolean {
+	return undefined !== method && DRIVER_METHODS.includes(method);
 }
 
 // Only the whole deposit held, at pickup, with no active incident: anything else is the office's.
@@ -1930,15 +2042,14 @@ function driverRefundRefusal(order: PaymentState, amount: number): Refusal | nul
 async function linkOf(
 	db: D1Database,
 	order: Order,
-	payment: PaymentInput
-): Promise<Omit<LinkedMovement, 'form'> | Refusal> {
+	{ form, payment }: { form: unknown; payment: PaymentInput }
+): Promise<LinkedMovement | Refusal> {
 	const { concept } = payment;
 	const refusal = 'INSTALLMENT' === concept ? await installmentRefusal(db, order) : null;
 	if (null !== refusal) {
 		return refusal;
 	}
-	const retention =
-		'CANCELLATION_FEE' === concept ? await feeRetention(db, order, payment.fee_source) : undefined;
+	const retention = await retentionOf(db, order, payment);
 	if (undefined !== retention && 'ok' in retention) {
 		return retention;
 	}
@@ -1946,12 +2057,33 @@ async function linkOf(
 	if ('string' !== typeof payee) {
 		return payee;
 	}
-	return { concept, entityType: 'ORDER', entityId: order.id, payee, retention };
+	const description = 'DAMAGE_CHARGE' === concept ? (payment.description ?? undefined) : undefined;
+	return {
+		form: formOf(form, payment),
+		concept,
+		entityType: 'ORDER',
+		entityId: order.id,
+		payee,
+		description,
+		retention
+	};
+}
+
+async function retentionOf(
+	db: D1Database,
+	order: Order,
+	payment: PaymentInput
+): Promise<Retention | undefined | Refusal> {
+	if ('CANCELLATION_FEE' === payment.concept) {
+		return feeRetention(db, order, payment.fee_source);
+	}
+	return 'DAMAGE_CHARGE' === payment.concept ? damageRetention(db, order, payment) : undefined;
 }
 
 /**
  * What the office's payment entry offers: «Pago» while there's a balance and no cuenta de cobro, the
- * deposit while it isn't complete, and money out to the manager only, as a cancelled order's fee.
+ * deposit while it isn't complete, a damage charge while there's an active incident, and money out
+ * to the manager only, as a cancelled order's fee.
  * Whoever doesn't take orders, nothing: Despachos has its own entry. Empty, the entry isn't offered.
  */
 export function offeredPaymentConcepts(order: OrderDetail, actor: Actor): OrderPaymentConcept[] {
@@ -1963,7 +2095,8 @@ export function offeredPaymentConcepts(order: OrderDetail, actor: Actor): OrderP
 		INSTALLMENT_REFUND: canPayOut,
 		DEPOSIT_REFUND: canPayOut,
 		CARRIER_PAYMENT: canPayOut && 0 < carriersOf(order).length,
-		CANCELLATION_FEE: canPayOut && 'CANCELLED' === order.status
+		CANCELLATION_FEE: canPayOut && 'CANCELLED' === order.status,
+		DAMAGE_CHARGE: isOffice && order.hasIncident
 	};
 	return ORDER_PAYMENT_CONCEPTS.filter((concept) => offered[concept]);
 }
@@ -1999,8 +2132,8 @@ function isRefundHeldByIncident(order: PaymentState, actor: Actor): boolean {
 }
 
 /**
- * Despachos' payment entry, the same for every role: what's collected on the road and the whole
- * deposit back at pickup with no active incident, under what the service lets the login record,
+ * Despachos' payment entry, the same for every role: what's collected on the road, a damage
+ * charge while there's an active incident, and the whole deposit back at pickup with none, under what the service lets the login record,
  * in cash or by transfer. Empty, «Registrar pago» isn't shown.
  */
 export function getDespachosPaymentEntry(order: OrderDetail, actor: Actor): DespachosPaymentEntry {

@@ -8,6 +8,7 @@ import {
 	offeredPaymentConcepts,
 	recordOrderPayment
 } from '$lib/server/services/orders';
+import { listActiveIncidents } from '$lib/server/services/incidents';
 import type { Actions, PageServerLoad } from './$types';
 
 const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
@@ -32,6 +33,7 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 		order,
 		concepts,
 		options: await getPaymentOptions(db, order, locals.user),
+		activeIncidents: order.hasIncident ? await listActiveIncidents(db, order.id, locals.user) : [],
 		today: getTodaysDate()
 	};
 };

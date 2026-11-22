@@ -126,6 +126,12 @@
 			<span>Saldo</span><span>{formatPesos(order.balanceDue)}</span>
 		</li>
 	{/if}
+	<!-- Apart from the rental's Total and Saldo: what was charged for damaged or lost products. -->
+	{#if 0 !== order.damageCharged}
+		<li class="detail-list__row--plain">
+			<span>Cobrado por novedades</span><span>{formatBalance(order.damageCharged)}</span>
+		</li>
+	{/if}
 </ul>
 {#if isPaidOverTotal}
 	<p class="note credit-note">Pagó {formatPesos(credit)} más del total del pedido.</p>

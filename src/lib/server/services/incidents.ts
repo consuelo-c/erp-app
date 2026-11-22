@@ -301,6 +301,26 @@ function toIncident(row: IncidentRow): IncidentFacts {
 	};
 }
 
+/** What a «Cobro por novedad» charges for: an active incident's products and whose fault. */
+export type ActiveIncident = Pick<Incident, 'id' | 'items' | 'responsibleParty'>;
+
+/** An order's `ACTIVE` incidents, oldest first, for the payment entry's notice. */
+export async function listActiveIncidents(
+	db: D1Database,
+	orderId: number,
+	actor: Actor | null
+): Promise<ActiveIncident[]> {
+	requireRole(actor, ROLES);
+	const { results } = await db
+		.prepare("select * from incidents where order_id = ? and status = 'ACTIVE' order by id")
+		.bind(orderId)
+		.all<IncidentRow>();
+	return results.map((row) => {
+		const { id, items, responsibleParty } = toIncident(row);
+		return { id, items, responsibleParty };
+	});
+}
+
 /**
  * An order's incidents, newest first, read by every role: the order detail's and Despachos'
  * «Novedades». Each carries what the actor may do with it.

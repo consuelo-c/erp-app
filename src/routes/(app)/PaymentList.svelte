@@ -17,18 +17,28 @@
 		return `${resolve('/(app)/caja/comprobante')}?${query}`;
 	}
 
+	// A damage charge kept from the deposit and its retention read as one operation.
 	function paymentTitle(payment: Payment): string {
 		const concept = CASH_CONCEPT_LABELS[payment.concept];
+		if (null !== payment.pairedReceiptNumber) {
+			return `${concept} · ${'DAMAGE_CHARGE' === payment.concept ? 'del depósito' : 'retenido'}`;
+		}
 		return payment.orderId ? `${concept} · Pedido #${payment.orderId}` : concept;
 	}
 
-	// The method, and who a carrier payment went to: the client is the order's own.
+	// The method, and who a carrier payment went to: the client is the order's own. A charge kept
+	// from the deposit has no method, so it says what it's for; its retention, which charge it goes with.
 	function paymentMeta(payment: Payment): string {
-		const method = payment.otherMethod ?? PAYMENT_METHOD_LABELS[payment.method];
+		const day = formatLongDay(payment.movementDate);
+		if (null !== payment.pairedReceiptNumber && payment.amount < 0) {
+			return `${day} · va con el cobro # ${formatReceiptNumber(payment.pairedReceiptNumber)}`;
+		}
+		const method =
+			null === payment.pairedReceiptNumber
+				? (payment.otherMethod ?? PAYMENT_METHOD_LABELS[payment.method])
+				: payment.description;
 		const payee = 'CARRIER_PAYMENT' === payment.concept ? payment.payee : null;
-		return [formatLongDay(payment.movementDate), method, payee, receiptName(payment)]
-			.filter(Boolean)
-			.join(' · ');
+		return [day, method, payee, receiptName(payment)].filter(Boolean).join(' · ');
 	}
 
 	function receiptName(payment: Payment): string {

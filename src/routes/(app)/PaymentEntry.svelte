@@ -13,10 +13,24 @@
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import { formatInteger, formatPesos } from '$lib/format';
-	import { CASH_CONCEPT_LABELS, FEE_SOURCE_LABELS, PAYMENT_METHOD_LABELS } from '$lib/labels';
-	import { isOrderInflow, type FeeSource, type OrderPaymentConcept } from '$lib/orders';
+	import {
+		CASH_CONCEPT_LABELS,
+		FEE_SOURCE_LABELS,
+		INCIDENT_OUTCOME_LABELS,
+		PAYMENT_METHOD_LABELS,
+		RESPONSIBLE_PARTY_LABELS
+	} from '$lib/labels';
+	import {
+		DAMAGE_CHARGE_SOURCES,
+		FEE_SOURCES,
+		isOrderInflow,
+		RETAINED_FROM_DEPOSIT,
+		type FeeSource,
+		type OrderPaymentConcept
+	} from '$lib/orders';
 	import { parsePesos } from '$lib/payroll';
 	import type { PaymentMethod } from '$lib/server/services/cash';
+	import type { ActiveIncident } from '$lib/server/services/incidents';
 	import type { PayableCarrier } from '$lib/server/services/orders';
 
 	// The payment entry of an order, of a cuenta de cobro and of Despachos: a sheet over it, its own
@@ -51,6 +65,10 @@
 		amountLockNoteOf?: (concept: OrderPaymentConcept) => string | undefined;
 		/** What the confirmation warns about, without blocking. */
 		warningOf?: (concept: OrderPaymentConcept, amount: number) => string | null;
+		/** The order's active incidents, which a «Cobro por novedad» charges for. */
+		activeIncidents?: ActiveIncident[];
+		/** What «Retener del depósito» can keep, at most. */
+		depositHeld?: number;
 	};
 
 	let {
@@ -71,7 +89,9 @@
 		form,
 		pendingOf,
 		amountLockNoteOf,
-		warningOf
+		warningOf,
+		activeIncidents = [],
+		depositHeld = 0
 	}: Props = $props();
 
 	let entered = $state<FormData | null>(null);
@@ -82,7 +102,13 @@
 	const isInflow = $derived(isOrderInflow(concept));
 	const isCarrierPayment = $derived('CARRIER_PAYMENT' === concept);
 	const isFee = $derived('CANCELLATION_FEE' === concept);
+	const isDamageCharge = $derived('DAMAGE_CHARGE' === concept);
 	const feeSource = $derived(typed('fee_source', 'NEW') as FeeSource);
+	// Kept from the deposit, no money changes hands: no method.
+	const isRetained = $derived(isDamageCharge && 'DEPOSIT' === feeSource);
+	const sources: readonly FeeSource[] = $derived(
+		isDamageCharge ? DAMAGE_CHARGE_SOURCES : FEE_SOURCES
+	);
 	const method = $derived(typed('payment_method', initialMethod) as PaymentMethod);
 	const amountLockNote = $derived(amountLockNoteOf?.(concept));
 	const trip = $derived(typed('trip', carriers[0]?.trip ?? ''));
@@ -91,6 +117,23 @@
 	const amount = $derived(parsePesos(typed('amount', '')));
 	const pending = $derived(pendingOf(concept));
 	const warning = $derived(warningOf?.(concept, amount) ?? null);
+	const overDeposit = $derived(
+		isRetained && amount > depositHeld
+			? `Supera el depósito recibido (${formatPesos(depositHeld)}). Cobra el resto con «Dinero nuevo».`
+			: null
+	);
+
+	// «6 × Silla Tiffany dorada · Perdido · Responsable: Cliente», each active incident in turn.
+	function describeIncident(incident: ActiveIncident): string {
+		const items = incident.items.map(
+			(item) => `${item.qty} × ${item.name} · ${INCIDENT_OUTCOME_LABELS[item.outcome]}`
+		);
+		return `${items.join(', ')} · Responsable: ${RESPONSIBLE_PARTY_LABELS[incident.responsibleParty]}`;
+	}
+
+	const incidentsNotice = $derived(
+		`${1 < activeIncidents.length ? 'Novedades activas' : 'Novedad activa'}: ${activeIncidents.map(describeIncident).join('; ')}.`
+	);
 
 	// A refund goes to the client's account, a carrier payment to the carrier's.
 	const savedAccount = $derived(isCarrierPayment ? carrier.bankAccount : clientBankAccount);
@@ -101,14 +144,16 @@
 	);
 
 	const methodOptions = $derived(methods.map((value) => [value, PAYMENT_METHOD_LABELS[value]]));
-	const FEE_SOURCE_OPTIONS = Object.entries(FEE_SOURCE_LABELS);
 	const TRIP_LABELS = { DELIVERY: 'Entrega', PICKUP: 'Retorno' };
 
-	const methodLabel = $derived(
-		'OTHER' === method
+	const methodLabel = $derived.by(() => {
+		if (isRetained) {
+			return RETAINED_FROM_DEPOSIT;
+		}
+		return 'OTHER' === method
 			? typed('other_method', '') || PAYMENT_METHOD_LABELS.OTHER
-			: PAYMENT_METHOD_LABELS[method]
-	);
+			: PAYMENT_METHOD_LABELS[method];
+	});
 
 	let isConfirmOpen = $state(false);
 
@@ -163,12 +208,27 @@
 			{#if notice}
 				<Notice tone="info">{notice}</Notice>
 			{/if}
+			{#if isDamageCharge && 0 < activeIncidents.length}
+				<Notice tone="info">{incidentsNotice}</Notice>
+			{/if}
 
 			<!-- New money, or kept from what the order holds: then a refund from that side goes with it. -->
-			{#if isFee}
-				<Choice legend="¿De dónde sale?" layout="stack">
-					{#each FEE_SOURCE_OPTIONS as [value, label] (value)}
-						<Chip type="radio" name="fee_source" {value} {label} checked={value === feeSource} />
+			{#if isFee || isDamageCharge}
+				<Choice
+					legend="¿De dónde sale?"
+					layout="stack"
+					hint={isRetained
+						? `Se queda con parte del depósito recibido (${formatPesos(depositHeld)}): el depósito baja y lo retenido pasa a ser ingreso.`
+						: undefined}
+				>
+					{#each sources as value (value)}
+						<Chip
+							type="radio"
+							name="fee_source"
+							{value}
+							label={FEE_SOURCE_LABELS[value]}
+							checked={value === feeSource}
+						/>
 					{/each}
 				</Choice>
 			{/if}
@@ -188,13 +248,15 @@
 				</Choice>
 			{/if}
 
-			<Choice legend="Método" hint={methodHintOf?.(method)}>
-				{#each methodOptions as [value, label] (value)}
-					<Chip type="radio" name="payment_method" {value} {label} checked={value === method} />
-				{/each}
-			</Choice>
+			{#if !isRetained}
+				<Choice legend="Método" hint={methodHintOf?.(method)}>
+					{#each methodOptions as [value, label] (value)}
+						<Chip type="radio" name="payment_method" {value} {label} checked={value === method} />
+					{/each}
+				</Choice>
+			{/if}
 
-			{#if 'OTHER' === method}
+			{#if 'OTHER' === method && !isRetained}
 				<Field label="¿Cuál medio de pago?" id="other_method" error={errorOf('other_method')}>
 					<Input
 						id="other_method"
@@ -214,7 +276,7 @@
 			{/if}
 
 			<!-- The bank an inflow came into, optional; the account an outflow was paid to, pre-filled. -->
-			{#if 'TRANSFER' === method}
+			{#if 'TRANSFER' === method && !isRetained}
 				<Field
 					label={isInflow ? 'Información bancaria (opcional)' : 'Cuenta de destino'}
 					id="bank_account"
@@ -228,6 +290,22 @@
 						value={isInflow ? undefined : (savedAccount ?? undefined)}
 						required={!isInflow}
 						aria-invalid={undefined !== errorOf('bank_account')}
+					/>
+				</Field>
+			{/if}
+
+			{#if isDamageCharge}
+				<Field
+					label="Descripción"
+					id="description"
+					hint="Qué se cobra. Un cobro puede cubrir varias novedades."
+					error={errorOf('description')}
+				>
+					<Input
+						id="description"
+						name="description"
+						required
+						aria-invalid={undefined !== errorOf('description')}
 					/>
 				</Field>
 			{/if}
@@ -256,6 +334,9 @@
 					/>
 				</Field>
 			</div>
+			{#if overDeposit}
+				<Notice tone="warning">{overDeposit}</Notice>
+			{/if}
 
 			<Field label="Notas (opcional)" id="notes">
 				<Input id="notes" name="notes" placeholder={notesPlaceholder} />
@@ -273,7 +354,9 @@
 		{/if}
 
 		<div class="screen__action">
-			<Button type="button" disabled={isOffline} onclick={askToConfirm}>Guardar pago</Button>
+			<Button type="button" disabled={isOffline || null !== overDeposit} onclick={askToConfirm}>
+				Guardar pago
+			</Button>
 		</div>
 	</form>
 </Screen>
@@ -287,7 +370,7 @@
 		<li class="detail-list__row--plain">
 			<span>Concepto</span><span>{CASH_CONCEPT_LABELS[concept]}</span>
 		</li>
-		{#if isFee}
+		{#if isFee || isDamageCharge}
 			<li class="detail-list__row--plain">
 				<span>De dónde sale</span><span>{FEE_SOURCE_LABELS[feeSource]}</span>
 			</li>

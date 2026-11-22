@@ -129,6 +129,7 @@ test("the load sends neither the client's phone nor username: its keys, listed",
 			'depositHeld',
 			'paid',
 			'balanceDue',
+			'damageCharged',
 			'owedToClient',
 			'receivableId',
 			'receivableBalance'
