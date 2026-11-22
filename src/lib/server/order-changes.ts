@@ -4,7 +4,7 @@
 
 import { formatCivilDate, formatClockTime } from '$lib/datetime';
 import { formatInteger, formatPesos } from '$lib/format';
-import { DELIVERY_METHOD_LABELS, RETURN_METHOD_LABELS } from '$lib/labels';
+import { DELIVERY_METHOD_LABELS, RETURN_METHOD_LABELS, TRANSPORTED_BY_LABELS } from '$lib/labels';
 import { formatPhone } from '$lib/phone';
 import { formatWhatsapp } from '$lib/whatsapp';
 import type {
@@ -16,6 +16,7 @@ import type {
 	OrderItem,
 	PickupAttributes
 } from './services/orders';
+import type { TransportedBy } from '$lib/quotes';
 import type { QuoteAttributes, QuoteEditedFields } from './services/quotes';
 
 /** One row of an edit's diff: «Transporte», «$150.000 → $180.000». */
@@ -165,11 +166,21 @@ const QUOTE_PLACE_FIELDS: Fields<Pick<QuoteAttributes, 'address_1' | 'address_2'
 	address_2: { label: 'Lugar del evento, segunda línea', format: text }
 };
 
+const QUOTE_TRANSPORT_FIELDS: Fields<Pick<QuoteEditedFields, 'transported_by'>> = {
+	transported_by: {
+		label: 'Quién transporta',
+		format: orBlank((value: TransportedBy) => TRANSPORTED_BY_LABELS[value])
+	}
+};
+
 const QUOTE_NOTES_FIELDS: Fields<Pick<QuoteAttributes, 'notes'>> = {
 	notes: { label: 'Notas', format: text }
 };
 
-/** A quote's `EDITED` event's diff, in its form's order: client, dates, place, lines, money, notes. */
+/**
+ * A quote's `EDITED` event's diff, in its form's order: client, dates, place, who transports, lines,
+ * money, notes.
+ */
 export function describeQuoteEdit(
 	before: QuoteEditedFields,
 	after: QuoteEditedFields
@@ -178,6 +189,7 @@ export function describeQuoteEdit(
 		...columnChanges(CLIENT_FIELDS, before.client_attributes, after.client_attributes),
 		...changesOf(QUOTE_SCHEDULE_FIELDS, before, after),
 		...columnChanges(QUOTE_PLACE_FIELDS, before.attributes, after.attributes),
+		...changesOf(QUOTE_TRANSPORT_FIELDS, before, after),
 		...lineChanges(before.quote_items, after.quote_items),
 		...changesOf(QUOTE_MONEY_FIELDS, before, after),
 		...columnChanges(QUOTE_NOTES_FIELDS, before.attributes, after.attributes)

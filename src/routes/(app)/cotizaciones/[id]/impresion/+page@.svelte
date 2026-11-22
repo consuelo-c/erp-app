@@ -2,6 +2,7 @@
 	import { resolve } from '$app/paths';
 	import { formatLongDay, getInstantDate } from '$lib/datetime';
 	import { formatPesos } from '$lib/format';
+	import { CLIENT_TRANSPORTED_BY_LABELS } from '$lib/labels';
 	import { printedContact } from '$lib/whatsapp';
 	import HalfLetterPrintout from '../../../pedidos/HalfLetterPrintout.svelte';
 	import type { PageProps } from './$types';
@@ -48,6 +49,9 @@
 				</span>
 			</div>
 		{/if}
+		<div class="print-row">
+			<span>Entrega</span><span>{CLIENT_TRANSPORTED_BY_LABELS[quote.transportedBy]}</span>
+		</div>
 		<div class="print-row"><span>Días cobrados</span><span>{quote.rentalDays}</span></div>
 	</div>
 {/snippet}

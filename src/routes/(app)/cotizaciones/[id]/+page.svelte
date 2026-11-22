@@ -9,7 +9,7 @@
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import { formatLongDay, getInstantDate } from '$lib/datetime';
 	import { formatPesos, formatShare } from '$lib/format';
-	import { QUOTE_STATE_LABELS } from '$lib/labels';
+	import { QUOTE_STATE_LABELS, TRANSPORTED_BY_LABELS } from '$lib/labels';
 	import ReachLines from '../../ReachLines.svelte';
 	import type { PageProps } from './$types';
 
@@ -110,6 +110,9 @@
 				</span>
 			</li>
 		{/if}
+		<li class="detail-list__row--plain">
+			<span>Quién transporta</span><span>{TRANSPORTED_BY_LABELS[quote.transportedBy]}</span>
+		</li>
 		<li class="detail-list__row--plain">
 			<span>Días cobrados</span><span>{quote.rentalDays}</span>
 		</li>

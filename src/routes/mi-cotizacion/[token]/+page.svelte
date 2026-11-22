@@ -2,6 +2,7 @@
 	import Button from '$lib/components/Button.svelte';
 	import { formatLongDay } from '$lib/datetime';
 	import { formatPesos } from '$lib/format';
+	import { CLIENT_TRANSPORTED_BY_LABELS } from '$lib/labels';
 	import type { PageProps } from './$types';
 
 	// «Su cotización»: the quote as the client holds it on paper, read-only, with the printout's
@@ -27,23 +28,24 @@
 	<li><span>Válida hasta</span><span>{formatLongDay(quote.validUntil)}</span></li>
 </ul>
 
-{#if quote.eventDate || quote.address1}
-	<h2 class="section-title">Evento</h2>
-	<ul class="detail-list">
-		{#if quote.eventDate}
-			<li><span>Fecha del evento</span><span>{formatLongDay(quote.eventDate)}</span></li>
-		{/if}
-		{#if quote.address1}
-			<li class="detail-list__row--plain">
-				<span>Lugar del evento</span>
-				<span>
-					{quote.address1}
-					{#if quote.address2}<span class="meta">{quote.address2}</span>{/if}
-				</span>
-			</li>
-		{/if}
-	</ul>
-{/if}
+<h2 class="section-title">Evento</h2>
+<ul class="detail-list">
+	{#if quote.eventDate}
+		<li><span>Fecha del evento</span><span>{formatLongDay(quote.eventDate)}</span></li>
+	{/if}
+	{#if quote.address1}
+		<li class="detail-list__row--plain">
+			<span>Lugar del evento</span>
+			<span>
+				{quote.address1}
+				{#if quote.address2}<span class="meta">{quote.address2}</span>{/if}
+			</span>
+		</li>
+	{/if}
+	<li class="detail-list__row--plain">
+		<span>Entrega</span><span>{CLIENT_TRANSPORTED_BY_LABELS[quote.transportedBy]}</span>
+	</li>
+</ul>
 
 <h2 class="section-title">Productos ({quote.items.length})</h2>
 <p class="meta rental-days">Días cobrados: {quote.rentalDays}</p>

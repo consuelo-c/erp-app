@@ -1,7 +1,13 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { getTodaysDate } from './datetime';
-import { QUOTE_STATE_LABELS } from './labels';
-import { describeConversionGaps, describeRemovedProducts, getQuoteState } from './quotes';
+import { CLIENT_TRANSPORTED_BY_LABELS, QUOTE_STATE_LABELS, TRANSPORTED_BY_LABELS } from './labels';
+import {
+	describeConversionGaps,
+	describeRemovedProducts,
+	getQuoteState,
+	toOrderMethods,
+	transportedByOf
+} from './quotes';
 
 afterEach(() => {
 	vi.useRealTimers();
@@ -41,18 +47,43 @@ test('«Duplicar» names the inactive products it left out: one, or how many, in
 	);
 });
 
-test('«Convertir en pedido» says the trips come from the event date, or that the dates are missing', () => {
+test('«Convertir en pedido» says the trips come from the event date, or that the dates are missing; the methods come from the quote', () => {
 	const dated = { eventDate: '2026-12-12', transportCost: 180000 };
 	expect(describeConversionGaps(dated)).toBe(
-		'el descuento, el transporte y las notas. La entrega y la recogida salen de la fecha del evento; faltan las horas y los métodos.'
+		'el descuento, el transporte y las notas. La entrega y la recogida salen de la fecha del evento; faltan las horas.'
 	);
 	expect(describeConversionGaps({ ...dated, transportCost: null })).toBe(
-		'el descuento y las notas. La entrega y la recogida salen de la fecha del evento; faltan las horas, los métodos y el transporte.'
+		'el descuento y las notas. La entrega y la recogida salen de la fecha del evento; faltan las horas y el transporte.'
 	);
 	expect(describeConversionGaps({ ...dated, eventDate: null })).toBe(
-		'el descuento, el transporte y las notas. Faltan las fechas y los métodos.'
+		'el descuento, el transporte y las notas. Faltan las fechas.'
 	);
 	expect(describeConversionGaps({ eventDate: null, transportCost: null })).toBe(
-		'el descuento y las notas. Faltan las fechas, los métodos y el transporte.'
+		'el descuento y las notas. Faltan las fechas y el transporte.'
 	);
+});
+
+test('«Convertir en pedido» fills both methods from who transports', () => {
+	expect(toOrderMethods('COMPANY')).toEqual({
+		deliveryMethod: 'COMPANY_DELIVERY',
+		returnMethod: 'COMPANY_PICKUP'
+	});
+	expect(toOrderMethods('CLIENT')).toEqual({
+		deliveryMethod: 'CLIENT_PICKUP',
+		returnMethod: 'CLIENT_RETURN'
+	});
+});
+
+test('«Cotizar de nuevo» reads who transports from the delivery method: only a client pickup is the client', () => {
+	expect(transportedByOf('CLIENT_PICKUP')).toBe('CLIENT');
+	expect(transportedByOf('COMPANY_DELIVERY')).toBe('COMPANY');
+	expect(transportedByOf('EXTERNAL_CARRIER')).toBe('COMPANY');
+});
+
+test('who transports reaches the screen through its labels, for staff and for the client', () => {
+	expect(TRANSPORTED_BY_LABELS).toEqual({ COMPANY: 'La empresa', CLIENT: 'El cliente' });
+	expect(CLIENT_TRANSPORTED_BY_LABELS).toEqual({
+		COMPANY: 'Entrega y recogida en su evento',
+		CLIENT: 'Recoge y devuelve en la bodega'
+	});
 });

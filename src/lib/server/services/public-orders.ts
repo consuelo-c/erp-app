@@ -3,6 +3,7 @@
 // isn't a login, and reads aren't logged.
 
 import { addDays, getInstantDate, getTodaysDate } from '$lib/datetime';
+import type { TransportedBy } from '$lib/quotes';
 import { publicTokenSchema } from '../public-token';
 import {
 	BALANCE_DUE_SQL,
@@ -178,6 +179,8 @@ export type PublicQuote = {
 	discount: number;
 	/** Null is «por acordar»: the total leaves it out. */
 	transportCost: number | null;
+	/** «Entrega»: who moves the products both ways. */
+	transportedBy: TransportedBy;
 	quoteTotal: number;
 	notes: string | null;
 };
@@ -204,7 +207,7 @@ export async function getPublicQuote(db: D1Database, token: unknown): Promise<Pu
 		return null;
 	}
 	const { id, validUntil, eventDate, address1, address2, rentalDays, notes } = quote;
-	const { itemsTotal, discount, transportCost, quoteTotal } = quote;
+	const { itemsTotal, discount, transportCost, transportedBy, quoteTotal } = quote;
 	return {
 		id,
 		createdOn: getInstantDate(quote.createdAt),
@@ -223,6 +226,7 @@ export async function getPublicQuote(db: D1Database, token: unknown): Promise<Pu
 		itemsTotal,
 		discount,
 		transportCost,
+		transportedBy,
 		quoteTotal,
 		notes
 	};

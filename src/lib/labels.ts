@@ -18,7 +18,7 @@ import type {
 } from './server/services/orders';
 import type { Category } from './server/services/products';
 import type { QuoteStateFilter } from './server/services/quotes';
-import type { QuoteState } from './quotes';
+import type { QuoteState, TransportedBy } from './quotes';
 import type { Punch } from './server/services/timesheets';
 
 export const ROLE_LABELS: Record<Role, string> = {
@@ -94,6 +94,18 @@ export const CLIENT_RETURN_METHOD_LABELS: Record<ReturnMethod, string> = {
 	COMPANY_PICKUP: 'Recogida en su evento',
 	CLIENT_RETURN: 'Devuelve en la bodega',
 	EXTERNAL_CARRIER: 'Recogida en su evento'
+};
+
+// «Quién transporta» on the quote, for staff.
+export const TRANSPORTED_BY_LABELS: Record<TransportedBy, string> = {
+	COMPANY: 'La empresa',
+	CLIENT: 'El cliente'
+};
+
+// The quote's «Entrega» row, as the client reads it on the printout and their page.
+export const CLIENT_TRANSPORTED_BY_LABELS: Record<TransportedBy, string> = {
+	COMPANY: 'Entrega y recogida en su evento',
+	CLIENT: 'Recoge y devuelve en la bodega'
 };
 
 export const DELIVERY_PERIOD_LABELS: Record<DeliveryPeriod, string> = {

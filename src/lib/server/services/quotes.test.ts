@@ -605,6 +605,20 @@ test('an edit opens into its changes: Spanish labels, «Sin fecha», «Por acord
 	expect(await getQuoteChange(db, { quote: 99, event: edited.id }, sales)).toBeNull();
 });
 
+test('an edit of «Quién transporta» opens into its change, after the place', async () => {
+	const id = await create();
+	const edit = { ...quote1043, id, address_2: null, transported_by: 'CLIENT' };
+	await updateQuote(db, edit, sales);
+	const [edited] = database.prepare("select id from events where action = 'EDITED'").all();
+	expect(await getQuoteChange(db, { quote: id, event: edited.id }, sales)).toEqual([
+		{
+			label: 'Lugar del evento, segunda línea',
+			change: 'Salón Social Torre Verde, piso 2 → —'
+		},
+		{ label: 'Quién transporta', change: 'La empresa → El cliente' }
+	]);
+});
+
 test('WAREHOUSE and DRIVER get a 403 on the detail, the timeline and an edit’s changes', async () => {
 	const id = await create();
 	for (const actor of [warehouse, driver]) {
@@ -705,6 +719,7 @@ function draftInput(draft: QuoteDraft) {
 		})),
 		discount: draft.discount,
 		transport_cost: draft.transportCost,
+		transported_by: draft.transportedBy,
 		address_1: draft.address1,
 		address_2: draft.address2,
 		notes: draft.notes
@@ -986,6 +1001,7 @@ test('«Cotizar de nuevo» fills the quote from the order at today’s prices, i
 				rentalDays: 2,
 				discount: 50000,
 				transportCost: 90000,
+				transportedBy: 'COMPANY',
 				notes: 'Entrar por el portón de servicio',
 				items: [
 					{
@@ -1072,4 +1088,66 @@ test('WAREHOUSE and DRIVER get a 403 on the printout', async () => {
 		const refusal = await getQuotePrintout(db, id, actor).catch((caught) => caught);
 		expect(isHttpError(refusal, 403)).toBe(true);
 	}
+});
+
+test('«Quién transporta» is saved and edited; left out, a new quote is the company; it never touches transport', async () => {
+	const pending = await create({ ...quote1043, transport_cost: null, transported_by: 'CLIENT' });
+	expect(await read(pending)).toMatchObject({ transportedBy: 'CLIENT', transportCost: null });
+	const edit = { ...quote1043, id: pending, transport_cost: null, transported_by: 'COMPANY' };
+	expect(await updateQuote(db, edit, sales)).toMatchObject({ ok: true });
+	expect(await read(pending)).toMatchObject({ transportedBy: 'COMPANY', transportCost: null });
+	const free = await create({ ...quote1043, transport_cost: 0, transported_by: 'CLIENT' });
+	expect(await read(free)).toMatchObject({ transportedBy: 'CLIENT', transportCost: 0 });
+	expect((await read(await create())).transportedBy).toBe('COMPANY');
+});
+
+test('«Quién transporta» is required: empty or anything but the company or the client fails on its field', async () => {
+	for (const transportedBy of [null, '', 'EXTERNAL_CARRIER']) {
+		const result = await createQuote(db, { ...quote1043, transported_by: transportedBy }, sales);
+		expect(errorsOf(result)).toEqual({ transported_by: 'Escoge quién transporta' });
+	}
+});
+
+test('a quote saved before «Quién transporta» existed reads as the company', async () => {
+	database.exec(
+		`insert into quotes (public_token, client_id, valid_until, rental_days, client_attributes,
+		quote_items, items_total, quote_total, created_at, created_by, updated_at, updated_by)
+		values ('legacyquote01', ${LUZ_MARINA}, '2026-12-01', 1,
+		'{"name":"Luz Marina Restrepo","phone":"573104428890","whatsapp":null}',
+		'[{"product_id":1,"name":"Silla Tiffany dorada","qty":10,"list_price":2500,"unit_price":2500,"line_total":25000}]',
+		25000, 25000, ${AUDIT})`
+	);
+	expect((await read(1)).transportedBy).toBe('COMPANY');
+});
+
+test('«Duplicar» copies who transports', async () => {
+	const id = await create({ ...quote1043, transported_by: 'CLIENT' });
+	expect((await getQuoteDuplicate(db, id, sales))?.draft.transportedBy).toBe('CLIENT');
+});
+
+test('«Cotizar de nuevo» reads who transports from the delivery method: a client pickup is the client', async () => {
+	const pickedUp = await convert(await create(), {
+		delivery_attributes: { address_1: quote1043.address_1, method: 'CLIENT_PICKUP' },
+		pickup_attributes: { address_1: quote1043.address_1, method: 'COMPANY_PICKUP' }
+	});
+	expect((await getOrderRequote(db, pickedUp, sales))?.draft.transportedBy).toBe('CLIENT');
+	const mixed = await convert(await create(), {
+		pickup_attributes: { address_1: quote1043.address_1, method: 'CLIENT_RETURN' }
+	});
+	expect((await getOrderRequote(db, mixed, sales))?.draft.transportedBy).toBe('COMPANY');
+});
+
+test('«Convertir en pedido» fills both methods from who transports; the order keeps no copy of it', async () => {
+	const byClient = await create({ ...quote1043, transported_by: 'CLIENT' });
+	expect((await getQuoteConversion(db, byClient, sales))?.methods).toEqual({
+		deliveryMethod: 'CLIENT_PICKUP',
+		returnMethod: 'CLIENT_RETURN'
+	});
+	const byCompany = await create();
+	expect((await getQuoteConversion(db, byCompany, sales))?.methods).toEqual({
+		deliveryMethod: 'COMPANY_DELIVERY',
+		returnMethod: 'COMPANY_PICKUP'
+	});
+	const orderId = await convert(byClient);
+	expect(JSON.stringify(await getOrder(db, orderId, sales))).not.toContain('transported');
 });

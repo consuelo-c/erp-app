@@ -2,13 +2,16 @@
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import Button from '$lib/components/Button.svelte';
+	import Chip from '$lib/components/Chip.svelte';
+	import Choice from '$lib/components/Choice.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import Input from '$lib/components/Input.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import { formatPesos } from '$lib/format';
+	import { TRANSPORTED_BY_LABELS } from '$lib/labels';
 	import { calculateOrderTotals } from '$lib/orders';
-	import { describeRemovedProducts } from '$lib/quotes';
+	import { describeRemovedProducts, TRANSPORTED_BY, type TransportedBy } from '$lib/quotes';
 	import { parsePesos, parseQuantity } from '$lib/payroll';
 	import { formatPhone } from '$lib/phone';
 	import { formatWhatsapp } from '$lib/whatsapp';
@@ -24,8 +27,8 @@
 	import OrderLines, { toFormLine, type FormLine } from '../pedidos/OrderLines.svelte';
 	import OrderTotals from '../pedidos/OrderTotals.svelte';
 
-	// The order form's single screen without what a quote doesn't have: no trips, no methods, no
-	// carrier, no deposit, no payments, and no availability or holiday warnings. Posted as one JSON
+	// The order form's single screen without what a quote doesn't have: no trips, no methods (only
+	// who transports), no carrier, no deposit, no payments, and no availability or holiday warnings. Posted as one JSON
 	// field; the server validates it and works the totals out again.
 	interface Props {
 		options: QuoteFormOptions;
@@ -57,6 +60,7 @@
 		validUntil: string;
 		address1: string;
 		address2: string;
+		transportedBy: TransportedBy;
 		rentalDays: string;
 		lines: FormLine[];
 		discount: string;
@@ -90,6 +94,7 @@
 			validUntil,
 			address1: saved.address1 ?? '',
 			address2: saved.address2 ?? '',
+			transportedBy: saved.transportedBy,
 			rentalDays: String(saved.rentalDays),
 			lines: saved.items.map(toFormLine),
 			discount: 0 === saved.discount ? '' : formatPesos(saved.discount),
@@ -117,6 +122,7 @@
 			validUntil: options.validUntil,
 			address1: '',
 			address2: '',
+			transportedBy: 'COMPANY',
 			rentalDays: '1',
 			lines: [],
 			discount: '',
@@ -136,6 +142,7 @@
 	let validUntil = $state(fields.validUntil);
 	let address1 = $state(fields.address1);
 	let address2 = $state(fields.address2);
+	let transportedBy = $state(fields.transportedBy);
 	let rentalDays = $state(fields.rentalDays);
 	let lines = $state(fields.lines);
 	let discount = $state(fields.discount);
@@ -175,6 +182,7 @@
 			valid_until: validUntil,
 			address_1: address1,
 			address_2: address2,
+			transported_by: transportedBy,
 			rental_days: numberOrNull(rentalDays),
 			quote_items: lines.map((line) => ({
 				product_id: line.productId,
@@ -351,6 +359,23 @@
 				/>
 			</div>
 		</Field>
+
+		<!-- Who moves the products, apart from what «Transporte» charges for it. -->
+		<Choice
+			legend="Quién transporta"
+			hint="La empresa entrega y recoge en el evento. El cliente recoge y devuelve en la bodega."
+		>
+			{#each TRANSPORTED_BY as option (option)}
+				<Chip
+					type="radio"
+					name="transported_by"
+					value={option}
+					label={TRANSPORTED_BY_LABELS[option]}
+					checked={option === transportedBy}
+					onchange={() => (transportedBy = option)}
+				/>
+			{/each}
+		</Choice>
 
 		<div class="field--narrow">
 			<Field label="Días cobrados" id="rental-days" error={errorOf('rental_days')}>

@@ -286,13 +286,16 @@ export const quotes = sqliteTable(
 		itemsTotal: integer('items_total').notNull(),
 		discount: integer('discount').notNull().default(0),
 		transportCost: integer('transport_cost'), // NULL is «por acordar»; 0 is a real price
+		// «Quién transporta», both ways; apart from the cost. The default backfills older quotes.
+		transportedBy: text('transported_by').notNull().default('COMPANY'),
 		quoteTotal: integer('quote_total').notNull(),
 		attributes: text('attributes').notNull().default('{}'), // JSON: the event's address, notes
 		...auditColumns
 	},
 	(table) => [
 		index('quotes_client_id').on(table.clientId),
-		index('quotes_valid_until').on(table.validUntil)
+		index('quotes_valid_until').on(table.validUntil),
+		check('quotes_transported_by', sql`${table.transportedBy} IN ('COMPANY', 'CLIENT')`)
 	]
 );
 
