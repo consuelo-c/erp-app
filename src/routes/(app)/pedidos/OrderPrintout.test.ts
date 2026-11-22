@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { render } from 'svelte/server';
-import { beforeAll, expect, test } from 'vitest';
+import { beforeAll, expect, test, vi } from 'vitest';
 import type { Actor } from '$lib/server/actor';
 import { createMemoryD1 } from '$lib/server/db/memory-d1';
 import { createOrder } from '$lib/server/db/test-orders';
@@ -10,7 +10,14 @@ import {
 	type OrderPrintout as Printout,
 	type OrderStatus
 } from '$lib/server/services/orders';
+import DispatchPrintoutPage from '../despachos/[id]/impresion/+page@.svelte';
 import OrderPrintout from './OrderPrintout.svelte';
+
+// The dispatch printout's back link keeps the detail's query.
+const state = vi.hoisted(() => ({
+	page: { url: new URL('http://localhost/despachos/1/impresion') }
+}));
+vi.mock('$app/state', () => state);
 
 const AUDIT = "0, 'admin', 0, 'admin'";
 const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
@@ -184,4 +191,14 @@ test('the sheet is titled «Remisión #NN», not «Pedido #NN»', () => {
 	const body = sheetOf(printout);
 	expect(body).toContain(`Remisión #${printout.order.id}`);
 	expect(body).not.toContain(`Pedido #${printout.order.id}`);
+});
+
+test('the sheets print on a portrait letter page with no margin', () => {
+	const { head } = render(OrderPrintout, { props: { printout, backHref: '/pedidos/1' } });
+	expect(head).toMatch(/@page\s*\{\s*size:\s*letter;\s*margin:\s*0;?\s*\}/);
+});
+
+test('the dispatch sheets print on a portrait letter page with no margin', () => {
+	const { head } = render(DispatchPrintoutPage, { props: { data: { printout } } as never });
+	expect(head).toMatch(/@page\s*\{\s*size:\s*letter;\s*margin:\s*0;?\s*\}/);
 });
