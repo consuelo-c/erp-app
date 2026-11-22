@@ -7,7 +7,17 @@
 import { z } from 'zod';
 import { addDays, getInstantDate, getTodaysDate } from '$lib/datetime';
 import { calculateOrderTotals, type OrderTotals, type PricedLine } from '$lib/orders';
-import { getQuoteState, QUOTE_STATE_SQL, QUOTE_STATES, type QuoteState } from '$lib/quotes';
+import {
+	getQuoteState,
+	QUOTE_STATE_SQL,
+	QUOTE_STATES,
+	toOrderMethods,
+	TRANSPORTED_BY,
+	transportedByOf,
+	type OrderMethods,
+	type QuoteState,
+	type TransportedBy
+} from '$lib/quotes';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, eventFieldsSchema } from '../audit';
 import { describeQuoteEdit, type OrderChange } from '../order-changes';
@@ -92,6 +102,8 @@ const quoteInputSchema = z
 		quote_items: linesInputSchema,
 		discount: pesosInputSchema('Escribe el descuento en pesos'),
 		transport_cost: transportInputSchema.nullable().default(null),
+		// Never tied to the transport cost: «por acordar» and 0 keep their meaning either way.
+		transported_by: z.enum(TRANSPORTED_BY, 'Escoge quién transporta').default('COMPANY'),
 		address_1: blankable,
 		address_2: blankable,
 		notes: blankable
@@ -132,6 +144,7 @@ export type Quote = {
 	discount: number;
 	/** Null is «por acordar». */
 	transportCost: number | null;
+	transportedBy: TransportedBy;
 	quoteTotal: number;
 	address1: string | null;
 	address2: string | null;
@@ -149,6 +162,7 @@ type Columns = {
 	items_total: number;
 	discount: number;
 	transport_cost: number | null;
+	transported_by: TransportedBy;
 	quote_total: number;
 	attributes: string;
 };
@@ -161,7 +175,8 @@ export type QuoteRow = Omit<Columns, 'client_id'> & {
 };
 
 export const SELECT_QUOTE = `select id, client_id, order_id, event_date, valid_until, rental_days,
-	client_attributes, quote_items, items_total, discount, transport_cost, quote_total, attributes,
+	client_attributes, quote_items, items_total, discount, transport_cost, transported_by, quote_total,
+	attributes,
 	created_at from quotes`;
 
 export function toQuote(row: QuoteRow): Quote {
@@ -180,6 +195,7 @@ export function toQuote(row: QuoteRow): Quote {
 		itemsTotal: row.items_total,
 		discount: row.discount,
 		transportCost: row.transport_cost,
+		transportedBy: z.enum(TRANSPORTED_BY).parse(row.transported_by),
 		quoteTotal: row.quote_total,
 		address1: attributes.address_1 ?? null,
 		address2: attributes.address_2 ?? null,
@@ -257,6 +273,7 @@ function toColumns(quote: QuoteInput, resolved: { client: ClientAttributes; item
 		items_total: itemsTotal,
 		discount: quote.discount,
 		transport_cost: quote.transport_cost,
+		transported_by: quote.transported_by,
 		quote_total: orderTotal,
 		attributes: JSON.stringify(quoteAttributesSchema.parse(attributes))
 	} satisfies Columns;
@@ -562,6 +579,7 @@ const editedFieldsSchema = z.object({
 	rental_days: z.number().int().optional(),
 	discount: z.number().int().optional(),
 	transport_cost: z.number().int().nullable().optional(),
+	transported_by: z.enum(TRANSPORTED_BY).optional(),
 	client_attributes: jsonColumn(clientAttributesSchema),
 	quote_items: jsonColumn(orderItemsSchema),
 	attributes: jsonColumn(quoteAttributesSchema)
@@ -609,6 +627,7 @@ export type QuoteDraft = Pick<
 	| 'items'
 	| 'discount'
 	| 'transportCost'
+	| 'transportedBy'
 	| 'notes'
 >;
 
@@ -689,7 +708,8 @@ export async function getQuoteDuplicate(
 		discount,
 		transportCost
 	};
-	const fresh = await freshDraft(db, { ...terms, notes: quote.notes });
+	const { notes, transportedBy } = quote;
+	const fresh = await freshDraft(db, { ...terms, notes, transportedBy });
 	return { source: { kind: 'QUOTE', id: quote.id }, ...fresh };
 }
 
@@ -711,15 +731,22 @@ export async function getOrderRequote(
 	const { clientId, client, rentalDays, items, discount, transportCost, notes } = order;
 	const { address_1: address1, address_2: address2 } = order.delivery;
 	const terms = { clientId, client, address1, address2, rentalDays, items, discount, notes };
-	const fresh = await freshDraft(db, { ...terms, transportCost });
+	const transportedBy = transportedByOf(order.delivery.method);
+	const fresh = await freshDraft(db, { ...terms, transportCost, transportedBy });
 	return { source: { kind: 'ORDER', id: order.id }, ...fresh };
 }
 
 /**
  * «Convertir en pedido»: the quote, and its client as the contact is today, for the order form;
- * the holidays' dates, which the trips' default dates skip.
+ * the trips' methods «Quién transporta» starts them with, still editable; the holidays' dates,
+ * which the trips' default dates skip.
  */
-export type QuoteConversion = { quote: Quote; client: ClientCandidate; holidayDates: string[] };
+export type QuoteConversion = {
+	quote: Quote;
+	client: ClientCandidate;
+	methods: OrderMethods;
+	holidayDates: string[];
+};
 
 /** What the order form opens filled with. Writes nothing: only «Guardar pedido» converts. Null: no such quote. */
 export async function getQuoteConversion(
@@ -734,7 +761,8 @@ export async function getQuoteConversion(
 	// The contact is the quote's foreign key: it's always there.
 	const client = toClientCandidate((await getContact(db, quote.clientId, actor)) as Contact);
 	const { PAYROLL_HOLIDAYS: holidays } = await readSettings(db, ['PAYROLL_HOLIDAYS']);
-	return { quote, client, holidayDates: holidays.map((holiday) => holiday.date) };
+	const methods = toOrderMethods(quote.transportedBy);
+	return { quote, client, methods, holidayDates: holidays.map((holiday) => holiday.date) };
 }
 
 const conversionInputSchema = z.object({

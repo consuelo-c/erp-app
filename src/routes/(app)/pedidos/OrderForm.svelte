@@ -32,7 +32,7 @@
 		findEventDateWarnings,
 		followEventDate
 	} from '$lib/orders';
-	import { describeConversionGaps } from '$lib/quotes';
+	import { describeConversionGaps, type OrderMethods } from '$lib/quotes';
 	import { parsePesos, parseQuantity } from '$lib/payroll';
 	import { formatPhone } from '$lib/phone';
 	import { formatNameAndReach, formatWhatsapp } from '$lib/whatsapp';
@@ -244,11 +244,21 @@
 		isPickupDateTyped: false
 	};
 
+	// The quote's place for both trips while the company moves the products; the client's, picking up
+	// and bringing back, start at the warehouse, as choosing those methods by hand does.
+	function quotedTrips(place: Trip, methods: OrderMethods) {
+		if ('CLIENT_PICKUP' !== methods.deliveryMethod) {
+			return { delivery: place };
+		}
+		const atWarehouse = { carrierId: '', ...warehouse };
+		return { delivery: atWarehouse, pickup: { ...atWarehouse }, isPickupTyped: true };
+	}
+
 	// A quote's order starts with its client as the contact is today, «Lugar del evento» as both
-	// addresses, its terms and lines as quoted, and the trips' dates from the event's. The trips'
-	// times and methods are the salesperson's, and a «por acordar» transport stays empty: «Guardar
-	// pedido» asks for it.
-	function quotedFields({ quote, client, holidayDates }: QuoteConversion): Fields {
+	// addresses, its terms and lines as quoted, the trips' dates from the event's and their methods
+	// from «Quién transporta». The trips' times are the salesperson's, and a «por acordar» transport
+	// stays empty: «Guardar pedido» asks for it.
+	function quotedFields({ quote, client, methods, holidayDates }: QuoteConversion): Fields {
 		const address = {
 			carrierId: '',
 			address1: quote.address1 ?? '',
@@ -267,7 +277,8 @@
 			clientName: client.fullName,
 			rentalDays: String(quote.rentalDays),
 			lines: quote.items.map(toFormLine),
-			delivery: address,
+			...methods,
+			...quotedTrips(address, methods),
 			notes: quote.notes ?? '',
 			discount: pesosOf(quote.discount),
 			transport: null === quote.transportCost ? '' : formatPesos(quote.transportCost)

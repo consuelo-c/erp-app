@@ -255,6 +255,22 @@ test("quotes has no status, incident, deposit or trip: it isn't an order", () =>
 	);
 });
 
+test('quotes: «Quién transporta» is the company or the client, and quotes saved before it are the company', () => {
+	database = new DatabaseSync(':memory:');
+	const [first, ...later] = MIGRATION_FILES;
+	applyMigrations([first]);
+	insertContact('8909039395');
+	insertOrder({});
+	insertQuote(180000, 1);
+	applyMigrations(later);
+	const row = database.prepare('select order_id, transport_cost, transported_by from quotes').get();
+	expect(row).toEqual({ order_id: 1, transport_cost: 180000, transported_by: 'COMPANY' });
+	expect(() => database.exec("update quotes set transported_by = 'EXTERNAL_CARRIER'")).toThrow(
+		/CHECK/
+	);
+	database.exec("update quotes set transported_by = 'CLIENT'");
+});
+
 test('quotes are indexed by client_id, valid_until and the unique order_id', () => {
 	const indexedColumns = database
 		.prepare(

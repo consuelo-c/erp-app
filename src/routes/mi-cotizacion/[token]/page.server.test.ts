@@ -118,6 +118,7 @@ test('a valid quote shows, with no session, built for the client: no phone, docu
 		itemsTotal: 440000,
 		discount: 40000,
 		transportCost: 250000,
+		transportedBy: 'COMPANY',
 		quoteTotal: 650000,
 		notes: 'Montaje desde las 7:00 a.m.'
 	});
@@ -153,6 +154,7 @@ test("the load sends neither the client's phone nor username: its keys, listed",
 			'itemsTotal',
 			'discount',
 			'transportCost',
+			'transportedBy',
 			'quoteTotal',
 			'notes'
 		].sort()
@@ -166,6 +168,13 @@ test("the load sends neither the client's phone nor username: its keys, listed",
 test('«por acordar» transport: no price, and the total leaves it out', async () => {
 	const data = await open(insertQuote({ transportCost: null }));
 	expect(data.quote).toMatchObject({ transportCost: null, quoteTotal: 400000 });
+});
+
+test('«Quién transporta» reaches the client: the company, or the client who picks up', async () => {
+	const token = insertQuote();
+	expect((await open(token)).quote.transportedBy).toBe('COMPANY');
+	database.exec("update quotes set transported_by = 'CLIENT'");
+	expect((await open(token)).quote.transportedBy).toBe('CLIENT');
 });
 
 test('expired, unknown, or a quote id: the same 404, «ya no está disponible»', async () => {

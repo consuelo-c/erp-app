@@ -33,6 +33,7 @@ const quote = {
 	itemsTotal: 3000,
 	discount: 0,
 	transportCost: null,
+	transportedBy: 'COMPANY',
 	quoteTotal: 3000,
 	address1: null,
 	address2: null,
@@ -136,4 +137,14 @@ test("the header reads the company's address and bare WhatsApp, no phone", () =>
 		'<div class="print-small">Calle 38a #79-18, Medellín, Colombia · 300 611 3392</div>'
 	);
 	expect(body).not.toContain('WhatsApp');
+});
+
+test('«Entrega» prints who moves the products: the company to the event, or the client at the warehouse', () => {
+	expect(printout()).toContain(
+		'<div class="print-row"><span>Entrega</span><span>Entrega y recogida en su evento</span></div>'
+	);
+	const byClient = printout({ quote: { ...quote, transportedBy: 'CLIENT' } });
+	expect(byClient).toContain(
+		'<div class="print-row"><span>Entrega</span><span>Recoge y devuelve en la bodega</span></div>'
+	);
 });
