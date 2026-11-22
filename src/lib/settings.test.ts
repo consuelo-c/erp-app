@@ -59,9 +59,9 @@ test('HELP_FAQ takes a non-empty text of at most 50,000 characters', () => {
 	expect(help.safeParse('a'.repeat(50_001)).success).toBe(false);
 });
 
-test('COMPANY_WHATSAPP takes an empty value or a phone, stored normalized', () => {
+test('COMPANY_WHATSAPP takes a phone, stored normalized, and refuses an empty value', () => {
 	const whatsapp = SETTINGS.COMPANY_WHATSAPP.schema;
-	expect(whatsapp.parse('')).toBe('');
+	expect(whatsapp.safeParse('').success).toBe(false);
 	expect(whatsapp.parse('310 555 0142')).toBe('573105550142');
 	expect(whatsapp.safeParse('123').success).toBe(false);
 });

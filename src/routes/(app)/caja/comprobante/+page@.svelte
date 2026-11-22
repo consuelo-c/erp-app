@@ -3,6 +3,7 @@
 	import Button from '$lib/components/Button.svelte';
 	import { formatLongDay } from '$lib/datetime';
 	import { formatPesos, formatPesosInWords, formatReceiptNumber } from '$lib/format';
+	import { formatPhone } from '$lib/phone';
 	import { CASH_CONCEPT_LABELS, PAYMENT_METHOD_LABELS } from '$lib/labels';
 	import type { PageProps } from './$types';
 
@@ -73,7 +74,9 @@
 					src="/banquetes-consuelo-c-logo.svg"
 					alt={company.COMPANY_NAME}
 				/>
-				<div class="print-small">{company.COMPANY_ADDRESS} · {company.COMPANY_PHONE}</div>
+				<div class="print-small">
+					{company.COMPANY_ADDRESS} · {formatPhone(company.COMPANY_WHATSAPP)}
+				</div>
 			</div>
 			<div class="print-head__title">
 				<div>{title}</div>

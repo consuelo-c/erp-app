@@ -4,6 +4,7 @@
 	import { formatSpelledDate } from '$lib/datetime';
 	import { formatBalance, formatIdNumber, formatPesos } from '$lib/format';
 	import { formatRemisiones, splitOrdersIntoPages } from '$lib/orders';
+	import { formatPhone } from '$lib/phone';
 	import type { PrintedOrder } from '$lib/server/services/receivables';
 	import { printedContact } from '$lib/whatsapp';
 	import type { PageProps } from './$types';
@@ -119,7 +120,9 @@
 	<div class="print-spacer"></div>
 	<div class="print-company">
 		<div class="signature">&nbsp;</div>
-		<div class="print-small">{company.COMPANY_ADDRESS} · {company.COMPANY_PHONE}</div>
+		<div class="print-small">
+			{company.COMPANY_ADDRESS} · {formatPhone(company.COMPANY_WHATSAPP)}
+		</div>
 	</div>
 {/snippet}
 

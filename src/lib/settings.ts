@@ -73,7 +73,7 @@ export const SETTINGS = {
 		placeholder: '604 411 44 29',
 		schema: textSchema
 	},
-	// What `wa.me` takes, so stored normalized; empty hides the public pages' WhatsApp icon.
+	// What `wa.me` takes, so stored normalized; required: every printout and public page shows it.
 	COMPANY_WHATSAPP: {
 		module: 'COMPANY',
 		label: 'WhatsApp',
@@ -83,9 +83,9 @@ export const SETTINGS = {
 			.string()
 			.trim()
 			.transform((typed, context) => {
-				const phone = '' === typed ? '' : normalizePhone(typed);
+				const phone = normalizePhone(typed);
 				if (null === phone) {
-					context.addIssue({ code: 'custom', message: 'Escriba un número válido o déjelo vacío' });
+					context.addIssue({ code: 'custom', message: 'Escribe un número válido' });
 					return z.NEVER;
 				}
 				return phone;

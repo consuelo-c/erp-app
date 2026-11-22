@@ -260,8 +260,8 @@ export async function getClientTerms(db: D1Database): Promise<string> {
 	return text;
 }
 
-/** The public pages' only contact: `wa.me` with `text` pre-filled, or null while it's empty. */
-export async function getWhatsAppHref(db: D1Database, text: string): Promise<string | null> {
+/** The public pages' only contact: `wa.me` with `text` pre-filled. */
+export async function getWhatsAppHref(db: D1Database, text: string): Promise<string> {
 	const { COMPANY_WHATSAPP: number } = await readSettings(db, ['COMPANY_WHATSAPP']);
-	return '' === number ? null : `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
+	return `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
 }

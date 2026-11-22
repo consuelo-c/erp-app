@@ -4,7 +4,7 @@
 
 	// The client's side, read on their own phone: no shell and no navigation, the logo at the top
 	// and the company's WhatsApp, around «Su pedido», «Su cotización» or «ya no está disponible».
-	let { whatsAppHref, children }: { whatsAppHref: string | null; children: Snippet } = $props();
+	let { whatsAppHref, children }: { whatsAppHref: string; children: Snippet } = $props();
 </script>
 
 <main class="client-page">
@@ -12,9 +12,7 @@
 	{@render children()}
 </main>
 
-{#if whatsAppHref}
-	<WhatsAppButton href={whatsAppHref} />
-{/if}
+<WhatsAppButton href={whatsAppHref} />
 
 <style>
 	/* The bottom padding keeps the last total clear of the WhatsApp button. */

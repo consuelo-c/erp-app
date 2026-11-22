@@ -26,11 +26,23 @@ const movement = {
 	settlement: null
 } satisfies MovementDetail;
 
-const company = { COMPANY_NAME: 'Banquetes Consuelo C', COMPANY_ADDRESS: '', COMPANY_PHONE: '' };
+const company = {
+	COMPANY_NAME: 'Banquetes Consuelo C',
+	COMPANY_ADDRESS: 'Calle 38a #79-18, Medellín, Colombia',
+	COMPANY_WHATSAPP: '573006113392'
+};
 
 test('the receipt prints on a portrait letter page with no margin', () => {
 	const data = { receipt: { movement, company, receivableOrderIds: [] }, opensCashBook: false };
 	const { head, body } = render(Page, { props: { data } as never });
 	expect(body).toContain('RECIBO DE CAJA');
 	expect(head).toMatch(/@page\s*\{\s*size:\s*letter;\s*margin:\s*0;?\s*\}/);
+});
+
+test("the receipt's header reads the company's address and bare WhatsApp, no phone", () => {
+	const data = { receipt: { movement, company, receivableOrderIds: [] }, opensCashBook: false };
+	const { body } = render(Page, { props: { data } as never });
+	expect(body).toMatch(
+		/<div class="print-small[^"]*">Calle 38a #79-18, Medellín, Colombia · 300 611 3392<\/div>/
+	);
 });

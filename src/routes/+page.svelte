@@ -29,9 +29,7 @@
 	</div>
 </Screen>
 
-{#if data.whatsAppHref}
-	<WhatsAppButton href={data.whatsAppHref} />
-{/if}
+<WhatsAppButton href={data.whatsAppHref} />
 
 <style>
 	.landing__entry {
