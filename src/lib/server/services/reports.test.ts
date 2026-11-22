@@ -1,12 +1,14 @@
 import { isHttpError } from '@sveltejs/kit';
 import type { DatabaseSync } from 'node:sqlite';
-import { beforeEach, describe, expect, test } from 'vitest';
+import { beforeEach, describe, expect, onTestFinished, test, vi } from 'vitest';
 import type { Actor } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
 import { logIn } from './auth';
 import { createContact } from './contacts';
 import { createProduct } from './products';
-import { getAuditLog } from './reports';
+import { createOrder } from '../db/test-orders';
+import { getAvailability } from './orders';
+import { getAuditLog, getSubLending, type SubLending } from './reports';
 
 const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
 const admin: Actor = { ...manager, username: 'admin', roles: ['ADMIN'] };
@@ -345,5 +347,349 @@ describe('getAuditLog', () => {
 		expect(await refusal(driver)).toBe(403);
 		expect(await refusal({ ...manager, roles: ['WAREHOUSE'] })).toBe(403);
 		expect(await refusal(admin)).toBeNull();
+	});
+});
+
+describe('getSubLending', () => {
+	const AUDIT = "0, 'admin', 0, 'admin'";
+
+	function insertProduct(name: string, owned: number, active = 1): number {
+		const result = database
+			.prepare(
+				`insert into products (name, category, rental_price, total_quantity, active, created_at,
+				created_by, updated_at, updated_by) values (?, 'CHAIRS_TABLES', 1000, ?, ?, ${AUDIT})`
+			)
+			.run(name, owned, active);
+		return Number(result.lastInsertRowid);
+	}
+
+	function insertClient(fullName: string, phone: string): number {
+		const result = database
+			.prepare(
+				`insert into contacts (phone, full_name, document_id, labels, created_at, created_by,
+				updated_at, updated_by) values (?, ?, ?, '[]', ${AUDIT})`
+			)
+			.run(phone, fullName, `@${phone}`);
+		return Number(result.lastInsertRowid);
+	}
+
+	type Booking = {
+		lines: [productId: number, qty: number][];
+		delivery: string;
+		pickup: string;
+		status?: string;
+		client?: string;
+	};
+
+	const address = { address_1: 'Calle 10 # 43-12', address_2: '' };
+	let clients = 0;
+
+	// An order holding `lines` from delivery to pickup, moved to `status` by hand: transitions are
+	// the orders service's.
+	async function book({ lines, delivery, pickup, status = 'CONFIRMED', client }: Booking) {
+		const name = client ?? 'Luz Marina Restrepo';
+		const result = await createOrder(
+			db,
+			{
+				client_id: insertClient(name, `5731000000${++clients}`),
+				client_name: name,
+				client_phone: '310 442 8890',
+				event_date: delivery,
+				delivery_date: delivery,
+				pickup_date: pickup,
+				rental_days: 1,
+				delivery_attributes: { method: 'COMPANY_DELIVERY', time: '14:00', ...address },
+				pickup_attributes: { method: 'COMPANY_PICKUP', time: '09:00', ...address },
+				order_items: lines.map(([productId, qty]) => ({
+					product_id: productId,
+					qty,
+					unit_price: 1000
+				})),
+				discount: 0,
+				deposit_amount: 0
+			},
+			sales
+		);
+		if (!result.ok) {
+			throw new Error(JSON.stringify(result.errors));
+		}
+		database.prepare('update orders set status = ? where id = ?').run(status, result.id);
+		return result.id;
+	}
+
+	const WEEKEND = { from: '2026-11-27', to: '2026-11-30' };
+
+	test('100 chairs owned, 70 held Friday to Monday and 50 Saturday to Monday: 20 missing on Saturday', async () => {
+		const chairs = insertProduct('Silla Tiffany dorada', 100);
+		const friday = await book({
+			lines: [[chairs, 70]],
+			delivery: '2026-11-27',
+			pickup: '2026-11-30',
+			client: 'Postobón S.A.'
+		});
+		const saturday = await book({
+			lines: [[chairs, 50]],
+			delivery: '2026-11-28',
+			pickup: '2026-11-30'
+		});
+
+		const report = await getSubLending(db, WEEKEND, sales);
+
+		expect(report).toEqual({
+			from: '2026-11-27',
+			to: '2026-11-30',
+			products: [
+				{
+					productId: chairs,
+					name: 'Silla Tiffany dorada',
+					owned: 100,
+					held: 120,
+					missing: 20,
+					worstDay: '2026-11-28',
+					orders: [
+						{
+							id: friday,
+							clientName: 'Postobón S.A.',
+							deliveryDate: '2026-11-27',
+							pickupDate: '2026-11-30',
+							quantity: 70
+						},
+						{
+							id: saturday,
+							clientName: 'Luz Marina Restrepo',
+							deliveryDate: '2026-11-28',
+							pickupDate: '2026-11-30',
+							quantity: 50
+						}
+					]
+				}
+			]
+		});
+	});
+
+	function missingOf(report: SubLending): Record<string, number> {
+		return Object.fromEntries(report.products.map(({ name, missing }) => [name, missing]));
+	}
+
+	test('the worst single day, never a sum over the days; a tie goes to the earliest day', async () => {
+		const glasses = insertProduct('Copa para vino tinto', 10);
+		await book({ lines: [[glasses, 15]], delivery: '2026-11-27', pickup: '2026-11-27' });
+		await book({ lines: [[glasses, 12]], delivery: '2026-11-28', pickup: '2026-11-28' });
+		await book({ lines: [[glasses, 15]], delivery: '2026-11-30', pickup: '2026-11-30' });
+
+		const report = await getSubLending(db, WEEKEND, manager);
+
+		expect(report.products).toMatchObject([{ held: 15, missing: 5, worstDay: '2026-11-27' }]);
+	});
+
+	test('an order holds its products on its delivery day and on its pickup day, both included', async () => {
+		const tables = insertProduct('Mesa redonda 10 puestos', 10);
+		await book({ lines: [[tables, 12]], delivery: '2026-11-26', pickup: '2026-11-27' });
+		const on = async (date: string) =>
+			missingOf(await getSubLending(db, { from: date, to: date }, manager));
+
+		expect(await on('2026-11-25')).toEqual({});
+		expect(await on('2026-11-26')).toEqual({ 'Mesa redonda 10 puestos': 2 });
+		expect(await on('2026-11-27')).toEqual({ 'Mesa redonda 10 puestos': 2 });
+		expect(await on('2026-11-28')).toEqual({});
+	});
+
+	test('only the orders that hold stock count: not a cancelled or a completed one', async () => {
+		const reserving = ['CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'OUT_FOR_PICKUP'];
+		const chairs = insertProduct('Silla Tiffany dorada', 0);
+		for (const status of [...reserving, 'CANCELLED', 'COMPLETED']) {
+			await book({ lines: [[chairs, 1]], delivery: '2026-11-28', pickup: '2026-11-28', status });
+		}
+
+		const report = await getSubLending(db, WEEKEND, manager);
+
+		expect(missingOf(report)).toEqual({ 'Silla Tiffany dorada': reserving.length });
+	});
+
+	test('quotes never count, however many products they ask for', async () => {
+		const chairs = insertProduct('Silla Tiffany dorada', 10);
+		const client = insertClient('Diana Zuluaga', '573150000001');
+		database
+			.prepare(
+				`insert into quotes (public_token, client_id, event_date, valid_until, rental_days,
+				client_attributes, quote_items, items_total, quote_total, created_at, created_by,
+				updated_at, updated_by) values ('quote-token-1', ?, '2026-11-28', '2026-12-31', 1,
+				'{"name":"Diana Zuluaga","phone":"-","whatsapp":null}', ?, 0, 0, ${AUDIT})`
+			)
+			.run(client, JSON.stringify([{ product_id: chairs, qty: 500, unit_price: 1000 }]));
+
+		expect((await getSubLending(db, WEEKEND, manager)).products).toEqual([]);
+	});
+
+	test('a product held up to what the company owns is left out', async () => {
+		const chairs = insertProduct('Silla Tiffany dorada', 100);
+		const tables = insertProduct('Mesa redonda 10 puestos', 30);
+		await book({
+			lines: [
+				[chairs, 100],
+				[tables, 31]
+			],
+			delivery: '2026-11-28',
+			pickup: '2026-11-29'
+		});
+
+		const report = await getSubLending(db, WEEKEND, manager);
+
+		expect(missingOf(report)).toEqual({ 'Mesa redonda 10 puestos': 1 });
+	});
+
+	test('an inactive product, or one with no stock, is listed when orders hold it', async () => {
+		const tablecloth = insertProduct('Mantel blanco 3×3', 0);
+		const retired = insertProduct('Silla Rimax', 20);
+		await book({
+			lines: [
+				[tablecloth, 4],
+				[retired, 25]
+			],
+			delivery: '2026-11-27',
+			pickup: '2026-11-27'
+		});
+		database.prepare('update products set active = 0 where id = ?').run(retired);
+
+		const report = await getSubLending(db, WEEKEND, manager);
+
+		expect(missingOf(report)).toEqual({ 'Mantel blanco 3×3': 4, 'Silla Rimax': 5 });
+	});
+
+	test('most missing first, then by name', async () => {
+		const tables = insertProduct('Mesa redonda 10 puestos', 30);
+		const glasses = insertProduct('Copa para vino tinto', 300);
+		const chairs = insertProduct('Silla Tiffany dorada', 100);
+		const tablecloth = insertProduct('Mantel blanco 3×3', 0);
+		await book({
+			lines: [
+				[tables, 36],
+				[glasses, 306],
+				[chairs, 120],
+				[tablecloth, 4]
+			],
+			delivery: '2026-11-28',
+			pickup: '2026-11-28'
+		});
+
+		const report = await getSubLending(db, WEEKEND, manager);
+
+		expect(report.products.map(({ name }) => name)).toEqual([
+			'Silla Tiffany dorada',
+			'Copa para vino tinto',
+			'Mesa redonda 10 puestos',
+			'Mantel blanco 3×3'
+		]);
+	});
+
+	test("the orders are the worst day's only, the largest first", async () => {
+		const chairs = insertProduct('Silla Tiffany dorada', 100);
+		const thursday = await book({
+			lines: [[chairs, 90]],
+			delivery: '2026-11-26',
+			pickup: '2026-11-27'
+		});
+		const small = await book({
+			lines: [[chairs, 40]],
+			delivery: '2026-11-28',
+			pickup: '2026-11-28'
+		});
+		const large = await book({
+			lines: [[chairs, 80]],
+			delivery: '2026-11-28',
+			pickup: '2026-11-29'
+		});
+
+		const [product] = (await getSubLending(db, WEEKEND, manager)).products;
+
+		expect(product.worstDay).toBe('2026-11-28');
+		expect(product.orders.map(({ id, quantity }) => [id, quantity])).toEqual([
+			[large, 80],
+			[small, 40]
+		]);
+		expect(product.orders.map(({ id }) => id)).not.toContain(thursday);
+	});
+
+	test('opens on today only', async () => {
+		vi.useFakeTimers({ toFake: ['Date'] });
+		onTestFinished(() => {
+			vi.useRealTimers();
+		});
+		vi.setSystemTime(new Date('2026-11-28T17:00:00Z')); // noon in Bogotá
+		const chairs = insertProduct('Silla Tiffany dorada', 10);
+		await book({ lines: [[chairs, 12]], delivery: '2026-11-28', pickup: '2026-11-28' });
+		await book({ lines: [[chairs, 50]], delivery: '2026-11-29', pickup: '2026-11-29' });
+
+		const report = await getSubLending(db, { from: '', to: null }, sales);
+
+		expect(report).toMatchObject({ from: '2026-11-28', to: '2026-11-28' });
+		expect(missingOf(report)).toEqual({ 'Silla Tiffany dorada': 2 });
+	});
+
+	test('a Hasta before the Desde is an empty period, as in the other date-range readers', async () => {
+		const chairs = insertProduct('Silla Tiffany dorada', 0);
+		await book({ lines: [[chairs, 5]], delivery: '2026-11-27', pickup: '2026-11-30' });
+
+		const report = await getSubLending(db, { from: '2026-11-30', to: '2026-11-27' }, sales);
+
+		expect(report).toEqual({ from: '2026-11-30', to: '2026-11-27', products: [] });
+	});
+
+	test('agrees with availability for the same range: what is missing is what availability is short', async () => {
+		const chairs = insertProduct('Silla Tiffany dorada', 100);
+		const glasses = insertProduct('Copa para vino tinto', 300);
+		const tables = insertProduct('Mesa redonda 10 puestos', 30);
+		await book({
+			lines: [
+				[chairs, 70],
+				[glasses, 200],
+				[tables, 20]
+			],
+			delivery: '2026-11-27',
+			pickup: '2026-11-30'
+		});
+		await book({
+			lines: [
+				[chairs, 50],
+				[tables, 5]
+			],
+			delivery: '2026-11-28',
+			pickup: '2026-11-30'
+		});
+		await book({ lines: [[glasses, 112]], delivery: '2026-11-29', pickup: '2026-12-01' });
+		await book({
+			lines: [[glasses, 400]],
+			delivery: '2026-11-20',
+			pickup: '2026-11-26',
+			status: 'COMPLETED'
+		});
+
+		const report = await getSubLending(db, WEEKEND, manager);
+		const availability = await getAvailability(
+			db,
+			{ delivery_date: WEEKEND.from, pickup_date: WEEKEND.to },
+			manager
+		);
+
+		const short = availability
+			.filter(({ available }) => available < 0)
+			.map(({ productId, available }) => [productId, -available]);
+		expect(report.products.map(({ productId, missing }) => [productId, missing]).sort()).toEqual(
+			short.sort()
+		);
+		expect(missingOf(report)).toEqual({ 'Silla Tiffany dorada': 20, 'Copa para vino tinto': 12 });
+	});
+
+	test('reads for the roles that take orders: drivers and warehouse are refused', async () => {
+		const refusedWith = (actor: Actor) =>
+			getSubLending(db, WEEKEND, actor).then(
+				() => null,
+				(thrown: unknown) => (isHttpError(thrown) ? thrown.status : thrown)
+			);
+
+		expect(await refusedWith(driver)).toBe(403);
+		expect(await refusedWith({ ...manager, roles: ['WAREHOUSE'] })).toBe(403);
+		expect(await refusedWith(admin)).toBeNull();
+		expect(await refusedWith(sales)).toBeNull();
 	});
 });

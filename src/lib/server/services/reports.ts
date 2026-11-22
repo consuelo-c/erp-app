@@ -3,12 +3,16 @@
 
 import { z } from 'zod';
 import { resolve } from '$app/paths';
-import { addDays, getDayStartInstant } from '$lib/datetime';
+import { addDays, getDayStartInstant, getTodaysDate } from '$lib/datetime';
 import { requireRole, type Actor } from '../actor';
 import { eventFieldsSchema } from '../audit';
 import { optional } from './cash';
+import { HELD_LINES_SQL } from './orders';
 
 const MANAGERS = ['ADMIN', 'MANAGER'] as const;
+
+// The roles that take orders, and so already see availability.
+const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
 
 /** Every `events.entity_type` the app writes: Auditoría's «Registro». */
 export const EVENT_ENTITY_TYPES = [
@@ -244,4 +248,126 @@ export async function getAuditLog(
 		filters,
 		usernames
 	};
+}
+
+// Missing or unreadable, an end is today.
+const subLendingSchema = z.object({
+	from: optional(z.iso.date()),
+	to: optional(z.iso.date())
+});
+
+/** An order holding the product on its worst day, and how many it holds. */
+export type SubLendingOrder = {
+	id: number;
+	clientName: string;
+	deliveryDate: string;
+	pickupDate: string;
+	quantity: number;
+};
+
+/** A product the orders need more of than the company owns: `missing` = `held` − `owned`, on `worstDay`. */
+export type SubLendingProduct = {
+	productId: number;
+	name: string;
+	owned: number;
+	held: number;
+	missing: number;
+	/** The earliest day with the peak. */
+	worstDay: string;
+	orders: SubLendingOrder[];
+};
+
+export type SubLending = { from: string; to: string; products: SubLendingProduct[] };
+
+type HeldRow = {
+	day: string;
+	productId: number;
+	name: string;
+	owned: number;
+	orderId: number;
+	clientName: string;
+	deliveryDate: string;
+	pickupDate: string;
+	quantity: number;
+};
+
+// One row per product, day and order holding it: the reserving rule is availability's own.
+const SUB_LENDING_SQL = `${HELD_LINES_SQL}
+	select held.day, held.product_id as productId, products.name, products.total_quantity as owned,
+		held.order_id as orderId, json_extract(orders.client_attributes, '$.name') as clientName,
+		orders.delivery_date as deliveryDate, orders.pickup_date as pickupDate, sum(held.qty) as quantity
+	from held
+	join products on products.id = held.product_id
+	join orders on orders.id = held.order_id
+	group by held.product_id, held.day, held.order_id
+	order by held.day`;
+
+type Day = { day: string; held: number; rows: HeldRow[] };
+
+// Rows come ordered by day, so a later day only wins with more held: the earliest peak stays.
+function findWorstDay(rows: HeldRow[]): Day {
+	const days = new Map<string, Day>();
+	for (const row of rows) {
+		const day = days.get(row.day) ?? { day: row.day, held: 0, rows: [] };
+		day.held += row.quantity;
+		day.rows.push(row);
+		days.set(row.day, day);
+	}
+	return [...days.values()].reduce((worst, day) => (day.held > worst.held ? day : worst));
+}
+
+function toShortProduct(rows: HeldRow[]): SubLendingProduct | null {
+	const worst = findWorstDay(rows);
+	const { productId, name, owned } = worst.rows[0];
+	if (worst.held <= owned) {
+		return null;
+	}
+	const orders = worst.rows
+		.map((row) => ({
+			id: row.orderId,
+			clientName: row.clientName,
+			deliveryDate: row.deliveryDate,
+			pickupDate: row.pickupDate,
+			quantity: row.quantity
+		}))
+		.sort((first, second) => second.quantity - first.quantity || first.id - second.id);
+	return {
+		productId,
+		name,
+		owned,
+		held: worst.held,
+		missing: worst.held - owned,
+		worstDay: worst.day,
+		orders
+	};
+}
+
+/**
+ * Subalquiler: each product the reserving orders need more of than the company owns, on the
+ * period's worst day for it, never a sum over days. Most missing first, then by name.
+ */
+export async function getSubLending(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<SubLending> {
+	requireRole(actor, TAKES_ORDERS);
+	const parsed = subLendingSchema.parse(input ?? {});
+	const today = getTodaysDate();
+	const from = parsed.from ?? today;
+	const to = parsed.to ?? today;
+	// An inverted period holds no day, as in the other date-range readers.
+	if (to < from) {
+		return { from, to, products: [] };
+	}
+	const { results } = await db.prepare(SUB_LENDING_SQL).bind(from, to, null).all<HeldRow>();
+	const byProduct = Map.groupBy(results, (row) => row.productId);
+	const products = [...byProduct.values()]
+		.map(toShortProduct)
+		.filter((product) => null !== product)
+		.sort(
+			(first, second) =>
+				second.missing - first.missing || first.name.localeCompare(second.name, 'es')
+		);
+	return { from, to, products };
 }

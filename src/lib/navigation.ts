@@ -102,6 +102,11 @@ const MENU: MenuParent[] = [
 		children: [
 			{ label: 'Planilla horas', href: resolve('/horas/equipo'), roles: MANAGERS },
 			{ label: 'Movimientos caja', href: resolve('/caja'), roles: MANAGERS },
+			{
+				label: 'Subalquiler',
+				href: resolve('/reportes/subalquiler'),
+				roles: ['ADMIN', 'MANAGER', 'SALES']
+			},
 			{ label: 'Auditoría', href: resolve('/reportes/auditoria'), roles: MANAGERS }
 		]
 	},

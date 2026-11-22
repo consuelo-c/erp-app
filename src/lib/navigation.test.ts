@@ -26,7 +26,7 @@ test('ADMIN sees the whole tree, in its order', () => {
 		'Contactos',
 		'Pagos: Cuentas de cobro, Movimiento, Entregas de efectivo',
 		'Nómina: Nómina, Horas, Logins',
-		'Reportes: Planilla horas, Movimientos caja, Auditoría',
+		'Reportes: Planilla horas, Movimientos caja, Subalquiler, Auditoría',
 		'Configuración: Nómina, Festivos, Ayuda, Términos, Etiquetas',
 		'Ayuda'
 	]);
@@ -42,6 +42,7 @@ test('each role sees only what it opens; two roles see the union', () => {
 		'Pagos: Cuentas de cobro',
 		'Efectivo por entregar',
 		'Nómina: Horas',
+		'Reportes: Subalquiler',
 		'Ayuda'
 	]);
 	expect(outline(getMenu(['WAREHOUSE']))).toEqual([
@@ -64,6 +65,8 @@ test('a parent without its own page, or one the login cannot open, opens its fir
 	const admin = getMenu(['ADMIN']);
 	expect(admin.find(({ label }) => 'Pagos' === label)?.href).toBe('/cuentas-de-cobro');
 	expect(admin.find(({ label }) => 'Reportes' === label)?.href).toBe('/horas/equipo');
+	const sales = getMenu(['SALES']);
+	expect(sales.find(({ label }) => 'Reportes' === label)?.href).toBe('/reportes/subalquiler');
 	expect(admin.find(({ label }) => 'Configuración' === label)?.href).toBe('/configuracion');
 	const noRole = getMenu([]);
 	expect(outline(noRole)).toEqual(['Despachos', 'Nómina: Horas', 'Ayuda']);
@@ -214,4 +217,5 @@ test("«Entregas de efectivo» is in Caja's menu for managers and admins only", 
 	expect(findPageLabel('/caja/entregas/registrar')).toBe('Entregas de efectivo');
 	expect(findPageLabel('/caja')).toBe('Movimientos caja');
 	expect(findPageLabel('/reportes/auditoria')).toBe('Auditoría');
+	expect(findPageLabel('/reportes/subalquiler')).toBe('Subalquiler');
 });
