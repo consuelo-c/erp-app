@@ -16,5 +16,9 @@
 		<ScreenHeader title="Efectivo por entregar" />
 	{/snippet}
 
-	<CashStatementView statement={data.statement} />
+	<CashStatementView
+		statement={data.statement}
+		cardHint="Todo el efectivo que has recibido, menos lo que ya entregaste en la oficina."
+		footnote="Las entregas las registra el Gerente cuando le llevas el efectivo."
+	/>
 </Screen>

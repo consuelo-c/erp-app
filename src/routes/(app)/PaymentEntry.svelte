@@ -35,7 +35,7 @@
 		initialMethod?: PaymentMethod;
 		/** What a method means for whoever records it, under Método. */
 		methodHintOf?: (method: PaymentMethod) => string | undefined;
-		/** Why the concepts on offer are fewer, over the form. */
+		/** Why the concepts on offer are fewer, under Concepto. */
 		notice?: string;
 		/** Saving needs signal: nothing is kept on the phone to send later. */
 		isOffline?: boolean;
@@ -148,11 +148,6 @@
 		oninput={(event) => (entered = new FormData(event.currentTarget))}
 	>
 		<p class="meta payment__lead">{lead}</p>
-		{#if notice}
-			<div class="payment__lead-notice">
-				<Notice tone="warning">{notice}</Notice>
-			</div>
-		{/if}
 		<div class="form-stack">
 			<Choice legend="Concepto" layout={1 < concepts.length ? 'scroll' : 'grid'} hint={conceptNote}>
 				{#each concepts as option (option)}
@@ -165,6 +160,9 @@
 					/>
 				{/each}
 			</Choice>
+			{#if notice}
+				<Notice tone="info">{notice}</Notice>
+			{/if}
 
 			<!-- New money, or kept from what the order holds: then a refund from that side goes with it. -->
 			{#if isFee}
@@ -321,10 +319,6 @@
 	.field-row {
 		display: flex;
 		gap: var(--control-gap);
-	}
-
-	.payment__lead-notice {
-		margin-bottom: var(--space-8);
 	}
 
 	.payment__notice {

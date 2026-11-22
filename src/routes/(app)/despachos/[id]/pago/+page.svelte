@@ -2,7 +2,7 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { online } from 'svelte/reactivity/window';
-	import { formatBalance } from '$lib/format';
+	import { formatBalance, formatPesos } from '$lib/format';
 	import type { OrderPaymentConcept } from '$lib/orders';
 	import PaymentEntry from '../../../PaymentEntry.svelte';
 	import type { PageProps } from './$types';
@@ -12,6 +12,21 @@
 	let { data, form }: PageProps = $props();
 
 	const order = $derived(data.order);
+
+	// At pickup the deposit held is what's given back; on the way, what's still owed of it.
+	const isRefundOnly = $derived(
+		data.entry.concepts.every((concept) => 'DEPOSIT_REFUND' === concept)
+	);
+	const deposit = $derived(
+		isRefundOnly
+			? `Depósito recibido ${formatBalance(order.depositHeld)}`
+			: `Depósito ${formatBalance(order.depositHeld)} de ${formatPesos(order.depositAmount)}`
+	);
+	const lead = $derived(
+		null === order.receivableId
+			? `Pedido #${order.id} · ${order.client.name} · Saldo ${formatBalance(order.balanceDue)} · ${deposit}`
+			: `Pedido #${order.id} · ${order.client.name} · Cuenta de cobro Nº ${order.receivableId}`
+	);
 
 	function pendingOf(concept: OrderPaymentConcept): number {
 		if ('INSTALLMENT' === concept) {
@@ -39,9 +54,8 @@
 </svelte:head>
 
 <PaymentEntry
-	lead={null === order.receivableId
-		? `Pedido #${order.id} · Saldo ${formatBalance(order.balanceDue)}`
-		: `Pedido #${order.id} · Cuenta de cobro Nº ${order.receivableId}`}
+	{lead}
+	notesPlaceholder={isRefundOnly ? 'Ej. Sin daños en la recogida' : 'Ej. Pagó al recibir'}
 	notice={data.entry.notice ?? undefined}
 	closeHref="{resolve('/(app)/despachos/[id]', { id: String(order.id) })}{page.url.search}"
 	concepts={data.entry.concepts}
