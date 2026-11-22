@@ -23,7 +23,7 @@ test('ADMIN sees the whole tree, in its order', () => {
 		'Cotizaciones: Pedidos',
 		'Productos: Nuevo conteo, Confirmar conteo',
 		'Contactos',
-		'Pagos: Cuentas de cobro, Movimiento',
+		'Pagos: Cuentas de cobro, Movimiento, Entregas de efectivo',
 		'Personal: Nómina, Horas, Logins',
 		'Reportes: Planilla horas, Movimientos caja',
 		'Ayuda',
@@ -167,4 +167,19 @@ test('«Efectivo por entregar» is for drivers and Sales reps, never for manager
 	expect(hasTab(['SALES', 'MANAGER'])).toBe(false);
 	expect(hasTab(['ADMIN', 'DRIVER'])).toBe(false);
 	expect(findPageLabel('/efectivo')).toBe('Efectivo por entregar');
+});
+
+test("«Entregas de efectivo» is in Caja's menu for managers and admins only", () => {
+	const hasHandovers = (roles: Parameters<typeof getMenu>[0]) =>
+		getMenu(roles)
+			.flatMap(({ children }) => children)
+			.some(({ label, href }) => 'Entregas de efectivo' === label && '/caja/entregas' === href);
+	expect(hasHandovers(['ADMIN'])).toBe(true);
+	expect(hasHandovers(['MANAGER'])).toBe(true);
+	expect(hasHandovers(['SALES', 'MANAGER'])).toBe(true);
+	expect(hasHandovers(['SALES'])).toBe(false);
+	expect(hasHandovers(['DRIVER'])).toBe(false);
+	expect(hasHandovers(['WAREHOUSE'])).toBe(false);
+	expect(findPageLabel('/caja/entregas/registrar')).toBe('Entregas de efectivo');
+	expect(findPageLabel('/caja')).toBe('Movimientos caja');
 });

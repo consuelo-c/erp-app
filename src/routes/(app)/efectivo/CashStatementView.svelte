@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import Card from '$lib/components/Card.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import Input from '$lib/components/Input.svelte';
@@ -12,12 +13,15 @@
 	} from '$lib/server/services/cash-handovers';
 
 	// A person's tab: the all-time «Por entregar» on top, then the range's movements, order by
-	// order, and handovers. The range is a GET form, so a range is a URL.
+	// order, and handovers. The range is a GET form, so a range is a URL. On the manager's screen
+	// `username` keeps the chosen person in it, and `status` sits by the card's label.
 	interface Props {
 		statement: CashStatement;
+		username?: string;
+		status?: Snippet;
 	}
 
-	let { statement }: Props = $props();
+	let { statement, username, status }: Props = $props();
 
 	// «#1043 · Pago»: the order, or the cuenta de cobro, it belongs to, and what it was.
 	function title(group: StatementGroup, movement: StatementMovement): string {
@@ -39,11 +43,14 @@
 </script>
 
 <Card>
-	<p class="meta">Por entregar</p>
+	<p class="meta card-label">Por entregar {@render status?.()}</p>
 	<p class="pending">{formatBalance(statement.pending)}</p>
 </Card>
 
 <form method="get" class="range" onchange={submitOnChange}>
+	{#if undefined !== username}
+		<input type="hidden" name="persona" value={username} />
+	{/if}
 	<Field label="Desde" id="desde">
 		<Input id="desde" name="desde" type="date" value={statement.range.from} />
 	</Field>
@@ -92,6 +99,13 @@
 </ul>
 
 <style>
+	.card-label {
+		display: flex;
+		gap: var(--space-4);
+		align-items: center;
+		justify-content: space-between;
+	}
+
 	.pending {
 		margin: 0;
 		font-size: var(--text-display);
