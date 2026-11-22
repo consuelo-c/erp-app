@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { TRANSPORTER } from '$lib/contact-labels';
 import { addDays, getTodaysDate, getWeekStart } from '$lib/datetime';
 import { formatPesos } from '$lib/format';
+import { parsePesos } from '$lib/payroll';
 import { INVALID_WHATSAPP } from '$lib/whatsapp';
 import {
 	calculateOrderTotals,
@@ -22,7 +23,15 @@ import {
 	type OrderTotals,
 	type PricedLine
 } from '$lib/orders';
-import { ROLES, isAdminOrManager, requireRole, type Actor } from '../actor';
+import {
+	ROLES,
+	hasAnyRole,
+	hasRole,
+	isAdminOrManager,
+	requireRole,
+	type Actor,
+	type Role
+} from '../actor';
 import { auditedInsert, auditedUpdate, eventFieldsSchema, type Row } from '../audit';
 import { describeOrderEdit, type OrderChange } from '../order-changes';
 import { createPublicToken } from '../public-token';
@@ -39,7 +48,7 @@ import { listProducts, type Product } from './products';
 import {
 	capitalizeName,
 	generateDocumentId,
-	getContact,
+	getContactBankAccount,
 	INVALID_PHONE,
 	listTransporters,
 	newClientStatements,
@@ -54,8 +63,12 @@ import { COMPANY_SETTINGS, readSettings, type CompanySettings } from './settings
 // The commercial side: whoever takes orders creates and edits them.
 const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
 
-// Money out of an order, refunds included, is the manager's.
+// Money out of an order, refunds included, is the manager's; the driver's whole-deposit refund is
+// the one written exception (#605).
 const PAYS_OUT = ['ADMIN', 'MANAGER'] as const;
+
+// Whoever records an order's payments: the office, and the driver on the road.
+const RECORDS_PAYMENTS = [...TAKES_ORDERS, 'DRIVER'] as const;
 
 export const ORDER_STATUSES = [
 	'CONFIRMED',
@@ -1680,6 +1693,9 @@ export async function getOrderPrintout(
 const paymentInputSchema = z.object({
 	order_id: orderIdSchema,
 	concept: z.enum(ORDER_PAYMENT_CONCEPTS, 'Escoge el concepto'),
+	// Checked again, with the rest of the entry, by the cash book; read here for the driver's rules.
+	payment_method: z.string().optional(),
+	amount: z.string().default(''),
 	trip: z.enum(['DELIVERY', 'PICKUP']).optional(),
 	fee_source: z.enum(FEE_SOURCES).optional(),
 	payee: blankable
@@ -1779,20 +1795,123 @@ export async function recordOrderPayment(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, TAKES_ORDERS);
+	requireRole(actor, RECORDS_PAYMENTS);
 	const parsed = paymentInputSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalidOrder(parsed.error);
 	}
 	const { concept } = parsed.data;
-	const isSalesConcept = isOrderInflow(concept) && 'CANCELLATION_FEE' !== concept;
-	requireRole(actor, isSalesConcept ? TAKES_ORDERS : PAYS_OUT);
+	const isOfficeEntry = hasAnyRole(actor, officeRolesFor(concept));
+	if (!isOfficeEntry) {
+		requireRole(actor, DRIVER_CONCEPTS.includes(concept) ? DRIVER_ONLY : officeRolesFor(concept));
+	}
 	const row = await findRow(db, parsed.data.order_id);
 	if (null === row) {
 		return { ok: false, message: 'Ese pedido no existe.', errors: {} };
 	}
-	const link = await linkOf(db, toOrder(row), parsed.data);
+	const order = toOrder(row);
+	if (!isOfficeEntry) {
+		const balances = await findBalances(db, order.id);
+		const driverRefused = driverRefusal({ ...order, ...balances }, parsed.data);
+		if (null !== driverRefused) {
+			return driverRefused;
+		}
+	}
+	const link = await linkOf(db, order, parsed.data);
 	return 'ok' in link ? link : recordLinkedMovement(db, { form: input, ...link }, actor);
+}
+
+// Sales records the money in; the manager the money out and the fee.
+function officeRolesFor(concept: OrderPaymentConcept): readonly Role[] {
+	const isSalesConcept = isOrderInflow(concept) && 'CANCELLATION_FEE' !== concept;
+	return isSalesConcept ? TAKES_ORDERS : PAYS_OUT;
+}
+
+const DRIVER_ONLY = ['DRIVER'] as const;
+
+const DRIVER_CONCEPTS: readonly OrderPaymentConcept[] = [
+	'INSTALLMENT',
+	'SECURITY_DEPOSIT',
+	'DEPOSIT_REFUND'
+];
+
+// The driver collects only on the road, and gives the deposit back only at pickup.
+const ON_THE_ROAD: readonly OrderStatus[] = ['OUT_FOR_DELIVERY', 'DELIVERED', 'OUT_FOR_PICKUP'];
+
+const DRIVER_METHODS: readonly string[] = ['CASH', 'TRANSFER'];
+
+/** What the driver's rules read: the order's status, incidents, billing and balances. */
+type PaymentState = Pick<
+	OrderDetail,
+	'status' | 'hasIncident' | 'receivableId' | 'balanceDue' | 'depositHeld' | 'depositAmount'
+>;
+
+/** The incident blocking the refund may be the client's damage: the office settles it. */
+const ACTIVE_INCIDENT_REFUND_MESSAGE =
+	'El pedido tiene una novedad activa: la devolución del depósito la hace la oficina.';
+
+// A billed order's payments are the cuenta's: the driver only hands the cuenta over.
+function driverConcepts(order: PaymentState): Partial<Record<OrderPaymentConcept, boolean>> {
+	const isCollecting = null === order.receivableId && ON_THE_ROAD.includes(order.status);
+	return {
+		INSTALLMENT: isCollecting && 0 < order.balanceDue,
+		SECURITY_DEPOSIT: isCollecting && order.depositHeld < order.depositAmount,
+		DEPOSIT_REFUND: isCollecting && isDriverRefundable(order)
+	};
+}
+
+function isDriverRefundable(order: PaymentState): boolean {
+	return 'OUT_FOR_PICKUP' === order.status && !order.hasIncident && 0 < order.depositHeld;
+}
+
+function refused(message: string): Refusal {
+	return { ok: false, message, errors: {} };
+}
+
+// Why the driver can't record this entry, or null: the service's own check, not just the screen's.
+function driverRefusal(order: PaymentState, payment: PaymentInput): Refusal | null {
+	if (!DRIVER_METHODS.includes(payment.payment_method ?? '')) {
+		return refusal('payment_method', 'Escoge «Efectivo» o «Transferencia»');
+	}
+	if (null !== order.receivableId) {
+		return refused(`El pago va en la cuenta de cobro Nº ${order.receivableId}.`);
+	}
+	if (!ON_THE_ROAD.includes(order.status)) {
+		return refused(
+			'En Despachos, los pagos se registran con el pedido en ruta de entrega, entregado o en ruta de recogida.'
+		);
+	}
+	if ('DEPOSIT_REFUND' === payment.concept) {
+		return driverRefundRefusal(order, parsePesos(payment.amount));
+	}
+	if (driverConcepts(order)[payment.concept]) {
+		return null;
+	}
+	return refused(
+		'INSTALLMENT' === payment.concept
+			? 'Este pedido ya está pagado.'
+			: 'El depósito ya está completo.'
+	);
+}
+
+// Only the whole deposit held, at pickup, with no active incident: anything else is the office's.
+function driverRefundRefusal(order: PaymentState, amount: number): Refusal | null {
+	if ('OUT_FOR_PICKUP' !== order.status) {
+		return refused('El depósito se devuelve en la recogida.');
+	}
+	if (order.hasIncident) {
+		return refused(ACTIVE_INCIDENT_REFUND_MESSAGE);
+	}
+	if (order.depositHeld <= 0) {
+		return refused('Este pedido no tiene depósito para devolver.');
+	}
+	if (amount !== order.depositHeld) {
+		return refusal(
+			'amount',
+			`Se devuelve todo el depósito recibido (${formatPesos(order.depositHeld)}). Una devolución parcial la hace la oficina.`
+		);
+	}
+	return null;
 }
 
 // What the movement links to and who it's with, or why the order refuses it.
@@ -1820,20 +1939,23 @@ async function linkOf(
 
 /**
  * What the payment entry offers: «Pago» while there's a balance and no cuenta de cobro, the deposit
- * while it isn't complete, and money out to the manager only, as a cancelled order's fee. Empty,
- * the entry isn't offered.
+ * while it isn't complete, and money out to the manager only, as a cancelled order's fee. The driver
+ * gets the first two on the road and the whole deposit back at pickup, with no active incident;
+ * the warehouse, nothing. Empty, the entry isn't offered.
  */
 export function offeredPaymentConcepts(order: OrderDetail, actor: Actor): OrderPaymentConcept[] {
+	const isOffice = hasAnyRole(actor, TAKES_ORDERS);
 	const canPayOut = isAdminOrManager(actor);
+	const driver = hasRole(actor, 'DRIVER') ? driverConcepts(order) : undefined;
 	const offered: Record<OrderPaymentConcept, boolean> = {
-		INSTALLMENT: null === order.receivableId && 0 < order.balanceDue,
-		SECURITY_DEPOSIT: order.depositHeld < order.depositAmount,
+		INSTALLMENT: isOffice && null === order.receivableId && 0 < order.balanceDue,
+		SECURITY_DEPOSIT: isOffice && order.depositHeld < order.depositAmount,
 		INSTALLMENT_REFUND: canPayOut,
 		DEPOSIT_REFUND: canPayOut,
 		CARRIER_PAYMENT: canPayOut && 0 < carriersOf(order).length,
 		CANCELLATION_FEE: canPayOut && 'CANCELLED' === order.status
 	};
-	return ORDER_PAYMENT_CONCEPTS.filter((concept) => offered[concept]);
+	return ORDER_PAYMENT_CONCEPTS.filter((concept) => offered[concept] || true === driver?.[concept]);
 }
 
 /** A carrier the order can pay, with the account its contact keeps. */
@@ -1847,19 +1969,19 @@ export async function getPaymentOptions(
 	order: Order,
 	actor: Actor | null
 ): Promise<PaymentOptions> {
-	requireRole(actor, TAKES_ORDERS);
+	requireRole(actor, RECORDS_PAYMENTS);
 	const carriers = carriersOf(order);
-	const [client, ...contacts] = await Promise.all(
+	const [clientBankAccount, ...accounts] = await Promise.all(
 		[order.clientId, ...carriers.map((entry) => entry.carrier.id)].map((id) =>
-			getContact(db, id, actor)
+			getContactBankAccount(db, id, actor)
 		)
 	);
 	return {
-		clientBankAccount: client?.bankAccount ?? null,
+		clientBankAccount,
 		carriers: carriers.map(({ trip, carrier }, index) => ({
 			trip,
 			name: carrier.name,
-			bankAccount: contacts[index]?.bankAccount ?? null
+			bankAccount: accounts[index]
 		}))
 	};
 }
