@@ -807,6 +807,7 @@
 			products={options.products}
 			{availability}
 			{rangeLabel}
+			datesHint="Escribe las fechas para ver la disponibilidad"
 			rentalDays={rentalDayCount}
 			{errorOf}
 			{original}

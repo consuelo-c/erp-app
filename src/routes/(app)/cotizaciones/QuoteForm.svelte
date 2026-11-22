@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import Button from '$lib/components/Button.svelte';
@@ -8,6 +9,7 @@
 	import Input from '$lib/components/Input.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
+	import { addDays, formatDayRange } from '$lib/datetime';
 	import { formatPesos } from '$lib/format';
 	import { TRANSPORTED_BY_LABELS } from '$lib/labels';
 	import { calculateOrderTotals } from '$lib/orders';
@@ -16,6 +18,7 @@
 	import { formatPhone } from '$lib/phone';
 	import { formatWhatsapp } from '$lib/whatsapp';
 	import type { ClientCandidate } from '$lib/server/services/contacts';
+	import type { Availability } from '$lib/server/services/orders';
 	import type {
 		Quote,
 		QuoteDraft,
@@ -28,8 +31,9 @@
 	import OrderTotals from '../pedidos/OrderTotals.svelte';
 
 	// The order form's single screen without what a quote doesn't have: no trips, no methods (only
-	// who transports), no carrier, no deposit, no payments, and no availability or holiday warnings. Posted as one JSON
-	// field; the server validates it and works the totals out again.
+	// who transports), no carrier, no deposit, no payments, and no holiday or schedule warnings: its
+	// availability is counted around the event date, and only informs. Posted as one JSON field; the
+	// server validates it and works the totals out again.
 	interface Props {
 		options: QuoteFormOptions;
 		/** The quote being edited; null for a new one. */
@@ -165,6 +169,46 @@
 		})
 	);
 
+	// Around the event, as an order delivered the day before and picked up the day after would see
+	// it; nothing until the event date is typed.
+	let counted = $state<{ eventDate: string; availability: Availability[] } | null>(null);
+	const availability = $derived(
+		null === counted || counted.eventDate !== eventDate
+			? null
+			: new Map(counted.availability.map((each) => [each.productId, each.available]))
+	);
+	const rangeLabel = $derived(
+		'' === eventDate ? '' : formatDayRange(addDays(eventDate, -1), addDays(eventDate, 1))
+	);
+
+	let availabilityTimer: ReturnType<typeof setTimeout> | undefined;
+	let checkedEventDate = '';
+
+	// Anything typed in the form asks again, but only when the event date changed.
+	function refreshAvailability() {
+		const typed = eventDate;
+		if (typed === checkedEventDate) {
+			return;
+		}
+		checkedEventDate = typed;
+		clearTimeout(availabilityTimer);
+		if ('' === typed) {
+			return;
+		}
+		availabilityTimer = setTimeout(async () => {
+			const query = String(new URLSearchParams({ evento: typed }));
+			const response = await fetch(`${resolve('/cotizaciones/disponibilidad')}?${query}`);
+			if (!response.ok || typed !== checkedEventDate) {
+				return;
+			}
+			const counts: Availability[] | null = await response.json();
+			counted = null === counts ? null : { eventDate: typed, availability: counts };
+		}, 300);
+	}
+
+	// A quote being edited already has its event date: its availability shows at once.
+	onMount(refreshAvailability);
+
 	// A blank number posts nothing, so the server names the field to fill in.
 	function numberOrNull(typed: string): number | null {
 		return '' === typed.trim() ? null : parseQuantity(typed);
@@ -239,6 +283,7 @@
 	class="quote"
 	method="POST"
 	aria-busy={isSaving}
+	oninput={refreshAvailability}
 	use:enhance={() => {
 		isSaving = true;
 		return async ({ update }) => {
@@ -395,6 +440,9 @@
 		<OrderLines
 			bind:lines
 			products={options.products}
+			{availability}
+			{rangeLabel}
+			datesHint="Escribe la fecha del evento para ver la disponibilidad"
 			rentalDays={rentalDayCount}
 			{errorOf}
 			field="quote_items"

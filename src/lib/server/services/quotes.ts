@@ -27,6 +27,7 @@ import {
 	clientAttributesSchema,
 	clientInputShape,
 	clientWrite,
+	getAvailability,
 	getOrder,
 	invalidOrder,
 	jsonColumn,
@@ -39,6 +40,7 @@ import {
 	resolveClient,
 	resolveItems,
 	searchTextSchema,
+	type Availability,
 	type CatalogProduct,
 	type ClientAttributes,
 	type OrderItem,
@@ -244,6 +246,28 @@ export async function getQuoteFormOptions(
 	]);
 	const validityDays = settings.QUOTES_VALIDITY_DAYS;
 	return { products, validUntil: addDays(getTodaysDate(), validityDays), validityDays };
+}
+
+const availabilitySchema = z.object({ event_date: z.iso.date() });
+
+/**
+ * Each product's availability around the quote's event, from the day before to the day after, as
+ * an order delivered and picked up then would see it; null without an event date. It only informs:
+ * a quote reserves nothing and saves whatever it shows.
+ */
+export async function getQuoteAvailability(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<Availability[] | null> {
+	requireRole(actor, TAKES_QUOTES);
+	const parsed = availabilitySchema.safeParse(input);
+	if (!parsed.success) {
+		return null;
+	}
+	const eventDate = parsed.data.event_date;
+	const range = { delivery_date: addDays(eventDate, -1), pickup_date: addDays(eventDate, 1) };
+	return getAvailability(db, range, actor);
 }
 
 // A quote can't expire before the day it was made: today for a new one.

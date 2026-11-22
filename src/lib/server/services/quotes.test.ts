@@ -11,6 +11,7 @@ import {
 	convertQuote,
 	createQuote,
 	getQuoteConversion,
+	getQuoteAvailability,
 	getQuoteFormOptions,
 	getQuotePrintout,
 	getQuote,
@@ -1150,4 +1151,34 @@ test('«Convertir en pedido» fills both methods from who transports; the order 
 	});
 	const orderId = await convert(byClient);
 	expect(JSON.stringify(await getOrder(db, orderId, sales))).not.toContain('transported');
+});
+
+// quote1043 converted: an order of 120 Tiffany chairs, delivered 11 December, picked up the 13th.
+test("the form's availability counts from the day before the event to the day after", async () => {
+	await convert(await create());
+	const chairsFor = async (eventDate: string) => {
+		const availability = await getQuoteAvailability(db, { event_date: eventDate }, sales);
+		return availability?.find(({ productId }) => 1 === productId)?.available;
+	};
+	expect(await chairsFor('2026-12-09')).toBe(500);
+	expect(await chairsFor('2026-12-10')).toBe(380);
+	expect(await chairsFor('2026-12-14')).toBe(380);
+	expect(await chairsFor('2026-12-15')).toBe(500);
+});
+
+test('without an event date the form gets no availability, and a saved quote reserves nothing', async () => {
+	await create();
+	expect(await getQuoteAvailability(db, { event_date: '' }, sales)).toBeNull();
+	expect(await getQuoteAvailability(db, { event_date: null }, sales)).toBeNull();
+	const availability = await getQuoteAvailability(db, { event_date: '2026-12-12' }, sales);
+	expect(availability?.find(({ productId }) => 1 === productId)?.available).toBe(500);
+});
+
+test("WAREHOUSE and DRIVER get a 403 asking for the quote form's availability", async () => {
+	for (const actor of [warehouse, driver]) {
+		const refusal = await getQuoteAvailability(db, { event_date: '2026-12-12' }, actor).catch(
+			(caught: unknown) => caught
+		);
+		expect(isHttpError(refusal, 403)).toBe(true);
+	}
 });
