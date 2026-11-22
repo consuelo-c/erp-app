@@ -18,15 +18,17 @@
 	// An order's «Novedades», the same on the order's detail and in Despachos: every role reads them
 	// all, and each card offers only what the service says the actor may do with it. Reversing posts
 	// to the page's `?/revertir`; `onassign`, where given, opens the page's own responsible-party
-	// dialog.
+	// dialog. «Corregir» opens `correctHref`'s form, which needs signal: Despachos only shows the
+	// section online.
 	interface Props {
 		incidents: Incident[];
+		correctHref: (incident: Incident) => string;
 		reverseMessage?: string;
 		buttonSize?: 'sm';
 		onassign?: (incident: Incident) => void;
 	}
 
-	let { incidents, reverseMessage, buttonSize, onassign }: Props = $props();
+	let { incidents, correctHref, reverseMessage, buttonSize, onassign }: Props = $props();
 
 	let selected = $state<Incident | null>(null);
 	let isReverseOpen = $state(false);
@@ -48,6 +50,12 @@
 	// The reporter who lost their rights to it, so they know why there's nothing to press.
 	function isFrozenForReporter(incident: Incident): boolean {
 		return incident.isReportedByActor && incident.isFrozen && !incident.canReverse;
+	}
+
+	function hasActions(incident: Incident): boolean {
+		const canAssign = undefined !== onassign && incident.canSetResponsibleParty;
+		const canReverseNow = incident.canReverse && null === incident.reversalBlock;
+		return incident.canCorrect || canAssign || canReverseNow;
 	}
 
 	// A refusal keeps the dialog open with its message.
@@ -96,9 +104,13 @@
 			{#if isFrozenForReporter(incident)}
 				<p class="note">El Gerente ya le puso responsable: no se puede corregir.</p>
 			{/if}
-			<!-- STUB: #619 adds «Corregir» here when `incident.canCorrect`. -->
-			{#if (onassign && incident.canSetResponsibleParty) || (incident.canReverse && null === incident.reversalBlock)}
+			{#if hasActions(incident)}
 				<div class="incident__actions">
+					{#if incident.canCorrect}
+						<Button variant="secondary" size={buttonSize} href={correctHref(incident)}>
+							Corregir
+						</Button>
+					{/if}
 					{#if onassign && incident.canSetResponsibleParty}
 						<Button variant="secondary" size={buttonSize} onclick={() => onassign(incident)}>
 							Cambiar responsable

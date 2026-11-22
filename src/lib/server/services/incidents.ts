@@ -330,11 +330,26 @@ export async function listIncidents(
  * The only rule for reversing an incident: why not, or null when it can. One with a `LOST` or
  * `UNRECOVERABLE` item can't once a count that applied any of those products was approved after
  * it, unless that count was reversed since; an all-`RECOVERABLE` one never touched inventory.
- * Ordered by the `events` ids, like the count's `reversalBlock`.
  */
 async function reversalBlock(db: D1Database, row: IncidentRow): Promise<string | null> {
 	const subtracted = toIncident(row).items.filter((item) => SUBTRACTING.includes(item.outcome));
-	if (0 === subtracted.length) {
+	const fixed = await firstFixedProduct(
+		db,
+		row.id,
+		subtracted.map((item) => item.product_id)
+	);
+	const name = subtracted.find((item) => item.product_id === fixed)?.name;
+	return undefined === name ? null : `Un conteo aprobado después ya fijó ${name}`;
+}
+
+// Of `productIds`, one an approved, unreversed count applied after the incident was reported, or
+// null. Ordered by the `events` ids, like the count's `reversalBlock`.
+async function firstFixedProduct(
+	db: D1Database,
+	incidentId: number,
+	productIds: number[]
+): Promise<number | null> {
+	if (0 === productIds.length) {
 		return null;
 	}
 	const fixed = await db
@@ -346,10 +361,9 @@ async function reversalBlock(db: D1Database, row: IncidentRow): Promise<string |
 			and events.id > (select id from events where entity_type = 'INCIDENT' and entity_id = ?2 and action = 'CREATED')
 			limit 1`
 		)
-		.bind(JSON.stringify(subtracted.map((item) => item.product_id)), row.id)
+		.bind(JSON.stringify(productIds), incidentId)
 		.first<{ product_id: number }>();
-	const name = subtracted.find((item) => item.product_id === fixed?.product_id)?.name;
-	return undefined === name ? null : `Un conteo aprobado después ya fijó ${name}`;
+	return fixed?.product_id ?? null;
 }
 
 const incidentIdSchema = z.coerce.number().int().positive();
@@ -481,5 +495,113 @@ export async function setResponsibleParty(
 	if (0 < statements.length) {
 		await db.batch(statements);
 	}
+	return { ok: true, id };
+}
+
+const correctionSchema = reportSchema.omit({ order_id: true }).extend({ id: incidentIdSchema });
+
+// How much each product's inventory moves when an incident's items change: the change in its
+// LOST + UNRECOVERABLE total, given back what it no longer takes. Unchanged products are left out.
+function stockDifference(before: IncidentItem[], after: IncidentItem[]): Map<number, number> {
+	const totals = adjustments(before, 1);
+	for (const [productId, qty] of adjustments(after, -1)) {
+		totals.set(productId, (totals.get(productId) ?? 0) + qty);
+	}
+	return new Map([...totals].filter(([, qty]) => 0 !== qty));
+}
+
+// Why the actor may not correct an ACTIVE incident, or null when they may.
+function correctionRefusal(row: IncidentRow, actor: Actor): Refusal | null {
+	if (mayCorrect(row, actor)) {
+		return null;
+	}
+	return isFrozen(row)
+		? refusal({}, 'El Gerente ya le puso responsable: no se puede corregir.')
+		: refusal({}, 'Solo quien la reportó o el Gerente puede corregirla');
+}
+
+// A correction never undoes a count: a product whose lost and unusable total moves is refused
+// once an approved count fixed it after the incident.
+async function countBlock(
+	db: D1Database,
+	row: IncidentRow,
+	items: IncidentItem[]
+): Promise<Refusal | null> {
+	const before = toIncident(row).items;
+	const moved = stockDifference(before, items);
+	const fixed = await firstFixedProduct(db, row.id, [...moved.keys()]);
+	const name = [...before, ...items].find((item) => item.product_id === fixed)?.name;
+	if (undefined === name) {
+		return null;
+	}
+	return refusal(
+		{},
+		`No se puede cambiar la cantidad perdida o inservible de ${name}: un conteo aprobado ya la fijó. Puedes cambiar la descripción y lo recuperable.`
+	);
+}
+
+// The corrected items, or why the actor may not correct this ACTIVE incident so.
+async function checkCorrection(
+	db: D1Database,
+	row: IncidentRow,
+	{ correction, actor }: { correction: z.infer<typeof correctionSchema>; actor: Actor }
+): Promise<IncidentItem[] | Refusal> {
+	const notAllowed = correctionRefusal(row, actor);
+	if (null !== notAllowed) {
+		return notAllowed;
+	}
+	const items = await checkReport(db, { ...correction, order_id: row.order_id });
+	if ('ok' in items) {
+		return items;
+	}
+	return (await countBlock(db, row, items)) ?? items;
+}
+
+// The edit, logged with its before and after, keeping `created_by`; the inventory moved by each
+// product's difference; and the order's flag worked out again.
+async function correctionStatements(
+	db: D1Database,
+	row: IncidentRow,
+	{ items, description, actor }: { items: IncidentItem[]; description: string; actor: Actor }
+): Promise<D1PreparedStatement[]> {
+	const current = {
+		incident_items: row.incident_items,
+		incident_description: row.incident_description
+	};
+	const changes = { incident_items: JSON.stringify(items), incident_description: description };
+	const write = { table: 'incidents', entityType: 'INCIDENT', actor, id: row.id, current, changes };
+	return [
+		...auditedUpdate(db, write),
+		...(await inventoryStatements(db, actor, stockDifference(toIncident(row).items, items))),
+		hasIncidentStatement(db, row.order_id)
+	];
+}
+
+/**
+ * Fixes a mistake in an ACTIVE incident in place, under a report's rules: its reporter until it's
+ * frozen, `ADMIN` and `MANAGER` on any unfrozen one. The reporter stays. The edit, the inventory
+ * moved by each product's difference and the order's flag go in one batch.
+ */
+export async function correctIncident(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<SaveResult> {
+	requireRole(actor, ROLES);
+	const parsed = correctionSchema.safeParse(input);
+	if (!parsed.success) {
+		return invalid(parsed.error);
+	}
+	const { id } = parsed.data;
+	const row = await findActive(db, id);
+	if ('ok' in row) {
+		return row;
+	}
+	const items = await checkCorrection(db, row, { correction: parsed.data, actor });
+	if ('ok' in items) {
+		return items;
+	}
+	const correction = { items, description: parsed.data.incident_description, actor };
+	await db.batch(await correctionStatements(db, row, correction));
 	return { ok: true, id };
 }

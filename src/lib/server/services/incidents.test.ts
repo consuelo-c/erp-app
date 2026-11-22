@@ -4,6 +4,7 @@ import { beforeEach, expect, test } from 'vitest';
 import type { Actor, Role } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
 import {
+	correctIncident,
 	incidentItemsSchema,
 	listIncidents,
 	reportIncident,
@@ -604,4 +605,177 @@ test('SALES, WAREHOUSE and DRIVER get a 403 changing the responsible party', asy
 	expect(await listIncidents(db, id, manager)).toMatchObject([
 		{ responsibleParty: 'UNDETERMINED' }
 	]);
+});
+
+function correct(id: number, items: object[], actor: Actor = driver) {
+	const input = { id: String(id), incident_description: 'Llegaron rotas', items };
+	return correctIncident(db, input, actor);
+}
+
+test('the reporter corrects their own: stock moves by the difference, logged before and after', async () => {
+	const id = await createOrderIn('DELIVERED');
+	await report(
+		id,
+		[
+			{ product_id: CHAIR, qty: 4, outcome: 'LOST' },
+			{ product_id: TABLE, qty: 1, outcome: 'UNRECOVERABLE' }
+		],
+		driver
+	);
+	const corrected = [
+		{ product_id: CHAIR, qty: 2, outcome: 'LOST' },
+		{ product_id: CHAIR, qty: 2, outcome: 'RECOVERABLE' },
+		{ product_id: TABLE, qty: 1, outcome: 'LOST' }
+	];
+	expect(await correct(1, corrected)).toEqual({ ok: true, id: 1 });
+	expect([stock(CHAIR), stock(TABLE)]).toEqual([498, 499]);
+	const row = database.prepare('select * from incidents').get();
+	expect(row).toMatchObject({
+		incident_description: 'Llegaron rotas',
+		status: 'ACTIVE',
+		created_by: 'conductor',
+		updated_by: 'conductor'
+	});
+	expect(JSON.parse(String(row?.incident_items))).toEqual([
+		{ product_id: CHAIR, name: 'Silla Tiffany dorada', qty: 2, outcome: 'LOST' },
+		{ product_id: CHAIR, name: 'Silla Tiffany dorada', qty: 2, outcome: 'RECOVERABLE' },
+		{ product_id: TABLE, name: 'Mesa redonda 10 puestos', qty: 1, outcome: 'LOST' }
+	]);
+	const [event] = events('INCIDENT', 'EDITED');
+	expect(event).toMatchObject({
+		entityId: 1,
+		actor: 'conductor',
+		before: { incident_description: 'Llegaron mojadas' },
+		after: { incident_description: 'Llegaron rotas' }
+	});
+	expect(JSON.parse(event.before.incident_items)).toHaveLength(2);
+	expect(JSON.parse(event.after.incident_items)).toHaveLength(3);
+	expect(events('PRODUCT', 'INVENTORY_ADJUSTED').slice(2)).toEqual([
+		{
+			entityId: CHAIR,
+			actor: 'conductor',
+			before: { total_quantity: 496 },
+			after: { total_quantity: 498 }
+		}
+	]);
+});
+
+test("a reporter can't correct someone else's incident nor their own once frozen", async () => {
+	const id = await createOrderIn('DELIVERED');
+	await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], driver);
+	await report(id, [{ product_id: TABLE, qty: 1, outcome: 'LOST' }], driver);
+	await setResponsibleParty(db, { id: 2, responsible_party: 'CARRIER' }, manager);
+	const more = [{ product_id: CHAIR, qty: 1, outcome: 'LOST' }];
+	expect(await correct(1, more, sales)).toEqual({
+		ok: false,
+		message: 'Solo quien la reportó o el Gerente puede corregirla',
+		errors: {}
+	});
+	expect(await correct(2, [{ product_id: TABLE, qty: 2, outcome: 'LOST' }])).toEqual({
+		ok: false,
+		message: 'El Gerente ya le puso responsable: no se puede corregir.',
+		errors: {}
+	});
+	await reverse(1, driver);
+	expect(await correct(1, more)).toMatchObject({ ok: false });
+	expect([stock(CHAIR), stock(TABLE)]).toEqual([500, 499]);
+	expect(events('INCIDENT', 'EDITED')).toHaveLength(1);
+});
+
+test('the manager corrects any unfrozen incident, not a frozen one; the reporter stays', async () => {
+	const id = await createOrderIn('DELIVERED');
+	await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], driver);
+	await report(id, [{ product_id: TABLE, qty: 1, outcome: 'LOST' }], sales);
+	await setResponsibleParty(db, { id: 2, responsible_party: 'CLIENT' }, manager);
+	expect(await correct(1, [{ product_id: CHAIR, qty: 3, outcome: 'LOST' }], manager)).toEqual({
+		ok: true,
+		id: 1
+	});
+	expect(stock(CHAIR)).toBe(497);
+	expect(
+		database.prepare('select created_by, updated_by from incidents where id = 1').get()
+	).toEqual({ created_by: 'conductor', updated_by: 'gerente' });
+	expect(await correct(2, [{ product_id: TABLE, qty: 2, outcome: 'LOST' }], manager)).toMatchObject(
+		{ ok: false }
+	);
+	expect(stock(TABLE)).toBe(499);
+});
+
+test('a correction is validated like a report', async () => {
+	const id = await createOrderIn('DELIVERED');
+	await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], driver);
+	expect(await correct(1, [])).toMatchObject({ ok: false, errors: { items: expect.any(String) } });
+	expect(await correct(1, [{ product_id: TABLECLOTH, qty: 1, outcome: 'LOST' }])).toMatchObject({
+		ok: false,
+		errors: { 'items.0.product_id': 'Ese producto no está en el pedido' }
+	});
+	const tooMany = [
+		{ product_id: TABLE, qty: 10, outcome: 'LOST' },
+		{ product_id: TABLE, qty: 3, outcome: 'RECOVERABLE' }
+	];
+	expect(await correct(1, tooMany)).toMatchObject({
+		ok: false,
+		errors: { 'items.1.qty': 'El pedido tiene 12: no se pueden reportar más' }
+	});
+	const twice = [
+		{ product_id: CHAIR, qty: 1, outcome: 'LOST' },
+		{ product_id: CHAIR, qty: 1, outcome: 'LOST' }
+	];
+	expect(await correct(1, twice)).toMatchObject({ ok: false });
+	const blankInput = {
+		id: '1',
+		incident_description: ' ',
+		items: [{ product_id: CHAIR, qty: 1, outcome: 'LOST' }]
+	};
+	expect(await correctIncident(db, blankInput, driver)).toMatchObject({
+		ok: false,
+		errors: { incident_description: expect.any(String) }
+	});
+	expect(stock(CHAIR)).toBe(498);
+	expect(events('INCIDENT', 'EDITED')).toEqual([]);
+});
+
+test("every correction works the order's flag out again", async () => {
+	const id = await createOrderIn('DELIVERED');
+	await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], driver);
+	database.prepare('update orders set has_incident = 0 where id = ?').run(id);
+	expect(await correct(1, [{ product_id: CHAIR, qty: 2, outcome: 'RECOVERABLE' }])).toMatchObject({
+		ok: true
+	});
+	expect(hasIncident(id)).toBe(1);
+	expect(stock(CHAIR)).toBe(500);
+});
+
+const COUNT_BLOCK =
+	'No se puede cambiar la cantidad perdida o inservible de Silla Tiffany dorada: un conteo aprobado ya la fijó. Puedes cambiar la descripción y lo recuperable.';
+
+test("a count approved after it blocks changing that product's lost total, and only that", async () => {
+	const id = await createOrderIn('COMPLETED');
+	await report(
+		id,
+		[
+			{ product_id: CHAIR, qty: 4, outcome: 'LOST' },
+			{ product_id: TABLE, qty: 1, outcome: 'LOST' }
+		],
+		driver
+	);
+	await count([[CHAIR, 490]]);
+	const moreChairs = [
+		{ product_id: CHAIR, qty: 5, outcome: 'LOST' },
+		{ product_id: TABLE, qty: 1, outcome: 'LOST' }
+	];
+	expect(await correct(1, moreChairs)).toEqual({ ok: false, message: COUNT_BLOCK, errors: {} });
+	const noChairs = [{ product_id: TABLE, qty: 1, outcome: 'LOST' }];
+	expect(await correct(1, noChairs)).toEqual({ ok: false, message: COUNT_BLOCK, errors: {} });
+	const sameTotal = [
+		{ product_id: CHAIR, qty: 2, outcome: 'LOST' },
+		{ product_id: CHAIR, qty: 2, outcome: 'UNRECOVERABLE' },
+		{ product_id: CHAIR, qty: 3, outcome: 'RECOVERABLE' },
+		{ product_id: TABLE, qty: 2, outcome: 'LOST' }
+	];
+	expect(await correct(1, sameTotal)).toEqual({ ok: true, id: 1 });
+	expect([stock(CHAIR), stock(TABLE)]).toEqual([490, 498]);
+	expect(database.prepare('select incident_description from incidents').get()).toEqual({
+		incident_description: 'Llegaron rotas'
+	});
 });
