@@ -480,3 +480,53 @@ test('events rejects an unknown actor_kind', () => {
 		)
 	).toThrow(/CHECK/);
 });
+
+function readSchema(): string[] {
+	return database
+		.prepare(
+			"select type, name, tbl_name, sql from sqlite_master where name not glob 'sqlite_*' order by name"
+		)
+		.all()
+		.map((row) => `${row.type} ${row.name} ${row.tbl_name} ${row.sql}`);
+}
+
+test("the new cash concepts' migration keeps every row, the receipt index and the self reference", () => {
+	const index = MIGRATION_FILES.findIndex((file) => file.startsWith('0004_'));
+	database = new DatabaseSync(':memory:');
+	applyMigrations(MIGRATION_FILES.slice(0, index));
+	insertMovement({ concept: 'OTHER_EXPENSE', amount: -100 });
+	insertMovement({ concept: 'INSTALLMENT', amount: 100, entityType: 'ORDER' });
+	insertMovement({ concept: 'OTHER_EXPENSE', amount: 100, reversesId: 1 });
+	const rows = database.prepare('select * from cash_movements order by id').all();
+	const before = readSchema();
+	// D1 runs a migration in a transaction with foreign keys on: `foreign_keys=OFF` does nothing there.
+	database.exec('PRAGMA foreign_keys = ON');
+	database.exec('begin');
+	applyMigrations(MIGRATION_FILES.slice(index, index + 1));
+	database.exec('commit');
+	expect(database.prepare('select * from cash_movements order by id').all()).toEqual(rows);
+	const changed = readSchema().filter((entry) => !before.includes(entry));
+	expect(changed).toHaveLength(1);
+	expect(changed[0]).toMatch(/^table cash_movements cash_movements CREATE TABLE `cash_movements`/);
+	expect(changed[0]).not.toContain('__old_');
+	expect(changed[0]).toContain("'DAMAGE_CHARGE'");
+	const { receipt_number } = database
+		.prepare('select receipt_number from cash_movements where id = 1')
+		.get()!;
+	expect(() =>
+		database.exec(
+			`insert into cash_movements (concept, payment_method, amount, movement_date, receipt_number, created_at, created_by, updated_at, updated_by) values ('OTHER_EXPENSE', 'CASH', -50, '2026-10-17', ${receipt_number}, ${AUDIT})`
+		)
+	).toThrow(/UNIQUE/);
+	expect(() => insertMovement({ concept: 'OTHER_INCOME', amount: -100, reversesId: 99 })).toThrow(
+		/FOREIGN KEY/
+	);
+});
+
+test('cash_movements: the three new expense concepts go out on no link, like OTHER_EXPENSE', () => {
+	for (const concept of ['TRANSPORT_EXPENSE', 'SUPPLIES_EXPENSE', 'RENT']) {
+		insertMovement({ concept, amount: -100 });
+		expect(() => insertMovement({ concept, amount: 100 })).toThrow(/CHECK/);
+		expect(() => insertMovement({ concept, amount: -100, entityType: 'ORDER' })).toThrow(/CHECK/);
+	}
+});

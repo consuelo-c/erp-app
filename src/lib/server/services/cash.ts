@@ -23,7 +23,11 @@ export const CASH_CONCEPTS = [
 	'PAYROLL',
 	'CARRIER_PAYMENT',
 	'CANCELLATION_FEE',
+	'DAMAGE_CHARGE',
 	'OTHER_INCOME',
+	'TRANSPORT_EXPENSE',
+	'SUPPLIES_EXPENSE',
+	'RENT',
 	'OTHER_EXPENSE'
 ] as const;
 
@@ -34,6 +38,7 @@ const INFLOW_CONCEPTS: readonly CashConcept[] = [
 	'INSTALLMENT',
 	'SECURITY_DEPOSIT',
 	'CANCELLATION_FEE',
+	'DAMAGE_CHARGE',
 	'OTHER_INCOME'
 ];
 
@@ -41,9 +46,17 @@ export const PAYMENT_METHODS = ['CASH', 'TRANSFER', 'OTHER'] as const;
 
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
+/** What a «Salida» recorded in Caja is for: each one its own line in the profit and loss. */
+export const EXPENSE_CONCEPTS = [
+	'TRANSPORT_EXPENSE',
+	'SUPPLIES_EXPENSE',
+	'RENT',
+	'OTHER_EXPENSE'
+] as const satisfies readonly CashConcept[];
+
 // A standalone movement has no order or settlement to say what it was: its description does,
 // printed as the receipt's «Concepto».
-const STANDALONE_CONCEPTS: readonly CashConcept[] = ['OTHER_INCOME', 'OTHER_EXPENSE'];
+const STANDALONE_CONCEPTS: readonly CashConcept[] = ['OTHER_INCOME', ...EXPENSE_CONCEPTS];
 
 // SQLite validates nothing: a movement's JSON is checked on write and on read.
 export const movementAttributesSchema = z.object({
@@ -198,9 +211,29 @@ async function insertMovement(
 	return { ok: true, id: inserted.meta.last_row_id };
 }
 
+// «Entrada» is always an `OTHER_INCOME`; «Salida» picks its expense concept, «Otro egreso» unless
+// told otherwise.
+function conceptShape(isInflow: boolean) {
+	const message = 'Escoge el concepto';
+	return {
+		concept: isInflow
+			? z.literal('OTHER_INCOME', message).default('OTHER_INCOME')
+			: z.enum(EXPENSE_CONCEPTS, message).default('OTHER_EXPENSE')
+	};
+}
+
+function standaloneSchema(isInflow: boolean) {
+	const schema = entryBase.extend({
+		...conceptShape(isInflow),
+		...partyShape(isInflow),
+		amount: amountSchema
+	});
+	return checkMethod(isInflow, schema);
+}
+
 /**
- * Records a movement no other module does: «Entrada» is an `OTHER_INCOME`, «Salida» an
- * `OTHER_EXPENSE`. Returns the new movement's id, for its detail.
+ * Records a movement no other module does: «Entrada» is an `OTHER_INCOME`, «Salida» one of the
+ * expense concepts. Returns the new movement's id, for its detail.
  */
 export async function recordMovement(
 	db: D1Database,
@@ -213,13 +246,12 @@ export async function recordMovement(
 		return invalid(direction.error);
 	}
 	const isInflow = 'IN' === direction.data.direction;
-	const schema = entryBase.extend({ ...partyShape(isInflow), amount: amountSchema });
-	const form = checkMethod(isInflow, schema).safeParse(input);
+	const form = standaloneSchema(isInflow).safeParse(input);
 	if (!form.success) {
 		return invalid(form.error);
 	}
 	return insertMovement(db, actor, {
-		concept: isInflow ? 'OTHER_INCOME' : 'OTHER_EXPENSE',
+		concept: form.data.concept,
 		payment_method: form.data.payment_method,
 		amount: isInflow ? form.data.amount : -form.data.amount,
 		movement_date: form.data.movement_date,
@@ -426,7 +458,10 @@ export const typedPesosSchema = z
 const cashBookFiltersSchema = z.object({
 	from: optional(z.iso.date()),
 	to: optional(z.iso.date()),
-	concept: optional(z.enum(CASH_CONCEPTS)),
+	// Several at once, `?concepto=` repeated: a profit-and-loss line sums more than one.
+	concepts: z
+		.preprocess((value) => [value ?? []].flat(), z.array(z.unknown()))
+		.transform((values) => CASH_CONCEPTS.filter((concept) => values.includes(concept))),
 	method: optional(z.enum(PAYMENT_METHODS)),
 	direction: optional(z.enum(DIRECTIONS)),
 	employee: optional(z.string().trim().min(1)),
@@ -524,7 +559,13 @@ function employeeClause(pattern: string): Clause {
 // One clause per filter, each narrowing on its own. No joins: the totals stay one SUM over the table.
 const CLAUSES: ((filters: CashBookFilters) => Clause | null)[] = [
 	({ from, to }) => ({ sql: 'cash_movements.movement_date between ? and ?', params: [from, to] }),
-	({ concept }) => (concept ? { sql: 'cash_movements.concept = ?', params: [concept] } : null),
+	({ concepts }) =>
+		0 === concepts.length
+			? null
+			: {
+					sql: `cash_movements.concept in (${concepts.map(() => '?').join(', ')})`,
+					params: concepts
+				},
 	({ method }) => (method ? { sql: 'cash_movements.payment_method = ?', params: [method] } : null),
 	({ direction }) => {
 		if (undefined === direction) {

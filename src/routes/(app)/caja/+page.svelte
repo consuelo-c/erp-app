@@ -23,7 +23,12 @@
 	} from '$lib/datetime';
 	import { formatBalance, formatPesos, formatReceiptNumber, formatSignedPesos } from '$lib/format';
 	import { CASH_CONCEPT_LABELS, PAYMENT_METHOD_LABELS } from '$lib/labels';
-	import type { CashBookEntry, MovementDetail, ReceiptReference } from '$lib/server/services/cash';
+	import type {
+		CashBookEntry,
+		CashConcept,
+		MovementDetail,
+		ReceiptReference
+	} from '$lib/server/services/cash';
 	import type { PageProps } from './$types';
 
 	// An auditable record, not a day's close: no opening balance, and the net mixes cash with
@@ -43,7 +48,7 @@
 	const extraCount = $derived(
 		[
 			filters.direction,
-			filters.concept,
+			0 === filters.concepts.length ? undefined : filters.concepts,
 			filters.method,
 			filters.order,
 			filters.employee,
@@ -237,14 +242,17 @@
 			</Field>
 		</div>
 		{@render choice(directionChoice, prefix)}
-		<Field label="Concepto" id="{prefix}concepto">
-			<Select id="{prefix}concepto" name="concepto" value={filters.concept ?? ''}>
-				<option value="">Todos</option>
-				{#each Object.entries(CASH_CONCEPT_LABELS) as [concept, label] (concept)}
-					<option value={concept}>{label}</option>
-				{/each}
-			</Select>
-		</Field>
+		<!-- Several at once, as a profit-and-loss line links here: none ticked is every concept. -->
+		<Choice legend="Concepto" layout="scroll">
+			{#each Object.entries(CASH_CONCEPT_LABELS) as [concept, label] (concept)}
+				<Chip
+					name="concepto"
+					value={concept}
+					{label}
+					checked={filters.concepts.includes(concept as CashConcept)}
+				/>
+			{/each}
+		</Choice>
 		{@render choice(methodChoice, prefix)}
 		<div class="field-row">
 			<Field label="Pedido" id="{prefix}pedido">
