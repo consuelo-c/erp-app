@@ -19,7 +19,7 @@
 		formatLongDay,
 		formatShortDay
 	} from '$lib/datetime';
-	import { formatBalance, formatPesos } from '$lib/format';
+	import { formatBalance, formatPesos, formatReceiptNumber } from '$lib/format';
 	import { DELIVERY_METHOD_LABELS, ORDER_STATUS_LABELS, RETURN_METHOD_LABELS } from '$lib/labels';
 	import { lineMark, loadChecklist, saveChecklist } from '$lib/offline';
 	import {
@@ -29,14 +29,14 @@
 		receivableLine,
 		type OperationalStatus
 	} from '$lib/orders';
-	import type { Carrier, OrderDetail } from '$lib/server/services/orders';
+	import type { Carrier, OrderDetail, OrderPayment } from '$lib/server/services/orders';
 	import { singleReach } from '$lib/whatsapp';
 	import IncidentCards from '../../IncidentCards.svelte';
 	import ReachLines from '../../ReachLines.svelte';
 	import type { PageProps } from './$types';
 
 	// The order as the warehouse and the driver work it: who, where, when, what, and its money.
-	// No commercial action lives here: only the status button. Every control is 48px, for a phone in
+	// No commercial action lives here: only the status button, and the payments collected on the road. Every control is 48px, for a phone in
 	// the street.
 	let { data, form }: PageProps = $props();
 
@@ -102,12 +102,30 @@
 		};
 	};
 
+	// Set by the payment entry's redirect: the payment just recorded, to tell the client.
+	const recordedPayment = $derived(
+		order.payments.find((payment) => String(payment.id) === page.url.searchParams.get('pago'))
+	);
+
+	function describePayment(payment: OrderPayment): string {
+		const method = 'CASH' === payment.method ? 'en efectivo' : 'por transferencia';
+		const receipt = 0 < payment.amount ? 'Recibo de caja' : 'Comprobante de egreso';
+		const amount = formatPesos(Math.abs(payment.amount));
+		const number = formatReceiptNumber(payment.receiptNumber);
+		return `Pago registrado: ${amount} ${method} · ${receipt} # ${number}. Saldo ${formatBalance(order.balanceDue)}.`;
+	}
+
 	// The day the order was opened from (`?fecha=`): «Atrás» goes back to it, through the printout,
-	// the timeline and the orders linked here. Without one, Despachos opens on today.
-	const backHref = $derived(`${resolve('/despachos')}${page.url.search}`);
+	// the timeline and the orders linked here. Without one, Despachos opens on today. The payment
+	// just recorded isn't carried along.
+	const originSearch = $derived.by(() => {
+		const kept = [...page.url.searchParams].filter(([name]) => 'pago' !== name);
+		return 0 === kept.length ? '' : `?${new URLSearchParams(kept)}`;
+	});
+	const backHref = $derived(`${resolve('/despachos')}${originSearch}`);
 
 	function keepOrigin(href: string): string {
-		return `${href}${page.url.search}`;
+		return `${href}${originSearch}`;
 	}
 
 	function orderHref(orderId: number): string {
@@ -215,8 +233,14 @@
 						? ''
 						: ` · Datos de las ${formatInstantTime(data.capturedAt)}`}
 				</strong>
-				Marcar, reportar una novedad, imprimir y ver el historial necesitan señal.
+				Marcar, registrar un pago, reportar una novedad, imprimir y ver el historial necesitan señal.
 			</Notice>
+		</div>
+	{/if}
+
+	{#if recordedPayment}
+		<div class="lead-notice">
+			<Notice tone="success">{describePayment(recordedPayment)}</Notice>
 		</div>
 	{/if}
 
@@ -351,7 +375,7 @@
 			<span>Depósito recibido</span><span>{formatBalance(order.depositHeld)}</span>
 		</li>
 	</ul>
-	<!-- The driver doesn't collect: a balance informs and blocks nothing. -->
+	<!-- A balance informs and blocks nothing: the driver may collect it, or not. -->
 	{#if null === order.receivableId && 0 < order.balanceDue}
 		<p class="note balance-note">Saldo pendiente. No impide entregar.</p>
 	{/if}
@@ -373,6 +397,16 @@
 	{/if}
 
 	<div class="screen__action">
+		<!-- Only as loaded with signal, and only with something to collect or give back. -->
+		{#if data.paymentConcepts?.length}
+			<Button
+				variant="secondary"
+				href={onlineHref(keepOrigin(resolve('/(app)/despachos/[id]/pago', { id })))}
+				disabled={isOffline}
+			>
+				Registrar pago
+			</Button>
+		{/if}
 		{#if isIncidentReportable(order)}
 			<Button
 				variant="secondary"

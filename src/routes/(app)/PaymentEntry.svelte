@@ -19,8 +19,8 @@
 	import type { PaymentMethod } from '$lib/server/services/cash';
 	import type { PayableCarrier } from '$lib/server/services/orders';
 
-	// The payment entry of an order and of a cuenta de cobro: a sheet over it, its own screen, closed
-	// by ✕ back to it. What's typed is read off the form; Concepto and Método decide which fields
+	// The payment entry of an order, of a cuenta de cobro and of Despachos: a sheet over it, its own
+	// screen, closed by ✕ back to it. What's typed is read off the form; Concepto and Método decide which fields
 	// show. Nothing blocks on the amounts: the confirmation warns, and says the payment can't be
 	// corrected afterward.
 	type Props = {
@@ -30,7 +30,15 @@
 		closeHref: string;
 		/** The first one starts picked. */
 		concepts: readonly OrderPaymentConcept[];
+		/** Despachos' entry takes only cash and transfers. */
+		methods?: readonly PaymentMethod[];
 		initialMethod?: PaymentMethod;
+		/** What a method means for whoever records it, under Método. */
+		methodHintOf?: (method: PaymentMethod) => string | undefined;
+		/** Why the concepts on offer are fewer, over the form. */
+		notice?: string;
+		/** Saving needs signal: nothing is kept on the phone to send later. */
+		isOffline?: boolean;
 		notesPlaceholder?: string;
 		clientName: string;
 		clientBankAccount?: string | null;
@@ -39,8 +47,8 @@
 		form: { message?: string; errors?: Record<string, string> } | null | undefined;
 		/** What Valor starts at under a concept; picking another fills it again. */
 		pendingOf: (concept: OrderPaymentConcept) => number;
-		/** Why Valor can't be changed from what it starts at. */
-		amountLockNote?: string;
+		/** Why Valor can't be changed from what it starts at under a concept. */
+		amountLockNoteOf?: (concept: OrderPaymentConcept) => string | undefined;
 		/** What the confirmation warns about, without blocking. */
 		warningOf?: (concept: OrderPaymentConcept, amount: number) => string | null;
 	};
@@ -50,7 +58,11 @@
 		conceptNote,
 		closeHref,
 		concepts,
+		methods = Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[],
 		initialMethod = 'CASH',
+		methodHintOf,
+		notice,
+		isOffline = false,
 		notesPlaceholder,
 		clientName,
 		clientBankAccount = null,
@@ -58,7 +70,7 @@
 		today,
 		form,
 		pendingOf,
-		amountLockNote,
+		amountLockNoteOf,
 		warningOf
 	}: Props = $props();
 
@@ -71,7 +83,8 @@
 	const isCarrierPayment = $derived('CARRIER_PAYMENT' === concept);
 	const isFee = $derived('CANCELLATION_FEE' === concept);
 	const feeSource = $derived(typed('fee_source', 'NEW') as FeeSource);
-	const method = $derived(typed('payment_method', initialMethod));
+	const method = $derived(typed('payment_method', initialMethod) as PaymentMethod);
+	const amountLockNote = $derived(amountLockNoteOf?.(concept));
 	const trip = $derived(typed('trip', carriers[0]?.trip ?? ''));
 	const carrier = $derived(carriers.find((option) => option.trip === trip) ?? carriers[0]);
 	const payee = $derived(isCarrierPayment ? typed('payee', carrier.name) : clientName);
@@ -87,14 +100,14 @@
 			: `Obligatoria. La cuenta guardada de ${isCarrierPayment ? carrier.name : clientName}; puedes cambiarla.`
 	);
 
-	const METHOD_OPTIONS = Object.entries(PAYMENT_METHOD_LABELS);
+	const methodOptions = $derived(methods.map((value) => [value, PAYMENT_METHOD_LABELS[value]]));
 	const FEE_SOURCE_OPTIONS = Object.entries(FEE_SOURCE_LABELS);
 	const TRIP_LABELS = { DELIVERY: 'Entrega', PICKUP: 'Retorno' };
 
 	const methodLabel = $derived(
 		'OTHER' === method
 			? typed('other_method', '') || PAYMENT_METHOD_LABELS.OTHER
-			: PAYMENT_METHOD_LABELS[method as keyof typeof PAYMENT_METHOD_LABELS]
+			: PAYMENT_METHOD_LABELS[method]
 	);
 
 	let isConfirmOpen = $state(false);
@@ -135,6 +148,11 @@
 		oninput={(event) => (entered = new FormData(event.currentTarget))}
 	>
 		<p class="meta payment__lead">{lead}</p>
+		{#if notice}
+			<div class="payment__lead-notice">
+				<Notice tone="warning">{notice}</Notice>
+			</div>
+		{/if}
 		<div class="form-stack">
 			<Choice legend="Concepto" layout={1 < concepts.length ? 'scroll' : 'grid'} hint={conceptNote}>
 				{#each concepts as option (option)}
@@ -172,8 +190,8 @@
 				</Choice>
 			{/if}
 
-			<Choice legend="Método">
-				{#each METHOD_OPTIONS as [value, label] (value)}
+			<Choice legend="Método" hint={methodHintOf?.(method)}>
+				{#each methodOptions as [value, label] (value)}
 					<Chip type="radio" name="payment_method" {value} {label} checked={value === method} />
 				{/each}
 			</Choice>
@@ -246,14 +264,18 @@
 			</Field>
 		</div>
 
-		{#if form?.message}
+		{#if isOffline}
+			<div class="payment__notice">
+				<Notice tone="error">Sin conexión. Registra el pago cuando tengas señal.</Notice>
+			</div>
+		{:else if form?.message}
 			<div class="payment__notice">
 				<Notice tone="error">{form.message}</Notice>
 			</div>
 		{/if}
 
 		<div class="screen__action">
-			<Button type="button" onclick={askToConfirm}>Guardar pago</Button>
+			<Button type="button" disabled={isOffline} onclick={askToConfirm}>Guardar pago</Button>
 		</div>
 	</form>
 </Screen>
@@ -287,7 +309,7 @@
 		<Button type="button" variant="secondary" onclick={() => (isConfirmOpen = false)}>
 			Cancelar
 		</Button>
-		<Button type="submit" form="payment" size="md">Confirmar</Button>
+		<Button type="submit" form="payment" size="md" disabled={isOffline}>Confirmar</Button>
 	{/snippet}
 </Modal>
 
@@ -299,6 +321,10 @@
 	.field-row {
 		display: flex;
 		gap: var(--control-gap);
+	}
+
+	.payment__lead-notice {
+		margin-bottom: var(--space-8);
 	}
 
 	.payment__notice {

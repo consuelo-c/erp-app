@@ -31,6 +31,7 @@ import {
 } from './orders';
 import { createOrder } from '../db/test-orders';
 import { readOwedOnReceivable } from '$lib/orders';
+import { reportIncident, reverseIncident } from './incidents';
 import { getReceivableDetail, issueReceivable, recordReceivablePayment } from './receivables';
 
 const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
@@ -1480,18 +1481,16 @@ test('a billed order refuses a «Pago», and still takes a refund', async () => 
 	expect(refund).toMatchObject({ amount: -300000, entity_type: 'ORDER' });
 });
 
-test('SALES records money in only; WAREHOUSE and DRIVER record nothing: a 403', async () => {
+test('SALES records money in only; WAREHOUSE records nothing: a 403', async () => {
 	const id = await create(withCarriers(WILSON, null));
 	for (const concept of ['INSTALLMENT_REFUND', 'DEPOSIT_REFUND', 'CARRIER_PAYMENT']) {
 		await expect(recordOrderPayment(db, typedPayment(id, { concept }), sales)).rejects.toSatisfy(
 			(thrown) => isHttpError(thrown, 403)
 		);
 	}
-	for (const actor of [warehouse, driver]) {
-		await expect(recordOrderPayment(db, typedPayment(id), actor)).rejects.toSatisfy((thrown) =>
-			isHttpError(thrown, 403)
-		);
-	}
+	await expect(recordOrderPayment(db, typedPayment(id), warehouse)).rejects.toSatisfy((thrown) =>
+		isHttpError(thrown, 403)
+	);
 	await recordPayment(id, { concept: 'SECURITY_DEPOSIT' }, sales);
 });
 
@@ -1594,6 +1593,151 @@ test('the entry offers «Pago» while there is a balance, the deposit until comp
 	await recordPayment(id, { concept: 'SECURITY_DEPOSIT', amount: String(depositAmount) }, sales);
 	expect(await offeredTo(sales)).toEqual([]);
 	expect(await offeredTo(manager)).toEqual(['INSTALLMENT_REFUND', 'DEPOSIT_REFUND']);
+});
+
+// The driver's payments (#605): on the road only, money in under the office's conditions, the
+// whole deposit back at pickup while the order has no active incident.
+function reportLost(orderId: number) {
+	const items = [{ product_id: 1, qty: 2, outcome: 'LOST' }];
+	const input = { order_id: String(orderId), incident_description: 'Se perdieron', items };
+	return reportIncident(db, input, driver);
+}
+
+function bill(orderId: number) {
+	database.exec(
+		`insert into receivables (id, client_id, issue_date, created_at, created_by, updated_at, updated_by)
+		select 4794, client_id, '2026-08-01', 0, 'admin', 0, 'admin' from orders where id = ${orderId};
+		update orders set receivable_id = 4794 where id = ${orderId}`
+	);
+}
+
+test('the driver is offered «Pago» and the deposit on the road, and the deposit back at pickup', async () => {
+	const id = await create();
+	const offered = async (actor: Actor = driver) => offeredPaymentConcepts(await detail(id), actor);
+	for (const status of ['CONFIRMED', 'PICKED', 'COMPLETED', 'CANCELLED']) {
+		setStatus(id, status);
+		expect(await offered()).toEqual([]);
+	}
+	for (const status of ['OUT_FOR_DELIVERY', 'DELIVERED', 'OUT_FOR_PICKUP']) {
+		setStatus(id, status);
+		expect(await offered()).toEqual(['INSTALLMENT', 'SECURITY_DEPOSIT']);
+	}
+	await recordPayment(id, { concept: 'SECURITY_DEPOSIT', amount: '200.000' }, sales);
+	expect(await offered()).toEqual(['INSTALLMENT', 'DEPOSIT_REFUND']);
+	setStatus(id, 'DELIVERED');
+	expect(await offered()).toEqual(['INSTALLMENT']);
+	setStatus(id, 'OUT_FOR_PICKUP');
+	expect(await offered(warehouse)).toEqual([]);
+	expect(await offered(manager)).toEqual(['INSTALLMENT', 'INSTALLMENT_REFUND', 'DEPOSIT_REFUND']);
+	expect(await reportLost(id)).toMatchObject({ ok: true });
+	expect(await offered()).toEqual(['INSTALLMENT']);
+	bill(id);
+	expect(await offered()).toEqual([]);
+});
+
+test('the driver records «Pago» and the deposit on the road, in cash or by transfer, as its author', async () => {
+	const id = await create();
+	setStatus(id, 'OUT_FOR_DELIVERY');
+	const installment = await recordPayment(id, { amount: '680.000' }, driver);
+	expect(installment).toMatchObject({
+		concept: 'INSTALLMENT',
+		amount: 680000,
+		payment_method: 'CASH',
+		entity_id: id,
+		payee: 'Luz Marina Restrepo',
+		created_by: 'conductor'
+	});
+	setStatus(id, 'DELIVERED');
+	const transfer = { concept: 'SECURITY_DEPOSIT', payment_method: 'TRANSFER', amount: '200.000' };
+	expect(await recordPayment(id, transfer, driver)).toMatchObject({ created_by: 'conductor' });
+	setStatus(id, 'OUT_FOR_PICKUP');
+	await recordPayment(id, { amount: '500.000' }, driver);
+	expect(await detail(id)).toMatchObject({ paid: 1180000, balanceDue: 0, depositHeld: 200000 });
+});
+
+test('the driver is refused off the road, with «Otro», a paid order and a complete deposit', async () => {
+	const id = await create();
+	const tryRecord = (fields: Record<string, string>) =>
+		recordOrderPayment(db, typedPayment(id, fields), driver);
+	for (const status of ['CONFIRMED', 'PICKED', 'COMPLETED', 'CANCELLED']) {
+		setStatus(id, status);
+		expect(await tryRecord({})).toMatchObject({ ok: false });
+	}
+	setStatus(id, 'DELIVERED');
+	const other = await tryRecord({ payment_method: 'OTHER', other_method: 'Trueque' });
+	expect(other).toMatchObject({ ok: false, errors: { payment_method: expect.any(String) } });
+	await recordPayment(id, { amount: '1.180.000' }, driver);
+	expect(await tryRecord({})).toMatchObject({ ok: false, message: 'Este pedido ya está pagado.' });
+	await recordPayment(id, { concept: 'SECURITY_DEPOSIT', amount: '200.000' }, driver);
+	const deposit = await tryRecord({ concept: 'SECURITY_DEPOSIT' });
+	expect(deposit).toMatchObject({ ok: false, message: 'El depósito ya está completo.' });
+	expect(database.prepare('select count(*) as count from cash_movements').get()).toEqual({
+		count: 2
+	});
+});
+
+test('the driver gives back only the whole deposit, only at pickup, only with no active incident', async () => {
+	const id = await create();
+	await recordPayment(id, { concept: 'SECURITY_DEPOSIT', amount: '200.000' }, sales);
+	const refund = (fields: Record<string, string> = {}) =>
+		recordOrderPayment(
+			db,
+			typedPayment(id, { concept: 'DEPOSIT_REFUND', amount: '200.000', ...fields }),
+			driver
+		);
+	setStatus(id, 'DELIVERED');
+	expect(await refund()).toMatchObject({ ok: false });
+	setStatus(id, 'OUT_FOR_PICKUP');
+	expect(await refund({ amount: '150.000' })).toMatchObject({
+		ok: false,
+		errors: { amount: expect.stringContaining('$200.000') }
+	});
+	expect(await reportLost(id)).toMatchObject({ ok: true });
+	expect(await refund()).toEqual({
+		ok: false,
+		message: 'El pedido tiene una novedad activa: la devolución del depósito la hace la oficina.',
+		errors: {}
+	});
+	const [{ id: incidentId }] = database.prepare('select id from incidents').all();
+	const reason = { id: String(incidentId), reason: 'Era de otro pedido' };
+	expect(await reverseIncident(db, reason, driver)).toMatchObject({ ok: true });
+	const account = { payment_method: 'TRANSFER', bank_account: 'Bancolombia ahorros 052-334198-07' };
+	expect(await refund(account)).toMatchObject({ ok: true });
+	const [given] = database
+		.prepare("select amount, created_by from cash_movements where concept = 'DEPOSIT_REFUND'")
+		.all();
+	expect(given).toEqual({ amount: -200000, created_by: 'conductor' });
+	expect((await detail(id)).depositHeld).toBe(0);
+	expect(await refund()).toMatchObject({ ok: false });
+});
+
+test("a billed order allows the driver nothing, and the rest of the money out stays the manager's", async () => {
+	const id = await create();
+	setStatus(id, 'OUT_FOR_PICKUP');
+	for (const concept of ['INSTALLMENT_REFUND', 'CARRIER_PAYMENT', 'CANCELLATION_FEE']) {
+		await expect(recordOrderPayment(db, typedPayment(id, { concept }), driver)).rejects.toSatisfy(
+			(thrown) => isHttpError(thrown, 403)
+		);
+	}
+	bill(id);
+	for (const concept of ['INSTALLMENT', 'SECURITY_DEPOSIT']) {
+		expect(await recordOrderPayment(db, typedPayment(id, { concept }), driver)).toEqual({
+			ok: false,
+			message: 'El pago va en la cuenta de cobro Nº 4794.',
+			errors: {}
+		});
+	}
+});
+
+test("the driver's refund by transfer is pre-filled with the client's account", async () => {
+	database.exec(`update contacts set attributes = '{"bank_account":"Cuenta Luz"}' where id = 1`);
+	const id = await create();
+	expect((await getPaymentOptions(db, await read(id), driver)).clientBankAccount).toBe(
+		'Cuenta Luz'
+	);
+	await expect(getPaymentOptions(db, await read(id), warehouse)).rejects.toSatisfy((thrown) =>
+		isHttpError(thrown, 403)
+	);
 });
 
 // The planning's example: a $1.500.000 order, $800.000 paid and a $300.000 deposit, cancelled.

@@ -23,5 +23,5 @@
 	today={data.today}
 	{form}
 	pendingOf={() => receivable.balance}
-	amountLockNote="La cuenta de cobro se paga completa."
+	amountLockNoteOf={() => 'La cuenta de cobro se paga completa.'}
 />
