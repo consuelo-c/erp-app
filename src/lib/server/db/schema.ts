@@ -399,11 +399,11 @@ export const cashMovements = sqliteTable(
 			'cash_movements_concept_link',
 			sql`CASE
 				WHEN ${table.concept} = 'INSTALLMENT' THEN coalesce(${table.entityType}, '') IN ('ORDER', 'RECEIVABLE') AND (${table.amount} > 0) = (${table.reversesId} IS NULL)
-				WHEN ${table.concept} IN ('SECURITY_DEPOSIT', 'CANCELLATION_FEE') THEN ${table.entityType} IS 'ORDER' AND (${table.amount} > 0) = (${table.reversesId} IS NULL)
+				WHEN ${table.concept} IN ('SECURITY_DEPOSIT', 'CANCELLATION_FEE', 'DAMAGE_CHARGE') THEN ${table.entityType} IS 'ORDER' AND (${table.amount} > 0) = (${table.reversesId} IS NULL)
 				WHEN ${table.concept} IN ('INSTALLMENT_REFUND', 'DEPOSIT_REFUND', 'CARRIER_PAYMENT') THEN ${table.entityType} IS 'ORDER' AND (${table.amount} < 0) = (${table.reversesId} IS NULL)
 				WHEN ${table.concept} = 'PAYROLL' THEN ${table.entityType} IS 'PAYROLL_RUN' AND (${table.amount} < 0) = (${table.reversesId} IS NULL)
 				WHEN ${table.concept} = 'OTHER_INCOME' THEN ${table.entityType} IS NULL AND (${table.amount} > 0) = (${table.reversesId} IS NULL)
-				WHEN ${table.concept} = 'OTHER_EXPENSE' THEN ${table.entityType} IS NULL AND (${table.amount} < 0) = (${table.reversesId} IS NULL)
+				WHEN ${table.concept} IN ('TRANSPORT_EXPENSE', 'SUPPLIES_EXPENSE', 'RENT', 'OTHER_EXPENSE') THEN ${table.entityType} IS NULL AND (${table.amount} < 0) = (${table.reversesId} IS NULL)
 				ELSE 0
 			END`
 		),

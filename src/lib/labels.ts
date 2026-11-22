@@ -62,7 +62,11 @@ export const CASH_CONCEPT_LABELS: Record<CashConcept, string> = {
 	PAYROLL: 'Pago de nómina',
 	CARRIER_PAYMENT: 'Pago a transportador',
 	CANCELLATION_FEE: 'Cargo por cancelación',
+	DAMAGE_CHARGE: 'Cobro por novedad',
 	OTHER_INCOME: 'Otro ingreso',
+	TRANSPORT_EXPENSE: 'Gasto de transporte',
+	SUPPLIES_EXPENSE: 'Insumos',
+	RENT: 'Arriendo',
 	OTHER_EXPENSE: 'Otro egreso'
 };
 

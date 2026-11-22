@@ -190,7 +190,7 @@ test("by default the book shows this month's movements, newest first, with link 
 test('each filter narrows the book on its own', async () => {
 	await seedBook();
 	expect(await bookIds({ from: '2026-09-01', to: '2026-09-30' })).toEqual([2]);
-	expect(await bookIds({ concept: 'PAYROLL' })).toEqual([4, 3]);
+	expect(await bookIds({ concepts: 'PAYROLL' })).toEqual([4, 3]);
 	expect(await bookIds({ method: 'CASH' })).toEqual([5, 1]);
 	expect(await bookIds({ direction: 'IN' })).toEqual([5]);
 	expect(await bookIds({ direction: 'OUT' })).toEqual([4, 3, 1]);
@@ -241,7 +241,7 @@ test("SALES prints an order movement's receipt, never a standalone one's", async
 
 test('a tampered filter is ignored, not an error', async () => {
 	await seedBook();
-	expect(await bookIds({ concept: 'BOGUS', from: 'ayer', min: 'mucho' })).toEqual([4, 3, 5, 1]);
+	expect(await bookIds({ concepts: 'BOGUS', from: 'ayer', min: 'mucho' })).toEqual([4, 3, 5, 1]);
 });
 
 test('the three totals follow the filters, and net is in minus out', async () => {
@@ -251,7 +251,7 @@ test('the three totals follow the filters, and net is in minus out', async () =>
 		outflow: 915000,
 		net: -795000
 	});
-	expect((await getCashBook(db, { concept: 'PAYROLL' }, manager)).totals).toEqual({
+	expect((await getCashBook(db, { concepts: 'PAYROLL' }, manager)).totals).toEqual({
 		inflow: 0,
 		outflow: 870000,
 		net: -870000
@@ -512,7 +512,7 @@ test("a PAYROLL movement's offset keeps its link; the settlement stays PAID", as
 test('an original and its correction net to zero, both under their concept', async () => {
 	await recordMovement(db, typedExpense, manager);
 	await recordOffset(db, typedCorrection, manager);
-	const filters = { from: '2026-10-01', to: '2026-10-31', concept: 'OTHER_EXPENSE' };
+	const filters = { from: '2026-10-01', to: '2026-10-31', concepts: ['OTHER_EXPENSE'] };
 	const { entries, totals } = await getCashBook(db, filters, manager);
 	expect(entries).toHaveLength(2);
 	expect(totals).toEqual({ inflow: 48500, outflow: 48500, net: 0 });
@@ -524,4 +524,97 @@ test('only MANAGER and ADMIN record an offsetting movement', async () => {
 	await expect(recordOffset(db, typedCorrection, actor)).rejects.toSatisfy((thrown) =>
 		isHttpError(thrown, 403)
 	);
+});
+
+const EXPENSE_CONCEPTS = [
+	'TRANSPORT_EXPENSE',
+	'SUPPLIES_EXPENSE',
+	'RENT',
+	'OTHER_EXPENSE'
+] as const;
+
+test('«Salida» saves the expense concept it picks, each with its description', async () => {
+	for (const [index, concept] of EXPENSE_CONCEPTS.entries()) {
+		expect(await recordMovement(db, { ...typedExpense, concept }, manager)).toEqual({
+			ok: true,
+			id: index + 1
+		});
+		expect(storedMovement(index + 1)).toMatchObject({
+			concept,
+			amount: -48500,
+			attributes: '{"description":"Compra de jabón y desinfectante"}'
+		});
+	}
+});
+
+test('every expense concept refuses a «Salida» without a description', async () => {
+	for (const concept of EXPENSE_CONCEPTS) {
+		expect(
+			await recordMovement(db, { ...typedExpense, concept, description: '' }, manager)
+		).toMatchObject({ ok: false, errors: { description: 'Escribe la descripción' } });
+		expect(movementSchema.safeParse({ ...expense, concept, attributes: {} }).success).toBe(false);
+	}
+	expect(storedMovement(1)).toEqual({});
+});
+
+test('«Entrada» stays an OTHER_INCOME and never takes an expense concept', async () => {
+	const entry = { ...typedExpense, direction: 'IN' };
+	for (const concept of ['RENT', 'SUPPLIES_EXPENSE', 'DAMAGE_CHARGE', 'OTHER_EXPENSE']) {
+		expect(await recordMovement(db, { ...entry, concept }, manager)).toMatchObject({
+			ok: false,
+			errors: { concept: expect.any(String) }
+		});
+	}
+	expect(
+		await recordMovement(db, { ...typedExpense, concept: 'INSTALLMENT' }, manager)
+	).toMatchObject({ ok: false, errors: { concept: expect.any(String) } });
+	expect(storedMovement(1)).toEqual({});
+	await recordMovement(db, { ...entry, concept: 'OTHER_INCOME' }, manager);
+	expect(storedMovement(1)).toMatchObject({ concept: 'OTHER_INCOME', amount: 48500 });
+});
+
+test('a new expense concept is offset like OTHER_EXPENSE: same concept, its sign flipped', async () => {
+	await recordMovement(db, { ...typedExpense, concept: 'RENT' }, manager);
+	expect(await recordOffset(db, typedCorrection, manager)).toMatchObject({ ok: true });
+	expect(storedMovement(2)).toMatchObject({ concept: 'RENT', amount: 48500, reverses_id: 1 });
+});
+
+test('a DAMAGE_CHARGE needs an order and is money in, unless it offsets one', async () => {
+	const charge: Movement = {
+		...installment,
+		concept: 'DAMAGE_CHARGE',
+		attributes: { description: 'Dos copas rotas' }
+	};
+	await record(charge);
+	await record({ ...charge, amount: -500000, reverses_id: 1 });
+	const refused: Movement[] = [
+		{ ...charge, amount: -500000 },
+		{ ...charge, entity_type: null, entity_id: null },
+		{ ...charge, entity_type: 'RECEIVABLE' }
+	];
+	for (const movement of refused) {
+		await expect(record(movement)).rejects.toThrow(/CHECK/);
+	}
+	expect(receiptNumbers()).toHaveLength(2);
+});
+
+test('the concept filter takes several concepts at once', async () => {
+	await recordMovement(db, { ...typedExpense, concept: 'RENT' }, manager);
+	await recordMovement(db, { ...typedExpense, concept: 'SUPPLIES_EXPENSE' }, manager);
+	await recordMovement(db, { ...typedExpense, concept: 'TRANSPORT_EXPENSE' }, manager);
+	await record({ ...expense, movement_date: '2026-10-20' });
+	const filters = { from: '2026-10-01', to: '2026-10-31' };
+	const book = await getCashBook(
+		db,
+		{ ...filters, concepts: ['RENT', 'TRANSPORT_EXPENSE', 'BOGUS'] },
+		manager
+	);
+	expect(book.filters.concepts).toEqual(['TRANSPORT_EXPENSE', 'RENT']);
+	expect(book.entries.map((entry) => entry.id)).toEqual([3, 1]);
+	expect(book.totals).toEqual({ inflow: 0, outflow: 97000, net: -97000 });
+	const one = await getCashBook(db, { ...filters, concepts: 'OTHER_EXPENSE' }, manager);
+	expect(one.entries.map((entry) => entry.id)).toEqual([4]);
+	const none = await getCashBook(db, { ...filters, concepts: [] }, manager);
+	expect(none.filters.concepts).toEqual([]);
+	expect(none.entries).toHaveLength(4);
 });

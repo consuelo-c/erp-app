@@ -5,9 +5,9 @@ import { getCashBook, getMovement } from '$lib/server/services/cash';
 import type { PageServerLoad } from './$types';
 
 // The filters live in the URL, so a filtered book can be shared and reloaded: `?desde=`, `?hasta=`
-// (this month by default), `?tipo=`, `?concepto=`, `?metodo=`, `?pedido=`, `?empleado=`, `?minimo=`,
-// `?maximo=` and `?texto=`. `?movimiento=` opens one movement's detail over them: its own view on a phone, a
-// side panel on a desktop.
+// (this month by default), `?tipo=`, `?concepto=` (repeated for several), `?metodo=`, `?pedido=`,
+// `?empleado=`, `?minimo=`, `?maximo=` and `?texto=`. `?movimiento=` opens one movement's detail
+// over them: its own view on a phone, a side panel on a desktop.
 export const load: PageServerLoad = async ({ cookies, locals, platform, url }) => {
 	requireRole(locals.user, ['ADMIN', 'MANAGER']);
 	rememberFilters('caja', url, cookies);
@@ -19,7 +19,7 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 		from: params.get('desde'),
 		to: params.get('hasta'),
 		direction: params.get('tipo'),
-		concept: params.get('concepto'),
+		concepts: params.getAll('concepto'),
 		method: params.get('metodo'),
 		order: params.get('pedido'),
 		employee: params.get('empleado'),

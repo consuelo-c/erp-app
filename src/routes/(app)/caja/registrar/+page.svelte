@@ -10,6 +10,7 @@
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
+	import Select from '$lib/components/Select.svelte';
 	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import { formatInteger, formatPesos, formatReceiptNumber, formatSignedPesos } from '$lib/format';
 	import { CASH_CONCEPT_LABELS, PAYMENT_METHOD_LABELS } from '$lib/labels';
@@ -23,6 +24,15 @@
 	// locked, and the amount the original's.
 	let { data, form }: PageProps = $props();
 
+	// Cash's `EXPENSE_CONCEPTS`, in the order the select lists them.
+	const EXPENSE_CONCEPTS: CashConcept[] = [
+		'TRANSPORT_EXPENSE',
+		'SUPPLIES_EXPENSE',
+		'RENT',
+		'OTHER_EXPENSE'
+	];
+	const STANDALONE_CONCEPTS: CashConcept[] = ['OTHER_INCOME', ...EXPENSE_CONCEPTS];
+
 	const original = $derived(data.original);
 
 	let entered = $state<FormData | null>(null);
@@ -32,12 +42,15 @@
 	const lockedDirection = $derived(original ? oppositeDirection(original.amount) : null);
 	const isInflow = $derived('IN' === (lockedDirection ?? typed('direction', 'OUT')));
 	const method = $derived(typed('payment_method', original?.method ?? 'CASH'));
+	// A «Salida» picks its concept; an «Entrada» and an offset are told theirs.
+	const isConceptPicked = $derived(null === original && !isInflow);
 	const conceptKey = $derived<CashConcept>(
-		original?.concept ?? (isInflow ? 'OTHER_INCOME' : 'OTHER_EXPENSE')
+		original?.concept ??
+			(isInflow ? 'OTHER_INCOME' : (typed('concept', 'OTHER_EXPENSE') as CashConcept))
 	);
 	const concept = $derived(CASH_CONCEPT_LABELS[conceptKey]);
 	// An order's or a settlement's movement takes who and what from its link, not from the form.
-	const isStandalone = $derived('OTHER_INCOME' === conceptKey || 'OTHER_EXPENSE' === conceptKey);
+	const isStandalone = $derived(STANDALONE_CONCEPTS.includes(conceptKey));
 	const party = $derived(original?.employeeName ?? original?.payee ?? '');
 	const amount = $derived(original ? Math.abs(original.amount) : parsePesos(typed('amount', '')));
 	const methodLabel = $derived(
@@ -118,7 +131,9 @@
 		<div class="form-stack">
 			<Choice
 				legend="Tipo"
-				hint="Concepto: {concept}{original ? ' · el tipo es el contrario del original' : ''}"
+				hint={isConceptPicked
+					? undefined
+					: `Concepto: ${concept}${original ? ' · el tipo es el contrario del original' : ''}`}
 			>
 				{#each DIRECTION_OPTIONS as [value, label] (value)}
 					<Chip
@@ -131,6 +146,16 @@
 					/>
 				{/each}
 			</Choice>
+
+			{#if isConceptPicked}
+				<Field label="Concepto" id="concept" error={errorOf('concept')}>
+					<Select id="concept" name="concept" value={conceptKey}>
+						{#each EXPENSE_CONCEPTS as value (value)}
+							<option {value}>{CASH_CONCEPT_LABELS[value]}</option>
+						{/each}
+					</Select>
+				</Field>
+			{/if}
 
 			{#if isStandalone}
 				<Field
