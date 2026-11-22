@@ -359,7 +359,17 @@
 	<!-- Only as loaded with signal: offline, the «Con novedad» badge is all there is. -->
 	{#if !isOffline && data.incidents?.length}
 		<h2 class="section-title" id="novedades">Novedades ({data.incidents.length})</h2>
-		<IncidentCards incidents={data.incidents} reverseMessage={form?.reverseMessage} />
+		<IncidentCards
+			incidents={data.incidents}
+			correctHref={(incident) =>
+				keepOrigin(
+					resolve('/(app)/despachos/[id]/novedad/[incidentId]', {
+						id,
+						incidentId: String(incident.id)
+					})
+				)}
+			reverseMessage={form?.reverseMessage}
+		/>
 	{/if}
 
 	<div class="screen__action">

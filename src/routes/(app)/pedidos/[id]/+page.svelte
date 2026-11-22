@@ -412,6 +412,11 @@
 		</p>
 		<IncidentCards
 			incidents={data.incidents}
+			correctHref={(incident) =>
+				resolve('/(app)/despachos/[id]/novedad/[incidentId]', {
+					id: String(order.id),
+					incidentId: String(incident.id)
+				})}
 			reverseMessage={form?.reverseMessage}
 			buttonSize="sm"
 			onassign={startAssign}
