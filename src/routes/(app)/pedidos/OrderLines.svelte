@@ -45,12 +45,14 @@
 		lines: FormLine[];
 		products: CatalogProduct[];
 		/**
-		 * Each product's availability for the order's range; null until both dates are typed. Left out
-		 * on a quote, which reserves nothing: no line shows any.
+		 * Each product's availability for the range; null until its dates are typed. Left out on an
+		 * extension, whose lines are its original's: no line shows any.
 		 */
 		availability?: Map<number, number> | null;
 		/** The range it was counted for, as `14 ago – 16 ago`. */
 		rangeLabel?: string;
+		/** What a line shows while `availability` is null: which dates to type to see it. */
+		datesHint?: string;
 		/** The lines' field in the posted record, which its errors are named after. */
 		field?: 'order_items' | 'quote_items';
 		rentalDays: number;
@@ -64,6 +66,7 @@
 		products,
 		availability,
 		rangeLabel = '',
+		datesHint = '',
 		rentalDays,
 		errorOf,
 		original = null,
@@ -117,7 +120,7 @@
 	function availabilityText(productId: number): string {
 		const available = availableOf(productId);
 		if (undefined === available) {
-			return 'Escribe las fechas para ver la disponibilidad';
+			return datesHint;
 		}
 		const total = totalQuantityOf(productId);
 		return `Disponible ${rangeLabel}: ${available}${undefined === total ? '' : ` de ${total}`}`;
@@ -251,7 +254,8 @@
 
 {#snippet overNotice(line: FormLine)}
 	<Notice tone="warning">
-		⚠ Disponible: {availableOf(line.productId)} — supera el inventario. Puedes continuar igual.
+		⚠ {line.name} — Disponible: {availableOf(line.productId)} — supera el inventario. Puedes continuar
+		igual.
 	</Notice>
 {/snippet}
 
