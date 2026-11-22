@@ -2,13 +2,14 @@ import { isHttpError } from '@sveltejs/kit';
 import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, describe, expect, onTestFinished, test, vi } from 'vitest';
 import type { Actor } from '../actor';
+import { addDays } from '$lib/datetime';
 import { createMemoryD1 } from '../db/memory-d1';
 import { logIn } from './auth';
 import { createContact } from './contacts';
 import { createProduct } from './products';
 import { createOrder } from '../db/test-orders';
 import { getAvailability } from './orders';
-import { getAuditLog, getSubLending, type SubLending } from './reports';
+import { getAuditLog, getProfitAndLoss, getSubLending, type SubLending } from './reports';
 
 const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
 const admin: Actor = { ...manager, username: 'admin', roles: ['ADMIN'] };
@@ -691,5 +692,298 @@ describe('getSubLending', () => {
 		expect(await refusedWith({ ...manager, roles: ['WAREHOUSE'] })).toBe(403);
 		expect(await refusedWith(admin)).toBeNull();
 		expect(await refusedWith(sales)).toBeNull();
+	});
+});
+
+describe('getProfitAndLoss', () => {
+	const AUDIT = "0, 'gerente', 0, 'gerente'";
+	const NOVEMBER = { from: '2026-11-01', to: '2026-11-30' };
+	const ORDER_CONCEPTS = [
+		'INSTALLMENT',
+		'SECURITY_DEPOSIT',
+		'INSTALLMENT_REFUND',
+		'DEPOSIT_REFUND',
+		'CARRIER_PAYMENT',
+		'CANCELLATION_FEE',
+		'DAMAGE_CHARGE'
+	];
+	let receipts = 0;
+
+	type Movement = {
+		concept: string;
+		amount: number;
+		date: string;
+		/** The order, cuenta de cobro or payroll run it links to; an order's by default. */
+		entityId?: number;
+		entityType?: string;
+		reverses?: number;
+	};
+
+	function linkTypeOf(concept: string): string | null {
+		if (ORDER_CONCEPTS.includes(concept)) {
+			return 'ORDER';
+		}
+		return 'PAYROLL' === concept ? 'PAYROLL_RUN' : null;
+	}
+
+	// A movement as the cash and orders services leave it: the concept's link, a receipt number.
+	function move({ concept, amount, date, entityId = 1, entityType, reverses }: Movement): number {
+		const linkType = entityType ?? linkTypeOf(concept);
+		const result = database
+			.prepare(
+				`insert into cash_movements (concept, payment_method, amount, movement_date, entity_type,
+				entity_id, attributes, receipt_number, reverses_id, created_at, created_by, updated_at,
+				updated_by) values (?, 'CASH', ?, ?, ?, ?, '{}', ?, ?, ${AUDIT})`
+			)
+			.run(
+				concept,
+				amount,
+				date,
+				linkType,
+				null === linkType ? null : entityId,
+				++receipts,
+				reverses ?? null
+			);
+		return Number(result.lastInsertRowid);
+	}
+
+	test('Recaudado nets payments, payment refunds and cancellation fees by movement date, offsets included', async () => {
+		move({ concept: 'INSTALLMENT', amount: 500_000, date: '2026-11-03' });
+		move({ concept: 'INSTALLMENT', amount: 300_000, date: '2026-11-30', entityType: 'RECEIVABLE' });
+		const mistaken = move({ concept: 'INSTALLMENT', amount: 80_000, date: '2026-10-28' });
+		move({ concept: 'INSTALLMENT', amount: -80_000, date: '2026-11-02', reverses: mistaken });
+		move({ concept: 'INSTALLMENT_REFUND', amount: -50_000, date: '2026-11-10' });
+		move({ concept: 'CANCELLATION_FEE', amount: 120_000, date: '2026-11-15' });
+		move({ concept: 'INSTALLMENT', amount: 900_000, date: '2026-12-01' });
+
+		const report = await getProfitAndLoss(db, NOVEMBER, manager);
+
+		expect(report.income.collected).toEqual({
+			amount: 790_000,
+			concepts: ['INSTALLMENT', 'INSTALLMENT_REFUND', 'CANCELLATION_FEE']
+		});
+	});
+
+	test('a fee kept from payments nets to nothing; one kept from the deposit counts; deposits are never read', async () => {
+		move({ concept: 'INSTALLMENT', amount: 500_000, date: '2026-11-03', entityId: 1 });
+		move({ concept: 'INSTALLMENT_REFUND', amount: -100_000, date: '2026-11-05', entityId: 1 });
+		move({ concept: 'CANCELLATION_FEE', amount: 100_000, date: '2026-11-05', entityId: 1 });
+		move({ concept: 'SECURITY_DEPOSIT', amount: 200_000, date: '2026-11-04', entityId: 2 });
+		move({ concept: 'DEPOSIT_REFUND', amount: -60_000, date: '2026-11-06', entityId: 2 });
+		move({ concept: 'CANCELLATION_FEE', amount: 60_000, date: '2026-11-06', entityId: 2 });
+		move({ concept: 'DEPOSIT_REFUND', amount: -140_000, date: '2026-11-06', entityId: 2 });
+
+		const report = await getProfitAndLoss(db, NOVEMBER, manager);
+
+		expect(report.income.collected.amount).toBe(560_000);
+		expect(report.income.total).toBe(560_000);
+		expect(report.expenses.total).toBe(0);
+		expect(report.result).toBe(560_000);
+	});
+
+	test('Cobrado por novedades nets damage charges, offsets included, and counts the orders that paid', async () => {
+		move({ concept: 'SECURITY_DEPOSIT', amount: 300_000, date: '2026-11-04', entityId: 7 });
+		move({ concept: 'DEPOSIT_REFUND', amount: -150_000, date: '2026-11-09', entityId: 7 });
+		move({ concept: 'DAMAGE_CHARGE', amount: 150_000, date: '2026-11-09', entityId: 7 });
+		move({ concept: 'DAMAGE_CHARGE', amount: 70_000, date: '2026-11-12', entityId: 8 });
+		const mistaken = move({
+			concept: 'DAMAGE_CHARGE',
+			amount: 40_000,
+			date: '2026-11-13',
+			entityId: 9
+		});
+		move({
+			concept: 'DAMAGE_CHARGE',
+			amount: -40_000,
+			date: '2026-11-14',
+			entityId: 9,
+			reverses: mistaken
+		});
+		move({ concept: 'DAMAGE_CHARGE', amount: 90_000, date: '2026-10-31', entityId: 10 });
+		move({ concept: 'OTHER_INCOME', amount: 350_000, date: '2026-11-20' });
+
+		const report = await getProfitAndLoss(db, NOVEMBER, admin);
+
+		expect(report.income).toEqual({
+			collected: { amount: 0, concepts: ['INSTALLMENT', 'INSTALLMENT_REFUND', 'CANCELLATION_FEE'] },
+			otherIncome: { amount: 350_000, concepts: ['OTHER_INCOME'] },
+			damageCharges: { amount: 220_000, concepts: ['DAMAGE_CHARGE'], orderCount: 2 },
+			total: 570_000
+		});
+	});
+
+	function insertPayrollRun(employeeId: number, periodStart: string): number {
+		const result = database
+			.prepare(
+				`insert into payroll_runs (employee_id, status, week_number, period_start, period_end,
+				payment_date, employee_snapshot, prepared_by, earnings, deductions, settings_snapshot,
+				total_earnings, total_deductions, net_pay, created_at, created_by, updated_at, updated_by)
+				values (?, 'PAID', 1, ?, ?, ?, '{}', 'gerente', '{}', '{}', '{}', 0, 0, 0, ${AUDIT})`
+			)
+			.run(employeeId, periodStart, addDays(periodStart, 5), addDays(periodStart, 5));
+		return Number(result.lastInsertRowid);
+	}
+
+	function insertEmployee(phone: string): number {
+		const contact = database
+			.prepare(
+				`insert into contacts (phone, full_name, document_id, labels, created_at, created_by,
+				updated_at, updated_by) values (?, 'Jhon Fredy Ospina', ?, '[]', ${AUDIT})`
+			)
+			.run(phone, `@${phone}`);
+		const employee = database
+			.prepare(
+				`insert into employees (contact_id, created_at, created_by, updated_at, updated_by)
+				values (?, ${AUDIT})`
+			)
+			.run(contact.lastInsertRowid);
+		return Number(employee.lastInsertRowid);
+	}
+
+	test('each expense line sums its concepts by movement date, offsets included, and Resultado subtracts them', async () => {
+		move({ concept: 'INSTALLMENT', amount: 5_000_000, date: '2026-11-02' });
+		move({ concept: 'TRANSPORT_EXPENSE', amount: -780_000, date: '2026-11-03' });
+		move({ concept: 'CARRIER_PAYMENT', amount: -1_200_000, date: '2026-11-04' });
+		const fuel = move({ concept: 'TRANSPORT_EXPENSE', amount: -50_000, date: '2026-11-05' });
+		move({ concept: 'TRANSPORT_EXPENSE', amount: 50_000, date: '2026-11-06', reverses: fuel });
+		move({ concept: 'SUPPLIES_EXPENSE', amount: -410_000, date: '2026-11-07' });
+		move({ concept: 'RENT', amount: -2_500_000, date: '2026-11-01' });
+		move({ concept: 'RENT', amount: -2_500_000, date: '2026-12-01' });
+		move({ concept: 'OTHER_EXPENSE', amount: -185_000, date: '2026-11-30' });
+		move({ concept: 'INSTALLMENT_REFUND', amount: -200_000, date: '2026-11-08' });
+
+		const report = await getProfitAndLoss(db, NOVEMBER, manager);
+
+		expect(report.expenses).toEqual({
+			transport: {
+				amount: -1_980_000,
+				concepts: ['TRANSPORT_EXPENSE', 'CARRIER_PAYMENT'],
+				transportExpenses: -780_000,
+				carrierPayments: -1_200_000
+			},
+			supplies: { amount: -410_000, concepts: ['SUPPLIES_EXPENSE'] },
+			salaries: { amount: 0, concepts: ['PAYROLL'], weekCount: 0 },
+			rent: { amount: -2_500_000, concepts: ['RENT'] },
+			other: { amount: -185_000, concepts: ['OTHER_EXPENSE'] },
+			total: -5_075_000
+		});
+		expect(report.income.total).toBe(4_800_000);
+		expect(report.result).toBe(-275_000);
+	});
+
+	test('Salarios is the payroll paid in the period, with the weeks it pays', async () => {
+		const ana = insertEmployee('3001112233');
+		const jhon = insertEmployee('3004445566');
+		const weekOneAna = insertPayrollRun(ana, '2026-11-02');
+		const weekOneJhon = insertPayrollRun(jhon, '2026-11-02');
+		const weekTwoAna = insertPayrollRun(ana, '2026-11-09');
+		const weekThreeAna = insertPayrollRun(ana, '2026-11-16');
+		move({ concept: 'PAYROLL', amount: -400_000, date: '2026-11-07', entityId: weekOneAna });
+		move({ concept: 'PAYROLL', amount: -380_000, date: '2026-11-07', entityId: weekOneJhon });
+		move({ concept: 'PAYROLL', amount: -410_000, date: '2026-11-14', entityId: weekTwoAna });
+		const undone = move({
+			concept: 'PAYROLL',
+			amount: -390_000,
+			date: '2026-11-21',
+			entityId: weekThreeAna
+		});
+		move({
+			concept: 'PAYROLL',
+			amount: 390_000,
+			date: '2026-11-21',
+			entityId: weekThreeAna,
+			reverses: undone
+		});
+
+		const report = await getProfitAndLoss(db, NOVEMBER, manager);
+
+		expect(report.expenses.salaries).toEqual({
+			amount: -1_190_000,
+			concepts: ['PAYROLL'],
+			weekCount: 2
+		});
+	});
+
+	let orders = 0;
+
+	// An order as the orders service leaves it, its money columns typed by hand.
+	function insertOrder(
+		eventDate: string,
+		status: string,
+		money: [items: number, discount: number, transport: number]
+	) {
+		const [items, discount, transport] = money;
+		const client = database
+			.prepare(
+				`insert into contacts (phone, full_name, document_id, labels, created_at, created_by,
+				updated_at, updated_by) values (?, 'Diana Zuluaga', ?, '[]', ${AUDIT})`
+			)
+			.run(`57320000${++orders}`, `@order${orders}`);
+		database
+			.prepare(
+				`insert into orders (public_token, client_id, status, event_date, delivery_date, pickup_date,
+				rental_days, client_attributes, delivery_attributes, pickup_attributes, order_items,
+				items_total, discount, transport_cost, order_total, created_at, created_by, updated_at,
+				updated_by) values (?, ?, ?, ?, ?, ?, 1, '{}', '{"method":"CLIENT_PICKUP"}',
+				'{"method":"CLIENT_RETURN"}', '[]', ?, ?, ?, ?, ${AUDIT})`
+			)
+			.run(
+				`token-${orders}`,
+				client.lastInsertRowid,
+				status,
+				eventDate,
+				eventDate,
+				eventDate,
+				items,
+				discount,
+				transport,
+				items - discount + transport
+			);
+	}
+
+	test('Vendido is the orders with their event in the period, paid or not, cancelled left out, split exactly', async () => {
+		insertOrder('2026-11-01', 'CONFIRMED', [1_000_000, 100_000, 150_000]);
+		insertOrder('2026-11-30', 'COMPLETED', [2_300_000, 0, 200_000]);
+		insertOrder('2026-11-15', 'CANCELLED', [5_000_000, 0, 300_000]);
+		insertOrder('2026-10-31', 'COMPLETED', [700_000, 0, 0]);
+		insertOrder('2026-12-01', 'CONFIRMED', [700_000, 0, 0]);
+
+		const report = await getProfitAndLoss(db, NOVEMBER, manager);
+
+		expect(report.sold).toEqual({
+			count: 2,
+			rental: 3_200_000,
+			transport: 350_000,
+			total: 3_550_000
+		});
+		expect(report.result).toBe(0);
+	});
+
+	test('opens on the current Bogotá month, first to last day', async () => {
+		vi.useFakeTimers({ toFake: ['Date'] });
+		onTestFinished(() => {
+			vi.useRealTimers();
+		});
+		vi.setSystemTime(new Date('2026-12-01T03:00:00Z')); // 10 p.m. on 30 November in Bogotá
+		move({ concept: 'OTHER_INCOME', amount: 10_000, date: '2026-11-01' });
+		move({ concept: 'OTHER_INCOME', amount: 20_000, date: '2026-11-30' });
+		move({ concept: 'OTHER_INCOME', amount: 40_000, date: '2026-12-01' });
+
+		const report = await getProfitAndLoss(db, { from: '', to: null }, manager);
+
+		expect(report).toMatchObject({ from: '2026-11-01', to: '2026-11-30', result: 30_000 });
+	});
+
+	test('reads only for managers: Sales, drivers and warehouse are refused', async () => {
+		const refusedWith = (actor: Actor) =>
+			getProfitAndLoss(db, NOVEMBER, actor).then(
+				() => null,
+				(thrown: unknown) => (isHttpError(thrown) ? thrown.status : thrown)
+			);
+
+		expect(await refusedWith(sales)).toBe(403);
+		expect(await refusedWith(driver)).toBe(403);
+		expect(await refusedWith({ ...manager, roles: ['WAREHOUSE'] })).toBe(403);
+		expect(await refusedWith(admin)).toBeNull();
 	});
 });
