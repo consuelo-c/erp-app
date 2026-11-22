@@ -911,20 +911,20 @@ describe('getProfitAndLoss', () => {
 		eventDate: string,
 		status: string,
 		money: [items: number, discount: number, transport: number]
-	) {
+	): number {
 		const [items, discount, transport] = money;
 		const client = database
 			.prepare(
 				`insert into contacts (phone, full_name, document_id, labels, created_at, created_by,
-				updated_at, updated_by) values (?, 'Diana Zuluaga', ?, '[]', ${AUDIT})`
+				updated_at, updated_by) values (?, ?, ?, '[]', ${AUDIT})`
 			)
-			.run(`57320000${++orders}`, `@order${orders}`);
-		database
+			.run(`57320000${++orders}`, 'Diana Zuluaga', `@order${orders}`);
+		const order = database
 			.prepare(
 				`insert into orders (public_token, client_id, status, event_date, delivery_date, pickup_date,
 				rental_days, client_attributes, delivery_attributes, pickup_attributes, order_items,
 				items_total, discount, transport_cost, order_total, created_at, created_by, updated_at,
-				updated_by) values (?, ?, ?, ?, ?, ?, 1, '{}', '{"method":"CLIENT_PICKUP"}',
+				updated_by) values (?, ?, ?, ?, ?, ?, 1, json_object('name', ?), '{"method":"CLIENT_PICKUP"}',
 				'{"method":"CLIENT_RETURN"}', '[]', ?, ?, ?, ?, ${AUDIT})`
 			)
 			.run(
@@ -934,11 +934,13 @@ describe('getProfitAndLoss', () => {
 				eventDate,
 				eventDate,
 				eventDate,
+				'Diana Zuluaga',
 				items,
 				discount,
 				transport,
 				items - discount + transport
 			);
+		return Number(order.lastInsertRowid);
 	}
 
 	test('Vendido is the orders with their event in the period, paid or not, cancelled left out, split exactly', async () => {
@@ -957,6 +959,185 @@ describe('getProfitAndLoss', () => {
 			total: 3_550_000
 		});
 		expect(report.result).toBe(0);
+	});
+
+	// A delivered order whose client is `clientName`, frozen into it like the orders service does.
+	function insertClientOrder(clientName: string): number {
+		const order = insertOrder('2026-11-08', 'COMPLETED', [1_000_000, 0, 0]);
+		database
+			.prepare(`update orders set client_attributes = json_object('name', ?) where id = ?`)
+			.run(clientName, order);
+		return order;
+	}
+
+	// A product as the products service leaves it; `null` is a product with no Costo de reposición.
+	function insertProduct(name: string, replacementCost: number | null): number {
+		const result = database
+			.prepare(
+				`insert into products (name, category, rental_price, total_quantity, attributes, created_at,
+				created_by, updated_at, updated_by) values (?, 'CHAIRS_TABLES', 1000, 100,
+				json_object('replacement_cost', ?), ${AUDIT})`
+			)
+			.run(name, replacementCost);
+		return Number(result.lastInsertRowid);
+	}
+
+	type Incident = {
+		orderId: number;
+		items: [productId: number, qty: number, outcome: string][];
+		party?: string;
+		status?: string;
+		/** When it was reported, Bogotá wall clock. */
+		at?: string;
+	};
+
+	function insertIncident({
+		orderId,
+		items,
+		party = 'CLIENT',
+		status = 'ACTIVE',
+		at = '2026-11-10T10:00:00'
+	}: Incident): void {
+		const incidentItems = items.map(([productId, qty, outcome]) => ({
+			product_id: productId,
+			qty,
+			outcome
+		}));
+		database
+			.prepare(
+				`insert into incidents (order_id, incident_items, incident_description, responsible_party,
+				status, created_at, created_by, updated_at, updated_by) values (?, ?, 'Se perdieron', ?, ?,
+				?, 'gerente', ?, 'gerente')`
+			)
+			.run(orderId, JSON.stringify(incidentItems), party, status, bogota(at), bogota(at));
+	}
+
+	test('Pérdidas counts only lost and unrecoverable units of active incidents reported in the period, any party', async () => {
+		const chair = insertProduct('Silla Tiffany dorada', 95_000);
+		const glass = insertProduct('Copa para vino tinto', 12_000);
+		const cloth = insertProduct('Mantel blanco 3×3', 111_000);
+		const order = insertOrder('2026-11-08', 'COMPLETED', [1_000_000, 0, 0]);
+		insertIncident({
+			orderId: order,
+			items: [
+				[chair, 4, 'LOST'],
+				[chair, 2, 'UNRECOVERABLE'],
+				[glass, 30, 'RECOVERABLE']
+			]
+		});
+		insertIncident({ orderId: order, items: [[glass, 18, 'UNRECOVERABLE']], party: 'CARRIER' });
+		insertIncident({ orderId: order, items: [[cloth, 4, 'LOST']], party: 'UNDETERMINED' });
+		insertIncident({ orderId: order, items: [[cloth, 9, 'LOST']], status: 'REVERSED' });
+		insertIncident({ orderId: order, items: [[chair, 5, 'LOST']], at: '2026-10-31T23:30:00' });
+		insertIncident({ orderId: order, items: [[chair, 7, 'LOST']], at: '2026-12-01T00:10:00' });
+		insertIncident({ orderId: order, items: [[glass, 1, 'LOST']], at: '2026-11-30T23:50:00' });
+
+		const report = await getProfitAndLoss(db, NOVEMBER, manager);
+
+		expect(report.losses).toEqual({
+			products: [
+				{ productId: chair, name: 'Silla Tiffany dorada', units: 6, cost: 95_000, total: 570_000 },
+				{ productId: cloth, name: 'Mantel blanco 3×3', units: 4, cost: 111_000, total: 444_000 },
+				{ productId: glass, name: 'Copa para vino tinto', units: 19, cost: 12_000, total: 228_000 }
+			],
+			total: 1_242_000,
+			withoutCost: 0
+		});
+		expect(report.result).toBe(0);
+	});
+
+	test('a product with no replacement cost is listed «sin costo», adds nothing and is counted', async () => {
+		const chair = insertProduct('Silla Tiffany dorada', 95_000);
+		const tray = insertProduct('Bandeja de plata', null);
+		const order = insertOrder('2026-11-08', 'COMPLETED', [1_000_000, 0, 0]);
+		insertIncident({
+			orderId: order,
+			items: [
+				[chair, 1, 'LOST'],
+				[tray, 2, 'LOST']
+			]
+		});
+
+		const report = await getProfitAndLoss(db, NOVEMBER, manager);
+
+		expect(report.losses).toEqual({
+			products: [
+				{ productId: chair, name: 'Silla Tiffany dorada', units: 1, cost: 95_000, total: 95_000 },
+				{ productId: tray, name: 'Bandeja de plata', units: 2, cost: null, total: 0 }
+			],
+			total: 95_000,
+			withoutCost: 1
+		});
+	});
+
+	test('Sin cobrar is per order, client-responsible losses only, less its damage charges of all time, never negative', async () => {
+		const chair = insertProduct('Silla Tiffany dorada', 95_000);
+		const cloth = insertProduct('Mantel blanco 3×3', 111_000);
+		const tray = insertProduct('Bandeja de plata', null);
+		const diana = insertClientOrder('Diana Zuluaga');
+		const carlos = insertClientOrder('Carlos Mejía');
+		const paidUp = insertClientOrder('Luz Restrepo');
+		const carriers = insertClientOrder('Juan Gómez');
+		insertIncident({
+			orderId: diana,
+			items: [
+				[chair, 6, 'LOST'],
+				[chair, 3, 'RECOVERABLE'],
+				[tray, 1, 'LOST']
+			]
+		});
+		insertIncident({ orderId: diana, items: [[cloth, 2, 'LOST']], party: 'COMPANY' });
+		insertIncident({ orderId: diana, items: [[cloth, 5, 'LOST']], status: 'REVERSED' });
+		move({ concept: 'DAMAGE_CHARGE', amount: 200_000, date: '2026-10-30', entityId: diana });
+		move({ concept: 'DAMAGE_CHARGE', amount: 100_000, date: '2026-12-02', entityId: diana });
+		insertIncident({ orderId: carlos, items: [[cloth, 4, 'UNRECOVERABLE']] });
+		const mistaken = move({
+			concept: 'DAMAGE_CHARGE',
+			amount: 50_000,
+			date: '2026-11-15',
+			entityId: carlos
+		});
+		move({
+			concept: 'DAMAGE_CHARGE',
+			amount: -50_000,
+			date: '2026-11-16',
+			entityId: carlos,
+			reverses: mistaken
+		});
+		insertIncident({ orderId: paidUp, items: [[chair, 1, 'LOST']] });
+		move({ concept: 'DAMAGE_CHARGE', amount: 150_000, date: '2026-11-21', entityId: paidUp });
+		insertIncident({ orderId: carriers, items: [[chair, 2, 'LOST']], party: 'CARRIER' });
+		insertIncident({ orderId: carriers, items: [[chair, 2, 'LOST']], party: 'UNDETERMINED' });
+
+		const report = await getProfitAndLoss(db, NOVEMBER, manager);
+
+		expect(report.uncollected).toEqual({
+			orders: [
+				{
+					orderId: diana,
+					clientName: 'Diana Zuluaga',
+					loss: 570_000,
+					charged: 300_000,
+					uncollected: 270_000
+				},
+				{
+					orderId: carlos,
+					clientName: 'Carlos Mejía',
+					loss: 444_000,
+					charged: 0,
+					uncollected: 444_000
+				},
+				{
+					orderId: paidUp,
+					clientName: 'Luz Restrepo',
+					loss: 95_000,
+					charged: 150_000,
+					uncollected: 0
+				}
+			],
+			total: 714_000,
+			orderCount: 2
+		});
 	});
 
 	test('opens on the current Bogotá month, first to last day', async () => {

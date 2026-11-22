@@ -7,7 +7,7 @@ import { addDays, getDayStartInstant, getMonthRange, getTodaysDate } from '$lib/
 import { requireRole, type Actor } from '../actor';
 import { eventFieldsSchema } from '../audit';
 import { optional, type CashConcept } from './cash';
-import { HELD_LINES_SQL } from './orders';
+import { DAMAGE_CHARGED_SQL, HELD_LINES_SQL } from './orders';
 
 const MANAGERS = ['ADMIN', 'MANAGER'] as const;
 
@@ -419,6 +419,37 @@ export type ProfitAndLoss = {
 	result: number;
 	/** Vendido: orders with their event in the period, cancelled ones left out, paid or not. */
 	sold: { count: number; rental: number; transport: number; total: number };
+	/**
+	 * Pérdidas: what incidents reported in the period cost, at today's Costo de reposición, whoever
+	 * is responsible. Never in the result: replacing a product is a Gasto when it's paid.
+	 */
+	losses: {
+		/** Most costly first; a product with no cost («sin costo») has `cost: null` and adds nothing. */
+		products: {
+			productId: number;
+			name: string;
+			units: number;
+			cost: number | null;
+			total: number;
+		}[];
+		total: number;
+		/** How many of the products have no replacement cost. */
+		withoutCost: number;
+	};
+	/** Sin cobrar: per order, its client-responsible losses less its damage charges of all time. */
+	uncollected: {
+		orders: {
+			orderId: number;
+			clientName: string;
+			loss: number;
+			charged: number;
+			/** Never below zero: charging more than the loss leaves nothing to collect. */
+			uncollected: number;
+		}[];
+		total: number;
+		/** How many orders still have something to collect. */
+		orderCount: number;
+	};
 };
 
 // Deposits and their refunds are never read: a retention paired with a fee or a damage charge
@@ -476,6 +507,68 @@ async function sumSold(db: D1Database, from: string, to: string): Promise<Profit
 	return row ?? { count: 0, rental: 0, transport: 0, total: 0 };
 }
 
+// Each unit gone (lost or unrecoverable) in an active incident reported in the period, bound to
+// ?1 and ?2, the period's first instant and the next day's. Recoverable units never count.
+const LOST_UNITS_SQL = `select incidents.order_id, incidents.responsible_party,
+		json_extract(item.value, '$.product_id') as product_id, json_extract(item.value, '$.qty') as qty
+	from incidents, json_each(incidents.incident_items) as item
+	where incidents.status = 'ACTIVE' and incidents.created_at >= ?1 and incidents.created_at < ?2
+	and json_extract(item.value, '$.outcome') in ('LOST', 'UNRECOVERABLE')`;
+
+const REPLACEMENT_COST_SQL = `json_extract(products.attributes, '$.replacement_cost')`;
+
+function periodInstants(from: string, to: string): [number, number] {
+	return [getDayStartInstant(from), getDayStartInstant(addDays(to, 1))];
+}
+
+async function sumLosses(
+	db: D1Database,
+	from: string,
+	to: string
+): Promise<ProfitAndLoss['losses']> {
+	const { results } = await db
+		.prepare(
+			`select products.id as productId, products.name, sum(lost.qty) as units,
+				${REPLACEMENT_COST_SQL} as cost, coalesce(sum(lost.qty) * ${REPLACEMENT_COST_SQL}, 0) as total
+			from (${LOST_UNITS_SQL}) lost join products on products.id = lost.product_id
+			group by products.id order by total desc, products.name`
+		)
+		.bind(...periodInstants(from, to))
+		.all<ProfitAndLoss['losses']['products'][number]>();
+	return {
+		products: results,
+		total: results.reduce((sum, product) => sum + product.total, 0),
+		withoutCost: results.filter((product) => null === product.cost).length
+	};
+}
+
+async function sumUncollected(
+	db: D1Database,
+	from: string,
+	to: string
+): Promise<ProfitAndLoss['uncollected']> {
+	const { results } = await db
+		.prepare(
+			`select orders.id as orderId, json_extract(orders.client_attributes, '$.name') as clientName,
+				sum(lost.qty * coalesce(${REPLACEMENT_COST_SQL}, 0)) as loss, ${DAMAGE_CHARGED_SQL} as charged
+			from (${LOST_UNITS_SQL}) lost join products on products.id = lost.product_id
+			join orders on orders.id = lost.order_id
+			where lost.responsible_party = 'CLIENT'
+			group by orders.id order by orders.id`
+		)
+		.bind(...periodInstants(from, to))
+		.all<{ orderId: number; clientName: string; loss: number; charged: number }>();
+	const orders = results.map((order) => ({
+		...order,
+		uncollected: Math.max(0, order.loss - order.charged)
+	}));
+	return {
+		orders,
+		total: orders.reduce((sum, order) => sum + order.uncollected, 0),
+		orderCount: orders.filter((order) => order.uncollected > 0).length
+	};
+}
+
 type SumOf = (concept: CashConcept) => number;
 
 function totalOf(lines: Record<string, ProfitAndLossLine>): number {
@@ -513,7 +606,8 @@ function expensesOf(sumOf: SumOf, payrollWeeks: number): ProfitAndLoss['expenses
 
 /**
  * Pérdidas y ganancias: what came in and went out in the period, on cash and by movement date so
- * it matches Movimientos caja, and apart from the result, what was sold for events in it.
+ * it matches Movimientos caja, and apart from the result, what was sold for events in it and what
+ * incidents cost.
  */
 export async function getProfitAndLoss(
 	db: D1Database,
@@ -525,13 +619,16 @@ export async function getProfitAndLoss(
 	const month = getMonthRange(getTodaysDate());
 	const from = parsed.from ?? month.start;
 	const to = parsed.to ?? month.end;
-	const [sumOf, damagedOrders, payrollWeeks, sold] = await Promise.all([
+	const [sumOf, damagedOrders, payrollWeeks, sold, losses, uncollected] = await Promise.all([
 		sumByConcept(db, from, to),
 		countDamagedOrders(db, from, to),
 		countPayrollWeeks(db, from, to),
-		sumSold(db, from, to)
+		sumSold(db, from, to),
+		sumLosses(db, from, to),
+		sumUncollected(db, from, to)
 	]);
 	const income = incomeOf(sumOf, damagedOrders);
 	const expenses = expensesOf(sumOf, payrollWeeks);
-	return { from, to, income, expenses, result: income.total + expenses.total, sold };
+	const result = income.total + expenses.total;
+	return { from, to, income, expenses, result, sold, losses, uncollected };
 }
