@@ -17,6 +17,6 @@ paths:
 - Product prices and names freeze into the order line when added; the client's name and phone into the order when picked; a settlement stores its `settings_snapshot`.
 - A `settings` key carries its module as prefix; its module, label, unit and Zod schema live in `src/lib/settings.ts`. Only `ADMIN` and `MANAGER` edit values.
 - `cash_movements` and `events` have no edit or delete routes. A correction is an offsetting movement: same concept and link, opposite sign, `reverses_id` pointing to the original, once.
-- An order's money in: `SALES`, `MANAGER`, `ADMIN`. Money out, refunds included, and everything recorded in Caja: only `MANAGER` and `ADMIN`.
+- An order's money in: `SALES`, `MANAGER`, `ADMIN`. Money out, refunds included, and everything recorded in Caja: only `MANAGER` and `ADMIN`. The one exception is `DRIVER`, from Despachos and online only (#605): Pago and deposit from `OUT_FOR_DELIVERY` to `OUT_FOR_PICKUP`, and the whole deposit back at `OUT_FOR_PICKUP` while the order has no active incident; `CASH` or `TRANSFER`, never an offset.
 - A public URL never carries an id: it carries a `public_token` from `createPublicToken()` (`src/lib/server/public-token.ts`).
 - Warnings never block: no transactions, no inventory reservations, no blocking on overbooking, a minimum amount or a schedule clash.
