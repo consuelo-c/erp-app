@@ -1,5 +1,5 @@
 import { error, fail } from '@sveltejs/kit';
-import { isAdminOrManager, requireRole, type Actor } from '$lib/server/actor';
+import { requireRole, type Actor } from '$lib/server/actor';
 import {
 	listIncidents,
 	reverseIncident,
@@ -28,7 +28,7 @@ async function getPaymentActions(db: D1Database, order: OrderDetail, actor: Acto
 	return { paymentConcepts, canIssueReceivable: null !== form };
 }
 
-// «Novedades» only for ADMIN and MANAGER: null hides the section for everyone else.
+// «Novedades» for everyone who opens the order, each with what the actor may do with it.
 // The quote it was converted from, if any, for «Desde la cotización #N».
 export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	requireRole(locals.user, TAKES_ORDERS);
@@ -40,9 +40,7 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	if (null === order) {
 		error(404, 'Ese pedido no existe');
 	}
-	const incidents = isAdminOrManager(locals.user)
-		? await listIncidents(db, order.id, locals.user)
-		: null;
+	const incidents = await listIncidents(db, order.id, locals.user);
 	const publicToken = await getPublicToken(db, order.id, locals.user);
 	const quoteId = await getSourceQuoteId(db, order.id, locals.user);
 	const paymentActions = await getPaymentActions(db, order, locals.user);
@@ -63,8 +61,9 @@ export const actions: Actions = {
 		}
 		return fail(400, { cancelMessage: result.errors.reason ?? result.message });
 	},
+	// Its reporter until it's frozen, the manager on any: the service decides.
 	revertir: async ({ locals, platform, request }) => {
-		requireRole(locals.user, MANAGES_INCIDENTS);
+		requireRole(locals.user, TAKES_ORDERS);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}

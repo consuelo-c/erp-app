@@ -31,6 +31,7 @@
 	} from '$lib/orders';
 	import type { Carrier, OrderDetail } from '$lib/server/services/orders';
 	import { singleReach } from '$lib/whatsapp';
+	import IncidentCards from '../../IncidentCards.svelte';
 	import ReachLines from '../../ReachLines.svelte';
 	import type { PageProps } from './$types';
 
@@ -355,6 +356,12 @@
 		<p class="note balance-note">Saldo pendiente. No impide entregar.</p>
 	{/if}
 
+	<!-- Only as loaded with signal: offline, the «Con novedad» badge is all there is. -->
+	{#if !isOffline && data.incidents?.length}
+		<h2 class="section-title" id="novedades">Novedades ({data.incidents.length})</h2>
+		<IncidentCards incidents={data.incidents} reverseMessage={form?.reverseMessage} />
+	{/if}
+
 	<div class="screen__action">
 		{#if isIncidentReportable(order)}
 			<Button
@@ -363,15 +370,6 @@
 				disabled={isOffline}
 			>
 				Reportar novedad
-			</Button>
-		{/if}
-		{#if data.hasIncidents}
-			<Button
-				variant="secondary"
-				href={onlineHref(`${resolve('/(app)/pedidos/[id]', { id })}#novedades`)}
-				disabled={isOffline}
-			>
-				Ver novedades
 			</Button>
 		{/if}
 		{#if nextStatus}

@@ -4,7 +4,7 @@
 
 import { z } from 'zod';
 import { isIncidentReportable } from '$lib/orders';
-import { ROLES, requireRole, type Actor, type Role } from '../actor';
+import { isAdminOrManager, ROLES, requireRole, type Actor, type Role } from '../actor';
 import { auditedInsert, auditedUpdate, nowInSeconds } from '../audit';
 import { CANCELLED_FROM_SQL, orderItemsSchema, type OrderStatus, type SaveResult } from './orders';
 
@@ -16,7 +16,7 @@ export type IncidentOutcome = (typeof INCIDENT_OUTCOMES)[number];
 export type ResponsibleParty = (typeof RESPONSIBLE_PARTIES)[number];
 export type IncidentStatus = (typeof INCIDENT_STATUSES)[number];
 
-/** Who reads an order's incidents, reverses them and decides whose fault they were. */
+/** Who decides whose fault an incident was, and corrects or reverses anyone's. */
 const MANAGES_INCIDENTS: readonly Role[] = ['ADMIN', 'MANAGER'];
 
 /** The outcomes that take the product out of inventory. */
@@ -221,6 +221,16 @@ export type Incident = {
 	reversal: Reversal | null;
 	/** Why an `ACTIVE` incident can't be reversed, or null when it can (and once reversed). */
 	reversalBlock: string | null;
+	/** Set once the manager names a responsible party: its reporter can no longer touch it. */
+	isFrozen: boolean;
+	isReportedByActor: boolean;
+} & IncidentRights;
+
+/** What the actor may do with one incident; `reversalBlock` may still stop a reversal. */
+export type IncidentRights = {
+	canCorrect: boolean;
+	canReverse: boolean;
+	canSetResponsibleParty: boolean;
 };
 
 type IncidentRow = {
@@ -237,7 +247,41 @@ type IncidentRow = {
 	created_by: string;
 };
 
-function toIncident(row: IncidentRow): Omit<Incident, 'reversalBlock'> {
+// No status or column of its own: naming whose fault it was is what freezes it.
+function isFrozen(row: IncidentRow): boolean {
+	return 'UNDETERMINED' !== row.responsible_party;
+}
+
+function isReporter(row: IncidentRow, actor: Actor): boolean {
+	return row.created_by === actor.username;
+}
+
+// Whoever reported it, until frozen; the manager on any. A reversed incident is read-only.
+function mayCorrect(row: IncidentRow, actor: Actor): boolean {
+	const mayTouch = isAdminOrManager(actor) || isReporter(row, actor);
+	return 'ACTIVE' === row.status && !isFrozen(row) && mayTouch;
+}
+
+// Like correcting, except the manager keeps reversing a frozen one.
+function mayReverse(row: IncidentRow, actor: Actor): boolean {
+	const isOwnUnfrozen = isReporter(row, actor) && !isFrozen(row);
+	return 'ACTIVE' === row.status && (isAdminOrManager(actor) || isOwnUnfrozen);
+}
+
+function rightsOf(row: IncidentRow, actor: Actor): IncidentRights {
+	return {
+		canCorrect: mayCorrect(row, actor),
+		canReverse: mayReverse(row, actor),
+		canSetResponsibleParty: 'ACTIVE' === row.status && isAdminOrManager(actor)
+	};
+}
+
+type IncidentFacts = Omit<
+	Incident,
+	'reversalBlock' | 'isFrozen' | 'isReportedByActor' | keyof IncidentRights
+>;
+
+function toIncident(row: IncidentRow): IncidentFacts {
 	const isReversed = 'REVERSED' === row.status;
 	return {
 		id: row.id,
@@ -257,13 +301,16 @@ function toIncident(row: IncidentRow): Omit<Incident, 'reversalBlock'> {
 	};
 }
 
-/** An order's incidents, newest first: the order detail's «Novedades», `ADMIN` and `MANAGER` only. */
+/**
+ * An order's incidents, newest first, read by every role: the order detail's and Despachos'
+ * «Novedades». Each carries what the actor may do with it.
+ */
 export async function listIncidents(
 	db: D1Database,
 	orderId: number,
 	actor: Actor | null
 ): Promise<Incident[]> {
-	requireRole(actor, MANAGES_INCIDENTS);
+	requireRole(actor, ROLES);
 	const { results } = await db
 		.prepare('select * from incidents where order_id = ? order by id desc')
 		.bind(orderId)
@@ -271,7 +318,10 @@ export async function listIncidents(
 	return Promise.all(
 		results.map(async (row) => ({
 			...toIncident(row),
-			reversalBlock: 'ACTIVE' === row.status ? await reversalBlock(db, row) : null
+			reversalBlock: 'ACTIVE' === row.status ? await reversalBlock(db, row) : null,
+			isFrozen: isFrozen(row),
+			isReportedByActor: isReporter(row, actor),
+			...rightsOf(row, actor)
 		}))
 	);
 }
@@ -357,8 +407,19 @@ function reversalStatements(
 	});
 }
 
+// Why the actor may not reverse an ACTIVE incident, or null when they may.
+function reversalRefusal(row: IncidentRow, actor: Actor): Refusal | null {
+	if (mayReverse(row, actor)) {
+		return null;
+	}
+	return isReporter(row, actor)
+		? refusal({}, 'El Gerente ya le puso responsable: no se puede revertir')
+		: refusal({}, 'Solo quien la reportó o el Gerente puede revertirla');
+}
+
 /**
- * Voids an incident, `ADMIN` and `MANAGER` only, with a required reason kept in the event. The
+ * Voids an incident, with a required reason kept in the event: its reporter until it's frozen,
+ * `ADMIN` and `MANAGER` on any. The
  * lost and unusable go back onto each product's current `total_quantity`, and the order's flag is
  * worked out again, in one batch, while `reversalBlock` allows it. Incidents reverse in any order
  * among themselves: their adjustments are subtractions.
@@ -368,7 +429,7 @@ export async function reverseIncident(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, MANAGES_INCIDENTS);
+	requireRole(actor, ROLES);
 	const parsed = reversalSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalid(parsed.error);
@@ -377,6 +438,10 @@ export async function reverseIncident(
 	const row = await findActive(db, id);
 	if ('ok' in row) {
 		return row;
+	}
+	const notAllowed = reversalRefusal(row, actor);
+	if (null !== notAllowed) {
+		return notAllowed;
 	}
 	const block = await reversalBlock(db, row);
 	if (null !== block) {
