@@ -953,26 +953,36 @@ const availabilitySchema = tripDatesSchema.safeExtend({
 /** What's left of a product on the range's tightest day. Negative when it's overbooked: never clamped. */
 export type Availability = { productId: number; available: number };
 
-// The block covers every day from delivery to pickup, both included. Each day subtracts the lines
-// of the reserving orders whose range holds it; a line's availability is its range's lowest day.
-const AVAILABILITY_SQL = `with recursive days(day) as (
+/**
+ * The reserving rule, availability's and Subalquiler's alike: each line of each order holding stock
+ * (`RESERVING_STATUSES`) on each day from `?1` to `?2`, as `held(order_id, product_id, day, qty)`. An
+ * order holds its lines from its delivery day to its pickup day, both included. `?3` is an order
+ * left out, the one being edited, or null. A query appends its own `select` after it.
+ */
+export const HELD_LINES_SQL = `with recursive days(day) as (
 		select ?1 union all select date(day, '+1 day') from days where day < ?2
 	),
-	reserved(product_id, day, qty) as (
-		select json_extract(item.value, '$.product_id'), days.day,
-			sum(cast(json_extract(item.value, '$.qty') as integer))
+	held(order_id, product_id, day, qty) as (
+		select orders.id, json_extract(item.value, '$.product_id'), days.day,
+			cast(json_extract(item.value, '$.qty') as integer)
 		from days
 		join orders on orders.delivery_date <= days.day and orders.pickup_date >= days.day
 		join json_each(orders.order_items) as item
-		where orders.status in (select value from json_each(?3)) and orders.id is not ?4
-		group by 1, 2
+		where orders.status in (${RESERVING_STATUSES.map((status) => `'${status}'`).join(', ')})
+			and orders.id is not ?3
+	)`;
+
+// Each day subtracts what's held that day; a line's availability is its range's lowest day.
+const AVAILABILITY_SQL = `${HELD_LINES_SQL},
+	reserved(product_id, day, qty) as (
+		select product_id, day, sum(qty) from held group by 1, 2
 	)
 	select products.id as productId,
 		min(products.total_quantity - coalesce(reserved.qty, 0)) as available
 	from products
 	join days
 	left join reserved on reserved.product_id = products.id and reserved.day = days.day
-	where ?5 is null or products.id in (select value from json_each(?5))
+	where ?4 is null or products.id in (select value from json_each(?4))
 	group by products.id`;
 
 /**
@@ -999,7 +1009,6 @@ async function queryAvailability(
 		.bind(
 			range.delivery_date,
 			range.pickup_date,
-			JSON.stringify(RESERVING_STATUSES),
 			range.order_id,
 			null === range.product_ids ? null : JSON.stringify(range.product_ids)
 		)
