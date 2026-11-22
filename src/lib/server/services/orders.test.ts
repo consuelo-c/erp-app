@@ -2495,6 +2495,18 @@ test('the payment list pairs a deposit-sourced charge with its retention, and ea
 	expect((await detail(id)).damageCharged).toBe(30000);
 });
 
+test('a new-money charge right after an ordinary deposit refund of the same amount pairs with nothing', async () => {
+	const id = await deliveredWithDeposit();
+	expect(await reportLost(id)).toMatchObject({ ok: true });
+	await recordPayment(id, { concept: 'DEPOSIT_REFUND', amount: '50.000' });
+	await recordPayment(id, damage('NEW', '50.000'));
+	const payments = (await detail(id)).payments.slice(2);
+	expect(payments).toEqual([
+		expect.objectContaining({ concept: 'DEPOSIT_REFUND', pairedReceiptNumber: null }),
+		expect.objectContaining({ concept: 'DAMAGE_CHARGE', pairedReceiptNumber: null })
+	]);
+});
+
 test('a damage charge stays out of Pagado, Saldo, what the client is owed and the cuenta de cobro', async () => {
 	const id = await create();
 	await recordPayment(id, { amount: '500.000' }, sales);

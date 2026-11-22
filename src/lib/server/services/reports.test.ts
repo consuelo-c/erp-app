@@ -483,6 +483,16 @@ describe('getSubLending', () => {
 		expect(report.products).toMatchObject([{ held: 15, missing: 5, worstDay: '2026-11-27' }]);
 	});
 
+	test('Hasta before Desde is the same period, swapped', async () => {
+		const glasses = insertProduct('Copa para vino tinto', 10);
+		await book({ lines: [[glasses, 15]], delivery: '2026-11-28', pickup: '2026-11-28' });
+
+		const report = await getSubLending(db, { from: '2026-11-30', to: '2026-11-27' }, manager);
+
+		expect(report).toMatchObject({ from: '2026-11-27', to: '2026-11-30' });
+		expect(missingOf(report)).toEqual({ 'Copa para vino tinto': 5 });
+	});
+
 	test('an order holds its products on its delivery day and on its pickup day, both included', async () => {
 		const tables = insertProduct('Mesa redonda 10 puestos', 10);
 		await book({ lines: [[tables, 12]], delivery: '2026-11-26', pickup: '2026-11-27' });
@@ -625,15 +635,6 @@ describe('getSubLending', () => {
 
 		expect(report).toMatchObject({ from: '2026-11-28', to: '2026-11-28' });
 		expect(missingOf(report)).toEqual({ 'Silla Tiffany dorada': 2 });
-	});
-
-	test('a Hasta before the Desde is an empty period, as in the other date-range readers', async () => {
-		const chairs = insertProduct('Silla Tiffany dorada', 0);
-		await book({ lines: [[chairs, 5]], delivery: '2026-11-27', pickup: '2026-11-30' });
-
-		const report = await getSubLending(db, { from: '2026-11-30', to: '2026-11-27' }, sales);
-
-		expect(report).toEqual({ from: '2026-11-30', to: '2026-11-27', products: [] });
 	});
 
 	test('agrees with availability for the same range: what is missing is what availability is short', async () => {
