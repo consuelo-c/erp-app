@@ -109,6 +109,7 @@ test("#1043's page: the printout's figures, and exactly the fields the client se
 		depositHeld: 0,
 		paid: 500000,
 		balanceDue: 680000,
+		damageCharged: 0,
 		owedToClient: 500000,
 		receivableId: null,
 		receivableBalance: null
@@ -233,4 +234,31 @@ test('the terms as stored, empty while there are none', async () => {
 	expect(await getClientTerms(db)).toBe('');
 	setTerms('## Depósito\n\nSe devuelve al recoger.');
 	expect(await getClientTerms(db)).toBe('## Depósito\n\nSe devuelve al recoger.');
+});
+
+test('the client sees «Cobrado por novedades», kept from the deposit, apart from Pagado and Saldo', async () => {
+	const token = await create('OUT_FOR_PICKUP');
+	const movement = (concept: string, amount: number) =>
+		movementStatements(db, sales, {
+			concept: concept as 'INSTALLMENT',
+			amount,
+			payment_method: 'CASH',
+			movement_date: '2026-10-18',
+			entity_type: 'ORDER',
+			entity_id: 1,
+			reverses_id: null,
+			attributes: {}
+		});
+	await db.batch([
+		...movement('INSTALLMENT', 500000),
+		...movement('SECURITY_DEPOSIT', 200000),
+		...movement('DEPOSIT_REFUND', -150000),
+		...movement('DAMAGE_CHARGE', 150000)
+	]);
+	expect(await getPublicOrder(db, token)).toMatchObject({
+		paid: 500000,
+		balanceDue: 680000,
+		depositHeld: 50000,
+		damageCharged: 150000
+	});
 });

@@ -298,6 +298,8 @@ export type LinkedMovement = {
 	entityType: string;
 	entityId: number;
 	payee: string;
+	/** What the movement is for, when its link doesn't say it: a damage charge's. */
+	description?: string;
 	/**
 	 * Money already in the cash book, relabelled: a refund of the same amount from `concept`,
 	 * written first in the same batch and on the same date, so the pair nets to 0. Refused above
@@ -320,7 +322,7 @@ function linkedStatements(
 		entity_type: movement.entityType,
 		entity_id: movement.entityId,
 		payee: movement.payee,
-		attributes: toAttributes(form)
+		attributes: toAttributes({ ...form, description: movement.description })
 	};
 	const { retention } = movement;
 	const refund =

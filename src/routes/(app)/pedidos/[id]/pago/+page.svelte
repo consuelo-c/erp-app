@@ -47,7 +47,6 @@
 		}
 		return null;
 	}
-
 </script>
 
 <svelte:head>
@@ -67,5 +66,7 @@
 	today={data.today}
 	{form}
 	{pendingOf}
+	activeIncidents={data.activeIncidents}
+	depositHeld={order.depositHeld}
 	warningOf={amountWarning}
 />

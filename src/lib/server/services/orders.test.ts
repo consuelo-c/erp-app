@@ -34,6 +34,7 @@ import { createOrder } from '../db/test-orders';
 import { readOwedOnReceivable } from '$lib/orders';
 import { reportIncident, reverseIncident } from './incidents';
 import { getReceivableDetail, issueReceivable, recordReceivablePayment } from './receivables';
+import { getCashStatement } from './cash-handovers';
 
 const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
 
@@ -1144,7 +1145,9 @@ test('the detail lists the order movements oldest first, and says who cancelled 
 			method: 'TRANSFER',
 			otherMethod: null,
 			payee: null,
-			receiptNumber: 2
+			receiptNumber: 2,
+			description: null,
+			pairedReceiptNumber: null
 		},
 		{
 			id: 1,
@@ -1154,7 +1157,9 @@ test('the detail lists the order movements oldest first, and says who cancelled 
 			method: 'TRANSFER',
 			otherMethod: null,
 			payee: null,
-			receiptNumber: 1
+			receiptNumber: 1,
+			description: null,
+			pairedReceiptNumber: null
 		}
 	]);
 	expect(order.cancellation).toBeNull();
@@ -1633,7 +1638,7 @@ test('Despachos offers «Pago» and the deposit on the road, and the deposit bac
 	setStatus(id, 'OUT_FOR_PICKUP');
 	expect(await offered(warehouse)).toEqual([]);
 	expect(await reportLost(id)).toMatchObject({ ok: true });
-	expect(await offered()).toEqual(['INSTALLMENT']);
+	expect(await offered()).toEqual(['INSTALLMENT', 'DAMAGE_CHARGE']);
 	bill(id);
 	expect(await offered()).toEqual([]);
 });
@@ -2340,4 +2345,189 @@ test('an extension has no PICKED, and is never modified after staging', async ()
 	const edited = { ...extension, delivery_date: '2026-08-17', rental_days: 4, id };
 	expect(await updateOrder(db, edited, sales)).toMatchObject({ ok: true });
 	expect(await modifiedAfterStagingAt(id)).toBeNull();
+});
+
+// «Cobro por novedad»: an order out at the client with $1.180.000 paid and a $200.000 deposit.
+async function deliveredWithDeposit(): Promise<number> {
+	const id = await create();
+	await recordPayment(id, { amount: '1.180.000' }, sales);
+	await recordPayment(id, { concept: 'SECURITY_DEPOSIT', amount: '200.000' }, sales);
+	setStatus(id, 'OUT_FOR_PICKUP');
+	return id;
+}
+
+const damage = (source: string, amount: string, fields: Record<string, string> = {}) => ({
+	concept: 'DAMAGE_CHARGE',
+	fee_source: source,
+	amount,
+	description: '2 sillas perdidas en el evento',
+	...fields
+});
+
+function reverseOnlyIncident() {
+	const [{ id }] = database.prepare('select id from incidents').all();
+	return reverseIncident(db, { id: String(id), reason: 'Era de otro pedido' }, manager);
+}
+
+test('a damage charge is refused while the order has no active incident, reversed ones included', async () => {
+	const id = await deliveredWithDeposit();
+	const tryCharge = () => recordOrderPayment(db, typedPayment(id, damage('NEW', '50.000')), sales);
+	const refused = {
+		ok: false,
+		message: 'El cobro por novedad necesita una novedad activa en el pedido.',
+		errors: {}
+	};
+	expect(await tryCharge()).toEqual(refused);
+	expect(offeredPaymentConcepts(await detail(id), sales)).not.toContain('DAMAGE_CHARGE');
+	expect(await reportLost(id)).toMatchObject({ ok: true });
+	expect(await reverseOnlyIncident()).toMatchObject({ ok: true });
+	expect(await tryCharge()).toEqual(refused);
+	expect(movementsOf(id)).toHaveLength(2);
+});
+
+test('with an active incident, the office and the driver record a damage charge in new money', async () => {
+	const id = await deliveredWithDeposit();
+	expect(await reportLost(id)).toMatchObject({ ok: true });
+	for (const actor of [admin, manager, sales]) {
+		expect(offeredPaymentConcepts(await detail(id), actor)).toContain('DAMAGE_CHARGE');
+	}
+	expect(getDespachosPaymentEntry(await detail(id), driver).concepts).toContain('DAMAGE_CHARGE');
+	const transfer = { payment_method: 'TRANSFER' };
+	const other = { payment_method: 'OTHER', other_method: 'Trueque' };
+	await recordPayment(id, damage('NEW', '10.000', transfer), admin);
+	await recordPayment(id, damage('NEW', '20.000', other), manager);
+	await recordPayment(id, damage('NEW', '30.000'), sales);
+	const byDriver = await recordPayment(id, damage('NEW', '40.000'), driver);
+	expect(byDriver).toMatchObject({
+		concept: 'DAMAGE_CHARGE',
+		amount: 40000,
+		payment_method: 'CASH',
+		payee: 'Luz Marina Restrepo',
+		created_by: 'conductor'
+	});
+	expect(JSON.parse(String(byDriver.attributes))).toMatchObject({
+		description: '2 sillas perdidas en el evento'
+	});
+	expect(await detail(id)).toMatchObject({
+		paid: 1180000,
+		balanceDue: 0,
+		depositHeld: 200000,
+		damageCharged: 100000
+	});
+});
+
+test('«Retener del depósito» writes the charge with its paired retention, no method, and the deposit held drops', async () => {
+	const id = await deliveredWithDeposit();
+	expect(await reportLost(id)).toMatchObject({ ok: true });
+	const kept = await recordPayment(id, damage('DEPOSIT', '150.000'), driver);
+	expect(movementsOf(id).slice(2)).toEqual([
+		expect.objectContaining({ concept: 'DEPOSIT_REFUND', amount: -150000, reverses_id: null }),
+		expect.objectContaining({ concept: 'DAMAGE_CHARGE', amount: 150000, reverses_id: null })
+	]);
+	expect(kept).toMatchObject({ payment_method: 'OTHER', created_by: 'conductor' });
+	expect(JSON.parse(String(kept.attributes))).toMatchObject({
+		other_method: 'Retenido del depósito'
+	});
+	expect(await detail(id)).toMatchObject({
+		paid: 1180000,
+		balanceDue: 0,
+		depositHeld: 50000,
+		damageCharged: 150000
+	});
+});
+
+test('«Retener del depósito» is capped at the deposit held, and charging more takes new money', async () => {
+	const id = await deliveredWithDeposit();
+	expect(await reportLost(id)).toMatchObject({ ok: true });
+	const over = await recordOrderPayment(
+		db,
+		typedPayment(id, damage('DEPOSIT', '200.001')),
+		manager
+	);
+	const message = 'Supera el depósito recibido ($200.000). Cobra el resto con «Dinero nuevo».';
+	expect(over).toEqual({ ok: false, message, errors: { amount: message } });
+	expect(movementsOf(id)).toHaveLength(2);
+	await recordPayment(id, damage('DEPOSIT', '200.000'));
+	await recordPayment(id, damage('NEW', '100.000'));
+	expect(await detail(id)).toMatchObject({ depositHeld: 0, damageCharged: 300000 });
+});
+
+test('a damage charge needs a description, and never comes from the payments', async () => {
+	const id = await deliveredWithDeposit();
+	expect(await reportLost(id)).toMatchObject({ ok: true });
+	const tryCharge = (fields: Record<string, string>) =>
+		recordOrderPayment(db, typedPayment(id, { ...damage('NEW', '50.000'), ...fields }), sales);
+	expect(await tryCharge({ description: '  ' })).toMatchObject({
+		ok: false,
+		errors: { description: 'Escribe qué se cobra' }
+	});
+	expect(await tryCharge({ fee_source: 'INSTALLMENTS' })).toMatchObject({
+		ok: false,
+		errors: { fee_source: expect.any(String) }
+	});
+	expect(movementsOf(id)).toHaveLength(2);
+});
+
+test('the payment list pairs a deposit-sourced charge with its retention, and each half is offset on its own', async () => {
+	const id = await deliveredWithDeposit();
+	expect(await reportLost(id)).toMatchObject({ ok: true });
+	const kept = await recordPayment(id, damage('DEPOSIT', '150.000'));
+	const fresh = await recordPayment(id, damage('NEW', '30.000'));
+	const payments = (await detail(id)).payments.slice(2);
+	expect(payments).toEqual([
+		expect.objectContaining({
+			concept: 'DEPOSIT_REFUND',
+			pairedReceiptNumber: kept.receipt_number
+		}),
+		expect.objectContaining({
+			concept: 'DAMAGE_CHARGE',
+			description: '2 sillas perdidas en el evento',
+			pairedReceiptNumber: expect.any(Number)
+		}),
+		expect.objectContaining({ id: fresh.id, pairedReceiptNumber: null })
+	]);
+	const offset = {
+		reverses_id: String(kept.id),
+		payment_method: 'CASH',
+		movement_date: '2026-08-02'
+	};
+	expect(await recordOffset(db, offset, manager)).toMatchObject({ ok: true });
+	expect((await detail(id)).damageCharged).toBe(30000);
+});
+
+test('a damage charge stays out of Pagado, Saldo, what the client is owed and the cuenta de cobro', async () => {
+	const id = await create();
+	await recordPayment(id, { amount: '500.000' }, sales);
+	await recordPayment(id, { concept: 'SECURITY_DEPOSIT', amount: '200.000' }, sales);
+	setStatus(id, 'OUT_FOR_PICKUP');
+	expect(await reportLost(id)).toMatchObject({ ok: true });
+	await recordPayment(id, damage('NEW', '90.000'), sales);
+	expect(await detail(id)).toMatchObject({
+		paid: 500000,
+		balanceDue: 680000,
+		damageCharged: 90000
+	});
+	const issued = await issueReceivable(db, { orders: [id], payment_terms: 'Contado' }, sales);
+	if (!issued.ok) {
+		throw new Error(issued.message);
+	}
+	const receivable = await getReceivableDetail(db, issued.id, sales);
+	expect(receivable).toMatchObject({ paid: 500000, balance: 680000 });
+	expect(receivable?.payments.map((payment) => payment.concept)).toEqual(['INSTALLMENT']);
+	setStatus(id, 'CANCELLED');
+	expect((await detail(id)).owedToClient).toBe(700000);
+});
+
+test("cash from a damage charge counts on the driver's Efectivo por entregar; one kept from the deposit doesn't", async () => {
+	database.exec(
+		`insert into users (username, roles, password_hash, password_salt, password_iterations, active,
+			created_at, created_by, updated_at, updated_by)
+		values ('conductor', '["DRIVER"]', 'hash', 'salt', 1, 1, 0, 'admin', 0, 'admin')`
+	);
+	const id = await deliveredWithDeposit();
+	expect(await reportLost(id)).toMatchObject({ ok: true });
+	await recordPayment(id, damage('NEW', '40.000'), driver);
+	await recordPayment(id, damage('DEPOSIT', '100.000'), driver);
+	const tab = { username: 'conductor', from: '2026-08-01', to: '2026-08-01' };
+	expect((await getCashStatement(db, tab, manager)).pending).toBe(40000);
 });

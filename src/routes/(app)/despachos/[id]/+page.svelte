@@ -368,6 +368,11 @@
 				<span>Saldo</span><span>{formatBalance(order.balanceDue)}</span>
 			</li>
 		{/if}
+		{#if 0 !== order.damageCharged}
+			<li class="detail-list__row--plain">
+				<span>Cobrado por novedades</span><span>{formatBalance(order.damageCharged)}</span>
+			</li>
+		{/if}
 		<li class="detail-list__row--plain">
 			<span>Depósito acordado</span><span>{formatPesos(order.depositAmount)}</span>
 		</li>

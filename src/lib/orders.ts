@@ -134,7 +134,10 @@ function defaultPickupDate(eventDate: string, holidayDates: string[]): string {
 
 export type TripDates = { deliveryDate: string; pickupDate: string };
 
-export type FollowingTrips = TripDates & { isDeliveryDateTyped: boolean; isPickupDateTyped: boolean };
+export type FollowingTrips = TripDates & {
+	isDeliveryDateTyped: boolean;
+	isPickupDateTyped: boolean;
+};
 
 /**
  * A quote's new order: the trips' dates from the event date, each until it's typed by hand. No
@@ -267,11 +270,25 @@ export function isIncidentReportable(order: {
 }
 
 // Sales records the money in; only the manager pays it out.
-const ORDER_INFLOWS = ['INSTALLMENT', 'SECURITY_DEPOSIT', 'CANCELLATION_FEE'] as const;
+const ORDER_INFLOWS = [
+	'INSTALLMENT',
+	'SECURITY_DEPOSIT',
+	'CANCELLATION_FEE',
+	'DAMAGE_CHARGE'
+] as const;
 const ORDER_OUTFLOWS = ['INSTALLMENT_REFUND', 'DEPOSIT_REFUND', 'CARRIER_PAYMENT'] as const;
 
-/** The movements an order records from its payment entry, in the order the entry offers them. */
-export const ORDER_PAYMENT_CONCEPTS = [...ORDER_INFLOWS, ...ORDER_OUTFLOWS] as const;
+/**
+ * The movements an order records from its payment entry, in the order the entry offers them: the
+ * damage charge last, apart from the rental's money.
+ */
+export const ORDER_PAYMENT_CONCEPTS = [
+	'INSTALLMENT',
+	'SECURITY_DEPOSIT',
+	'CANCELLATION_FEE',
+	...ORDER_OUTFLOWS,
+	'DAMAGE_CHARGE'
+] as const satisfies readonly ((typeof ORDER_INFLOWS)[number] | (typeof ORDER_OUTFLOWS)[number])[];
 
 export type OrderPaymentConcept = (typeof ORDER_PAYMENT_CONCEPTS)[number];
 
@@ -284,6 +301,15 @@ export function isOrderInflow(concept: OrderPaymentConcept): boolean {
 export const FEE_SOURCES = ['NEW', 'INSTALLMENTS', 'DEPOSIT'] as const;
 
 export type FeeSource = (typeof FEE_SOURCES)[number];
+
+/** Where a «Cobro por novedad» comes from: never the payments, which pay the order's Total. */
+export const DAMAGE_CHARGE_SOURCES = ['NEW', 'DEPOSIT'] as const satisfies readonly FeeSource[];
+
+/**
+ * A damage charge kept from the deposit moves no money, so the client picks no method: its pair is
+ * recorded as «Otro» with this, which keeps it off every Efectivo por entregar.
+ */
+export const RETAINED_FROM_DEPOSIT = 'Retenido del depósito';
 
 export type PrintSheet = { firstPageLines: number; linesPerPage: number; closingLines: number };
 

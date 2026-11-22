@@ -67,6 +67,8 @@
 	today={data.today}
 	{form}
 	{pendingOf}
+	activeIncidents={data.activeIncidents}
+	depositHeld={order.depositHeld}
 	amountLockNoteOf={(concept) => data.entry.amountLocks[concept]}
 	{warningOf}
 />
