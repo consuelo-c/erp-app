@@ -407,3 +407,25 @@ export const cashMovements = sqliteTable(
 		)
 	]
 );
+
+// An Entrega de efectivo: cash a driver or Sales rep hands to the manager, recorded by the manager.
+// It moves the company's own cash from a pocket to the drawer, so it isn't a cash movement: no
+// receipt number and no effect on Caja. `user_id` is who handed it (the login, as `created_by` names
+// a movement's author).
+export const cashHandovers = sqliteTable(
+	'cash_handovers',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		userId: integer('user_id')
+			.notNull()
+			.references(() => users.id),
+		amount: integer('amount').notNull(), // whole pesos
+		handoverDate: text('handover_date').notNull(), // YYYY-MM-DD
+		note: text('note'),
+		...auditColumns
+	},
+	(table) => [
+		index('cash_handovers_user_id').on(table.userId, table.handoverDate),
+		check('cash_handovers_amount', sql`${table.amount} > 0`)
+	]
+);
