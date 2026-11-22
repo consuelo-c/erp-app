@@ -7,17 +7,18 @@
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
 	import { formatPeriod } from '$lib/datetime';
-	import { formatBalance, formatPesos } from '$lib/format';
+	import { formatBalance, formatInteger, formatPesos } from '$lib/format';
 	import type { CashConcept } from '$lib/server/services/cash';
 	import type { PageProps } from './$types';
 
 	// The period's money in and out, on cash like Movimientos caja, each line opening the book on
-	// its own concepts; and apart from the result, Vendido. A desktop puts the tiles on top and
-	// Vendido beside; a phone puts the Resultado card on top and Vendido under «Aparte del resultado».
+	// its own concepts; and apart from the result, Vendido and Pérdidas. A desktop puts the tiles on
+	// top and Vendido and Pérdidas beside; a phone puts the Resultado card on top and both under
+	// «Aparte del resultado».
 	let { data }: PageProps = $props();
 
 	const report = $derived(data.report);
-	const { income, expenses } = $derived(report);
+	const { income, expenses, losses, uncollected } = $derived(report);
 
 	type Line = { label: string; amount: number; concepts: CashConcept[]; meta?: string };
 
@@ -53,6 +54,10 @@
 
 	const soldSplit = $derived(
 		`Alquiler ${formatPesos(report.sold.rental)} · Transporte ${formatPesos(report.sold.transport)}`
+	);
+
+	const withoutCostNote = $derived(
+		`${countOf(losses.withoutCost, 'producto', 'productos')} sin costo de reposición no ${1 === losses.withoutCost ? 'suma' : 'suman'}: ponlo en`
 	);
 
 	function countOf(count: number, one: string, many: string): string {
@@ -187,7 +192,19 @@
 						</span>
 						<span>{formatPesos(report.sold.total)}</span>
 					</li>
-					<!-- STUB: #645 adds the «Pérdidas» row here, with «Sin cobrar» in its meta line. -->
+					<li class="detail-list__row--plain">
+						<span>
+							Pérdidas
+							<div class="meta">
+								Sin cobrar {formatPesos(uncollected.total)} en {countOf(
+									uncollected.orderCount,
+									'pedido',
+									'pedidos'
+								)}
+							</div>
+						</span>
+						<span>{formatPesos(losses.total)}</span>
+					</li>
 				</ul>
 			</div>
 		</div>
@@ -214,7 +231,86 @@
 					<Button variant="secondary" size="sm" inline href={ordersHref}>Ver pedidos</Button>
 				</div>
 			</Card>
-			<!-- STUB: #645 adds the «Pérdidas» card here, its products and «Sin cobrar» per order. -->
+			<div class="losses">
+				<Card>
+					{#snippet head()}
+						<b class="card-title">Pérdidas</b>
+						<b class="card-value">{formatPesos(losses.total)}</b>
+					{/snippet}
+					<p class="meta losses__note">
+						Unidades perdidas o irrecuperables en novedades del periodo × costo de reposición. No se
+						resta del resultado: reponerlas es un gasto cuando se paga.
+					</p>
+					{#if losses.products.length > 0}
+						<table class="table">
+							<thead>
+								<tr>
+									<th>Producto</th>
+									<th class="num">Unid.</th>
+									<th class="num">Costo</th>
+									<th class="num">Total</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each losses.products as product (product.productId)}
+									<tr>
+										<td>{product.name}</td>
+										<td class="num">{formatInteger(product.units)}</td>
+										{#if null === product.cost}
+											<td class="num">sin costo</td>
+											<td class="num">—</td>
+										{:else}
+											<td class="num">{formatPesos(product.cost)}</td>
+											<td class="num">{formatPesos(product.total)}</td>
+										{/if}
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					{:else}
+						<p class="meta">No hubo pérdidas en el periodo.</p>
+					{/if}
+					{#if losses.withoutCost > 0}
+						<p class="meta losses__missing">
+							{withoutCostNote} <a href={resolve('/productos')}>Productos</a>.
+						</p>
+					{/if}
+
+					<h3 class="uncollected__title">
+						<span>Sin cobrar</span><span>{formatPesos(uncollected.total)}</span>
+					</h3>
+					<p class="meta uncollected__note">
+						Pérdidas de las que responde el cliente, menos lo ya cobrado por novedades.
+					</p>
+					{#if uncollected.orders.length > 0}
+						<table class="table">
+							<thead>
+								<tr>
+									<th>Pedido</th>
+									<th class="num">Pérdida</th>
+									<th class="num">Cobrado</th>
+									<th class="num">Sin cobrar</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each uncollected.orders as order (order.orderId)}
+									<tr>
+										<td>
+											<a href={resolve('/(app)/pedidos/[id]', { id: String(order.orderId) })}
+												>#{order.orderId}</a
+											>
+											<div class="meta">{order.clientName}</div>
+										</td>
+										<td class="num">{formatPesos(order.loss)}</td>
+										<td class="num">{formatPesos(order.charged)}</td>
+										<td class="num"><b>{formatPesos(order.uncollected)}</b></td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					{/if}
+				</Card>
+			</div>
 		</div>
 	</div>
 </Screen>
@@ -314,6 +410,33 @@
 
 	.sold__action {
 		margin-top: var(--space-5);
+	}
+
+	.losses {
+		margin-top: var(--space-6);
+	}
+
+	.losses__note {
+		margin: var(--space-1) 0 var(--space-4);
+	}
+
+	.losses .table {
+		width: 100%;
+	}
+
+	.losses__missing {
+		margin-top: var(--space-3);
+	}
+
+	.uncollected__title {
+		display: flex;
+		justify-content: space-between;
+		margin: var(--space-6) 0 var(--space-1);
+		font-size: var(--text-sm);
+	}
+
+	.uncollected__note {
+		margin-bottom: var(--space-3);
 	}
 
 	@container (width >= 1024px) {
