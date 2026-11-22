@@ -95,7 +95,7 @@
 	}
 
 	function appliedText(item: InventoryItem): string {
-		const counted = `Sistema ${formatInteger(item.system_qty)} · Contado ${formatInteger(item.counted_qty)}`;
+		const counted = `Contado ${formatInteger(item.counted_qty)}`;
 		return undefined === item.corrected_qty
 			? counted
 			: `${counted} · Corregido ${formatInteger(item.corrected_qty)}`;

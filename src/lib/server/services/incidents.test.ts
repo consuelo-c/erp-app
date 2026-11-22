@@ -573,7 +573,7 @@ test("a reporter can't reverse someone else's incident nor their own once frozen
 	expect(await reverse(1, sales)).toMatchObject({ ok: false });
 	expect(await reverse(2, driver)).toEqual({
 		ok: false,
-		message: 'El Gerente ya le puso responsable: no se puede revertir',
+		message: 'El Gerente ya le puso responsable: no se puede revertir.',
 		errors: {}
 	});
 	expect([stock(CHAIR), stock(TABLE)]).toEqual([498, 499]);
@@ -668,7 +668,7 @@ test("a reporter can't correct someone else's incident nor their own once frozen
 	const more = [{ product_id: CHAIR, qty: 1, outcome: 'LOST' }];
 	expect(await correct(1, more, sales)).toEqual({
 		ok: false,
-		message: 'Solo quien la reportó o el Gerente puede corregirla',
+		message: 'Solo quien la reportó o el Gerente puede corregirla.',
 		errors: {}
 	});
 	expect(await correct(2, [{ product_id: TABLE, qty: 2, outcome: 'LOST' }])).toEqual({

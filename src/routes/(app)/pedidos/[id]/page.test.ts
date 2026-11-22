@@ -135,7 +135,8 @@ test('«Convertir en pedido» › «Guardar pedido» lands on the new order with
 			rental_days: 2,
 			quote_items: orderInput.order_items,
 			discount: 0,
-			transport_cost: 180000
+			transport_cost: 180000,
+			transported_by: 'COMPANY'
 		},
 		sales
 	);
@@ -176,7 +177,12 @@ type Route = { page: unknown; load: unknown };
 
 // The form as the route renders it, its data from the route's own load.
 async function rendered({ page, load }: Route, params: object, url = 'http://localhost/') {
-	const event = { locals: { user: sales }, params, platform: { env: { DB: db } }, url: new URL(url) };
+	const event = {
+		locals: { user: sales },
+		params,
+		platform: { env: { DB: db } },
+		url: new URL(url)
+	};
 	const data = await (load as (event: never) => Promise<unknown>)(event as never);
 	return render(page as never, { props: { data, form: null } as never }).body;
 }
@@ -188,7 +194,8 @@ const quoteInput = {
 	rental_days: 2,
 	quote_items: orderInput.order_items,
 	discount: 0,
-	transport_cost: 180000
+	transport_cost: 180000,
+	transported_by: 'COMPANY'
 };
 
 async function newQuote(): Promise<number> {
@@ -201,11 +208,17 @@ async function newQuote(): Promise<number> {
 
 test('a Vetado client warns under «Cliente» when the order loads, and the edit still saves', async () => {
 	const id = await newOrder();
-	expect(await rendered({ page: EditPage, load: loadEdit }, { id: String(id) })).not.toContain(BANNED_WARNING);
+	expect(await rendered({ page: EditPage, load: loadEdit }, { id: String(id) })).not.toContain(
+		BANNED_WARNING
+	);
 	banClient();
-	expect(await rendered({ page: EditPage, load: loadEdit }, { id: String(id) })).toContain(BANNED_WARNING);
+	expect(await rendered({ page: EditPage, load: loadEdit }, { id: String(id) })).toContain(
+		BANNED_WARNING
+	);
 	const post = { ...postOf(orderInput), params: { id: String(id) } };
-	expect(await locationAfter(() => editActions.default(post as never))).toBe(`/pedidos/${id}?guardado`);
+	expect(await locationAfter(() => editActions.default(post as never))).toBe(
+		`/pedidos/${id}?guardado`
+	);
 });
 
 test('a Vetado client warns under «Cliente» when a quote loads, edited or converted, and it saves', async () => {
@@ -214,7 +227,9 @@ test('a Vetado client warns under «Cliente» when a quote loads, edited or conv
 	const edit = await rendered({ page: QuoteEditPage, load: loadQuoteEdit }, { id: String(quote) });
 	expect(edit).toContain(BANNED_WARNING);
 	const url = `http://localhost/pedidos/nuevo?cotizacion=${quote}`;
-	expect(await rendered({ page: ConversionPage, load: loadConversion }, {}, url)).toContain(BANNED_WARNING);
+	expect(await rendered({ page: ConversionPage, load: loadConversion }, {}, url)).toContain(
+		BANNED_WARNING
+	);
 	const formData = new FormData();
 	formData.set('quote', JSON.stringify(quoteInput));
 	const request = new Request('http://localhost/', { method: 'POST', body: formData });

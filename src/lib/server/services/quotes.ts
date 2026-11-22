@@ -105,7 +105,7 @@ const quoteInputSchema = z
 		discount: pesosInputSchema('Escribe el descuento en pesos'),
 		transport_cost: transportInputSchema.nullable().default(null),
 		// Never tied to the transport cost: «por acordar» and 0 keep their meaning either way.
-		transported_by: z.enum(TRANSPORTED_BY, 'Escoge quién transporta').default('COMPANY'),
+		transported_by: z.enum(TRANSPORTED_BY, 'Escoge quién transporta'),
 		address_1: blankable,
 		address_2: blankable,
 		notes: blankable

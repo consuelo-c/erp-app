@@ -1,7 +1,7 @@
 import { error, json } from '@sveltejs/kit';
 import { requireRole, ROLES } from '$lib/server/actor';
 import { listIncidents } from '$lib/server/services/incidents';
-import { getOrderDetail, offeredPaymentConcepts } from '$lib/server/services/orders';
+import { getDespachosPaymentEntry, getOrderDetail } from '$lib/server/services/orders';
 import type { RequestHandler } from './$types';
 
 // The operational detail as JSON, for its universal load: the whole order, prices included, for
@@ -18,6 +18,6 @@ export const GET: RequestHandler = async ({ locals, params, platform }) => {
 		error(404, 'Ese pedido no existe');
 	}
 	const incidents = await listIncidents(db, order.id, locals.user);
-	const paymentConcepts = offeredPaymentConcepts(order, locals.user);
+	const paymentConcepts = getDespachosPaymentEntry(order, locals.user).concepts;
 	return json({ order, incidents, paymentConcepts });
 };

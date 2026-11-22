@@ -361,22 +361,9 @@ export async function getContact(
 	return null === row ? null : toContact(row);
 }
 
-// A refund or a carrier payment is paid to an account: the driver's refund by transfer reads the
-// client's, and nothing else of the contact.
-const PAYS_TO_ACCOUNTS = [...EDITS_CONTACTS, 'DRIVER'] as const;
-
-/** The account a contact keeps for transfers to it, or null. */
-export async function getContactBankAccount(
-	db: D1Database,
-	id: number,
-	actor: Actor | null
-): Promise<string | null> {
-	requireRole(actor, PAYS_TO_ACCOUNTS);
-	const row = await db
-		.prepare('select attributes from contacts where id = ?')
-		.bind(id)
-		.first<{ attributes: string }>();
-	return null === row ? null : bankAccountOf({ ...NEW_CONTACT, attributes: row.attributes });
+/** The account a contact keeps for transfers to it, read from its `attributes` column, or null. */
+export function readBankAccount(attributes: string): string | null {
+	return bankAccountOf({ ...NEW_CONTACT, attributes });
 }
 
 export async function createContact(

@@ -13,6 +13,7 @@ import {
 	createExtension,
 	deliveryAttributesSchema,
 	getAvailability,
+	getDespachosPaymentEntry,
 	getOrder,
 	getOrderBilling,
 	getOrderChange,
@@ -1611,12 +1612,15 @@ function bill(orderId: number) {
 	);
 }
 
-test('the driver is offered «Pago» and the deposit on the road, and the deposit back at pickup', async () => {
+test('Despachos offers «Pago» and the deposit on the road, and the deposit back at pickup', async () => {
 	const id = await create();
-	const offered = async (actor: Actor = driver) => offeredPaymentConcepts(await detail(id), actor);
+	const offered = async (actor: Actor = driver) =>
+		getDespachosPaymentEntry(await detail(id), actor).concepts;
 	for (const status of ['CONFIRMED', 'PICKED', 'COMPLETED', 'CANCELLED']) {
 		setStatus(id, status);
 		expect(await offered()).toEqual([]);
+		expect(await offered(manager)).toEqual([]);
+		expect(await offered(sales)).toEqual([]);
 	}
 	for (const status of ['OUT_FOR_DELIVERY', 'DELIVERED', 'OUT_FOR_PICKUP']) {
 		setStatus(id, status);
@@ -1628,11 +1632,67 @@ test('the driver is offered «Pago» and the deposit on the road, and the deposi
 	expect(await offered()).toEqual(['INSTALLMENT']);
 	setStatus(id, 'OUT_FOR_PICKUP');
 	expect(await offered(warehouse)).toEqual([]);
-	expect(await offered(manager)).toEqual(['INSTALLMENT', 'INSTALLMENT_REFUND', 'DEPOSIT_REFUND']);
 	expect(await reportLost(id)).toMatchObject({ ok: true });
 	expect(await offered()).toEqual(['INSTALLMENT']);
 	bill(id);
 	expect(await offered()).toEqual([]);
+});
+
+test('in Despachos the office gets the on-the-road set too, Sales without the refund', async () => {
+	const id = await create(withCarriers(null, WILSON));
+	await recordPayment(id, { concept: 'SECURITY_DEPOSIT', amount: '200.000' }, sales);
+	setStatus(id, 'OUT_FOR_PICKUP');
+	const entryOf = async (actor: Actor) => getDespachosPaymentEntry(await detail(id), actor);
+	expect((await entryOf(manager)).concepts).toEqual(['INSTALLMENT', 'DEPOSIT_REFUND']);
+	expect((await entryOf(admin)).concepts).toEqual(['INSTALLMENT', 'DEPOSIT_REFUND']);
+	expect((await entryOf(sales)).concepts).toEqual(['INSTALLMENT']);
+	const salesDriver: Actor = { ...sales, roles: ['SALES', 'DRIVER'] };
+	expect((await entryOf(salesDriver)).concepts).toEqual(['INSTALLMENT', 'DEPOSIT_REFUND']);
+	for (const actor of [driver, manager, sales]) {
+		expect((await entryOf(actor)).methods).toEqual(['CASH', 'TRANSFER']);
+	}
+	expect(offeredPaymentConcepts(await detail(id), driver)).toEqual([]);
+});
+
+test("Despachos locks the refund to the whole deposit for whoever isn't the manager", async () => {
+	const id = await create();
+	await recordPayment(id, { concept: 'SECURITY_DEPOSIT', amount: '200.000' }, sales);
+	setStatus(id, 'OUT_FOR_PICKUP');
+	const locksOf = async (actor: Actor) =>
+		getDespachosPaymentEntry(await detail(id), actor).amountLocks;
+	expect((await locksOf(driver)).DEPOSIT_REFUND).toBe(
+		'Se devuelve todo el depósito recibido. Una devolución parcial la hace la oficina.'
+	);
+	expect((await locksOf(driver)).INSTALLMENT).toBeUndefined();
+	expect((await locksOf(manager)).DEPOSIT_REFUND).toBeUndefined();
+});
+
+test('with an active incident, Despachos says the office gives the deposit back', async () => {
+	const id = await create();
+	await recordPayment(id, { concept: 'SECURITY_DEPOSIT', amount: '200.000' }, sales);
+	setStatus(id, 'OUT_FOR_PICKUP');
+	const noticeFor = async (actor: Actor) =>
+		getDespachosPaymentEntry(await detail(id), actor).notice;
+	expect(await noticeFor(driver)).toBeNull();
+	expect(await reportLost(id)).toMatchObject({ ok: true });
+	const notice =
+		'El pedido tiene una novedad activa: la devolución del depósito la hace la oficina.';
+	expect(await noticeFor(driver)).toBe(notice);
+	expect(await noticeFor(manager)).toBe(notice);
+	expect(await noticeFor(sales)).toBeNull();
+});
+
+test('the cash hint shows only to whoever keeps an «Efectivo por entregar»', async () => {
+	const id = await create();
+	setStatus(id, 'DELIVERED');
+	const hintFor = async (actor: Actor) =>
+		getDespachosPaymentEntry(await detail(id), actor).methodHints.CASH;
+	const hint =
+		'El efectivo queda en tu cuenta de «Efectivo por entregar» hasta que lo entregues en la oficina.';
+	expect(await hintFor(driver)).toBe(hint);
+	expect(await hintFor(sales)).toBe(hint);
+	expect(await hintFor(manager)).toBeUndefined();
+	expect(await hintFor({ ...manager, roles: ['MANAGER', 'DRIVER'] })).toBeUndefined();
 });
 
 test('the driver records «Pago» and the deposit on the road, in cash or by transfer, as its author', async () => {

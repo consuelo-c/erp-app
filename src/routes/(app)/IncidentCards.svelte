@@ -52,6 +52,11 @@
 		return incident.isReportedByActor && incident.isFrozen && !incident.canReverse;
 	}
 
+	// An open item for the office: whose fault it was decides whether the deposit is withheld.
+	function isResponsiblePartyPending(incident: Incident): boolean {
+		return incident.canSetResponsibleParty && !incident.isFrozen;
+	}
+
 	function hasActions(incident: Incident): boolean {
 		const canAssign = undefined !== onassign && incident.canSetResponsibleParty;
 		const canReverseNow = incident.canReverse && null === incident.reversalBlock;
@@ -95,8 +100,7 @@
 					.reversedBy}: {incident.reversal.reason}
 			</p>
 		{:else}
-			<!-- An open item for the office: whose fault it was decides whether the deposit is withheld. -->
-			{#if incident.canSetResponsibleParty && 'UNDETERMINED' === incident.responsibleParty}
+			{#if isResponsiblePartyPending(incident)}
 				<Notice tone="warning">
 					Falta definir el responsable: si no fue el cliente, el depósito no se retiene.
 				</Notice>
