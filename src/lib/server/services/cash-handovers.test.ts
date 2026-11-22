@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Actor, Role } from '../actor';
 import { createMemoryD1 } from '../db/memory-d1';
 import { movementStatements, type Movement } from './cash';
-import { getCashStatement, listPeopleWithTab } from './cash-handovers';
+import { getCashStatement, listPeopleWithTab, recordHandover } from './cash-handovers';
 
 const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
 const driver: Actor = { username: 'conductor', employeeId: null, roles: ['DRIVER'], kind: 'user' };
@@ -70,22 +70,17 @@ test("the manager's offset of the person's movement comes off their tab, not the
 	expect((await getCashStatement(db, today, driver)).pending).toBe(0);
 });
 
-// Recording a handover is #622's: until it lands, a test writes the row itself.
 type HandoverRow = { username: string; amount: number; date: string; note?: string };
 
-function addHandover({ username, amount, date, note }: HandoverRow) {
-	database
-		.prepare(
-			`insert into cash_handovers (user_id, amount, handover_date, note, created_at, created_by,
-				updated_at, updated_by) select id, ?, ?, ?, 0, 'gerente', 0, 'gerente' from users where username = ?`
-		)
-		.run(amount, date, note ?? null, username);
+async function addHandover({ username, amount, date, note }: HandoverRow): Promise<void> {
+	const input = { username, amount: String(amount), handover_date: date, note };
+	expect(await recordHandover(db, input, manager)).toMatchObject({ ok: true });
 }
 
 test('Por entregar is all-time, whatever the range, less every handover', async () => {
 	await record(driver, { movement_date: '2026-11-02' });
 	await record(driver, { amount: 120000, movement_date: '2026-11-20' });
-	addHandover({ username: 'conductor', amount: 600000, date: '2026-11-03' });
+	await addHandover({ username: 'conductor', amount: 600000, date: '2026-11-03' });
 	const statement = await getCashStatement(db, today, driver);
 	expect(statement.pending).toBe(200000);
 });
@@ -137,14 +132,14 @@ test("the range lists the person's movements grouped by order, transfers marked 
 
 test("the range lists the person's handovers, and only theirs", async () => {
 	addLogin('vendedora', ['SALES']);
-	addHandover({ username: 'conductor', amount: 500000, date: '2026-11-01' });
-	addHandover({
+	await addHandover({ username: 'conductor', amount: 500000, date: '2026-11-01' });
+	await addHandover({
 		username: 'conductor',
 		amount: 600000,
 		date: '2026-11-03',
 		note: 'Faltaron $80.000'
 	});
-	addHandover({ username: 'vendedora', amount: 100000, date: '2026-11-03' });
+	await addHandover({ username: 'vendedora', amount: 100000, date: '2026-11-03' });
 	const statement = await getCashStatement(
 		db,
 		{ username: 'conductor', from: '2026-11-02', to: '2026-11-20' },
@@ -212,10 +207,10 @@ test('the people with a tab are the drivers and Sales reps who are not managers,
 	addLogin('saliente', ['DRIVER'], false);
 	await record({ ...driver, username: 'saliente' }, {});
 	expect(await listPeopleWithTab(db, manager)).toEqual([
-		{ username: 'vendedora', name: 'Ana Restrepo' },
-		{ username: 'ayudante', name: 'ayudante' },
-		{ username: 'conductor', name: 'conductor' },
-		{ username: 'saliente', name: 'saliente' }
+		{ username: 'vendedora', name: 'Ana Restrepo', pending: 0 },
+		{ username: 'ayudante', name: 'ayudante', pending: 0 },
+		{ username: 'conductor', name: 'conductor', pending: 0 },
+		{ username: 'saliente', name: 'saliente', pending: 680000 }
 	]);
 	expect(await statusOf(listPeopleWithTab(db, driver))).toBe(403);
 });
@@ -226,4 +221,41 @@ test('the range is today unless given; an unreadable end is today too', async ()
 	const statement = await getCashStatement(db, { username: 'conductor', from: 'ayer' }, driver);
 	expect(statement.range).toEqual({ from: '2026-11-20', to: '2026-11-20' });
 	expect(statement.groups.map(({ orderId }) => orderId)).toEqual([1044]);
+});
+
+test('a recorded handover lowers the tab by the amount received; a shortfall stays on it', async () => {
+	await record(driver, {});
+	const result = await recordHandover(
+		db,
+		{ username: 'conductor', amount: '600.000', handover_date: '2026-11-20', note: 'Faltaron' },
+		manager
+	);
+	expect(result).toEqual({ ok: true, id: 1 });
+	const statement = await getCashStatement(db, today, driver);
+	expect(statement.pending).toBe(80000);
+	expect(statement.handovers).toEqual([
+		{ id: 1, amount: 600000, handoverDate: '2026-11-20', note: 'Faltaron', recordedBy: 'gerente' }
+	]);
+});
+
+test('only a manager or an admin records a handover, and only for someone with a tab', async () => {
+	addLogin('vendedora', ['SALES']);
+	const seller: Actor = { ...driver, username: 'vendedora', roles: ['SALES'] };
+	const admin: Actor = { ...manager, username: 'admin', roles: ['ADMIN'] };
+	const handover = { username: 'conductor', amount: '100.000', handover_date: '2026-11-20' };
+	expect(await statusOf(recordHandover(db, handover, driver))).toBe(403);
+	expect(await statusOf(recordHandover(db, handover, seller))).toBe(403);
+	expect(await statusOf(recordHandover(db, handover, null))).toBe(401);
+	expect(await recordHandover(db, handover, admin)).toEqual({ ok: true, id: 1 });
+	expect(await recordHandover(db, { ...handover, username: 'gerente' }, manager)).toMatchObject({
+		ok: false,
+		errors: { username: 'Esa persona no tiene efectivo por entregar' }
+	});
+	expect(await recordHandover(db, { ...handover, amount: '0' }, manager)).toMatchObject({
+		ok: false,
+		errors: { amount: 'Escribe un valor mayor que cero' }
+	});
+	expect((await getCashStatement(db, { ...today, username: 'conductor' }, manager)).pending).toBe(
+		-100000
+	);
 });

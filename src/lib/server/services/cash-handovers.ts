@@ -5,8 +5,10 @@
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { getTodaysDate } from '$lib/datetime';
+import { parsePesos } from '$lib/payroll';
 import { hasAnyRole, requireRole, rolesSchema, type Actor, type Role } from '../actor';
-import { optional, type CashConcept, type PaymentMethod } from './cash';
+import { auditedInsert } from '../audit';
+import { optional, type CashConcept, type PaymentMethod, type RecordResult } from './cash';
 
 // Whose tab a movement is on: whoever recorded it, or, for an offset (only the manager records
 // one), whoever recorded the movement it offsets, so correcting a mistake corrects their tab.
@@ -162,18 +164,19 @@ function canReadTab(actor: Actor, username: string): boolean {
 	return hasAnyRole(actor, MANAGES_CASH) || actor.username === username;
 }
 
-type Login = { username: string; name: string; roles: Role[]; isActive: boolean };
+type Login = { id: number; username: string; name: string; roles: Role[]; isActive: boolean };
 
-const SELECT_LOGIN = `select users.username, users.roles, users.active,
+const SELECT_LOGIN = `select users.id, users.username, users.roles, users.active,
 		coalesce(contacts.full_name, users.username) as name
 	from users
 	left join employees on employees.id = users.employee_id
 	left join contacts on contacts.id = employees.contact_id`;
 
-type LoginRow = { username: string; roles: string; active: number; name: string };
+type LoginRow = { id: number; username: string; roles: string; active: number; name: string };
 
 function toLogin(row: LoginRow): Login {
 	return {
+		id: row.id,
 		username: row.username,
 		name: row.name,
 		roles: rolesSchema.parse(JSON.parse(row.roles)),
@@ -189,11 +192,11 @@ async function findLogin(db: D1Database, username: string): Promise<Login | null
 	return null === row ? null : toLogin(row);
 }
 
-export type PersonWithTab = { username: string; name: string };
+export type PersonWithTab = { username: string; name: string; pending: number };
 
 /**
- * The «Persona» choices: every login with a tab, by name. A deactivated one stays while they
- * still hold cash, so what they owe can still be handed in.
+ * The «Persona» choices: every login with a tab, by name, with what they hold now. A deactivated
+ * one stays while they still hold cash, so what they owe can still be handed in.
  */
 export async function listPeopleWithTab(
 	db: D1Database,
@@ -202,10 +205,11 @@ export async function listPeopleWithTab(
 	requireRole(actor, MANAGES_CASH);
 	const { results } = await db.prepare(SELECT_LOGIN).all<LoginRow>();
 	const logins = results.map(toLogin).filter(({ roles }) => hasTab(roles));
-	const pending = await Promise.all(logins.map(({ username }) => sumPending(db, username)));
+	const held = await Promise.all(logins.map(({ username }) => sumPending(db, username)));
 	return logins
-		.filter(({ isActive }, index) => isActive || 0 !== pending[index])
-		.map(({ username, name }) => ({ username, name }))
+		.map((login, index) => ({ ...login, pending: held[index] }))
+		.filter(({ isActive, pending }) => isActive || 0 !== pending)
+		.map(({ username, name, pending }) => ({ username, name, pending }))
 		.sort((first, second) => first.name.localeCompare(second.name, 'es'));
 }
 
@@ -232,4 +236,63 @@ export async function getCashStatement(
 		listHandovers(db, range)
 	]);
 	return { pending, range: { from: range.from, to: range.to }, groups, handovers };
+}
+
+const AMOUNT_MESSAGE = 'Escribe un valor mayor que cero';
+
+// «Entregó», «Recibido», «Fecha» and «Nota (opcional)», every field as text.
+const handoverSchema = z.object({
+	username: z.string('Escoge quién entregó').trim().min(1, 'Escoge quién entregó'),
+	amount: z
+		.string(AMOUNT_MESSAGE)
+		.transform(parsePesos)
+		.pipe(z.number().int().positive(AMOUNT_MESSAGE)),
+	handover_date: z.iso.date('Escoge la fecha'),
+	note: z
+		.string()
+		.trim()
+		.optional()
+		.transform((value) => value || null)
+});
+
+function invalid(error: z.ZodError): RecordResult {
+	const errors = Object.fromEntries(
+		error.issues.map((issue) => [String(issue.path[0]), issue.message])
+	);
+	return { ok: false, message: 'Revisa los campos marcados en rojo antes de guardar.', errors };
+}
+
+/**
+ * Records the cash a person handed in: their tab goes down by it. Only the drawer records one, and
+ * whatever it falls short of stays on the tab: nothing else moves.
+ */
+export async function recordHandover(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<RecordResult> {
+	requireRole(actor, MANAGES_CASH);
+	const form = handoverSchema.safeParse(input);
+	if (!form.success) {
+		return invalid(form.error);
+	}
+	const login = await findLogin(db, form.data.username);
+	if (null === login || !hasTab(login.roles)) {
+		const message = 'Esa persona no tiene efectivo por entregar';
+		return { ok: false, message, errors: { username: message } };
+	}
+	const [inserted] = await db.batch(
+		auditedInsert(db, {
+			table: 'cash_handovers',
+			entityType: 'CASH_HANDOVER',
+			actor,
+			values: {
+				user_id: login.id,
+				amount: form.data.amount,
+				handover_date: form.data.handover_date,
+				note: form.data.note
+			}
+		})
+	);
+	return { ok: true, id: inserted.meta.last_row_id };
 }

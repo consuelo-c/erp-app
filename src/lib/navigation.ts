@@ -71,7 +71,8 @@ const MENU: MenuParent[] = [
 		icon: 'wallet',
 		children: [
 			{ label: 'Cuentas de cobro', href: resolve('/cuentas-de-cobro'), roles: SELLERS },
-			{ label: 'Movimiento', href: resolve('/caja/registrar'), roles: MANAGERS }
+			{ label: 'Movimiento', href: resolve('/caja/registrar'), roles: MANAGERS },
+			{ label: 'Entregas de efectivo', href: resolve('/caja/entregas'), roles: MANAGERS }
 		]
 	},
 	// The managers are the drawer: they hold no cash for the company.
