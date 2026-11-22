@@ -39,6 +39,7 @@ test('each role sees only what it opens; two roles see the union', () => {
 		'Productos',
 		'Contactos',
 		'Pagos: Cuentas de cobro',
+		'Efectivo por entregar',
 		'Personal: Horas',
 		'Ayuda'
 	]);
@@ -48,7 +49,13 @@ test('each role sees only what it opens; two roles see the union', () => {
 		'Personal: Horas',
 		'Ayuda'
 	]);
-	expect(outline(getMenu(['DRIVER']))).toEqual(outline(getMenu(['WAREHOUSE'])));
+	expect(outline(getMenu(['DRIVER']))).toEqual([
+		'Despachos',
+		'Productos: Nuevo conteo',
+		'Efectivo por entregar',
+		'Personal: Horas',
+		'Ayuda'
+	]);
 	expect(outline(getMenu(['SALES', 'WAREHOUSE']))).toContain('Productos: Nuevo conteo');
 });
 
@@ -144,4 +151,20 @@ test('the pagination shows the first, the last and the neighbors of the current 
 	expect(getPageNumbers(5, 8)).toEqual([1, null, 4, 5, 6, 7, 8]);
 	expect(getPageNumbers(4, 8)).toEqual([1, 2, 3, 4, 5, null, 8]);
 	expect(getPageNumbers(8, 8)).toEqual([1, null, 7, 8]);
+});
+
+test('«Efectivo por entregar» is for drivers and Sales reps, never for managers, admins or the warehouse', () => {
+	const hasTab = (roles: Parameters<typeof getMenu>[0]) =>
+		getMenu(roles).some(
+			({ label, href }) => 'Efectivo por entregar' === label && '/efectivo' === href
+		);
+	expect(hasTab(['DRIVER'])).toBe(true);
+	expect(hasTab(['SALES'])).toBe(true);
+	expect(hasTab(['WAREHOUSE', 'DRIVER'])).toBe(true);
+	expect(hasTab(['WAREHOUSE'])).toBe(false);
+	expect(hasTab(['MANAGER'])).toBe(false);
+	expect(hasTab(['ADMIN'])).toBe(false);
+	expect(hasTab(['SALES', 'MANAGER'])).toBe(false);
+	expect(hasTab(['ADMIN', 'DRIVER'])).toBe(false);
+	expect(findPageLabel('/efectivo')).toBe('Efectivo por entregar');
 });

@@ -5,8 +5,16 @@ import type { Role } from '$lib/server/actor';
 
 type IconName = ComponentProps<typeof Icon>['name'];
 
-/** A page of the menu tree, with the roles its route lets in; without `roles`, every login. */
-type MenuPage = { label: string; href: string; roles?: readonly Role[] };
+/**
+ * A page of the menu tree, with the roles its route lets in; without `roles`, every login. A login
+ * holding any of `hiddenFrom` doesn't see it, whatever else it holds.
+ */
+type MenuPage = {
+	label: string;
+	href: string;
+	roles?: readonly Role[];
+	hiddenFrom?: readonly Role[];
+};
 
 /** A parent of the menu tree: Pagos and Reportes have no page of their own. */
 type MenuParent = {
@@ -66,6 +74,13 @@ const MENU: MenuParent[] = [
 			{ label: 'Movimiento', href: resolve('/caja/registrar'), roles: MANAGERS }
 		]
 	},
+	// The managers are the drawer: they hold no cash for the company.
+	{
+		label: 'Efectivo por entregar',
+		icon: 'wallet',
+		page: { href: resolve('/efectivo'), roles: ['SALES', 'DRIVER'], hiddenFrom: MANAGERS },
+		children: []
+	},
 	{
 		label: 'Personal',
 		icon: 'users',
@@ -99,8 +114,13 @@ const MENU: MenuParent[] = [
 	}
 ];
 
-function canOpen(page: { roles?: readonly Role[] }, roles: readonly Role[]): boolean {
-	return undefined === page.roles || page.roles.some((role) => roles.includes(role));
+function canOpen(
+	page: { roles?: readonly Role[]; hiddenFrom?: readonly Role[] },
+	roles: readonly Role[]
+): boolean {
+	const isLetIn = undefined === page.roles || page.roles.some((role) => roles.includes(role));
+	const isHidden = (page.hiddenFrom ?? []).some((role) => roles.includes(role));
+	return isLetIn && !isHidden;
 }
 
 /** The menu one login sees: only what its roles open, and no parent left with nothing to open. */
