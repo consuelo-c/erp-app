@@ -10,7 +10,8 @@ const LISTS = [
 	'cuentas-de-cobro',
 	'contactos',
 	'productos',
-	'caja'
+	'caja',
+	'auditoria'
 ] as const;
 
 // A notice or an open movement: where the list was opened, not how it's filtered.

@@ -45,6 +45,21 @@ export function getInstantDate(epochSeconds: number): string {
 	return civilDateFormat.format(new Date(epochSeconds * 1000));
 }
 
+/**
+ * The UTC instant (epoch seconds) a Bogotá civil date starts at: its midnight. A day's `created_at`
+ * rows run from this instant up to the next day's.
+ */
+export function getDayStartInstant(date: string): number {
+	const utcMidnight = toUtcDate(date).getTime() / 1000;
+	// Bogotá's wall clock at UTC midnight, read back as if it were UTC, is the zone's offset.
+	const parts = instantPartsFormat.formatToParts(new Date(utcMidnight * 1000));
+	const part = (type: Intl.DateTimeFormatPartTypes) =>
+		Number(parts.find((candidate) => type === candidate.type)?.value);
+	const wallClock =
+		Date.UTC(part('year'), part('month') - 1, part('day'), part('hour'), part('minute')) / 1000;
+	return utcMidnight + (utcMidnight - wallClock);
+}
+
 /** A UTC instant (epoch seconds) formatted in Bogotá time, for display. */
 export function formatInstant(epochSeconds: number): string {
 	return `${formatInstantDate(epochSeconds)}, ${formatInstantTime(epochSeconds)}`;

@@ -26,7 +26,7 @@ test('ADMIN sees the whole tree, in its order', () => {
 		'Contactos',
 		'Pagos: Cuentas de cobro, Movimiento, Entregas de efectivo',
 		'Nómina: Nómina, Horas, Logins',
-		'Reportes: Planilla horas, Movimientos caja',
+		'Reportes: Planilla horas, Movimientos caja, Auditoría',
 		'Configuración: Nómina, Festivos, Ayuda, Términos, Etiquetas',
 		'Ayuda'
 	]);
@@ -213,4 +213,5 @@ test("«Entregas de efectivo» is in Caja's menu for managers and admins only", 
 	expect(hasHandovers(['WAREHOUSE'])).toBe(false);
 	expect(findPageLabel('/caja/entregas/registrar')).toBe('Entregas de efectivo');
 	expect(findPageLabel('/caja')).toBe('Movimientos caja');
+	expect(findPageLabel('/reportes/auditoria')).toBe('Auditoría');
 });

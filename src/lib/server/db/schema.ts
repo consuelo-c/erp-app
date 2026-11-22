@@ -50,7 +50,13 @@ export const events = sqliteTable(
 			'events_actor_kind',
 			sql`${table.actorKind} IN ('user', 'system', 'agent', 'integration')`
 		),
-		check('events_entity_id_or_key', sql`${table.entityId} IS NULL OR ${table.entityKey} IS NULL`)
+		check('events_entity_id_or_key', sql`${table.entityId} IS NULL OR ${table.entityKey} IS NULL`),
+		// Auditoría's newest-first page, its «Usuario» options (index-only distinct) and its
+		// Registro/Acción filters; the record's own timeline by type and id.
+		index('events_created_at').on(table.createdAt),
+		index('events_actor_username').on(table.actorUsername),
+		index('events_entity_type_action').on(table.entityType, table.action),
+		index('events_entity').on(table.entityType, table.entityId)
 	]
 );
 

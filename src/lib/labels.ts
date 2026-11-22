@@ -18,6 +18,7 @@ import type {
 } from './server/services/orders';
 import type { Category } from './server/services/products';
 import type { QuoteStateFilter } from './server/services/quotes';
+import type { EventAction, EventEntityType } from './server/services/reports';
 import type { QuoteState, TransportedBy } from './quotes';
 import type { Punch } from './server/services/timesheets';
 
@@ -203,4 +204,40 @@ export const INVENTORY_COUNT_STATUS_LABELS: Record<InventoryCountStatus, string>
 	APPROVED: 'Aprobado',
 	REJECTED: 'Rechazado',
 	REVERSED: 'Revertido'
+};
+
+/** Auditoría's «Registro»: what kind of record an Event changed. */
+export const EVENT_ENTITY_TYPE_LABELS: Record<EventEntityType, string> = {
+	ORDER: 'Pedido',
+	QUOTE: 'Cotización',
+	CONTACT: 'Contacto',
+	PRODUCT: 'Producto',
+	USER: 'Login',
+	EMPLOYEE: 'Empleado',
+	TIMESHEET: 'Planilla de horas',
+	PAYROLL_RUN: 'Nómina',
+	CASH_MOVEMENT: 'Movimiento de caja',
+	CASH_HANDOVER: 'Entrega de efectivo',
+	RECEIVABLE: 'Cuenta de cobro',
+	INCIDENT: 'Novedad',
+	INVENTORY_COUNT: 'Conteo',
+	SETTINGS: 'Configuración'
+};
+
+/** Auditoría's «Acción»; an action the code writes that has no label here shows raw. */
+export const EVENT_ACTION_LABELS: Record<EventAction, string> = {
+	CREATED: 'Creado',
+	EDITED: 'Editado',
+	STATUS_CHANGED: 'Cambio de estado',
+	CANCELLED: 'Cancelado',
+	CONVERTED: 'Convertido',
+	PAID: 'Pagado',
+	REVERSED: 'Anulado',
+	CLEARED: 'Autorizado',
+	INVENTORY_ADJUSTED: 'Ajuste de inventario',
+	RECEIVABLE_LINKED: 'Cuenta de cobro asociada',
+	PASSWORD_SET: 'Contraseña asignada',
+	LOGIN: 'Ingreso',
+	LOGIN_FAILED: 'Ingreso fallido',
+	LOGOUT: 'Salida'
 };
