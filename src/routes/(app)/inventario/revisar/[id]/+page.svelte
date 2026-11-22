@@ -5,32 +5,57 @@
 	import Badge, { INVENTORY_COUNT_STATUS_TONES } from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import Field from '$lib/components/Field.svelte';
+	import IconButton from '$lib/components/IconButton.svelte';
+	import Input from '$lib/components/Input.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import Screen from '$lib/components/Screen.svelte';
 	import ScreenHeader from '$lib/components/ScreenHeader.svelte';
+	import UnsavedChangesGuard from '$lib/components/UnsavedChangesGuard.svelte';
 	import { formatInstant } from '$lib/datetime';
 	import { formatInteger } from '$lib/format';
 	import { INVENTORY_COUNT_STATUS_LABELS } from '$lib/labels';
-	import type { InventoryItem } from '$lib/server/services/inventory';
+	import type { ApprovalPreview, InventoryItem } from '$lib/server/services/inventory';
 	import OverlapNotice from '../../OverlapNotice.svelte';
 	import type { PageProps } from './$types';
 
 	// A pending count is reviewed against the system as it is now: a product that moved since it
-	// was counted is stale, and approving skips it. A reviewed count is read-only.
+	// was counted is stale, and approving skips it. The reviewer corrects or deletes rows, never adds
+	// one, and nothing is saved until they approve. A reviewed count is read-only.
 	let { data, form }: PageProps = $props();
 
 	const count = $derived(data.count);
 	const preview = $derived(count.preview);
 	const title = $derived(`Conteo #${count.id}`);
 
-	const staleById = $derived(new Map(preview?.stale.map((item) => [item.product_id, item])));
-	const isAllStale = $derived(count.items.every((item) => staleById.has(item.product_id)));
+	let corrected = $state<Record<number, number | null | undefined>>({});
+	let removed = $state<Record<number, boolean>>({});
+	// What approving would do with the edits, asked of the server when «Aprobar» is pressed.
+	let approval = $state<ApprovalPreview | null>(null);
+	let approvalMessage = $state('');
 
-	// A reviewed count's items: what changed on approval, what didn't, and what was skipped.
-	const changed = $derived(count.items.filter((item) => item.applied && isDifferent(item)));
-	const unchanged = $derived(count.items.filter((item) => item.applied && !isDifferent(item)));
-	const skipped = $derived(count.items.filter((item) => false === item.applied));
+	const staleById = $derived(new Map(preview?.stale.map((item) => [item.product_id, item])));
+	const isNothingApplied = $derived(
+		count.items.every((item) => staleById.has(item.product_id) || removed[item.product_id])
+	);
+	type Edit = { product_id: number; removed: true } | { product_id: number; corrected_qty: number };
+	const edits = $derived(
+		count.items.flatMap((item): Edit[] => {
+			if (removed[item.product_id]) {
+				return [{ product_id: item.product_id, removed: true }];
+			}
+			const quantity = corrected[item.product_id];
+			return 'number' === typeof quantity
+				? [{ product_id: item.product_id, corrected_qty: quantity }]
+				: [];
+		})
+	);
+
+	// A reviewed count's items: what was applied, what was skipped as stale, and what was deleted.
+	const applied = $derived(count.items.filter((item) => item.applied));
+	const changed = $derived(applied.filter((item) => appliedQuantity(item) !== item.system_qty));
+	const skipped = $derived(count.items.filter((item) => false === item.applied && !item.removed));
+	const deleted = $derived(count.items.filter((item) => item.removed));
 
 	let isApproveOpen = $state(false);
 	let isRejectOpen = $state(false);
@@ -38,8 +63,42 @@
 	let note = $state('');
 	let reason = $state('');
 
-	function isDifferent(item: InventoryItem): boolean {
-		return item.counted_qty !== item.system_qty;
+	function appliedQuantity(item: InventoryItem): number {
+		return item.corrected_qty ?? item.counted_qty;
+	}
+
+	// The figure approving would apply to a pending row: what the reviewer typed, else the count.
+	function reviewedQuantity(item: InventoryItem): number {
+		const quantity = corrected[item.product_id];
+		return 'number' === typeof quantity ? quantity : item.counted_qty;
+	}
+
+	// Deleting has no typing in it, so it tells the unsaved-changes guard itself.
+	function toggleRemoved(event: MouseEvent, item: InventoryItem) {
+		removed[item.product_id] = !removed[item.product_id];
+		event.currentTarget?.dispatchEvent(new Event('input', { bubbles: true }));
+	}
+
+	async function askToApprove() {
+		const response = await fetch(resolve('/inventario/aprobacion'), {
+			method: 'POST',
+			body: JSON.stringify({ id: count.id, edits })
+		});
+		const answer: ApprovalPreview | { message: string } = await response.json();
+		if ('message' in answer) {
+			approvalMessage = answer.message;
+			return;
+		}
+		approvalMessage = '';
+		approval = answer;
+		isApproveOpen = true;
+	}
+
+	function appliedText(item: InventoryItem): string {
+		const counted = `Sistema ${formatInteger(item.system_qty)} · Contado ${formatInteger(item.counted_qty)}`;
+		return undefined === item.corrected_qty
+			? counted
+			: `${counted} · Corregido ${formatInteger(item.corrected_qty)}`;
 	}
 
 	function signed(difference: number): string {
@@ -112,57 +171,100 @@
 		{#if preview.overlaps.length}
 			<div class="lead"><OverlapNotice overlaps={preview.overlaps} /></div>
 		{/if}
+		<UnsavedChangesGuard form="approve" />
 		<table class="table">
 			<thead>
 				<tr>
 					<th>Producto</th>
 					<th class="num">Sistema</th>
 					<th class="num">Contado</th>
-					<th class="num">Diferencia</th>
+					<th class="num">Corregido</th>
+					<th aria-label="Eliminar"></th>
 				</tr>
 			</thead>
 			<tbody>
 				{#each count.items as item (item.product_id)}
 					{@const stale = staleById.get(item.product_id)}
 					{@const current = stale?.current ?? item.system_qty}
-					<tr>
+					{@const isRemoved = removed[item.product_id]}
+					{@const difference = reviewedQuantity(item) - current}
+					<tr class={{ removed: isRemoved }}>
 						<td>
-							{item.name}
-							{#if stale}
-								<div class="stale"><Badge tone="warning">Desactualizado</Badge></div>
+							<span class="name">{item.name}</span>
+							{#if isRemoved}
+								<div class="badge-line"><Badge>Eliminado</Badge></div>
+							{:else if stale}
+								<div class="badge-line"><Badge tone="warning">Desactualizado</Badge></div>
 								<div class="meta">
 									Al contar: {formatInteger(stale.system_qty)} · Ahora: {formatInteger(
 										stale.current
 									)}
 								</div>
+							{:else}
+								<div class={['meta', { difference: 0 !== difference }]}>
+									Diferencia {signed(difference)}
+								</div>
 							{/if}
 						</td>
 						<td class="num">{formatInteger(current)}</td>
 						<td class="num">{formatInteger(item.counted_qty)}</td>
-						<td class={['num', { 'num--same': stale || item.counted_qty === current }]}>
-							{stale ? '—' : signed(item.counted_qty - current)}
+						<td class="num">
+							{#if !stale && !isRemoved}
+								<Input
+									id="corrected-{item.product_id}"
+									form="approve"
+									type="number"
+									inputmode="numeric"
+									min="0"
+									step="1"
+									autocomplete="off"
+									aria-label="Corregido de {item.name}"
+									placeholder={String(item.counted_qty)}
+									bind:value={corrected[item.product_id]}
+								/>
+							{/if}
+						</td>
+						<td class="remove">
+							{#if isRemoved}
+								<Button
+									type="button"
+									variant="secondary"
+									form="approve"
+									onclick={(event) => toggleRemoved(event, item)}
+								>
+									Deshacer
+								</Button>
+							{:else}
+								<IconButton
+									icon="trash"
+									size="lg"
+									form="approve"
+									label="Eliminar {item.name}"
+									onclick={(event) => toggleRemoved(event, item)}
+								/>
+							{/if}
 						</td>
 					</tr>
 				{/each}
 			</tbody>
 		</table>
-		{#if preview.stale.length}
+		<p class="note after">
+			«Corregido» vacío aplica lo contado. Las filas desactualizadas no se aplican.
+		</p>
+		{#if isNothingApplied}
 			<p class="note after">
-				No se aplica, porque su inventario cambió después del conteo: {names(preview.stale)}. Pide
-				un conteo nuevo.
+				No puedes aprobarlo: todos los productos están desactualizados o eliminados. Recházalo y
+				pide un conteo nuevo.
 			</p>
 		{/if}
-		{#if isAllStale}
-			<p class="note after">
-				No puedes aprobarlo: todos los productos están desactualizados. Recházalo y pide un conteo
-				nuevo.
-			</p>
+		{#if approvalMessage}
+			<div class="after"><Notice tone="error">{approvalMessage}</Notice></div>
 		{/if}
 		<div class="screen__action actions">
 			<Button type="button" variant="secondary" onclick={() => (isRejectOpen = true)}>
 				Rechazar
 			</Button>
-			<Button type="button" size="md" disabled={isAllStale} onclick={() => (isApproveOpen = true)}>
+			<Button type="button" size="md" disabled={isNothingApplied} onclick={askToApprove}>
 				Aprobar
 			</Button>
 		</div>
@@ -198,16 +300,20 @@
 			)}
 		{:else}
 			{@render itemGroup(
-				'REVERSED' === count.status ? 'Cambió y se revirtió' : 'Cambió',
-				changed,
-				(item) => `${formatInteger(item.system_qty)} → ${formatInteger(item.counted_qty)}`
+				'REVERSED' === count.status ? 'Aplicados y revertidos' : 'Aplicados',
+				applied,
+				appliedText
 			)}
-			{@render itemGroup('Sin cambio', unchanged, (item) => formatInteger(item.system_qty))}
 			{@render itemGroup(
-				'No se aplicó: desactualizado',
+				'Desactualizados, sin aplicar',
 				skipped,
 				(item) =>
 					`Contado ${formatInteger(item.counted_qty)} · Sistema ${formatInteger(item.system_qty)}`
+			)}
+			{@render itemGroup(
+				'Eliminados del conteo',
+				deleted,
+				(item) => `Contado ${formatInteger(item.counted_qty)}`
 			)}
 		{/if}
 
@@ -230,7 +336,7 @@
 	<Modal
 		bind:open={isApproveOpen}
 		title="Aprobar conteo #{count.id}"
-		body={preview.changes.length
+		body={approval?.changes.length
 			? 'Cambia el inventario:'
 			: 'El inventario no cambia: lo contado coincide con el sistema.'}
 	>
@@ -241,18 +347,25 @@
 			action="?/aprobar"
 			use:enhance={closeOnSuccess(() => (isApproveOpen = false))}
 		>
-			{#if preview.changes.length}
+			<input type="hidden" name="edits" value={JSON.stringify(edits)} />
+			{#if approval?.changes.length}
 				<ul class="changes">
-					{#each preview.changes as change (change.product_id)}
-						<li>{change.name}: {formatInteger(change.from)} → {formatInteger(change.to)}</li>
+					{#each approval.changes as change (change.product_id)}
+						<li>
+							{change.name}: {formatInteger(change.from)} → {formatInteger(change.to)}
+							{#if change.isCorrected}<span class="corrected">(corregido)</span>{/if}
+						</li>
 					{/each}
 				</ul>
 			{/if}
-			{#if preview.stale.length}
-				<p>No se aplica, porque está desactualizado: {names(preview.stale)}.</p>
+			{#if approval?.stale.length}
+				<p>No se aplica, porque está desactualizado: {names(approval.stale)}.</p>
 			{/if}
-			{#if preview.overlaps.length}
-				<OverlapNotice overlaps={preview.overlaps} />
+			{#if approval?.removed.length}
+				<p>No se aplica, porque lo eliminaste: {names(approval.removed)}.</p>
+			{/if}
+			{#if approval?.overlaps.length}
+				<OverlapNotice overlaps={approval.overlaps} />
 			{/if}
 			<Field label="Nota (opcional)" id="approve-note">
 				<textarea
@@ -332,7 +445,7 @@
 				<ul class="changes">
 					{#each changed as item (item.product_id)}
 						<li>
-							{item.name}: {formatInteger(item.counted_qty)} → {formatInteger(item.system_qty)}
+							{item.name}: {formatInteger(appliedQuantity(item))} → {formatInteger(item.system_qty)}
 						</li>
 					{/each}
 				</ul>
@@ -386,8 +499,35 @@
 		margin: var(--space-10) 0 var(--space-4);
 	}
 
-	.stale {
+	.badge-line {
 		margin-top: var(--space-2);
+	}
+
+	.difference {
+		font-weight: var(--weight-bold);
+		color: var(--text-body);
+	}
+
+	.removed .name,
+	.removed td.num {
+		color: var(--text-secondary);
+		text-decoration: line-through;
+	}
+
+	.remove {
+		width: 1%;
+		text-align: right;
+		white-space: nowrap;
+	}
+
+	.table td.num :global(.input) {
+		width: 6em;
+		text-align: right;
+	}
+
+	.corrected {
+		font-weight: var(--weight-regular);
+		color: var(--text-secondary);
 	}
 
 	.changes {
@@ -421,15 +561,6 @@
 	.table .num {
 		font-variant-numeric: tabular-nums;
 		text-align: right;
-	}
-
-	td.num:last-child {
-		font-weight: var(--weight-bold);
-	}
-
-	td.num--same:last-child {
-		font-weight: var(--weight-regular);
-		color: var(--text-secondary);
 	}
 
 	.textarea {
