@@ -296,7 +296,7 @@
 	</form>
 
 	<label class="search">
-		<Icon name="search" size="sm" />
+		<Icon name="search" />
 		<Input
 			id={SEARCH_ID}
 			type="search"
@@ -326,7 +326,7 @@
 							<span>{product.name}</span>
 							<span class="meta">{systemHint(product)}</span>
 						</span>
-						<Icon name="plus" size="sm" />
+						<Icon name="plus" />
 					</button>
 				{:else}
 					<p class="meta results__none">Ningún producto activo coincide.</p>

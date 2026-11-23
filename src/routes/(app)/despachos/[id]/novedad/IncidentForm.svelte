@@ -344,7 +344,7 @@
 					<span>{line.name}</span>
 					<span class="meta">{line.qty} en el pedido</span>
 				</span>
-				<Icon name="plus" size="sm" />
+				<Icon name="plus" />
 			</button>
 		{/each}
 	</div>

@@ -80,7 +80,7 @@
 			data-sveltekit-replacestate
 		>
 			<label class="search">
-				<Icon name="search" size="sm" />
+				<Icon name="search" />
 				<Input
 					type="search"
 					name="texto"
@@ -161,7 +161,7 @@
 										{/if}
 										<!-- Hover only: on a phone a tap doesn't open it. -->
 										<span class="hint hint--info" title={updated}>
-											<Icon name="info" size="sm" />
+											<Icon name="info" />
 											<span class="visually-hidden">{updated}</span>
 										</span>
 										{#if !product.isActive}<Badge>Inactivo</Badge>{/if}

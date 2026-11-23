@@ -73,7 +73,7 @@
 			<LogoutButton>
 				{#snippet trigger(open)}
 					<Button type="button" variant="secondary" size="sm" inline onclick={open}>
-						<Icon name="exit" size="sm" />Cerrar sesión
+						<Icon name="exit" />Cerrar sesión
 					</Button>
 				{/snippet}
 			</LogoutButton>

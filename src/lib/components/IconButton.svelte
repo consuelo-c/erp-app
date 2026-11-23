@@ -5,8 +5,8 @@
 
 	// A bare glyph has no visible text, so `label` is its accessible name and its tooltip. With `href`
 	// it's a link; a link that can't be followed drops its `href` and takes `disabled`, as `Button` does.
-	// `lg` is the 48px hit area and the 26px glyph of the driver's and the warehouse's screens, and of
-	// every call, WhatsApp and Maps link.
+	// `lg` is the 48px hit area of the driver's and the warehouse's screens, and of every call,
+	// WhatsApp and Maps link.
 	type Props = HTMLButtonAttributes &
 		HTMLAnchorAttributes & {
 			icon: ComponentProps<typeof Icon>['name'];
@@ -17,17 +17,16 @@
 	let { icon, label, size, href, ...rest }: Props = $props();
 
 	const classes = $derived(['icon-btn', size && `icon-btn--${size}`]);
-	const glyph = $derived(size ?? 'md');
 </script>
 
 {#if href}
 	<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- the caller passes an href built with resolve() -->
 	<a {...rest} {href} class={classes} aria-label={label} title={label}>
-		<Icon name={icon} size={glyph} />
+		<Icon name={icon} />
 	</a>
 {:else}
 	<button type="button" {...rest} class={classes} aria-label={label} title={label}>
-		<Icon name={icon} size={glyph} />
+		<Icon name={icon} />
 	</button>
 {/if}
 

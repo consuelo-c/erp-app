@@ -38,12 +38,12 @@
 				{#if 0 === parent.children.length}
 					<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- MENU builds its hrefs with resolve() -->
 					<a class="sidebar__item" href={parent.href} aria-current={ariaCurrent(parent.ownHref)}>
-						<Icon name={parent.icon} size="md" />{parent.label}
+						<Icon name={parent.icon} />{parent.label}
 					</a>
 				{:else}
 					<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- MENU builds its hrefs with resolve() -->
 					<a class="sidebar__item" href={parent.href}>
-						<Icon name={parent.icon} size="md" />{parent.label}
+						<Icon name={parent.icon} />{parent.label}
 						<span
 							class="sidebar__caret"
 							class:sidebar__caret--open={isParentOpen}
@@ -73,7 +73,7 @@
 		<LogoutButton>
 			{#snippet trigger(open)}
 				<button class="sidebar__item" type="button" onclick={open}>
-					<Icon name="exit" size="md" />Cerrar sesión
+					<Icon name="exit" />Cerrar sesión
 				</button>
 			{/snippet}
 		</LogoutButton>
@@ -152,9 +152,9 @@
 		font-weight: var(--weight-regular);
 	}
 
-	/* Aligned with the parent's label: its padding, its 18px icon and the gap. */
+	/* Aligned with the parent's label: its padding, its icon and the gap. */
 	.sidebar__children > .sidebar__item--child {
-		padding-left: calc(2 * var(--space-6) + 18px);
+		padding-left: calc(2 * var(--space-6) + var(--icon-size));
 	}
 
 	/* A parent with pages under it: the caret points at the flyout, and down once they're open. */

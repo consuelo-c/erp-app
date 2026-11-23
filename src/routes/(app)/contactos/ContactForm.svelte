@@ -230,7 +230,7 @@
 
 {#snippet lockedHint()}
 	<span class="locked-hint"
-		><Icon name="lock" size="xs" />Solo Gerente o Administrador lo cambian</span
+		><Icon name="lock" />Solo Gerente o Administrador lo cambian</span
 	>
 {/snippet}
 
@@ -238,7 +238,7 @@
 {#snippet locked(id: string, text: string)}
 	<div class="locked" {id} aria-readonly="true">
 		<span>{text}</span>
-		<Icon name="lock" size="sm" />
+		<Icon name="lock" />
 	</div>
 {/snippet}
 
