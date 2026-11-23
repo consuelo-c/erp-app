@@ -22,9 +22,9 @@ test('ADMIN sees the whole tree, in its order', () => {
 	expect(outline(getMenu(['ADMIN']))).toEqual([
 		'Despachos',
 		'Pedidos: Cotizaciones',
-		'Inventario: Nuevo conteo, Confirmar conteo',
+		'Productos/Inventario: Nuevo conteo, Confirmar conteo',
 		'Contactos',
-		'Pagos: Cuentas de cobro, Movimiento, Entregas de efectivo',
+		'Pagos/Efectivo: Cuentas de cobro, Movimiento, Entregas de efectivo',
 		'Nómina: Nómina, Horas, Logins',
 		'Reportes: Planilla horas, Movimientos caja, Pérdidas y ganancias, Subalquiler, Auditoría',
 		'Configuración: Nómina, Festivos, Ayuda, Términos, Etiquetas',
@@ -37,9 +37,9 @@ test('each role sees only what it opens; two roles see the union', () => {
 	expect(outline(getMenu(['SALES']))).toEqual([
 		'Despachos',
 		'Pedidos: Cotizaciones',
-		'Inventario',
+		'Productos/Inventario',
 		'Contactos',
-		'Pagos: Cuentas de cobro',
+		'Pagos/Efectivo: Cuentas de cobro',
 		'Efectivo por entregar',
 		'Nómina: Horas',
 		'Reportes: Subalquiler',
@@ -47,23 +47,23 @@ test('each role sees only what it opens; two roles see the union', () => {
 	]);
 	expect(outline(getMenu(['WAREHOUSE']))).toEqual([
 		'Despachos',
-		'Inventario: Nuevo conteo',
+		'Productos/Inventario: Nuevo conteo',
 		'Nómina: Horas',
 		'Ayuda'
 	]);
 	expect(outline(getMenu(['DRIVER']))).toEqual([
 		'Despachos',
-		'Inventario: Nuevo conteo',
+		'Productos/Inventario: Nuevo conteo',
 		'Efectivo por entregar',
 		'Nómina: Horas',
 		'Ayuda'
 	]);
-	expect(outline(getMenu(['SALES', 'WAREHOUSE']))).toContain('Inventario: Nuevo conteo');
+	expect(outline(getMenu(['SALES', 'WAREHOUSE']))).toContain('Productos/Inventario: Nuevo conteo');
 });
 
 test('a parent without its own page, or one the login cannot open, opens its first child', () => {
 	const admin = getMenu(['ADMIN']);
-	expect(admin.find(({ label }) => 'Pagos' === label)?.href).toBe('/cuentas-de-cobro');
+	expect(admin.find(({ label }) => 'Pagos/Efectivo' === label)?.href).toBe('/cuentas-de-cobro');
 	expect(admin.find(({ label }) => 'Reportes' === label)?.href).toBe('/horas/equipo');
 	const sales = getMenu(['SALES']);
 	expect(sales.find(({ label }) => 'Reportes' === label)?.href).toBe('/reportes/subalquiler');
@@ -74,10 +74,10 @@ test('a parent without its own page, or one the login cannot open, opens its fir
 		href: '/horas',
 		ownHref: undefined
 	});
-	expect(getMenu(['WAREHOUSE']).find(({ label }) => 'Inventario' === label)?.href).toBe(
+	expect(getMenu(['WAREHOUSE']).find(({ label }) => 'Productos/Inventario' === label)?.href).toBe(
 		'/inventario'
 	);
-	expect(getMenu(['DRIVER']).find(({ label }) => 'Inventario' === label)?.href).toBe('/inventario');
+	expect(getMenu(['DRIVER']).find(({ label }) => 'Productos/Inventario' === label)?.href).toBe('/inventario');
 	expect(getMenu(['DRIVER']).find(({ label }) => 'Nómina' === label)?.href).toBe('/horas');
 });
 
@@ -99,21 +99,12 @@ test('the most specific path is the current page', () => {
 	expect(findCurrentHref(getMenu(['SALES']), '/caja')).toBeUndefined();
 });
 
-test('the bar is Despachos · Horas · Nuevo conteo; Sales alone gets Productos; a slot nobody opens goes', () => {
+test('the bar is Despachos · Horas for every login; a slot nobody opens goes', () => {
 	const slots = (roles: Parameters<typeof getMenu>[0]) =>
 		getBarSlots(getMenu(roles)).map(({ label, href }) => `${label} ${href}`);
-	expect(slots(['ADMIN'])).toEqual([
-		'Despachos /despachos',
-		'Horas /horas',
-		'Nuevo conteo /inventario'
-	]);
+	expect(slots(['ADMIN'])).toEqual(['Despachos /despachos', 'Horas /horas']);
 	expect(slots(['WAREHOUSE'])).toEqual(slots(['ADMIN']));
-	expect(slots(['SALES'])).toEqual([
-		'Despachos /despachos',
-		'Horas /horas',
-		'Productos /productos'
-	]);
-	expect(slots(['SALES', 'DRIVER'])).toEqual(slots(['ADMIN']));
+	expect(slots(['SALES'])).toEqual(slots(['ADMIN']));
 	expect(slots([])).toEqual(['Despachos /despachos', 'Horas /horas']);
 });
 
@@ -121,7 +112,7 @@ test('a bar slot is current only on its own page: Confirmar conteo and Planilla 
 	const menu = getMenu(['ADMIN']);
 	const currentSlot = (pathname: string) =>
 		getBarSlots(menu).find(({ href }) => href === findCurrentHref(menu, pathname))?.label;
-	expect(currentSlot('/inventario')).toBe('Nuevo conteo');
+	expect(currentSlot('/inventario')).toBeUndefined();
 	expect(currentSlot('/horas/empleado')).toBe('Horas');
 	expect(currentSlot('/inventario/revisar')).toBeUndefined();
 	expect(currentSlot('/horas/equipo')).toBeUndefined();
@@ -130,8 +121,8 @@ test('a bar slot is current only on its own page: Confirmar conteo and Planilla 
 
 test("the «Más» sheet opens on the current parent's list, or on the first list", () => {
 	const menu = getMenu(['ADMIN']);
-	expect(findSheetParent(menu, findCurrentHref(menu, '/caja/registrar'))?.label).toBe('Pagos');
-	expect(findSheetParent(menu, findCurrentHref(menu, '/productos/12'))?.label).toBe('Inventario');
+	expect(findSheetParent(menu, findCurrentHref(menu, '/caja/registrar'))?.label).toBe('Pagos/Efectivo');
+	expect(findSheetParent(menu, findCurrentHref(menu, '/productos/12'))?.label).toBe('Productos/Inventario');
 	expect(findSheetParent(menu, findCurrentHref(menu, '/contactos'))).toBeUndefined();
 	expect(findSheetParent(menu, findCurrentHref(menu, '/caja'))?.label).toBe('Reportes');
 	// A section outside the login's roles has no current page.
@@ -152,7 +143,7 @@ test("a parent's own page lists under its own label, or else under the parent's"
 			({ label, href }) => `${label} ${href}`
 		);
 	expect(pages(['ADMIN'], 'Pedidos')).toEqual(['Pedidos /pedidos', 'Cotizaciones /cotizaciones']);
-	expect(pages(['ADMIN'], 'Inventario')).toEqual([
+	expect(pages(['ADMIN'], 'Productos/Inventario')).toEqual([
 		'Productos /productos',
 		'Nuevo conteo /inventario',
 		'Confirmar conteo /inventario/revisar'
@@ -163,7 +154,7 @@ test("a parent's own page lists under its own label, or else under the parent's"
 		'Horas /horas',
 		'Logins /logins'
 	]);
-	expect(pages(['DRIVER'], 'Inventario')).toEqual(['Nuevo conteo /inventario']);
+	expect(pages(['DRIVER'], 'Productos/Inventario')).toEqual(['Nuevo conteo /inventario']);
 });
 
 test('the no-permission screen is titled by the menu page that holds the path', () => {

@@ -55,13 +55,13 @@ test('MenuList: parents with a list carry ›, the open list marks its current p
 		props: {
 			menu: getMenu(['ADMIN']),
 			currentHref: '/caja/registrar',
-			parentLabel: 'Pagos',
+			parentLabel: 'Pagos/Efectivo',
 			isParentListOpen: true,
 			session: text('<p>Sesión</p>')
 		}
 	});
 	const body = rendered.body.replaceAll(/<!--.*?-->/g, '');
-	expect(body).toMatch(/Pagos\s*<span class="menu-row__chevron/);
+	expect(body).toMatch(/Pagos\/Efectivo\s*<span class="menu-row__chevron/);
 	expect(body).not.toMatch(/Contactos\s*<span class="menu-row__chevron/);
 	expect(body).toMatch(/<a[^>]*href="\/caja\/registrar"[^>]*aria-current="page"[^>]*>Movimiento</);
 	expect(body).toMatch(/<a[^>]*href="\/cuentas-de-cobro"[^>]*>Cuentas de cobro</);
