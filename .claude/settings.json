@@ -7,7 +7,6 @@
 			"SendMessage",
 			"Skill",
 			"PushNotification",
-			"Artifact",
 			"Bash(rg:*)",
 			"Bash(fd:*)",
 			"Bash(npm run test:*)",

@@ -1,9 +1,9 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 
-	// Mobile screen: header, scrolling body, and a fixed footer with the one primary action, only on
-	// screens without the bottom navigation. On a wide screen the body and the footer's action keep
-	// to one centered column, the same on every screen.
+	// Mobile screen: header, body, and a footer with the one primary action, only on screens without
+	// the bottom navigation. The page scrolls as a whole, so nothing here is fixed. On a wide screen
+	// the body and the footer's action keep to one centered column, the same on every screen.
 	interface Props {
 		header?: Snippet;
 		children?: Snippet;
@@ -25,8 +25,6 @@
 	.screen {
 		display: flex;
 		flex-direction: column;
-		height: 100%;
-		min-height: 0;
 	}
 
 	/* The side padding grows past the column's width, so the scrollbar and the footer's border
@@ -40,10 +38,7 @@
 	}
 
 	.screen__body {
-		flex: 1;
-		min-height: 0;
 		padding-block: var(--space-8) var(--space-12);
-		overflow: auto;
 	}
 
 	.screen__footer {
