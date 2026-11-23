@@ -56,7 +56,6 @@
 <PaymentEntry
 	{lead}
 	notesPlaceholder={isRefundOnly ? 'Ej. Sin daños en la recogida' : 'Ej. Pagó al recibir'}
-	notice={data.entry.notice ?? undefined}
 	closeHref="{resolve('/(app)/despachos/[id]', { id: String(order.id) })}{page.url.search}"
 	concepts={data.entry.concepts}
 	methods={data.entry.methods}
