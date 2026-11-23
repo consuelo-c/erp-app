@@ -1983,10 +1983,6 @@ type PaymentState = Pick<
 	'status' | 'hasIncident' | 'receivableId' | 'balanceDue' | 'depositHeld' | 'depositAmount'
 >;
 
-/** The incident blocking the refund may be the client's damage: the office settles it. */
-const ACTIVE_INCIDENT_REFUND_MESSAGE =
-	'El pedido tiene una novedad activa: la devolución del depósito la hace la oficina.';
-
 // A billed order's payments are the cuenta's: the driver only hands the cuenta over.
 function onTheRoadConcepts(order: PaymentState): Partial<Record<OrderPaymentConcept, boolean>> {
 	const isCollecting = null === order.receivableId && ON_THE_ROAD.includes(order.status);
@@ -1999,7 +1995,7 @@ function onTheRoadConcepts(order: PaymentState): Partial<Record<OrderPaymentConc
 }
 
 function isDriverRefundable(order: PaymentState): boolean {
-	return 'OUT_FOR_PICKUP' === order.status && !order.hasIncident && 0 < order.depositHeld;
+	return 'OUT_FOR_PICKUP' === order.status && 0 < order.depositHeld;
 }
 
 // Why the driver can't record this entry, or null: the service's own check, not just the screen's.
@@ -2033,13 +2029,10 @@ function isDriverMethod(method: PaymentMethod | undefined): boolean {
 	return undefined !== method && DRIVER_METHODS.includes(method);
 }
 
-// Only the whole deposit held, at pickup, with no active incident: anything else is the office's.
+// Only the whole deposit held, at pickup: what a damage charge kept is no longer held.
 function driverRefundRefusal(order: PaymentState, amount: number): Refusal | null {
 	if ('OUT_FOR_PICKUP' !== order.status) {
 		return messageRefusal('El depósito se devuelve en la recogida.');
-	}
-	if (order.hasIncident) {
-		return messageRefusal(ACTIVE_INCIDENT_REFUND_MESSAGE);
 	}
 	if (order.depositHeld <= 0) {
 		return messageRefusal('Este pedido no tiene depósito para devolver.');
@@ -2124,8 +2117,6 @@ export type DespachosPaymentEntry = {
 	amountLocks: Partial<Record<OrderPaymentConcept, string>>;
 	/** What a method's choice means for this login: cash stays on their tab until handed in. */
 	methodHints: Partial<Record<PaymentMethod, string>>;
-	/** Why the deposit isn't offered back at pickup, or null. */
-	notice: string | null;
 };
 
 const WHOLE_REFUND_NOTE =
@@ -2139,18 +2130,10 @@ function canRecordOnTheRoad(actor: Actor, concept: OrderPaymentConcept): boolean
 	return hasAnyRole(actor, officeRolesFor(concept)) || hasRole(actor, 'DRIVER');
 }
 
-// The refund the actor would otherwise be offered at pickup, held back by an active incident.
-function isRefundHeldByIncident(order: PaymentState, actor: Actor): boolean {
-	const wouldRefund =
-		null === order.receivableId && 'OUT_FOR_PICKUP' === order.status && 0 < order.depositHeld;
-	return wouldRefund && order.hasIncident && canRecordOnTheRoad(actor, 'DEPOSIT_REFUND');
-}
-
 /**
  * Despachos' payment entry, the same for every role: what's collected on the road, a damage
- * charge while there's an active incident, and the whole deposit back at pickup with none, under
- * what the service lets the login record, in cash or by transfer. Empty, «Registrar pago» isn't
- * shown.
+ * charge while there's an active incident, and the whole deposit held back at pickup, under what
+ * the service lets the login record, in cash or by transfer. Empty, «Registrar pago» isn't shown.
  */
 export function getDespachosPaymentEntry(order: OrderDetail, actor: Actor): DespachosPaymentEntry {
 	const onTheRoad = onTheRoadConcepts(order);
@@ -2162,8 +2145,7 @@ export function getDespachosPaymentEntry(order: OrderDetail, actor: Actor): Desp
 		concepts,
 		methods: DRIVER_METHODS,
 		amountLocks: isRefundWhole ? { DEPOSIT_REFUND: WHOLE_REFUND_NOTE } : {},
-		methodHints: hasCashTab(actor.roles) ? { CASH: CASH_TAB_HINT } : {},
-		notice: isRefundHeldByIncident(order, actor) ? ACTIVE_INCIDENT_REFUND_MESSAGE : null
+		methodHints: hasCashTab(actor.roles) ? { CASH: CASH_TAB_HINT } : {}
 	};
 }
 

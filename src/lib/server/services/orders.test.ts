@@ -1638,7 +1638,7 @@ test('Despachos offers «Pago» and the deposit on the road, and the deposit bac
 	setStatus(id, 'OUT_FOR_PICKUP');
 	expect(await offered(warehouse)).toEqual([]);
 	expect(await reportLost(id)).toMatchObject({ ok: true });
-	expect(await offered()).toEqual(['INSTALLMENT', 'DAMAGE_CHARGE']);
+	expect(await offered()).toEqual(['INSTALLMENT', 'DEPOSIT_REFUND', 'DAMAGE_CHARGE']);
 	bill(id);
 	expect(await offered()).toEqual([]);
 });
@@ -1672,19 +1672,27 @@ test("Despachos locks the refund to the whole deposit for whoever isn't the mana
 	expect((await locksOf(manager)).DEPOSIT_REFUND).toBeUndefined();
 });
 
-test('with an active incident, Despachos says the office gives the deposit back', async () => {
+test('with an active incident, the driver keeps part of the deposit and gives back the rest', async () => {
 	const id = await create();
 	await recordPayment(id, { concept: 'SECURITY_DEPOSIT', amount: '200.000' }, sales);
 	setStatus(id, 'OUT_FOR_PICKUP');
-	const noticeFor = async (actor: Actor) =>
-		getDespachosPaymentEntry(await detail(id), actor).notice;
-	expect(await noticeFor(driver)).toBeNull();
 	expect(await reportLost(id)).toMatchObject({ ok: true });
-	const notice =
-		'El pedido tiene una novedad activa: la devolución del depósito la hace la oficina.';
-	expect(await noticeFor(driver)).toBe(notice);
-	expect(await noticeFor(manager)).toBe(notice);
-	expect(await noticeFor(sales)).toBeNull();
+	const offered = async () => getDespachosPaymentEntry(await detail(id), driver).concepts;
+	expect(await offered()).toEqual(expect.arrayContaining(['DAMAGE_CHARGE', 'DEPOSIT_REFUND']));
+	const charge = await recordOrderPayment(
+		db,
+		typedPayment(id, damage('DEPOSIT', '120.000')),
+		driver
+	);
+	expect(charge).toMatchObject({ ok: true });
+	expect((await detail(id)).depositHeld).toBe(80000);
+	const rest = await recordOrderPayment(
+		db,
+		typedPayment(id, { concept: 'DEPOSIT_REFUND', amount: '80.000', payment_method: 'CASH' }),
+		driver
+	);
+	expect(rest).toMatchObject({ ok: true });
+	expect((await detail(id)).depositHeld).toBe(0);
 });
 
 test('the cash hint shows only to whoever keeps an «Efectivo por entregar»', async () => {
@@ -1741,7 +1749,7 @@ test('the driver is refused off the road, with «Otro», a paid order and a comp
 	});
 });
 
-test('the driver gives back only the whole deposit, only at pickup, only with no active incident', async () => {
+test('the driver gives back only the whole deposit, only at pickup', async () => {
 	const id = await create();
 	await recordPayment(id, { concept: 'SECURITY_DEPOSIT', amount: '200.000' }, sales);
 	const refund = (fields: Record<string, string> = {}) =>
@@ -1757,15 +1765,6 @@ test('the driver gives back only the whole deposit, only at pickup, only with no
 		ok: false,
 		errors: { amount: expect.stringContaining('$200.000') }
 	});
-	expect(await reportLost(id)).toMatchObject({ ok: true });
-	expect(await refund()).toEqual({
-		ok: false,
-		message: 'El pedido tiene una novedad activa: la devolución del depósito la hace la oficina.',
-		errors: {}
-	});
-	const [{ id: incidentId }] = database.prepare('select id from incidents').all();
-	const reason = { id: String(incidentId), reason: 'Era de otro pedido' };
-	expect(await reverseIncident(db, reason, driver)).toMatchObject({ ok: true });
 	const account = { payment_method: 'TRANSFER', bank_account: 'Bancolombia ahorros 052-334198-07' };
 	expect(await refund(account)).toMatchObject({ ok: true });
 	const [given] = database
