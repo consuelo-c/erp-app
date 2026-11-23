@@ -52,7 +52,7 @@ const MENU: MenuParent[] = [
 		children: [{ label: 'Cotizaciones', href: resolve('/cotizaciones'), roles: SELLERS }]
 	},
 	{
-		label: 'Inventario',
+		label: 'Productos/Inventario',
 		icon: 'package',
 		page: { label: 'Productos', href: resolve('/productos'), roles: SELLERS },
 		children: [
@@ -71,7 +71,7 @@ const MENU: MenuParent[] = [
 		children: []
 	},
 	{
-		label: 'Pagos',
+		label: 'Pagos/Efectivo',
 		icon: 'wallet',
 		children: [
 			{ label: 'Cuentas de cobro', href: resolve('/cuentas-de-cobro'), roles: SELLERS },
@@ -205,11 +205,7 @@ export type BarSlot = { label: string; icon: IconName; href: string };
 /** The bottom bar before «Más»: each slot is the first of its choices the login can open. */
 const BAR: BarSlot[][] = [
 	[{ label: 'Despachos', icon: 'truck', href: resolve('/despachos') }],
-	[{ label: 'Horas', icon: 'clock', href: resolve('/horas') }],
-	[
-		{ label: 'Nuevo conteo', icon: 'clipboard', href: resolve('/inventario') },
-		{ label: 'Productos', icon: 'package', href: resolve('/productos') }
-	]
+	[{ label: 'Horas', icon: 'clock', href: resolve('/horas') }]
 ];
 
 /** The login's bar slots; a slot it can open none of is left out, and the bar is shorter. */

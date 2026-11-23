@@ -142,17 +142,19 @@ export function generateDocumentId(): string {
 const LOWERCASE_WORDS = new Set(['de', 'del', 'la', 'las', 'los', 'y']);
 
 function capitalizeLowercase(word: string): string {
-	if (word !== word.toLocaleLowerCase('es')) {
+	const isMixedCase = word !== word.toLocaleLowerCase('es') && word !== word.toLocaleUpperCase('es');
+	if (isMixedCase || word.includes('.')) {
 		return word;
 	}
-	return word.charAt(0).toLocaleUpperCase('es') + word.slice(1);
+	const lowercase = word.toLocaleLowerCase('es');
+	return lowercase.charAt(0).toLocaleUpperCase('es') + lowercase.slice(1);
 }
 
 /**
- * The name a new contact is saved with: each word typed all in lowercase gets its capital, as
- * does each part after a hyphen or an apostrophe. A word with any capital is kept as typed, so
- * «McDonald» and «S.A.S.» survive; an edit never comes through here, so a wrong guess is fixed
- * by editing it.
+ * The name a new contact is saved with: each word typed in lowercase or in all capitals gets a
+ * capital and the rest lowercase, as does each part after a hyphen or an apostrophe. A mixed-case
+ * word («McDonald») and a dotted one («S.A.S.») are kept as typed; an edit never comes through
+ * here, so a wrong guess is fixed by editing it.
  */
 export function capitalizeName(name: string): string {
 	let wordIndex = 0;
