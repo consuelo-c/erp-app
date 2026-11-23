@@ -513,8 +513,8 @@ test('a client carrying Vetado is found marked, for the forms’ warning under �
 test.each([
 	['luz marina restrepo', 'Luz Marina Restrepo'],
 	['JUAN PEREZ', 'Juan Perez'],
-	['INVERSIONES ABC S.A.S.', 'Inversiones Abc S.A.S.'],
-	['ABC eventos', 'Abc Eventos'],
+	['INVERSIONES ABC S.A.S.', 'Inversiones ABC S.A.S.'],
+	['ABC eventos', 'ABC Eventos'],
 	['McDonald', 'McDonald'],
 	['maría de la cruz', 'María de la Cruz'],
 	['de la torre', 'De la Torre'],

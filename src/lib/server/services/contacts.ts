@@ -141,9 +141,16 @@ export function generateDocumentId(): string {
 // Spanish names' connecting words: «María de la Cruz», never «María De La Cruz».
 const LOWERCASE_WORDS = new Set(['de', 'del', 'la', 'las', 'los', 'y']);
 
+// Up to three letters typed in capitals are an acronym («ABC», «SAS»), kept as typed.
+const MAX_ACRONYM_LENGTH = 3;
+
+function isAcronym(word: string): boolean {
+	return word.length <= MAX_ACRONYM_LENGTH && word === word.toLocaleUpperCase('es');
+}
+
 function capitalizeLowercase(word: string): string {
 	const isMixedCase = word !== word.toLocaleLowerCase('es') && word !== word.toLocaleUpperCase('es');
-	if (isMixedCase || word.includes('.')) {
+	if (isMixedCase || word.includes('.') || isAcronym(word)) {
 		return word;
 	}
 	const lowercase = word.toLocaleLowerCase('es');
