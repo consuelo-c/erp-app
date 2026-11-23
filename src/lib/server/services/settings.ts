@@ -274,7 +274,7 @@ type HolidaysWrite = { current: Holiday[]; holidays: Holiday[]; actor: Actor; re
 
 // Sorted here, so the key's schema only has duplicates left to reject.
 async function saveHolidays(db: D1Database, write: HolidaysWrite): Promise<HolidaysResult> {
-	const sorted = [...write.holidays].sort((first, second) => first.date.localeCompare(second.date));
+	const sorted = write.holidays.toSorted((first, second) => first.date.localeCompare(second.date));
 	if (!holidaysSchema.safeParse(sorted).success) {
 		return { ok: false, message: 'Esa fecha ya está en la lista' };
 	}

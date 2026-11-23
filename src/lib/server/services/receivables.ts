@@ -122,7 +122,7 @@ function toAttributes(paymentTerms: string): string {
 
 // An array can't go in `events`: it's logged as JSON text, as the JSON columns are.
 function toLoggedIds(orderIds: number[]): string {
-	return JSON.stringify([...orderIds].sort((first, second) => first - second));
+	return JSON.stringify(orderIds.toSorted((first, second) => first - second));
 }
 
 type IssuedReceivable = {

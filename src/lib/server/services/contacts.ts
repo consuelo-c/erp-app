@@ -187,7 +187,7 @@ type Form = z.output<typeof formSchema>;
 // Both in a fixed order, so an edit that changes nothing produces the same text and logs nothing.
 // Keys, not names: a rename changes no contact.
 function labelsJson(labels: string[]): string {
-	return JSON.stringify([...labels].sort());
+	return JSON.stringify(labels.toSorted());
 }
 
 function attributesJson(attributes: Attributes): string {

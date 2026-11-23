@@ -11,7 +11,7 @@ export function catalogName(product: Product): string {
 
 /** One row per product, variants included: by category in `CATEGORY_LABELS`' order, then by name. */
 export function sortCatalog<P extends Product>(products: P[]): P[] {
-	return [...products].sort(
+	return products.toSorted(
 		(first, second) =>
 			CATEGORY_ORDER.indexOf(first.category) - CATEGORY_ORDER.indexOf(second.category) ||
 			catalogName(first).localeCompare(catalogName(second), 'es')
