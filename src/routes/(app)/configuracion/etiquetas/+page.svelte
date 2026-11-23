@@ -145,7 +145,11 @@
 						onclick={() => startRenaming(label)}
 					/>
 					{#if label.isBuiltIn}
-						<span class="labels__spacer"></span>
+						<IconButton
+							icon="trash"
+							label="{label.name} no se puede eliminar"
+							disabled
+						/>
 					{:else}
 						<IconButton
 							icon="trash"
@@ -222,12 +226,6 @@
 
 	.labels__name--danger {
 		color: var(--error-fg);
-	}
-
-	/* Holds the trash's place on the built-in rows, so every pencil lines up. */
-	.labels__spacer {
-		flex: none;
-		width: 44px;
 	}
 
 	.labels__form {
