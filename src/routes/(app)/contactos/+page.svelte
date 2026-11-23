@@ -204,6 +204,24 @@
 		margin: var(--space-6) 0 var(--space-4);
 	}
 
+	/* On a wide screen the search and the etiqueta share one row: the search takes the rest. */
+	@container (width >= 1024px) {
+		.tools {
+			display: flex;
+			gap: var(--space-4);
+			align-items: flex-end;
+		}
+
+		.search {
+			flex: 1 1 auto;
+		}
+
+		.filter {
+			flex: 0 0 16rem;
+			margin: 0;
+		}
+	}
+
 	.none {
 		display: flex;
 		flex-direction: column;
