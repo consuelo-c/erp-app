@@ -196,13 +196,6 @@
 		};
 	};
 
-	// Enter in a count would submit it without its confirmation, and a sent count can't be withdrawn.
-	function keepEnterFromSending(event: KeyboardEvent) {
-		if ('Enter' === event.key) {
-			event.preventDefault();
-		}
-	}
-
 	const errorMessage = $derived(previewMessage || form?.errors?.items || form?.message);
 </script>
 
@@ -235,7 +228,6 @@
 					min="0"
 					step="1"
 					autocomplete="off"
-					onkeydown={keepEnterFromSending}
 					bind:value={counted[product.product_id]}
 				/>
 			</Field>
