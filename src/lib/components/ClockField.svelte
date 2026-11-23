@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { guessPeriod, isHourComplete } from '$lib/clock-entry';
 	import Chip from './Chip.svelte';
 	import Input from './Input.svelte';
 
@@ -9,7 +10,8 @@
 		prefix?: string;
 		hour: string;
 		minute: string;
-		period: 'am' | 'pm';
+		// Empty until the rep picks one or types an hour that suggests one.
+		period: 'am' | 'pm' | '';
 		// The form the fields belong to, when they sit outside it.
 		form?: string;
 		placeholder?: { hour: string; minute: string } | null;
@@ -29,11 +31,43 @@
 		error,
 		optional = false
 	}: Props = $props();
+
+	// Once the rep picks a period, typing an hour no longer suggests one over it.
+	let isPeriodChosen = $state(period !== '');
+	let row: HTMLDivElement | undefined = $state();
+
+	function minuteField(): HTMLInputElement | null {
+		return row?.querySelector<HTMLInputElement>(`input[name="${prefix}minute"]`) ?? null;
+	}
+
+	function onHourInput(event: Event) {
+		const typed = (event.currentTarget as HTMLInputElement).value;
+		if ('' !== typed.trim() && '' === minute) {
+			minute = '00';
+		}
+		if (!isPeriodChosen) {
+			period = guessPeriod(typed) ?? '';
+		}
+		if (isHourComplete(typed)) {
+			minuteField()?.focus();
+		}
+	}
+
+	function onMinuteBlur() {
+		if ('' === minute.trim() && '' !== hour.trim()) {
+			minute = '00';
+		}
+	}
+
+	function choosePeriod(value: 'am' | 'pm') {
+		period = value;
+		isPeriodChosen = true;
+	}
 </script>
 
 <fieldset class="clock">
 	<legend class="clock__legend">{legend}</legend>
-	<div class="clock__row">
+	<div class="clock__row" bind:this={row}>
 		<Input
 			{form}
 			name="{prefix}hour"
@@ -44,6 +78,7 @@
 			aria-invalid={undefined !== error}
 			placeholder={placeholder?.hour}
 			required={!optional}
+			oninput={onHourInput}
 			bind:value={hour}
 		/>
 		<span class="clock__colon">:</span>
@@ -56,6 +91,8 @@
 			aria-label="Minutos"
 			aria-invalid={undefined !== error}
 			placeholder={placeholder?.minute}
+			onfocus={(event) => (event.currentTarget as HTMLInputElement).select()}
+			onblur={onMinuteBlur}
 			bind:value={minute}
 		/>
 		{#each ['am', 'pm'] as const as value (value)}
@@ -66,7 +103,7 @@
 				{value}
 				label={'am' === value ? 'a.m.' : 'p.m.'}
 				checked={value === period}
-				onchange={() => (period = value)}
+				onchange={() => choosePeriod(value)}
 			/>
 		{/each}
 	</div>
