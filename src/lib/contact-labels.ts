@@ -22,7 +22,7 @@ const isSortedByName = (labels: ContactLabel[]) =>
 
 /** `labels` A–Z, as the setting stores them. */
 export function sortByName(labels: ContactLabel[]): ContactLabel[] {
-	return [...labels].sort((first, second) => collator.compare(first.name, second.name));
+	return labels.toSorted((first, second) => collator.compare(first.name, second.name));
 }
 
 /**

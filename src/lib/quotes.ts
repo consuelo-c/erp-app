@@ -52,7 +52,7 @@ export function describeRemovedProducts(names: string[]): string | null {
 	if (0 === names.length) {
 		return null;
 	}
-	const sorted = [...names].sort((first, second) => first.localeCompare(second, 'es'));
+	const sorted = names.toSorted((first, second) => first.localeCompare(second, 'es'));
 	if (1 === sorted.length) {
 		return `Se quitó un producto inactivo: ${sorted[0]}.`;
 	}

@@ -263,22 +263,22 @@
 				<Input id="total_quantity" value={formatInteger(product.totalQuantity)} readonly />
 			{/if}
 		</Field>
-	</div>
-	<Field
-		label="Costo de reposición (opcional)"
-		id="replacement_cost"
-		hint="Lo que cuesta reponer una unidad perdida o irrecuperable. Valora las «Pérdidas» del reporte de pérdidas y ganancias."
-		error={errorOf('replacement_cost')}
-	>
-		<Input
+		<Field
+			label="Costo de reposición (opcional)"
 			id="replacement_cost"
-			name="replacement_cost"
-			inputmode="numeric"
-			value={fields.replacementCost}
-			placeholder="Ej. $95.000"
-			aria-invalid={undefined !== errorOf('replacement_cost')}
-		/>
-	</Field>
+			hint="Lo que cuesta reponer una unidad perdida o irrecuperable. Valora las «Pérdidas» del reporte de pérdidas y ganancias."
+			error={errorOf('replacement_cost')}
+		>
+			<Input
+				id="replacement_cost"
+				name="replacement_cost"
+				inputmode="numeric"
+				value={fields.replacementCost}
+				placeholder="Ej. $95.000"
+				aria-invalid={undefined !== errorOf('replacement_cost')}
+			/>
+		</Field>
+	</div>
 	<Choice
 		legend="Estado"
 		hint="Los productos no se eliminan. Un producto inactivo no se ofrece en pedidos nuevos."
@@ -302,9 +302,17 @@
 {/snippet}
 
 <style>
+	/* Stacked on a narrow screen, one row on a wide one. */
 	.field-row {
 		display: flex;
+		flex-direction: column;
 		gap: var(--control-gap);
+	}
+
+	@container (width >= 1024px) {
+		.field-row {
+			flex-direction: row;
+		}
 	}
 
 	textarea {
