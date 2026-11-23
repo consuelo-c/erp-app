@@ -213,7 +213,7 @@
 	}
 
 	.sidebar__foot {
-		margin-top: auto;
+		background: var(--surface-sidebar);
 		border-top: var(--border-w-hair) solid var(--border-sidebar);
 	}
 

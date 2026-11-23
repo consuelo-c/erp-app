@@ -88,7 +88,7 @@
 			'screen' 1fr
 			'bar' auto
 			/ 1fr;
-		height: 100%;
+		min-height: 100dvh;
 	}
 
 	.shell__screen {
@@ -99,7 +99,10 @@
 		min-height: 0;
 	}
 
+	/* The page scrolls as a whole, so the bottom bar sticks to the viewport's edge to stay in view. */
 	.shell__bar {
+		position: sticky;
+		bottom: 0;
 		grid-area: bar;
 	}
 
