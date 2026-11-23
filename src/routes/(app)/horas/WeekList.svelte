@@ -73,7 +73,7 @@
 					<td class="num"><b>{formatHours(day.workedMinutes)}</b></td>
 					<td class="num">{opens(day) ? '›' : ''}</td>
 				{:else if opens(day)}
-					<td class="num table__cell--missing"><Icon name="edit" size="sm" /></td>
+					<td class="num table__cell--missing"><Icon name="edit" /></td>
 					<td class="num">›</td>
 				{:else}
 					<td class="num">—</td>

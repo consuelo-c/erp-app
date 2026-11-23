@@ -103,7 +103,7 @@
 			hint="Por nombre, teléfono, correo o cédula. Si no está, llena los datos y se crea."
 		>
 			<label class="search">
-				<Icon name="search" size="sm" />
+				<Icon name="search" />
 				<Input
 					id="contact_search"
 					type="search"

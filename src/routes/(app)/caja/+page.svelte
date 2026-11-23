@@ -297,7 +297,7 @@
 		<div class="filters__search">
 			<Field label="Buscar" id="{prefix}texto">
 				<span class="search">
-					<Icon name="search" size="sm" />
+					<Icon name="search" />
 					<Input
 						id="{prefix}texto"
 						name="texto"
@@ -432,7 +432,7 @@
 									aria-expanded={areFiltersShown}
 									onclick={() => (areFiltersShown = !areFiltersShown)}
 								>
-									<Icon name="filter" size="sm" />
+									<Icon name="filter" />
 									{areFiltersShown ? 'Ocultar filtros' : 'Filtros'}{extraCount
 										? ` (${extraCount})`
 										: ''}
@@ -468,7 +468,7 @@
 								inline
 								onclick={() => (isSheetOpen = true)}
 							>
-								<Icon name="filter" size="sm" />
+								<Icon name="filter" />
 								Filtros{extraCount ? ` (${extraCount})` : ''}
 							</Button>
 						</div>

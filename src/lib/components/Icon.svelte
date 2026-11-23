@@ -43,46 +43,25 @@
 
 	interface Props {
 		name: IconName;
-		size?: 'xs' | 'sm' | 'md' | 'lg';
 	}
 
-	let { name, size }: Props = $props();
+	let { name }: Props = $props();
 </script>
 
-<svg class={['icon', size && `icon--${size}`]} aria-hidden="true">
+<svg class="icon" aria-hidden="true">
 	<use href="/icons.svg#{name}"></use>
 </svg>
 
 <style>
 	.icon {
 		flex: none;
-		width: 20px;
-		height: 20px;
+		width: var(--icon-size);
+		height: var(--icon-size);
 		vertical-align: middle;
 		fill: none;
 		stroke: currentcolor;
 		stroke-width: 2;
 		stroke-linecap: round;
 		stroke-linejoin: round;
-	}
-
-	.icon--xs {
-		width: 13px;
-		height: 13px;
-	}
-
-	.icon--sm {
-		width: 16px;
-		height: 16px;
-	}
-
-	.icon--md {
-		width: 18px;
-		height: 18px;
-	}
-
-	.icon--lg {
-		width: 26px;
-		height: 26px;
 	}
 </style>

@@ -181,8 +181,11 @@
 	--button-pad-xl: 17px;
 	--button-pad-sm: 9px;
 	--chip-pad-md: 7px 14px;
-	--input-icon-pad: 38px;
-	--input-icon-inset: 13px;
+	--input-icon-pad: 44px;
+	--input-icon-inset: 12px;
+
+	/* Icons: every glyph in the sprite is this size */
+	--icon-size: 24px;
 
 	/* Layers */
 	--z-modal: 10;

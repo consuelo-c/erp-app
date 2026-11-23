@@ -428,7 +428,7 @@
 				{/if}
 			</span>
 			<span class="result__price">{formatPesos(product.rentalPrice)}</span>
-			<Icon name="plus" size="sm" />
+			<Icon name="plus" />
 		</button>
 	{/each}
 {/snippet}
@@ -444,7 +444,7 @@
 	<!-- A phone: the field stays below the subtotal, and climbs once something is typed. -->
 	<div class="search-area phone-only">
 		<label class="search">
-			<Icon name="search" size="sm" />
+			<Icon name="search" />
 			<Input
 				id={SEARCH_ID}
 				type="search"
@@ -471,7 +471,7 @@
 			aria-describedby="product-search-hint"
 			onclick={openDialog}
 		>
-			<Icon name="search" size="sm" />
+			<Icon name="search" />
 			<span>Buscar producto para agregar…</span>
 		</button>
 		<p class="meta search__hint" id="product-search-hint">
@@ -489,7 +489,7 @@
 	>
 		<div class="picker__head">
 			<label class="search picker__search">
-				<Icon name="search" size="sm" />
+				<Icon name="search" />
 				<Input
 					id={DIALOG_SEARCH_ID}
 					type="search"

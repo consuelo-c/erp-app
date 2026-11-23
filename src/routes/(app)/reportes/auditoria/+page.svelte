@@ -187,7 +187,7 @@
 
 	<details class="filters-fold phone-only">
 		<summary class="filters-fold__button">
-			<Icon name="filter" size="sm" />
+			<Icon name="filter" />
 			Filtros{0 < appliedCount ? ` (${appliedCount})` : ''}
 		</summary>
 		<form

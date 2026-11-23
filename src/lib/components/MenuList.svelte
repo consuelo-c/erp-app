@@ -154,9 +154,9 @@
 		color: var(--text-secondary);
 	}
 
-	/* Aligned with the parent's label above: its 20px icon and the gap. */
+	/* Aligned with the parent's label above: its icon and the gap. */
 	.menu-row--child {
-		padding-left: calc(20px + var(--space-6));
+		padding-left: calc(var(--icon-size) + var(--space-6));
 	}
 
 	/* As tall as the first list, «Volver» sits at the bottom, within the thumb's reach. */

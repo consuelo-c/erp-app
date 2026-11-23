@@ -19,7 +19,7 @@
 <button type="button" aria-haspopup="dialog" {...rest} class={['punch', time && 'punch--done']}>
 	<span class="punch__label">{label}</span>
 	{#if time}
-		<Icon name="check" size="sm" />{time}
+		<Icon name="check" />{time}
 	{:else}
 		{pendingText}
 	{/if}

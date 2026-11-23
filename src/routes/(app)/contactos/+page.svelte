@@ -86,7 +86,7 @@
 			data-sveltekit-replacestate
 		>
 			<label class="search">
-				<Icon name="search" size="sm" />
+				<Icon name="search" />
 				<Input
 					type="search"
 					name="texto"

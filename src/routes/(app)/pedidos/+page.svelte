@@ -86,7 +86,7 @@
 
 {#snippet filterButton(label: string, expanded: boolean | undefined, onclick: () => void)}
 	<Button type="button" variant="secondary" size="sm" inline aria-expanded={expanded} {onclick}>
-		<Icon name="filter" size="sm" />
+		<Icon name="filter" />
 		{label}{isFiltered ? ` (${applied.length})` : ''}
 	</Button>
 {/snippet}

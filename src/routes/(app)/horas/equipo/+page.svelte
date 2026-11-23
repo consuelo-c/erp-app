@@ -49,7 +49,7 @@
 			<b>Horas extras</b>
 			<!-- Hover on a mouse, tap on a phone: a tap leaves the button hovered or focused. -->
 			<button type="button" class="hint" aria-label={OVERTIME_HINT}>
-				<Icon name="info" size="sm" />
+				<Icon name="info" />
 				<span class="hint__text" aria-hidden="true">{OVERTIME_HINT}</span>
 			</button>
 		</td>
