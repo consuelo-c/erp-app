@@ -126,7 +126,7 @@ export function toClockTime({ hour, minute, period }: DialTime): string {
 export function typedClockTime(typed: {
 	hour: string;
 	minute: string;
-	period: 'am' | 'pm';
+	period: 'am' | 'pm' | '';
 }): string | null {
 	const { hour, minute, period } = typed;
 	if ('' === hour.trim()) {

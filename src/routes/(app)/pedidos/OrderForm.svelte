@@ -91,7 +91,7 @@
 	let isShortageOpen = $state(false);
 
 	const FORM_ID = 'order-form';
-	const EMPTY_TIME = { hour: '', minute: '', period: 'am' as const };
+	const EMPTY_TIME = { hour: '', minute: '', period: '' as const };
 
 	// The company's warehouse: where the client picks up or brings back.
 	const warehouse = $derived({
@@ -102,7 +102,7 @@
 	type ClientChoice = number | 'new' | null;
 	type Trip = { carrierId: string; address1: string; address2: string };
 
-	type DialTime = { hour: string; minute: string; period: 'am' | 'pm' };
+	type DialTime = { hour: string; minute: string; period: 'am' | 'pm' | '' };
 
 	function dialOf(time: string | null): DialTime {
 		return null === time ? { ...EMPTY_TIME } : toDialTime(time);
