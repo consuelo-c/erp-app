@@ -313,21 +313,15 @@ export const RETAINED_FROM_DEPOSIT = 'Retenido del depósito';
 
 export type PrintSheet = { firstPageLines: number; linesPerPage: number; closingLines: number };
 
-// A landscape half-letter sheet holds its lines in two columns of 13 rows under the client's band,
-// 18 on the next sheets. The closing (signature, totals) takes 7 rows of each column on the last
-// sheet, and is never split from it.
-const HALF_LETTER_SHEET: PrintSheet = { firstPageLines: 26, linesPerPage: 36, closingLines: 14 };
+// A landscape half-letter sheet holds its lines in two columns of 15 rows under the client's band,
+// 18 on the next sheets, one row per line. The closing (signature, totals) takes 7 rows of each
+// column on the last sheet, and is never split from it.
+const HALF_LETTER_SHEET: PrintSheet = { firstPageLines: 30, linesPerPage: 36, closingLines: 14 };
 
-/** One half-letter sheet's lines, left column then right: the left one fills first. */
-export function splitIntoColumns<Line>(
-	lines: Line[],
-	isFirstPage: boolean,
-	isLastPage: boolean
-): Line[][] {
-	const { firstPageLines, linesPerPage, closingLines } = HALF_LETTER_SHEET;
-	const room = (isFirstPage ? firstPageLines : linesPerPage) - (isLastPage ? closingLines : 0);
-	const columnRows = room / 2;
-	return [lines.slice(0, columnRows), lines.slice(columnRows)];
+/** One half-letter sheet's lines in two columns of about the same height, left then right. */
+export function splitIntoColumns<Line>(lines: Line[]): [Line[], Line[]] {
+	const leftRows = Math.ceil(lines.length / 2);
+	return [lines.slice(0, leftRows), lines.slice(leftRows)];
 }
 
 /**
