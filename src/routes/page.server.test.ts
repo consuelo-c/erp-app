@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { isRedirect } from '@sveltejs/kit';
 import { beforeEach, expect, test } from 'vitest';
 import { createMemoryD1 } from '$lib/server/db/memory-d1';
 import * as landing from './+page.server';
@@ -12,7 +13,16 @@ beforeEach(() => {
 	({ db, database } = createMemoryD1());
 });
 
-const load = () => landing.load({ platform: { env: { DB: db } } } as never);
+const load = (user: unknown = null) =>
+	landing.load({ platform: { env: { DB: db } }, locals: { user } } as never);
+
+test('a logged-in employee opening the landing goes to Despachos', async () => {
+	const thrown = await Promise.resolve(load({ username: 'ana', roles: ['DISPATCHER'] })).catch(
+		(error: unknown) => error
+	);
+	expect(isRedirect(thrown)).toBe(true);
+	expect(thrown).toMatchObject({ location: '/despachos' });
+});
 
 test("the landing's WhatsApp carries no order", async () => {
 	database.exec(
