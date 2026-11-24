@@ -3,7 +3,6 @@ import { resolve } from '$app/paths';
 import { getWhatsAppHref } from '$lib/server/services/public-orders';
 import type { PageServerLoad } from './$types';
 
-// Public: no `requireRole`, and a logged-in employee sees the same as anyone.
 export const load: PageServerLoad = async ({ platform, locals }) => {
 	if (null !== locals.user) {
 		redirect(303, resolve('/despachos'));
