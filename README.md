@@ -344,6 +344,57 @@ Then check in the browser at `https://app.consueloc.com`.
 > [!WARNING]
 > Don't create test orders in production. An order takes a number from the `orders` sequence, and once `orders` has rows the deploy can no longer wipe the database after squashing migrations.
 
+## Back up the database
+
+The `.github/workflows/backup-d1.yml` workflow exports the production database, `consueloc-erp-db`, to a plain SQL file and uploads it to the private R2 bucket `consueloc-erp-arch`. It uses the same `CLOUDFLARE_API_TOKEN` secret as the deploy, and the account ID in `wrangler.jsonc`.
+
+### When it runs
+
+- **On a schedule:** at 03:00 Bogotá time on odd calendar days (1, 3, 5 … 31), cron `0 8 1-31/2 * *` in UTC. Gaps between backups are 1 or 2 days, because the cron resets each month.
+- **By hand:** from _Actions -> Back up D1 -> Run workflow_ on GitHub, for example right before a risky migration. From the terminal:
+
+```bash
+gh workflow run backup-d1.yml --ref main --repo consuelo-c/erp-app
+gh run watch --exit-status --repo consuelo-c/erp-app
+```
+
+A failed export or upload fails the run, and GitHub emails the failure. A failed export never uploads.
+
+### Where the dumps live
+
+Each run uploads one object to `consueloc-erp-arch` under `backups/d1/`, named after the database and the run's UTC time, so the keys sort by time:
+
+```text
+backups/d1/consueloc-erp-db-2026-11-25T08-00-00Z.sql
+```
+
+Retention is the R2 lifecycle rule `d1-backups`: every object under the `backups/d1/` prefix, manual runs included, is deleted 60 days after it's uploaded. The workflow never deletes anything. The rule is already live on `consueloc-erp-arch`; on a new bucket, re-create it with:
+
+```bash
+npx wrangler r2 bucket lifecycle add consueloc-erp-arch d1-backups backups/d1/ --expire-days 60 --force
+npx wrangler r2 bucket lifecycle list consueloc-erp-arch
+```
+
+> [!WARNING]
+> If the backups fail for 60 days in a row, every dump expires and **no backup is left**. Don't ignore the workflow's failure emails.
+
+### Restore a dump
+
+Wrangler can't list R2 objects, so find the key of the dump to restore in the dashboard (_R2 -> `consueloc-erp-arch` -> `backups/d1/`_), or from a run's log in _Actions -> Back up D1_. Download it:
+
+```bash
+npx wrangler r2 object get consueloc-erp-arch/backups/d1/consueloc-erp-db-2026-11-25T08-00-00Z.sql --file dump.sql --remote
+```
+
+Then load it into an **empty** database: the dump creates the tables, so it fails on a database that already has them.
+
+```bash
+npx wrangler d1 execute <database> --remote --file=dump.sql
+```
+
+> [!CAUTION]
+> To check a dump, restore it into a scratch database (`npx wrangler d1 create <scratch-name>`, then delete it with `npx wrangler d1 delete <scratch-name>`). To restore production, `consueloc-erp-db` must be emptied or re-created first, and its `database_id` in `wrangler.jsonc` updated if it's re-created. `--remote` matters in both commands: without it, Wrangler reads and writes the local copies.
+
 ## Set up a staging environment
 
 This section is a recipe: **none of it is built**. Until someone follows it, there is still a single environment and `main` is production. Staging is for showing users work in progress, even an unmerged branch, without touching production.
