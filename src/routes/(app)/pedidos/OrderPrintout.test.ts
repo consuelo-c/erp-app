@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
+import { compile } from 'svelte/compiler';
 import { render } from 'svelte/server';
 import { beforeAll, expect, test, vi } from 'vitest';
 import type { Actor } from '$lib/server/actor';
@@ -210,5 +211,43 @@ test("the order and dispatch headers read the company's address and bare WhatsAp
 			'<div class="print-small">Calle 38a #79-18, Medellín, Colombia · 300 611 3392</div>'
 		);
 		expect(body).not.toContain('604 411 44 29');
+	}
+});
+
+/** The printout's sheet with `count` lines, each a copy of the order's line under its own name. */
+function sheetWithLines(count: number, nameOf = (index: number) => `Producto ${index + 1}`) {
+	const [line] = printout.order.items;
+	const items = Array.from({ length: count }, (_, index) => ({
+		...line,
+		product_id: index + 1,
+		name: nameOf(index)
+	}));
+	const props = { printout: { ...printout, order: { ...printout.order, items } }, backHref: '/' };
+	return render(OrderPrintout, { props }).body;
+}
+
+test('a 15-line order, like #4107, prints on one sheet, «1 de 1», with its closing', () => {
+	const body = sheetWithLines(15);
+	expect(body.split('<article')).toHaveLength(2);
+	expect(body).toContain('1 de 1');
+	expect(body).toContain('Recibí');
+	expect(body).toContain('<span>Total</span>');
+	expect(body).toMatch(/Producto 8<[\s\S]*<\/table>[\s\S]*Producto 9</);
+	expect(body).not.toMatch(/Producto 8<[\s\S]*Producto 9<[\s\S]*<\/table>[\s\S]*<table/);
+});
+
+test('a long product name prints whole in a cell that cuts it with an ellipsis, never wrapping', () => {
+	const name = 'Mantel rectangular de lino bordado a mano color marfil para mesa de 2,40 m';
+	const body = sheetWithLines(1, () => name);
+	expect(body).toMatch(new RegExp(`<td class="print-table__name svelte-\\w+">${name}</td>`));
+	const source = readFileSync('src/routes/(app)/pedidos/HalfLetterPrintout.svelte', 'utf8');
+	const { css } = compile(source, { filename: 'HalfLetterPrintout.svelte' });
+	const rule = css?.code.match(/\.print-table__name\.svelte-\w+\s*\{([^}]*)\}/)?.[1];
+	for (const declaration of [
+		'white-space: nowrap;',
+		'overflow: hidden;',
+		'text-overflow: ellipsis;'
+	]) {
+		expect(rule).toContain(declaration);
 	}
 });

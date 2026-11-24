@@ -69,21 +69,21 @@
 			{/if}
 
 			<div class="print-columns">
-				{#each splitIntoColumns(lines, 0 === index, isLastPage) as column, columnIndex (columnIndex)}
+				{#each splitIntoColumns(lines) as column, columnIndex (columnIndex)}
 					{#if column.length}
 						<table class="print-table">
 							<thead>
 								<tr>
 									<th>Producto</th>
-									<th class="num">Cant.</th>
-									<th class="num">Precio unit.</th>
-									<th class="num">Total</th>
+									<th class="num print-table__quantity">Cant.</th>
+									<th class="num print-table__price">Precio unit.</th>
+									<th class="num print-table__total">Total</th>
 								</tr>
 							</thead>
 							<tbody>
 								{#each column as item (item.product_id)}
 									<tr>
-										<td>{item.name}</td>
+										<td class="print-table__name">{item.name}</td>
 										<td class="num">{item.qty}</td>
 										<td class="num">{formatPesos(item.unit_price)}</td>
 										<td class="num">{formatPesos(item.line_total)}</td>
@@ -228,10 +228,12 @@
 		font-size: var(--print-lg);
 	}
 
+	/* Fixed columns: a long name gives way, cut on its one row; the numbers keep their width. */
 	.print-table {
 		width: 100%;
 		margin: var(--space-5) 0 var(--space-2);
 		font-size: var(--print-md);
+		table-layout: fixed;
 		border-collapse: collapse;
 	}
 
@@ -248,6 +250,21 @@
 		padding: 2px 5px;
 		vertical-align: top;
 		border-bottom: var(--border-w-hair) solid var(--border-default);
+	}
+
+	.print-table__quantity {
+		width: 4em;
+	}
+
+	.print-table__price,
+	.print-table__total {
+		width: 7.5em;
+	}
+
+	.print-table__name {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.print-table .num {

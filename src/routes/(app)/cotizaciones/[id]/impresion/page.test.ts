@@ -64,6 +64,14 @@ test('30 lines print on two sheets, each titled and numbered; notes and totals o
 	expect(sheets[1]).toContain(quote.notes);
 });
 
+test('a 15-line quote prints on one sheet, «1 de 1», with its totals', () => {
+	const sheets = sheetsOf(printout({ quote: { ...quote, items: itemsOf(15) } }));
+	expect(sheets).toHaveLength(1);
+	expect(sheets[0]).toContain('1 de 1');
+	expect(sheets[0]).toContain('Producto 15');
+	expect(sheets[0]).toContain('Subtotal');
+});
+
 test('«por acordar» prints as such, with «Total sin transporte»; a priced one prints «Total»', () => {
 	expect(printout()).toMatch(/Transporte<\/span>\s*<span>Por acordar/);
 	expect(printout()).toContain('Total sin transporte');

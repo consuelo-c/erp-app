@@ -139,26 +139,35 @@ function linesOf(count: number): number[] {
 	return Array.from({ length: count }, (_, index) => index);
 }
 
-test('up to 12 lines print on one sheet, its closing under them', () => {
-	expect(splitIntoPages(linesOf(12))).toEqual([linesOf(12)]);
+test('up to 16 lines print on one sheet, its closing under them', () => {
+	expect(splitIntoPages(linesOf(16))).toEqual([linesOf(16)]);
+	expect(splitIntoPages(linesOf(17)).map((page) => page.length)).toEqual([17, 0]);
 });
 
-test('45 lines take two sheets: 26 on the first, 19 with the closing on the second', () => {
+test('order #4107, 13 products and 2 services, prints on one sheet split 8 and 7', () => {
+	const pages = splitIntoPages(linesOf(15));
+	expect(pages).toEqual([linesOf(15)]);
+	expect(splitIntoColumns(pages[0])).toEqual([linesOf(8), [8, 9, 10, 11, 12, 13, 14]]);
+});
+
+test('45 lines take two sheets: 30 on the first, 15 with the closing on the second', () => {
 	const pages = splitIntoPages(linesOf(45));
-	expect(pages.map((page) => page.length)).toEqual([26, 19]);
+	expect(pages.map((page) => page.length)).toEqual([30, 15]);
 	expect(pages.flat()).toEqual(linesOf(45));
+	const [first, last] = pages;
+	expect(splitIntoColumns(first).map((column) => column.length)).toEqual([15, 15]);
+	expect(splitIntoColumns(last).map((column) => column.length)).toEqual([8, 7]);
 });
 
 test('lines filling the first sheet exactly leave the closing a second one', () => {
-	expect(splitIntoPages(linesOf(26))).toEqual([linesOf(26), []]);
+	expect(splitIntoPages(linesOf(30))).toEqual([linesOf(30), []]);
 });
 
-test('a sheet splits into its two columns, the left one filling first', () => {
-	const [first, last] = splitIntoPages(linesOf(45));
-	expect(splitIntoColumns(first, true, false).map((column) => column.length)).toEqual([13, 13]);
-	expect(splitIntoColumns(last, false, true).map((column) => column.length)).toEqual([11, 8]);
-	expect(splitIntoColumns(linesOf(10), true, true).map((column) => column.length)).toEqual([6, 4]);
-	expect(splitIntoColumns(linesOf(3), true, true)).toEqual([linesOf(3), []]);
+test('a sheet splits evenly into its two columns, read down the left one, then the right', () => {
+	expect(splitIntoColumns(linesOf(10))).toEqual([linesOf(5), [5, 6, 7, 8, 9]]);
+	expect(splitIntoColumns(linesOf(5))).toEqual([linesOf(3), [3, 4]]);
+	expect(splitIntoColumns(linesOf(1))).toEqual([[0], []]);
+	expect(splitIntoColumns(linesOf(0))).toEqual([[], []]);
 });
 
 function orderOf(id: number, lineCount: number) {
@@ -194,7 +203,7 @@ test('«ABONOS» and «SALDO A PAGAR» take room: a closing that fitted moves to
 	expect(pages[1]).toEqual([]);
 });
 
-test('the driver hands a billed order\'s cuenta over until it is delivered, then only names it', () => {
+test("the driver hands a billed order's cuenta over until it is delivered, then only names it", () => {
 	const line = (status: OrderStatus) => receivableLine({ receivableId: 4794, status });
 	for (const status of ['CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY'] as const) {
 		expect(line(status)).toBe('Entregar cuenta de cobro Nº 4794');
@@ -259,7 +268,12 @@ test.each([
 	{ day: 'Friday 4', event: '2026-12-04', deliveryDate: '2026-12-04', pickupDate: '2026-12-07' },
 	{ day: 'Sunday 6', event: '2026-12-06', deliveryDate: '2026-12-05', pickupDate: '2026-12-07' },
 	{ day: 'Monday 7', event: '2026-12-07', deliveryDate: '2026-12-07', pickupDate: '2026-12-09' },
-	{ day: 'holiday Tuesday 8', event: '2026-12-08', deliveryDate: '2026-12-07', pickupDate: '2026-12-09' }
+	{
+		day: 'holiday Tuesday 8',
+		event: '2026-12-08',
+		deliveryDate: '2026-12-07',
+		pickupDate: '2026-12-09'
+	}
 ])('an event on $day December gets its default delivery and pickup', ({ event, ...expected }) => {
 	const { deliveryDate, pickupDate } = expected;
 	expect(followEventDate(event, UNTYPED, HOLIDAYS)).toEqual({ deliveryDate, pickupDate });
@@ -271,7 +285,12 @@ test('moving the event moves both dates; one typed by hand stays while the other
 		deliveryDate: '2026-12-04',
 		pickupDate: '2026-12-07'
 	});
-	const typed = { ...first, pickupDate: '2026-12-10', isDeliveryDateTyped: false, isPickupDateTyped: true };
+	const typed = {
+		...first,
+		pickupDate: '2026-12-10',
+		isDeliveryDateTyped: false,
+		isPickupDateTyped: true
+	};
 	expect(followEventDate('2026-12-07', typed, HOLIDAYS)).toEqual({
 		deliveryDate: '2026-12-07',
 		pickupDate: '2026-12-10'
@@ -308,13 +327,16 @@ test('a delivery after the event and a pickup before it each warn', () => {
 	expect(findEventDateWarnings({ ...event, pickupDate: '2026-08-17' })).toEqual([
 		'La recogida es antes del evento'
 	]);
-	expect(findEventDateWarnings({ ...event, deliveryDate: '2026-08-23', pickupDate: '2026-08-21' })).toEqual([
-		'La entrega es después del evento',
-		'La recogida es antes del evento'
-	]);
+	expect(
+		findEventDateWarnings({ ...event, deliveryDate: '2026-08-23', pickupDate: '2026-08-21' })
+	).toEqual(['La entrega es después del evento', 'La recogida es antes del evento']);
 });
 
 test('blank dates never warn', () => {
-	expect(findEventDateWarnings({ eventDate: '', deliveryDate: '2026-08-23', pickupDate: '' })).toEqual([]);
-	expect(findEventDateWarnings({ eventDate: '2026-08-22', deliveryDate: '', pickupDate: '' })).toEqual([]);
+	expect(
+		findEventDateWarnings({ eventDate: '', deliveryDate: '2026-08-23', pickupDate: '' })
+	).toEqual([]);
+	expect(
+		findEventDateWarnings({ eventDate: '2026-08-22', deliveryDate: '', pickupDate: '' })
+	).toEqual([]);
 });
