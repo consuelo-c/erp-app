@@ -11,8 +11,7 @@ import {
 	readReceivableBalance,
 	receivableLine,
 	formatRemisiones,
-	splitIntoColumns,
-	splitIntoPages,
+	splitIntoColumnPages,
 	splitOrdersIntoPages
 } from './orders';
 
@@ -139,35 +138,73 @@ function linesOf(count: number): number[] {
 	return Array.from({ length: count }, (_, index) => index);
 }
 
-test('up to 16 lines print on one sheet, its closing under them', () => {
-	expect(splitIntoPages(linesOf(16))).toEqual([linesOf(16)]);
-	expect(splitIntoPages(linesOf(17)).map((page) => page.length)).toEqual([17, 0]);
+// The quote's closing, notes and totals, takes 7 rows of each column; the order's, 2 on the left
+// for the signature and 7 on the right for the totals.
+const QUOTE_CLOSING = { left: 7, right: 7 };
+const ORDER_CLOSING = { left: 2, right: 7 };
+
+function columnLengths<Line>(pages: [Line[], Line[]][]): number[][] {
+	return pages.map((columns) => columns.map((column) => column.length));
+}
+
+test('up to 16 lines print on one sheet with a 7-and-7 closing under them', () => {
+	expect(columnLengths(splitIntoColumnPages(linesOf(16), QUOTE_CLOSING))).toEqual([[8, 8]]);
+	expect(columnLengths(splitIntoColumnPages(linesOf(17), QUOTE_CLOSING))).toEqual([
+		[9, 8],
+		[0, 0]
+	]);
 });
 
 test('order #4107, 13 products and 2 services, prints on one sheet split 8 and 7', () => {
-	const pages = splitIntoPages(linesOf(15));
-	expect(pages).toEqual([linesOf(15)]);
-	expect(splitIntoColumns(pages[0])).toEqual([linesOf(8), [8, 9, 10, 11, 12, 13, 14]]);
+	expect(splitIntoColumnPages(linesOf(15), QUOTE_CLOSING)).toEqual([
+		[linesOf(8), [8, 9, 10, 11, 12, 13, 14]]
+	]);
 });
 
-test('45 lines take two sheets: 30 on the first, 15 with the closing on the second', () => {
-	const pages = splitIntoPages(linesOf(45));
-	expect(pages.map((page) => page.length)).toEqual([30, 15]);
-	expect(pages.flat()).toEqual(linesOf(45));
-	const [first, last] = pages;
-	expect(splitIntoColumns(first).map((column) => column.length)).toEqual([15, 15]);
-	expect(splitIntoColumns(last).map((column) => column.length)).toEqual([8, 7]);
+test('45 lines take two sheets: 15 and 15 on the first, 8 and 7 with the closing on the second', () => {
+	const pages = splitIntoColumnPages(linesOf(45), QUOTE_CLOSING);
+	expect(columnLengths(pages)).toEqual([
+		[15, 15],
+		[8, 7]
+	]);
+	expect(pages.flat(2)).toEqual(linesOf(45));
 });
 
 test('lines filling the first sheet exactly leave the closing a second one', () => {
-	expect(splitIntoPages(linesOf(30))).toEqual([linesOf(30), []]);
+	expect(columnLengths(splitIntoColumnPages(linesOf(30), QUOTE_CLOSING))).toEqual([
+		[15, 15],
+		[0, 0]
+	]);
 });
 
-test('a sheet splits evenly into its two columns, read down the left one, then the right', () => {
-	expect(splitIntoColumns(linesOf(10))).toEqual([linesOf(5), [5, 6, 7, 8, 9]]);
-	expect(splitIntoColumns(linesOf(5))).toEqual([linesOf(3), [3, 4]]);
-	expect(splitIntoColumns(linesOf(1))).toEqual([[0], []]);
-	expect(splitIntoColumns(linesOf(0))).toEqual([[], []]);
+test('columns stay even, the left one taking the odd line, while the closing fits under them', () => {
+	expect(splitIntoColumnPages(linesOf(5), ORDER_CLOSING)).toEqual([[linesOf(3), [3, 4]]]);
+	expect(splitIntoColumnPages(linesOf(1), ORDER_CLOSING)).toEqual([[[0], []]]);
+	expect(splitIntoColumnPages(linesOf(0), ORDER_CLOSING)).toEqual([[[], []]]);
+	expect(columnLengths(splitIntoColumnPages(linesOf(16), ORDER_CLOSING))).toEqual([[8, 8]]);
+});
+
+test('order #1075, 20 lines, fits one sheet: the left column runs on to the signature', () => {
+	const pages = splitIntoColumnPages(linesOf(20), ORDER_CLOSING);
+	expect(pages).toEqual([[linesOf(12), [12, 13, 14, 15, 16, 17, 18, 19]]]);
+	expect(columnLengths(splitIntoColumnPages(linesOf(17), ORDER_CLOSING))).toEqual([[9, 8]]);
+	expect(columnLengths(splitIntoColumnPages(linesOf(21), ORDER_CLOSING))).toEqual([[13, 8]]);
+});
+
+test('22 lines leave an order its closing on a second sheet, both columns even on the first', () => {
+	expect(columnLengths(splitIntoColumnPages(linesOf(22), ORDER_CLOSING))).toEqual([
+		[11, 11],
+		[0, 0]
+	]);
+});
+
+test('a later sheet holds 18 rows a column, 16 and 11 on the last one under an order closing', () => {
+	const pages = splitIntoColumnPages(linesOf(57), ORDER_CLOSING);
+	expect(columnLengths(pages)).toEqual([
+		[15, 15],
+		[16, 11]
+	]);
+	expect(pages.flat(2)).toEqual(linesOf(57));
 });
 
 function orderOf(id: number, lineCount: number) {
