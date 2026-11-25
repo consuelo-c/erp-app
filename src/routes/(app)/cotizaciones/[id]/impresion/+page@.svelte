@@ -15,6 +15,20 @@
 	const { quote, document, company } = $derived(data.printout);
 	const isTransportPending = $derived(null === quote.transportCost);
 	const contact = $derived(printedContact(quote.client.phone, quote.client.whatsapp));
+	const closingRows = $derived({ left: notesRows(quote.notes), right: 6 });
+
+	// The rows the notes take at the foot of the left column: the label and its padding, then each
+	// paragraph at about 60 characters a printed line, its small type erring on the safe side. Without
+	// notes, the padding alone.
+	function notesRows(notes: string | null): number {
+		if (!notes) {
+			return 1;
+		}
+		const lines = notes
+			.split('\n')
+			.reduce((sum, paragraph) => sum + Math.max(1, Math.ceil(paragraph.length / 60)), 0);
+		return 2 + lines;
+	}
 </script>
 
 {#snippet opening()}
@@ -97,7 +111,7 @@
 	{opening}
 	closingLeft={notes}
 	closingRight={totals}
-	closingRows={{ left: 7, right: 7 }}
+	{closingRows}
 />
 
 <style>

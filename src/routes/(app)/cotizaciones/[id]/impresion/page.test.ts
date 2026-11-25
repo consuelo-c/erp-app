@@ -72,6 +72,22 @@ test('a 15-line quote prints on one sheet, «1 de 1», with its totals', () => {
 	expect(sheets[0]).toContain('Subtotal');
 });
 
+test('quote #4, 20 lines and two lines of notes, prints on one sheet', () => {
+	const notes = 'Cotización de prueba con 20 productos distintos, para revisar las impresiones.';
+	const sheets = sheetsOf(printout({ quote: { ...quote, items: itemsOf(20), notes } }));
+	expect(sheets).toHaveLength(1);
+	expect(sheets[0]).toContain('Producto 20');
+	expect(sheets[0]).toContain(notes);
+	expect(sheets[0]).toContain('Subtotal');
+});
+
+test('notes long enough to fill the left column send the totals to a second sheet', () => {
+	const notes = 'Precios incluyen montaje y desmontaje. '.repeat(16);
+	const sheets = sheetsOf(printout({ quote: { ...quote, items: itemsOf(20), notes } }));
+	expect(sheets).toHaveLength(2);
+	expect(sheets[1]).toContain('Subtotal');
+});
+
 test('«por acordar» prints as such, with «Total sin transporte»; a priced one prints «Total»', () => {
 	expect(printout()).toMatch(/Transporte<\/span>\s*<span>Por acordar/);
 	expect(printout()).toContain('Total sin transporte');

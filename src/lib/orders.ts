@@ -339,8 +339,9 @@ export function splitIntoColumnPages<Line>(
 	let rest = lines;
 	for (;;) {
 		const columnRows = 0 === pages.length ? HALF_LETTER_FIRST_COLUMN_ROWS : HALF_LETTER_COLUMN_ROWS;
-		const leftRoom = columnRows - closing.left;
-		const rightRoom = columnRows - closing.right;
+		// A closing taller than its column leaves the column no lines, never fewer than none.
+		const leftRoom = Math.max(0, columnRows - closing.left);
+		const rightRoom = Math.max(0, columnRows - closing.right);
 		if (rest.length <= leftRoom + rightRoom) {
 			const evenRows = Math.ceil(rest.length / 2);
 			const leftRows = Math.min(leftRoom, Math.max(evenRows, rest.length - rightRoom));
