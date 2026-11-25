@@ -154,13 +154,14 @@ test('never the carrier, trip dates, times, notes, list prices, phone, incident 
 	const { id, token } = await create('DELIVERED', {
 		delivery_attributes: external,
 		pickup_attributes: {
-			method: 'COMPANY_PICKUP',
+			method: 'EXTERNAL_CARRIER',
+			carrier_id: WILSON,
 			time: '14:00',
 			address_1: 'Finca La Esperanza'
 		},
 		notes: 'Cliente difícil'
 	});
-	// The driver's note on the pickup, then a chair lost: an active incident.
+	// The driver's note on the carrier's pickup, then a chair lost: an active incident.
 	const pickup = { id, status: 'OUT_FOR_PICKUP', notes: 'Portería cerrada' };
 	expect(await advanceOrder(db, pickup, DRIVER)).toMatchObject({ ok: true });
 	const items = [{ product_id: TIFFANY, qty: 1, outcome: 'LOST' }];

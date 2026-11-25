@@ -160,3 +160,42 @@ test('logged fields alone are a change: the row refreshes its audit columns and 
 	expect(JSON.parse(String(edited.before))).toEqual({ order_ids: '[1]' });
 	expect(JSON.parse(String(edited.after))).toEqual({ order_ids: '[1,2]' });
 });
+
+function loggedAttributeChange(current: string, changes: string) {
+	database.exec('alter table sample_rows add column attributes text');
+	database
+		.prepare("insert into sample_rows values (1, 'Silla', 0, 'admin', 0, 'admin', ?)")
+		.run(current);
+	runBatch(
+		auditedUpdate(db, {
+			table: 'sample_rows',
+			entityType: 'SAMPLE_ROW',
+			actor: MANAGER,
+			id: 1,
+			current: { attributes: current },
+			changes: { attributes: changes },
+			jsonColumns: ['attributes']
+		})
+	);
+	const [edited] = readEvents();
+	return { before: JSON.parse(String(edited.before)), after: JSON.parse(String(edited.after)) };
+}
+
+test('a JSON column logs a nested object equal but re-parsed as unchanged', () => {
+	const carrier = { id: 4, name: 'Wilson Muñoz' };
+	const current = JSON.stringify({ carrier, notes: null });
+	const changes = JSON.stringify({ carrier: { ...carrier }, notes: 'Portería cerrada' });
+	expect(loggedAttributeChange(current, changes)).toEqual({
+		before: { 'attributes.notes': null },
+		after: { 'attributes.notes': 'Portería cerrada' }
+	});
+});
+
+test('a JSON column logs a nested object that changed as its JSON text', () => {
+	const current = JSON.stringify({ carrier: { id: 4, name: 'Wilson Muñoz' } });
+	const changes = JSON.stringify({ carrier: { id: 5, name: 'Transportes Aburrá' } });
+	expect(loggedAttributeChange(current, changes)).toEqual({
+		before: { 'attributes.carrier': '{"id":4,"name":"Wilson Muñoz"}' },
+		after: { 'attributes.carrier': '{"id":5,"name":"Transportes Aburrá"}' }
+	});
+});

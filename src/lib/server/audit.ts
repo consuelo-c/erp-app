@@ -150,8 +150,22 @@ export function diffFields(current: Row, changes: Row): { before: Row; after: Ro
 
 export type Diff = { before: Row; after: Row };
 
+function isNested(value: unknown): value is object {
+	return null !== value && 'object' === typeof value;
+}
+
+// A nested object or array becomes its JSON text: a re-parse of the same value is a new object, so
+// `!==` would always see a change, and an event holds only plain values. The text compares by key
+// order too, which is stable: every JSON column is written through its Zod schema.
 function parseObject(json: ColumnValue | undefined): Row {
-	return null === json || undefined === json ? {} : (JSON.parse(String(json)) as Row);
+	const object: Record<string, unknown> =
+		null === json || undefined === json ? {} : JSON.parse(String(json));
+	return Object.fromEntries(
+		Object.entries(object).map(([key, value]) => [
+			key,
+			isNested(value) ? JSON.stringify(value) : (value as ColumnValue)
+		])
+	);
 }
 
 // The keys of a JSON column that changed, as `attributes.bank_account`; a missing key logs as null.
