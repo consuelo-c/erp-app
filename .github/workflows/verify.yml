@@ -5,18 +5,23 @@ on:
 
 jobs:
   # The job name is the required status check in the main ruleset: keep it "test".
+  # Only the PR's changes are tested and linted (`npm run verify`); deploy.yml runs the full suite.
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # The base branch, to diff the PR against it.
+          fetch-depth: 0
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npx vitest run
-      # Tests block; linting only reports.
-      - run: npm run lint:js
-        continue-on-error: true
-      - run: npm run lint:css
-        continue-on-error: true
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node24-${{ hashFiles('package-lock.json') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: npm ci
+      # lint-staged's commit-hook tasks over the PR's changed files; fails if a fix or format changes one.
+      - run: npm run verify
