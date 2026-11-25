@@ -236,6 +236,35 @@ test('a 15-line order, like #4107, prints on one sheet, «1 de 1», with its clo
 	expect(body).not.toMatch(/Producto 8<[\s\S]*Producto 9<[\s\S]*<\/table>[\s\S]*<table/);
 });
 
+test('a 20-line order, like #1075, prints on one sheet: 12 lines by the signature, 8 over the totals', () => {
+	const body = sheetWithLines(20);
+	expect(body.split('<article')).toHaveLength(2);
+	expect(body).toContain('1 de 1');
+	expect(body).toMatch(/Producto 12<[\s\S]*<\/table>[\s\S]*Recibí[\s\S]*Producto 13</);
+	expect(body).toMatch(/Producto 20<[\s\S]*<\/table>[\s\S]*<span>Total<\/span>/);
+});
+
+test('the lines print alphabetically, accents aside and numbers by their value', () => {
+	const names = [
+		'Vasos Roqueros',
+		'Copas de Jerez',
+		'Mantel 150cm',
+		'Árbol de luces',
+		'Mantel 90cm'
+	];
+	const body = sheetWithLines(names.length, (index) => names[index]);
+	const printed = [...body.matchAll(/print-table__name svelte-\w+">([^<]*)</g)].map(
+		([, name]) => name
+	);
+	expect(printed).toEqual([
+		'Árbol de luces',
+		'Copas de Jerez',
+		'Mantel 90cm',
+		'Mantel 150cm',
+		'Vasos Roqueros'
+	]);
+});
+
 test('a long product name prints whole in a cell that cuts it with an ellipsis, never wrapping', () => {
 	const name = 'Mantel rectangular de lino bordado a mano color marfil para mesa de 2,40 m';
 	const body = sheetWithLines(1, () => name);

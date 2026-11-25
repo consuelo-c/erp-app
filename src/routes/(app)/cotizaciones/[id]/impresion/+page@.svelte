@@ -56,13 +56,16 @@
 	</div>
 {/snippet}
 
-{#snippet closing()}
+{#snippet notes()}
 	<div>
 		{#if quote.notes}
 			<div class="print-small notes__label">Notas</div>
 			<p class="print-small notes__text">{quote.notes}</p>
 		{/if}
 	</div>
+{/snippet}
+
+{#snippet totals()}
 	<div>
 		<div class="print-row"><span>Productos</span><span>{quote.items.length}</span></div>
 		<div class="print-row">
@@ -92,7 +95,9 @@
 		label: 'Volver a la cotización'
 	}}
 	{opening}
-	{closing}
+	closingLeft={notes}
+	closingRight={totals}
+	closingRows={{ left: 7, right: 7 }}
 />
 
 <style>

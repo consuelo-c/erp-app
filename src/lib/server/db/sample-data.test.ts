@@ -273,7 +273,7 @@ function parseOrder(order: Record<string, unknown>) {
 
 test("loads the Design Brief's #1043 and #1051, #1047 delivered, and enough for a third page", () => {
 	const orders = readAll('orders');
-	expect(orders).toHaveLength(52);
+	expect(orders).toHaveLength(55);
 	expect(new Set(orders.map((order) => order.status)).size).toBe(7);
 	expect(orders.every((order) => 0 === order.has_incident)).toBe(true);
 	expect(readAll('incidents')).toEqual([]);

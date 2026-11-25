@@ -76,9 +76,12 @@
 	</div>
 {/snippet}
 
-{#snippet closing()}
+{#snippet signature()}
 	<!-- The client's proof of receipt: never sacrificed for space. -->
 	<div class="signature">Recibí: Nombre / C.C. / NIT</div>
+{/snippet}
+
+{#snippet totals()}
 	<div>
 		<div class="print-row"><span>Productos</span><span>{order.items.length}</span></div>
 		<div class="print-row">
@@ -128,7 +131,9 @@
 	items={order.items}
 	back={{ href: backHref, label: 'Volver al pedido' }}
 	{opening}
-	{closing}
+	closingLeft={signature}
+	closingRight={totals}
+	closingRows={{ left: 2, right: 7 }}
 />
 
 <style>

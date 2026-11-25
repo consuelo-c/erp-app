@@ -3,15 +3,15 @@
 	import Button from '$lib/components/Button.svelte';
 	import { formatPesos } from '$lib/format';
 	import { formatPhone } from '$lib/phone';
-	import { splitIntoColumns, splitIntoPages } from '$lib/orders';
+	import { splitIntoColumnPages, type ClosingRows } from '$lib/orders';
 	import type { OrderItem } from '$lib/server/services/orders';
 	import type { CompanySettings } from '$lib/server/services/settings';
 
 	// Outside the app's shell, the landscape half-letter sheets the order and the quote print on:
 	// what prints is the sheets, as they're seen. Each repeats the header and numbers itself in its
 	// margin. `opening` writes the band's two columns under the first header, the lines follow in two
-	// columns, and `closing` writes the last sheet's closing row, never split from it: left, then
-	// right. The rows the snippets write (`print-row`, …) take their style from here.
+	// columns, and `closingLeft` and `closingRight` close the last sheet at the foot of each column,
+	// taking `closingRows` of it. The rows the snippets write (`print-row`, …) take their style from here.
 	interface Props {
 		/** «Pedido #1043», «Cotización #12». */
 		title: string;
@@ -19,12 +19,21 @@
 		items: OrderItem[];
 		back: { href: string; label: string };
 		opening: Snippet;
-		closing: Snippet;
+		closingLeft: Snippet;
+		closingRight: Snippet;
+		closingRows: ClosingRows;
 	}
 
-	let { title, company, items, back, opening, closing }: Props = $props();
+	let { title, company, items, back, opening, closingLeft, closingRight, closingRows }: Props =
+		$props();
 
-	const pages = $derived(splitIntoPages(items));
+	// Alphabetical, so whoever checks the sheet against the products finds each line at a glance;
+	// numbers by their value, «Mantel 90cm» before «Mantel 150cm».
+	const byName = new Intl.Collator('es', { numeric: true });
+	const sortedItems = $derived(
+		items.toSorted((first, second) => byName.compare(first.name, second.name))
+	);
+	const pages = $derived(splitIntoColumnPages(sortedItems, closingRows));
 </script>
 
 <svelte:head>
@@ -46,7 +55,7 @@
 		<Button type="button" size="sm" inline onclick={() => window.print()}>Imprimir</Button>
 	</div>
 
-	{#each pages as lines, index (index)}
+	{#each pages as columns, index (index)}
 		{@const isLastPage = pages.length - 1 === index}
 		<article class="print-sheet">
 			<header class="print-head">
@@ -69,37 +78,38 @@
 			{/if}
 
 			<div class="print-columns">
-				{#each splitIntoColumns(lines) as column, columnIndex (columnIndex)}
-					{#if column.length}
-						<table class="print-table">
-							<thead>
-								<tr>
-									<th>Producto</th>
-									<th class="num print-table__quantity">Cant.</th>
-									<th class="num print-table__price">Precio unit.</th>
-									<th class="num print-table__total">Total</th>
-								</tr>
-							</thead>
-							<tbody>
-								{#each column as item (item.product_id)}
+				{#each columns as column, columnIndex (columnIndex)}
+					<div class="print-column">
+						{#if column.length}
+							<table class="print-table">
+								<thead>
 									<tr>
-										<td class="print-table__name">{item.name}</td>
-										<td class="num">{item.qty}</td>
-										<td class="num">{formatPesos(item.unit_price)}</td>
-										<td class="num">{formatPesos(item.line_total)}</td>
+										<th>Producto</th>
+										<th class="num print-table__quantity">Cant.</th>
+										<th class="num print-table__price">Precio unit.</th>
+										<th class="num print-table__total">Total</th>
 									</tr>
-								{/each}
-							</tbody>
-						</table>
-					{/if}
+								</thead>
+								<tbody>
+									{#each column as item (item.product_id)}
+										<tr>
+											<td class="print-table__name">{item.name}</td>
+											<td class="num">{item.qty}</td>
+											<td class="num">{formatPesos(item.unit_price)}</td>
+											<td class="num">{formatPesos(item.line_total)}</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						{/if}
+						{#if isLastPage}
+							<div class="print-close">
+								{@render (0 === columnIndex ? closingLeft : closingRight)()}
+							</div>
+						{/if}
+					</div>
 				{/each}
 			</div>
-
-			<div class="print-spacer"></div>
-
-			{#if isLastPage}
-				<div class="print-close">{@render closing()}</div>
-			{/if}
 		</article>
 	{/each}
 </div>
@@ -175,8 +185,7 @@
 		bottom: 6px;
 	}
 
-	.print-band,
-	.print-close {
+	.print-band {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
 		gap: 0 var(--space-14);
@@ -187,17 +196,24 @@
 		max-width: 240px;
 	}
 
+	/* At the foot of its column, whatever the column's length. */
 	.print-close {
-		align-items: end;
-		margin-top: var(--space-6);
+		padding-top: var(--space-6);
+		margin-top: auto;
 	}
 
 	/* Read down the left column, then on to the right one. */
 	.print-columns {
 		display: grid;
+		flex: 1;
 		grid-template-columns: 1fr 1fr;
 		gap: 0 var(--space-12);
-		align-items: start;
+	}
+
+	.print-column {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
 	}
 
 	.print-sheet :global(.print-row) {
@@ -271,10 +287,6 @@
 		font-variant-numeric: tabular-nums;
 		text-align: right;
 		white-space: nowrap;
-	}
-
-	.print-spacer {
-		flex: 1;
 	}
 
 	@media print {

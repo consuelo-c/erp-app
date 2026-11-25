@@ -311,27 +311,56 @@ export const DAMAGE_CHARGE_SOURCES = ['NEW', 'DEPOSIT'] as const satisfies reado
  */
 export const RETAINED_FROM_DEPOSIT = 'Retenido del depósito';
 
-export type PrintSheet = { firstPageLines: number; linesPerPage: number; closingLines: number };
+type PrintSheet = { firstPageLines: number; linesPerPage: number; closingLines: number };
+
+/** The rows the closing takes at the foot of each column of the last half-letter sheet. */
+export type ClosingRows = { left: number; right: number };
 
 // A landscape half-letter sheet holds its lines in two columns of 15 rows under the client's band,
-// 18 on the next sheets, one row per line. The closing (signature, totals) takes 7 rows of each
-// column on the last sheet, and is never split from it.
-const HALF_LETTER_SHEET: PrintSheet = { firstPageLines: 30, linesPerPage: 36, closingLines: 14 };
+// 18 on the next sheets, one row per line.
+const HALF_LETTER_FIRST_COLUMN_ROWS = 15;
+const HALF_LETTER_COLUMN_ROWS = 18;
 
-/** One half-letter sheet's lines in two columns of about the same height, left then right. */
-export function splitIntoColumns<Line>(lines: Line[]): [Line[], Line[]] {
+function splitEvenly<Line>(lines: Line[]): [Line[], Line[]] {
 	const leftRows = Math.ceil(lines.length / 2);
 	return [lines.slice(0, leftRows), lines.slice(leftRows)];
 }
 
 /**
- * The printout's lines, sheet by sheet: the last one keeps room for the totals and signature.
+ * The printout's lines, sheet by sheet, each sheet already in its two columns. The closing sits at
+ * the foot of each column, so a column under a short closing (the signature) runs longer than one
+ * under a tall one (the totals): the columns stay even unless that costs the closing a sheet.
+ */
+export function splitIntoColumnPages<Line>(
+	lines: Line[],
+	closing: ClosingRows
+): [Line[], Line[]][] {
+	const pages: [Line[], Line[]][] = [];
+	let rest = lines;
+	for (;;) {
+		const columnRows = 0 === pages.length ? HALF_LETTER_FIRST_COLUMN_ROWS : HALF_LETTER_COLUMN_ROWS;
+		const leftRoom = columnRows - closing.left;
+		const rightRoom = columnRows - closing.right;
+		if (rest.length <= leftRoom + rightRoom) {
+			const evenRows = Math.ceil(rest.length / 2);
+			const leftRows = Math.min(leftRoom, Math.max(evenRows, rest.length - rightRoom));
+			pages.push([rest.slice(0, leftRows), rest.slice(leftRows)]);
+			return pages;
+		}
+		const onThisPage = rest.slice(0, 2 * columnRows);
+		pages.push(splitEvenly(onThisPage));
+		rest = rest.slice(onThisPage.length);
+	}
+}
+
+/**
+ * A letter printout's lines, sheet by sheet: the last one keeps room for the totals and signature.
  * `linesOf` says how many lines of room one takes, for a line that carries more than itself.
  */
-export function splitIntoPages<Line>(
+function splitIntoPages<Line>(
 	lines: Line[],
-	sheet: PrintSheet = HALF_LETTER_SHEET,
-	linesOf: (line: Line) => number = () => 1
+	sheet: PrintSheet,
+	linesOf: (line: Line) => number
 ): Line[][] {
 	const pages: Line[][] = [[]];
 	let usedLines = 0;
