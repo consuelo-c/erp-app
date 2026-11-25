@@ -147,6 +147,24 @@ test('an order cancelled with no status to cancel from is cancelled from CONFIRM
 	});
 });
 
+test('a «Cliente nuevo» order converts a «Cliente nuevo» quote of the same client', async () => {
+	const { db, order } = createFixture();
+	const id = await order({
+		client_id: null,
+		client_name: 'Diana Zuluaga',
+		client_phone: '3104428890'
+	});
+	const quoteId = await getSourceQuoteId(db, id, SALES);
+	const [read, quoted] = [
+		await getOrderDetail(db, id, SALES),
+		await getQuoteDetail(db, quoteId, SALES)
+	];
+	expect(read!.client).toMatchObject({ name: 'Diana Zuluaga', phone: '573104428890' });
+	expect(quoted!.client).toEqual(read!.client);
+	expect(quoted!.items).toEqual(read!.items);
+	expect(await getContact(db, quoted!.clientId, SALES)).toMatchObject({ hasAutoDocument: true });
+});
+
 test('an order takes its lines, dates, transport, deposit and client', async () => {
 	const { db, contact, product, order } = createFixture();
 	const client = await contact({ full_name: 'Luz Marina Restrepo' });
@@ -257,4 +275,56 @@ test('two orders in one test each get their own client and product', async () =>
 	];
 	expect(other!.clientId).not.toBe(one!.clientId);
 	expect(other!.items[0].product_id).not.toBe(one!.items[0].product_id);
+});
+
+test('advanceTo moves an existing order forward, each transition in its timeline', async () => {
+	const { db, order, advanceTo } = createFixture();
+	const id = await order({ status: 'PICKED' });
+	await advanceTo(id, 'DELIVERED');
+	const timeline = await getOrderTimeline(db, id, MANAGER);
+	expect(timeline?.map((entry) => entry.status).reverse()).toEqual([
+		'CONFIRMED',
+		'PICKED',
+		'OUT_FOR_DELIVERY',
+		'DELIVERED'
+	]);
+	await expect(advanceTo(id + 1, 'DELIVERED')).rejects.toThrow('not found');
+});
+
+test('editContact posts the whole form back: what it types changes, the rest stays', async () => {
+	const { db, contact, editContact } = createFixture();
+	const id = await contact({ full_name: 'Luz Marina Restrepo', email: 'luz@example.com' });
+	await editContact(id, { full_name: 'Luz M. Restrepo', labels: ['BANNED'] });
+	expect(await getContact(db, id, SALES)).toMatchObject({
+		fullName: 'Luz M. Restrepo',
+		email: 'luz@example.com',
+		labels: ['BANNED']
+	});
+	await expect(editContact(id + 1, {})).rejects.toThrow('not found');
+});
+
+test('editContact saves as the actor given, and throws the reason it is refused with', async () => {
+	const { db, order, editContact } = createFixture();
+	const read = await getOrderDetail(db, await order({ client_id: null }), SALES);
+	await editContact(read!.clientId, { document_id: '43521789' }, SALES);
+	expect(await getContact(db, read!.clientId, SALES)).toMatchObject({ documentId: '43521789' });
+	await expect(editContact(read!.clientId, { labels: ['BANNED'] }, SALES)).rejects.toThrow();
+});
+
+test('editProduct posts the whole form back: what it types changes, the rest stays', async () => {
+	const { db, product, editProduct } = createFixture();
+	const id = await product({
+		name: 'Silla Tiffany',
+		description: 'Dorada',
+		replacement_cost: '95.000'
+	});
+	await editProduct(id, { rental_price: '7.500', active: 'off' });
+	expect(await getProduct(db, id, MANAGER)).toMatchObject({
+		name: 'Silla Tiffany',
+		description: 'Dorada',
+		replacementCost: 95000,
+		rentalPrice: 7500,
+		isActive: false
+	});
+	await expect(editProduct(id + 1, {})).rejects.toThrow('not found');
 });

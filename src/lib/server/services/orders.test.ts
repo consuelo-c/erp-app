@@ -4,7 +4,7 @@ import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
 import type { Actor, Role } from '../actor';
 import { actorWith, ADMIN, createFixture, DRIVER, MANAGER, SALES, WAREHOUSE } from '../db/fixture';
 import { recordOffset } from './cash';
-import { getContact, updateContact } from './contacts';
+import { getContact } from './contacts';
 import {
 	advanceOrder,
 	cancelOrder,
@@ -31,9 +31,8 @@ import {
 	updateOrder,
 	type OrderStatus
 } from './orders';
-import { getProduct, updateProduct } from './products';
 import { convertQuote } from './quotes';
-import { nextOperationalStatus, readOwedOnReceivable } from '$lib/orders';
+import { readOwedOnReceivable } from '$lib/orders';
 import { reportIncident, reverseIncident } from './incidents';
 import { getReceivableDetail, issueReceivable, recordReceivablePayment } from './receivables';
 import { getCashStatement } from './cash-handovers';
@@ -159,52 +158,6 @@ beforeEach(async () => {
 	extension = extensionOfBrief();
 });
 
-// Contactos › Editar as the manager saves it: the contact as it is, with `changes` typed over it.
-async function editContact(id: number, changes: Record<string, unknown>) {
-	const current = await getContact(db, id, MANAGER);
-	if (null === current) {
-		throw new Error(`Contact ${id} not found`);
-	}
-	const typed = {
-		phone: current.phone,
-		whatsapp: current.whatsapp,
-		full_name: current.fullName,
-		document_id: current.documentId,
-		email: current.email,
-		address_1: current.address1,
-		address_2: current.address2,
-		bank_account: current.bankAccount,
-		notes: current.notes
-	};
-	// An empty field posts as empty text, never as null.
-	const posted = Object.entries(typed).map(([key, value]) => [key, value ?? '']);
-	const form = { id, ...Object.fromEntries(posted), labels: current.labels, ...changes };
-	const result = await updateContact(db, form, MANAGER);
-	if (!result.ok) {
-		throw new Error(JSON.stringify(result));
-	}
-}
-
-// Productos › Editar as the manager saves it: the product as it is, with `changes` typed over it.
-async function editProduct(id: number, changes: Record<string, string>) {
-	const current = await getProduct(db, id, MANAGER);
-	if (null === current) {
-		throw new Error(`Product ${id} not found`);
-	}
-	const form = {
-		id,
-		name: current.name,
-		category: current.category,
-		rental_price: String(current.rentalPrice),
-		active: current.isActive ? 'on' : 'off',
-		...changes
-	};
-	const result = await updateProduct(db, form, MANAGER);
-	if (!result.ok) {
-		throw new Error(result.message);
-	}
-}
-
 // The Design Brief's #1043, with `fields` typed over it, born from its quote and moved to `status`.
 function create(fields: Record<string, unknown> = {}): Promise<number> {
 	return fixture.order({ ...order1043, ...fields });
@@ -214,21 +167,6 @@ function create(fields: Record<string, unknown> = {}): Promise<number> {
 async function convert(input: object, actor: Actor = SALES) {
 	const quote = await fixture.quote();
 	return convertQuote(db, { quote, order: { transport_cost: 0, ...input }, force: true }, actor);
-}
-
-// The status button pressed until the order reaches `target`, each transition leaving its event.
-async function advanceTo(id: number, target: OrderStatus) {
-	for (let order = await read(id); target !== order.status; order = await read(id)) {
-		const to = nextOperationalStatus({
-			from: order.status,
-			deliveryMethod: order.delivery.method,
-			returnMethod: order.pickup.method
-		});
-		const result = null === to ? null : await advanceOrder(db, { id, status: to }, MANAGER);
-		if (!result?.ok) {
-			throw new Error(`Order ${id} can't reach ${target} from ${order.status}`);
-		}
-	}
 }
 
 async function read(id: number) {
@@ -284,7 +222,7 @@ test('creating stores the snapshots and works out the totals, ignoring any sent'
 });
 
 test('a client carrying Vetado saves an order like any other, with no extra step', async () => {
-	await editContact(LUZ_MARINA, { labels: ['BANNED'] });
+	await fixture.editContact(LUZ_MARINA, { labels: ['BANNED'] });
 	expect((await read(await create())).clientId).toBe(LUZ_MARINA);
 });
 
@@ -319,8 +257,8 @@ test("the client's link token: in any status, never for WAREHOUSE or DRIVER", as
 
 test('renaming the client or a product, or repricing it, changes no saved order, an edit included', async () => {
 	const id = await create();
-	await editContact(LUZ_MARINA, { full_name: 'Luz Marina Restrepo de Gil' });
-	await editProduct(CHAIRS, { name: 'Silla Tiffany', rental_price: '3.000' });
+	await fixture.editContact(LUZ_MARINA, { full_name: 'Luz Marina Restrepo de Gil' });
+	await fixture.editProduct(CHAIRS, { name: 'Silla Tiffany', rental_price: '3.000' });
 	expect((await read(id)).client.name).toBe('Luz Marina Restrepo');
 	await updateOrder(db, { ...order1043, id, rental_days: 3 }, SALES);
 	const edited = await read(id);
@@ -331,7 +269,7 @@ test('renaming the client or a product, or repricing it, changes no saved order,
 test('a line added in an edit takes the catalog name and price of that moment', async () => {
 	const id = await create();
 	const redTablecloth = await fixture.product({ name: 'Mantel rojo', rental_price: '7.000' });
-	await editProduct(redTablecloth, { rental_price: '7.500' });
+	await fixture.editProduct(redTablecloth, { rental_price: '7.500' });
 	const items = [
 		...order1043.order_items,
 		{ product_id: redTablecloth, qty: 12, unit_price: 7000 }
@@ -387,7 +325,7 @@ test("an inactive product can't be added; a line holding one deactivated since s
 		errors: { 'order_items.3.product_id': expect.any(String) }
 	});
 	const id = await create();
-	await editProduct(CHAIRS, { active: 'off' });
+	await fixture.editProduct(CHAIRS, { active: 'off' });
 	const result = await updateOrder(db, { ...order1043, id, rental_days: 3 }, SALES);
 	expect(result).toEqual({ ok: true, id });
 	expect((await read(id)).items[0]).toMatchObject({ product_id: CHAIRS, line_total: 900000 });
@@ -459,9 +397,9 @@ test('an order is edited through DELIVERED; on its way back, completed or cancel
 		const result = await updateOrder(db, { ...order1043, id: orderId, rental_days: 4 }, SALES);
 		expect(result).toMatchObject({ ok: false });
 	};
-	await advanceTo(id, 'OUT_FOR_PICKUP');
+	await fixture.advanceTo(id, 'OUT_FOR_PICKUP');
 	await refuses(id);
-	await advanceTo(id, 'COMPLETED');
+	await fixture.advanceTo(id, 'COMPLETED');
 	await refuses(id);
 	const cancelled = await create({ status: 'CANCELLED' });
 	await refuses(cancelled);
@@ -1053,21 +991,21 @@ test("the balance is the total less the order's installments and refunds, not it
 
 test('the filters combine, each over the order snapshot', async () => {
 	const [luzMarina, jorge, september] = await createThree();
-	await editContact(LUZ_MARINA, { full_name: 'Otro nombre', phone: '300 000 0000' });
+	await fixture.editContact(LUZ_MARINA, { full_name: 'Otro nombre', phone: '300 000 0000' });
 	expect(await listIds({ text: '442 88' })).toEqual([september, luzMarina]);
 	expect(await listIds({ text: '44' })).toHaveLength(3);
 	expect(await listIds({ text: 'BETANCUR' })).toEqual([jorge]);
 	expect(await listIds({ from: '2026-08-22', to: '2026-08-22' })).toEqual([jorge]);
 	expect(await listIds({ from: '2026-08-16' })).toEqual([september, jorge]);
 	expect(await listIds({ to: '2026-08-31', text: 'luz' })).toEqual([luzMarina]);
-	await advanceTo(luzMarina, 'PICKED');
+	await fixture.advanceTo(luzMarina, 'PICKED');
 	expect(await listIds({ status: 'PICKED' })).toEqual([luzMarina]);
 });
 
 test("letters also find the snapshot's username, without the @ and ignoring case", async () => {
-	await editContact(JORGE, { whatsapp: 'LuzMarinaR' });
+	await fixture.editContact(JORGE, { whatsapp: 'LuzMarinaR' });
 	const [, jorge] = await createThree();
-	await editContact(LUZ_MARINA, { whatsapp: 'LuzMarinaR' });
+	await fixture.editContact(LUZ_MARINA, { whatsapp: 'LuzMarinaR' });
 	expect(await listIds({ text: 'luzma' })).toEqual([jorge]);
 	expect(await listIds({ text: '@LUZMA' })).toEqual([jorge]);
 	expect(await listIds({ text: '@luzmarinar betancur' })).toEqual([]);
@@ -1075,7 +1013,7 @@ test("letters also find the snapshot's username, without the @ and ignoring case
 
 test('incidents only is its own filter, in SQL', async () => {
 	const [luzMarina] = await createThree();
-	await advanceTo(luzMarina, 'DELIVERED');
+	await fixture.advanceTo(luzMarina, 'DELIVERED');
 	expect(await reportLost(luzMarina)).toMatchObject({ ok: true });
 	expect(await listIds({ hasIncident: '1' })).toEqual([luzMarina]);
 	expect(await listIds({ hasIncident: '1' })).toHaveLength(1);
@@ -1328,7 +1266,8 @@ test('«Cliente nuevo» makes the contact and the order in one batch, linked by 
 		client_phone: '315 220 7781'
 	};
 	const id = await create(fresh);
-	const [contact] = contactsByPhone('573152207781');
+	// Its source quote, «Cliente nuevo» too, made a contact of its own first.
+	const contact = contactsByPhone('573152207781').at(-1)!;
 	expect(contact).toMatchObject({
 		full_name: 'Gloria Patricia Henao',
 		labels: '[]',
@@ -1373,9 +1312,11 @@ test('«Cliente nuevo» saves the typed phone and username on the contact, in th
 		client_whatsapp: ' @GloriaH '
 	};
 	const id = await create(fresh);
+	// Its source quote, «Cliente nuevo» too, made a contact of its own first.
 	const contact = database
 		.prepare("select id, phone, whatsapp from contacts where full_name = 'Gloria Patricia Henao'")
-		.get();
+		.all()
+		.at(-1);
 	expect(contact).toMatchObject({ phone: '573152207781', whatsapp: 'GloriaH' });
 	expect(await read(id)).toMatchObject({
 		clientId: contact?.id,
@@ -1403,14 +1344,13 @@ test('«Cliente nuevo» saves with only a username, or with neither', async () =
 		client_phone: undefined
 	});
 	expect((await read(neither)).client).toEqual({ name: 'Andrés Gil', phone: null, whatsapp: null });
-	const saved = database
-		.prepare(
-			"select phone, whatsapp from contacts where full_name in ('Mayra Castaño', 'Andrés Gil') order by id"
-		)
-		.all();
-	expect(saved).toEqual([
-		{ phone: null, whatsapp: 'MayC47' },
-		{ phone: null, whatsapp: null }
+	const saved = [
+		await getContact(db, (await read(onlyUsername)).clientId, SALES),
+		await getContact(db, (await read(neither)).clientId, SALES)
+	];
+	expect(saved).toMatchObject([
+		{ fullName: 'Mayra Castaño', phone: null, whatsapp: 'MayC47' },
+		{ fullName: 'Andrés Gil', phone: null, whatsapp: null }
 	]);
 });
 
@@ -1425,7 +1365,7 @@ test("«Cliente nuevo» refuses a username that isn't one, and writes nothing", 
 });
 
 test("picking a contact freezes its phone and username, not the typed ones, and later edits don't reach the order", async () => {
-	await editContact(LUZ_MARINA, { whatsapp: 'LuzMarinaR' });
+	await fixture.editContact(LUZ_MARINA, { whatsapp: 'LuzMarinaR' });
 	const typed = { ...order1043, client_phone: '300 000 0000', client_whatsapp: '@otro_usuario' };
 	const id = await create(typed);
 	expect((await read(id)).client).toEqual({
@@ -1433,7 +1373,7 @@ test("picking a contact freezes its phone and username, not the typed ones, and 
 		phone: '573104428890',
 		whatsapp: 'LuzMarinaR'
 	});
-	await editContact(LUZ_MARINA, { phone: '', whatsapp: 'LuzMa' });
+	await fixture.editContact(LUZ_MARINA, { phone: '', whatsapp: 'LuzMa' });
 	expect((await read(id)).client).toMatchObject({ phone: '573104428890', whatsapp: 'LuzMarinaR' });
 	expect(await updateOrder(db, { ...typed, id, client_whatsapp: '' }, SALES)).toEqual({
 		ok: true,
@@ -1665,7 +1605,7 @@ test('a transfer out needs the account, a copy the contact or order never change
 	});
 	const account = 'Bancolombia ahorros 052-334198-07';
 	const refund = await recordPayment(id, { ...transfer, bank_account: account });
-	await editContact(LUZ_MARINA, { bank_account: 'Otra cuenta', full_name: 'Otra' });
+	await fixture.editContact(LUZ_MARINA, { bank_account: 'Otra cuenta', full_name: 'Otra' });
 	const edited = { ...order1043, client_id: JORGE, client_name: 'Jorge Iván Betancur' };
 	expect(await updateOrder(db, { ...edited, id }, SALES)).toMatchObject({ ok: true });
 	const stored = database.prepare('select payee, attributes from cash_movements').get();
@@ -1838,10 +1778,10 @@ test('the driver records «Pago» and the deposit on the road, in cash or by tra
 		payee: 'Luz Marina Restrepo',
 		created_by: 'driver'
 	});
-	await advanceTo(id, 'DELIVERED');
+	await fixture.advanceTo(id, 'DELIVERED');
 	const transfer = { concept: 'SECURITY_DEPOSIT', payment_method: 'TRANSFER', amount: '200.000' };
 	expect(await recordPayment(id, transfer, DRIVER)).toMatchObject({ created_by: 'driver' });
-	await advanceTo(id, 'OUT_FOR_PICKUP');
+	await fixture.advanceTo(id, 'OUT_FOR_PICKUP');
 	await recordPayment(id, { amount: '500.000' }, DRIVER);
 	expect(await detail(id)).toMatchObject({ paid: 1180000, balanceDue: 0, depositHeld: 200000 });
 });
@@ -1878,7 +1818,7 @@ test('the driver gives back only the whole deposit, only at pickup', async () =>
 			DRIVER
 		);
 	expect(await refund()).toMatchObject({ ok: false });
-	await advanceTo(id, 'OUT_FOR_PICKUP');
+	await fixture.advanceTo(id, 'OUT_FOR_PICKUP');
 	expect(await refund({ amount: '150.000' })).toMatchObject({
 		ok: false,
 		errors: { amount: expect.stringContaining('$200.000') }
@@ -1911,7 +1851,7 @@ test("a billed order allows the driver nothing, and the rest of the money out st
 });
 
 test("the driver's refund by transfer is pre-filled with the client's account", async () => {
-	await editContact(LUZ_MARINA, { bank_account: 'Cuenta Luz' });
+	await fixture.editContact(LUZ_MARINA, { bank_account: 'Cuenta Luz' });
 	const id = await create();
 	expect((await getPaymentOptions(db, await read(id), DRIVER)).clientBankAccount).toBe(
 		'Cuenta Luz'
@@ -2114,8 +2054,8 @@ test('nothing blocks on the amounts: above the balance, what was paid, or the de
 });
 
 test("the payment entry pre-fills from the client's and each carrier's saved account", async () => {
-	await editContact(LUZ_MARINA, { bank_account: 'Cuenta Luz' });
-	await editContact(WILSON, { bank_account: 'Cuenta Wilson' });
+	await fixture.editContact(LUZ_MARINA, { bank_account: 'Cuenta Luz' });
+	await fixture.editContact(WILSON, { bank_account: 'Cuenta Wilson' });
 	const id = await create(withCarriers(ABURRA, WILSON));
 	expect(await getPaymentOptions(db, await read(id), MANAGER)).toEqual({
 		clientBankAccount: 'Cuenta Luz',
@@ -2260,7 +2200,7 @@ function orderRow(id: number) {
 
 test('an extension is born DELIVERED the day after the pickup, copying the original, which stays as it was', async () => {
 	const parent = await create({ status: 'DELIVERED' });
-	await editProduct(CHAIRS, { name: 'Silla', rental_price: '3.000' });
+	await fixture.editProduct(CHAIRS, { name: 'Silla', rental_price: '3.000' });
 	const before = orderRow(parent);
 	const result = await extend(parent);
 	if (!result.ok) {

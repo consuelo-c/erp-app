@@ -1,8 +1,7 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import { auditedInsert, auditedUpdate, diffFields } from './audit';
-import { MANAGER } from './db/fixture';
-import { createMemoryD1 } from './db/memory-d1';
+import { createFixture, MANAGER } from './db/fixture';
 
 let database: DatabaseSync;
 
@@ -22,8 +21,9 @@ function readEvents() {
 }
 
 beforeEach(() => {
-	({ database } = createMemoryD1());
-	// A table with an INTEGER id, like every table after settings.
+	// The default settings: a table keyed by TEXT. The helpers sit below every service, so
+	// sample_rows, a table no service writes, stands for one with an INTEGER id, like every other.
+	({ database } = createFixture());
 	database.exec(
 		'create table sample_rows (id integer primary key, name text not null, created_at integer not null, created_by text not null, updated_at integer not null, updated_by text not null)'
 	);
@@ -68,9 +68,6 @@ test('an insert logs CREATED with the new id and a null before', () => {
 });
 
 test('an update logs before and after with only the changed fields', () => {
-	database.exec(
-		"insert into settings values ('PAYROLL_PENSION_RATE', '4', 0, 'system', 0, 'system')"
-	);
 	runBatch(
 		auditedUpdate(db, {
 			table: 'settings',
@@ -82,7 +79,9 @@ test('an update logs before and after with only the changed fields', () => {
 			changes: { key: 'PAYROLL_PENSION_RATE', value: '5' }
 		})
 	);
-	expect(database.prepare('select value, created_by, updated_by from settings').get()).toEqual({
+	const select =
+		"select value, created_by, updated_by from settings where key = 'PAYROLL_PENSION_RATE'";
+	expect(database.prepare(select).get()).toEqual({
 		value: '5',
 		created_by: 'system',
 		updated_by: 'manager'

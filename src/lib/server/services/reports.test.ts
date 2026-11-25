@@ -5,12 +5,12 @@ import type { Actor } from '../actor';
 import { actorWith, ADMIN, createFixture, DRIVER, MANAGER, SALES, WAREHOUSE } from '../db/fixture';
 import { logIn } from './auth';
 import { recordMovement, recordOffset } from './cash';
-import { createContact, getContact, updateContact } from './contacts';
+import { createContact } from './contacts';
 import { reportIncident, reverseIncident, setResponsibleParty } from './incidents';
 import { submitCount } from './inventory';
 import { advanceOrder, cancelOrder, getAvailability, type OrderStatus } from './orders';
 import { openWeek, recordPayment } from './payroll';
-import { createProduct, getProduct, updateProduct } from './products';
+import { createProduct } from './products';
 import { issueReceivable, recordReceivablePayment } from './receivables';
 import { getAuditLog, getProfitAndLoss, getSubLending, type SubLending } from './reports';
 import { updateHelp } from './settings';
@@ -69,52 +69,6 @@ async function productCreated(at = '2026-11-22T10:00:00', actor: Actor = MANAGER
 		throw new Error(result.message);
 	}
 	return lastEventId();
-}
-
-// Productos › Editar by `actor`: the product as it is, with `changes` typed over it.
-async function editProduct(id: number, changes: Record<string, string>, actor: Actor = MANAGER) {
-	const current = await getProduct(db, id, MANAGER);
-	if (null === current) {
-		throw new Error(`Product ${id} not found`);
-	}
-	const form = {
-		id,
-		name: current.name,
-		category: current.category,
-		rental_price: String(current.rentalPrice),
-		active: current.isActive ? 'on' : 'off',
-		...changes
-	};
-	const result = await updateProduct(db, form, actor);
-	if (!result.ok) {
-		throw new Error(result.message);
-	}
-}
-
-// Contactos › Editar: the contact as it is, with `changes` typed over it.
-async function editContact(id: number, changes: Record<string, unknown>) {
-	const current = await getContact(db, id, MANAGER);
-	if (null === current) {
-		throw new Error(`Contact ${id} not found`);
-	}
-	const typed = {
-		phone: current.phone,
-		whatsapp: current.whatsapp,
-		full_name: current.fullName,
-		document_id: current.documentId,
-		email: current.email,
-		address_1: current.address1,
-		address_2: current.address2,
-		bank_account: current.bankAccount,
-		notes: current.notes
-	};
-	// An empty field posts as empty text, never as null.
-	const posted = Object.entries(typed).map(([key, value]) => [key, value ?? '']);
-	const form = { id, ...Object.fromEntries(posted), labels: current.labels, ...changes };
-	const result = await updateContact(db, form, MANAGER);
-	if (!result.ok) {
-		throw new Error(JSON.stringify(result));
-	}
 }
 
 const SECRETS = { pepper: 'test-pepper', adminPassword: 'clave-admin' };
@@ -210,12 +164,12 @@ describe('getAuditLog', () => {
 		const [first, second] = catalog.map((row) => Number(row.id));
 		const client = await fixture.contact();
 		vi.setSystemTime(bogota('2026-11-21T08:00:00'));
-		await editProduct(first, { rental_price: '9.999' });
+		await fixture.editProduct(first, { rental_price: '9.999' });
 		const productEdit = lastEventId();
 		const productCreatedId = await productCreated();
-		await editContact(client, { full_name: 'Diana Zuluaga' });
+		await fixture.editContact(client, { full_name: 'Diana Zuluaga' });
 		const contactEdit = lastEventId();
-		await editProduct(second, { rental_price: '9.999' }, ADMIN);
+		await fixture.editProduct(second, { rental_price: '9.999' }, ADMIN);
 
 		const productEvents = await getAuditLog(db, { entityType: 'PRODUCT' }, MANAGER);
 		const edits = await getAuditLog(db, { action: 'EDITED' }, MANAGER);
@@ -282,7 +236,7 @@ describe('getAuditLog', () => {
 
 	test('each changed field is a column with its raw value before and after', async () => {
 		const id = await fixture.product({ rental_price: '2.500' });
-		await editProduct(id, { rental_price: '2.800', replacement_cost: '95.000' });
+		await fixture.editProduct(id, { rental_price: '2.800', replacement_cost: '95.000' });
 		await fixture.payment(await fixture.order(), { amount: '680.000' });
 
 		const [edit] = (await getAuditLog(db, { entityType: 'PRODUCT', action: 'EDITED' }, MANAGER))
@@ -596,7 +550,7 @@ describe('getSubLending', () => {
 			delivery: '2026-11-27',
 			pickup: '2026-11-27'
 		});
-		await editProduct(retired, { active: 'off' });
+		await fixture.editProduct(retired, { active: 'off' });
 
 		const report = await getSubLending(db, WEEKEND, MANAGER);
 

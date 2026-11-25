@@ -66,9 +66,13 @@ async function newClient(): Promise<void> {
 
 test('without a picked contact, the contact and the employee in one batch, each with its CREATED event', async () => {
 	const id = await hire();
+	const contacts = database.prepare('select id, full_name, document_id from contacts').all();
+	expect(contacts).toHaveLength(1);
+	const [contact] = contacts;
+	const contactId = Number(contact.id);
 	expect(await getEmployee(db, id, MANAGER)).toEqual({
 		id,
-		contactId: 1,
+		contactId,
 		phone: '573152847710',
 		whatsapp: null,
 		fullName: 'Carlos Vélez',
@@ -79,24 +83,22 @@ test('without a picked contact, the contact and the employee in one batch, each 
 		employment: [{ start: '2024-07-15', end: null }],
 		isEmployed: true
 	});
-	const contact = database.prepare('select id, full_name, document_id from contacts').get();
-	expect(contact).toEqual({ id: 1, full_name: 'Carlos Vélez', document_id: '71384902' });
-	expect(database.prepare('select contact_id from employees').get()?.contact_id).toBe(1);
+	expect(contact).toEqual({ id: contactId, full_name: 'Carlos Vélez', document_id: '71384902' });
 	expect(events()).toMatchObject([
-		{ entity_type: 'CONTACT', entity_id: 1, action: 'CREATED' },
+		{ entity_type: 'CONTACT', entity_id: contactId, action: 'CREATED' },
 		{ entity_type: 'EMPLOYEE', entity_id: id, action: 'CREATED' }
 	]);
 });
 
 test('a contact picked from the search is reused, its phone, name and ID number as typed', async () => {
-	await fixture.contact({
+	const jorgeId = await fixture.contact({
 		full_name: 'Jorge Betancur',
 		phone: '300 771 2043',
 		document_id: '71234560',
 		email: 'jorge@b.co'
 	});
 	const candidate = {
-		id: 1,
+		id: jorgeId,
 		fullName: 'Jorge Betancur',
 		phone: '573007712043',
 		whatsapp: null,
@@ -107,14 +109,14 @@ test('a contact picked from the search is reused, its phone, name and ID number 
 		expect(await searchContactCandidates(db, search, MANAGER)).toEqual([candidate]);
 	}
 
-	const id = await hire({ ...carlos, ...jorge, contact_id: '1' });
+	const id = await hire({ ...carlos, ...jorge, contact_id: String(jorgeId) });
 	expect(count('contacts')).toBe(1);
 	expect(await getEmployee(db, id, MANAGER)).toMatchObject({
 		fullName: 'Jorge Iván Betancur',
 		idNumber: '71234567'
 	});
 	const edited = events()[1];
-	expect(edited).toMatchObject({ entity_type: 'CONTACT', entity_id: 1, action: 'EDITED' });
+	expect(edited).toMatchObject({ entity_type: 'CONTACT', entity_id: jorgeId, action: 'EDITED' });
 	expect(JSON.parse(String(edited.after))).toEqual({
 		full_name: 'Jorge Iván Betancur',
 		document_id: '71234567'
@@ -128,30 +130,30 @@ test('a new contact gets its name capitalized; a picked one keeps the name as ty
 	const created = await hire({ ...carlos, full_name: 'carlos vélez' });
 	expect((await getEmployee(db, created, MANAGER))?.fullName).toBe('Carlos Vélez');
 	await newClient();
+	const [client] = await searchContactCandidates(db, '3007712043', MANAGER);
 	const picked = await hire({
 		...carlos,
 		...jorge,
 		full_name: 'jorge iván betancur',
-		contact_id: '2'
+		contact_id: String(client.id)
 	});
 	expect((await getEmployee(db, picked, MANAGER))?.fullName).toBe('jorge iván betancur');
 });
 
 test("a contact that's already another employee's is refused naming them", async () => {
-	await hire();
+	const employee = await getEmployee(db, await hire(), MANAGER);
+	const picked = { ...carlos, document_id: '1', contact_id: String(employee?.contactId) };
 	const refusal = { ok: false, message: 'Carlos Vélez ya está en Personal' };
-	expect(
-		await createEmployee(db, { ...carlos, document_id: '1', contact_id: '1' }, MANAGER)
-	).toEqual(refusal);
+	expect(await createEmployee(db, picked, MANAGER)).toEqual(refusal);
 	expect(count('employees')).toBe(1);
 });
 
 test('without a pick, a shared phone gets a contact of its own', async () => {
 	const bodega = { phone: carlos.phone, full_name: 'Bodega Central', document_id: '900111222' };
-	await fixture.contact(bodega);
-	await hire();
+	const shared = await fixture.contact(bodega);
+	const id = await hire();
 	expect(count('contacts')).toBe(2);
-	expect(database.prepare('select contact_id from employees').get()?.contact_id).toBe(2);
+	expect((await getEmployee(db, id, MANAGER))?.contactId).not.toBe(shared);
 });
 
 test('letters also find the username, without the @ and ignoring case', async () => {
@@ -249,8 +251,9 @@ test('editing name, phone or ID number changes the contact, logged as CONTACT ED
 		{ ...carlos, id, full_name: 'Carlos A. Vélez', phone: '315 284 7711' },
 		MANAGER
 	);
+	const { contactId } = (await getEmployee(db, id, MANAGER))!;
 	const edited = events()[2];
-	expect(edited).toMatchObject({ entity_type: 'CONTACT', entity_id: 1, action: 'EDITED' });
+	expect(edited).toMatchObject({ entity_type: 'CONTACT', entity_id: contactId, action: 'EDITED' });
 	expect(JSON.parse(String(edited.before))).toEqual({
 		phone: '573152847710',
 		full_name: 'Carlos Vélez'

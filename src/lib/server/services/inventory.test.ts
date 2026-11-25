@@ -17,9 +17,7 @@ import {
 	submitAndApproveCount,
 	submitCount
 } from './inventory';
-import { nextOperationalStatus } from '$lib/orders';
-import { advanceOrder, createExtension, getOrder, type OrderStatus } from './orders';
-import { getProduct, updateProduct } from './products';
+import { createExtension, type OrderStatus } from './orders';
 
 let db: D1Database;
 let database: DatabaseSync;
@@ -61,46 +59,6 @@ function countProductEvents(): number {
 	return Number(row.get()?.count);
 }
 
-// Productos › Editar as the manager saves it: the product as it is, with `changes` typed over it.
-async function editProduct(id: number, changes: Record<string, string>) {
-	const current = await getProduct(db, id, MANAGER);
-	const form = {
-		id,
-		name: current?.name,
-		category: current?.category,
-		rental_price: String(current?.rentalPrice),
-		active: current?.isActive ? 'on' : 'off',
-		...changes
-	};
-	const result = await updateProduct(db, form, MANAGER);
-	if (!result.ok) {
-		throw new Error(result.message);
-	}
-}
-
-// Moves an order forward one legal transition at a time, as the status button does.
-async function advanceTo(id: number, target: OrderStatus) {
-	for (let order = await read(id); target !== order.status; order = await read(id)) {
-		const to = nextOperationalStatus({
-			from: order.status,
-			deliveryMethod: order.delivery.method,
-			returnMethod: order.pickup.method
-		});
-		const result = null === to ? null : await advanceOrder(db, { id, status: to }, MANAGER);
-		if (!result?.ok) {
-			throw new Error(`Order ${id} can't reach ${target} from ${order.status}`);
-		}
-	}
-}
-
-async function read(id: number) {
-	const order = await getOrder(db, id, MANAGER);
-	if (null === order) {
-		throw new Error(`Order ${id} not found`);
-	}
-	return order;
-}
-
 test('the items: at least one, whole counted quantities, known keys, a product once', () => {
 	const item = {
 		product_id: CHAIR,
@@ -135,7 +93,7 @@ test('a warehouse login sends a count pending approval, changing no product', as
 	expect(result).toEqual({ ok: true, id: expect.any(Number) });
 	const id = result.ok ? result.id : 0;
 	expect(countProductEvents()).toBe(productEvents);
-	await editProduct(CHAIR, { name: 'Silla Tiffany oro' });
+	await fixture.editProduct(CHAIR, { name: 'Silla Tiffany oro' });
 	expect(count(id)).toMatchObject({
 		status: 'PENDING_APPROVAL',
 		review_note: null,
@@ -800,7 +758,7 @@ test('a count of another product, a stale skip, or a pending or rejected count v
 
 test('an inactive product with a recoverable incident is still suggested', async () => {
 	await loseChairs(10, 'RECOVERABLE');
-	await editProduct(CHAIR, { active: 'off' });
+	await fixture.editProduct(CHAIR, { active: 'off' });
 	expect(await suggested()).toEqual([CHAIR]);
 });
 
@@ -814,7 +772,7 @@ test('«En alquiler» adds the orders out at events; an extension only once its 
 	const extension = { ...chairsOrder(50), pickup_date: '2026-08-18', parent_order_id: original };
 	expect(await createExtension(db, extension, SALES)).toMatchObject({ ok: true });
 	expect(await getUnitsOnRent(db, WAREHOUSE)).toEqual({ [CHAIR]: 600 });
-	await advanceTo(original, 'COMPLETED');
+	await fixture.advanceTo(original, 'COMPLETED');
 	expect(await getUnitsOnRent(db, DRIVER)).toEqual({ [CHAIR]: 450 });
 });
 

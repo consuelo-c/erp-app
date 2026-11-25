@@ -47,6 +47,15 @@ function create(input: Record<string, unknown>, actor: Actor = ADMIN) {
 	return createLogin({ db, pepper }, { employee_id: '', ...input }, actor);
 }
 
+// A login through Logins › Nuevo, as the admin: its id; a refusal throws with its reason.
+async function created(input: Record<string, unknown>): Promise<number> {
+	const result = await create(input);
+	if (!result.ok) {
+		throw new Error(result.message);
+	}
+	return result.id;
+}
+
 function logInAs(username: string, password: string) {
 	// With no `admin` login yet, the first attempt creates it from the secret.
 	const secrets = { pepper, adminPassword: 'clave-admin' };
@@ -69,12 +78,11 @@ function lastEvent() {
 
 test('creates a login with several roles and an employee; it can log in', async () => {
 	const carlos = await hire('Carlos Vélez', '71384902');
-	const result = await create({ ...bodega, employee_id: String(carlos) });
-	expect(result.ok).toBe(true);
+	const id = await created({ ...bodega, employee_id: String(carlos) });
 
 	expect(await listLogins(db, ADMIN)).toEqual([
 		{
-			id: 1,
+			id,
 			username: 'bodega',
 			roles: ['WAREHOUSE', 'DRIVER'],
 			employee: { id: carlos, fullName: 'Carlos Vélez' },
@@ -117,17 +125,19 @@ test('rejects the reserved username, a taken one, no roles and a short password'
 });
 
 test('changing roles logs the old and new set, in ROLES order', async () => {
-	await create(bodega);
-	expect((await updateRoles(db, { id: '1', roles: ['DRIVER', 'SALES'] }, ADMIN)).ok).toBe(true);
-	expect((await getLogin(db, 1, ADMIN))?.roles).toEqual(['SALES', 'DRIVER']);
+	const id = await created(bodega);
+	expect((await updateRoles(db, { id: String(id), roles: ['DRIVER', 'SALES'] }, ADMIN)).ok).toBe(
+		true
+	);
+	expect((await getLogin(db, id, ADMIN))?.roles).toEqual(['SALES', 'DRIVER']);
 	const edited = database.prepare("select before, after from events where action = 'EDITED'").get();
 	expect(JSON.parse(String(edited?.before))).toEqual({ roles: '["WAREHOUSE","DRIVER"]' });
 	expect(JSON.parse(String(edited?.after))).toEqual({ roles: '["SALES","DRIVER"]' });
 });
 
 test('an admin cannot drop ADMIN from their own login', async () => {
-	await create({ ...bodega, username: 'admin', roles: ['ADMIN'] });
-	expect(await updateRoles(db, { id: 1, roles: ['MANAGER'] }, ADMIN)).toEqual({
+	const id = await created({ ...bodega, username: 'admin', roles: ['ADMIN'] });
+	expect(await updateRoles(db, { id, roles: ['MANAGER'] }, ADMIN)).toEqual({
 		ok: false,
 		message: 'No puedes quitarte el rol de Administrador'
 	});
@@ -150,13 +160,11 @@ test('only the currently employed without a login can be given one', async () =>
 });
 
 test('setting a password ends the sessions and keeps the hash out of events', async () => {
-	await create(bodega);
+	const id = await created(bodega);
 	await logInAs('bodega', 'clave-bodega');
 	expect(sessionCount()).toBe(1);
 
-	expect((await setPassword({ db, pepper }, { id: 1, password: 'clave-nueva' }, ADMIN)).ok).toBe(
-		true
-	);
+	expect((await setPassword({ db, pepper }, { id, password: 'clave-nueva' }, ADMIN)).ok).toBe(true);
 	expect(sessionCount()).toBe(0);
 	expect(await logInAs('bodega', 'clave-bodega')).toBeNull();
 	expect(await logInAs('bodega', 'clave-nueva')).not.toBeNull();
@@ -171,15 +179,15 @@ test('setting a password ends the sessions and keeps the hash out of events', as
 test('reassigning moves the login, ends its sessions and leaves the previous employee as is', async () => {
 	const carlos = await hire('Carlos Vélez', '71384902');
 	const ana = await hire('Ana Pérez', '1036452118');
-	await create({ ...bodega, employee_id: String(carlos) });
+	const id = await created({ ...bodega, employee_id: String(carlos) });
 	await logInAs('bodega', 'clave-bodega');
 	const carlosRow = () => database.prepare('select * from employees where id = ?').get(carlos);
 	const before = carlosRow();
 
-	const input = { id: 1, employee_id: String(ana), password: 'clave-de-ana' };
+	const input = { id, employee_id: String(ana), password: 'clave-de-ana' };
 	expect((await reassignLogin({ db, pepper }, input, ADMIN)).ok).toBe(true);
 
-	expect((await getLogin(db, 1, ADMIN))?.employee).toEqual({ id: ana, fullName: 'Ana Pérez' });
+	expect((await getLogin(db, id, ADMIN))?.employee).toEqual({ id: ana, fullName: 'Ana Pérez' });
 	expect(carlosRow()).toEqual(before);
 	expect(sessionCount()).toBe(0);
 	expect(await logInAs('bodega', 'clave-de-ana')).not.toBeNull();
@@ -190,8 +198,8 @@ test('reassigning moves the login, ends its sessions and leaves the previous emp
 });
 
 test('reassigning to the same employee is rejected', async () => {
-	await create(bodega);
-	const input = { id: 1, employee_id: '', password: 'clave-nueva' };
+	const id = await created(bodega);
+	const input = { id, employee_id: '', password: 'clave-nueva' };
 	expect(await reassignLogin({ db, pepper }, input, ADMIN)).toEqual({
 		ok: false,
 		message: 'Escoge un empleado distinto al actual'
@@ -199,27 +207,27 @@ test('reassigning to the same employee is rejected', async () => {
 });
 
 test('deactivating keeps the row with active = 0 and ends its sessions', async () => {
-	await create(bodega);
+	const id = await created(bodega);
 	await logInAs('bodega', 'clave-bodega');
-	expect((await deactivateLogin(db, { id: 1 }, ADMIN)).ok).toBe(true);
+	expect((await deactivateLogin(db, { id }, ADMIN)).ok).toBe(true);
 
-	expect(database.prepare('select active from users where id = 1').get()).toEqual({ active: 0 });
+	expect(database.prepare('select active from users where id = ?').get(id)).toEqual({ active: 0 });
 	expect(sessionCount()).toBe(0);
 	expect(await logInAs('bodega', 'clave-bodega')).toBeNull();
-	expect(await deactivateLogin(db, { id: 1 }, ADMIN)).toEqual({
+	expect(await deactivateLogin(db, { id }, ADMIN)).toEqual({
 		ok: false,
 		message: 'Este login ya está inactivo'
 	});
 });
 
 test('reactivating lets the login in again with its password', async () => {
-	await create(bodega);
-	expect(await reactivateLogin(db, { id: 1 }, ADMIN)).toEqual({
+	const id = await created(bodega);
+	expect(await reactivateLogin(db, { id }, ADMIN)).toEqual({
 		ok: false,
 		message: 'Este login ya está activo'
 	});
-	await deactivateLogin(db, { id: 1 }, ADMIN);
-	expect((await reactivateLogin(db, { id: 1 }, ADMIN)).ok).toBe(true);
+	await deactivateLogin(db, { id }, ADMIN);
+	expect((await reactivateLogin(db, { id }, ADMIN)).ok).toBe(true);
 
 	expect(await logInAs('bodega', 'clave-bodega')).not.toBeNull();
 	const event = lastEvent();
@@ -228,8 +236,8 @@ test('reactivating lets the login in again with its password', async () => {
 });
 
 test('an admin cannot deactivate their own login', async () => {
-	await create({ ...bodega, username: 'admin', roles: ['ADMIN'] });
-	expect(await deactivateLogin(db, { id: 1 }, ADMIN)).toEqual({
+	const id = await created({ ...bodega, username: 'admin', roles: ['ADMIN'] });
+	expect(await deactivateLogin(db, { id }, ADMIN)).toEqual({
 		ok: false,
 		message: 'No puedes desactivar tu propio login'
 	});

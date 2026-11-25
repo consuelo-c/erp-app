@@ -4,7 +4,6 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { createFixture, DRIVER, MANAGER, SALES, WAREHOUSE } from '../db/fixture';
 import { addDays } from '$lib/datetime';
 import { getQuoteState, QUOTE_STATE_SQL } from '$lib/quotes';
-import { getContact, updateContact } from './contacts';
 import { submitAndApproveCount } from './inventory';
 import {
 	cancelOrder,
@@ -13,7 +12,6 @@ import {
 	offeredPaymentConcepts,
 	type OrderStatus
 } from './orders';
-import { getProduct, updateProduct } from './products';
 import {
 	convertQuote,
 	createQuote,
@@ -40,6 +38,13 @@ import { getSystemSettings, updateSystemSettings } from './settings';
 let db: D1Database;
 let database: DatabaseSync;
 let fixture: ReturnType<typeof createFixture>;
+let POSTOBON: number;
+let LUZ_MARINA: number;
+let TIFFANY: number;
+let ROUND_TABLE: number;
+let WINE_GLASS: number;
+let RIMAX: number;
+let quote1043: ReturnType<typeof designBrief>;
 
 // The clock on Sunday 1 November 2026, 10:00 a.m. in Bogotá.
 const NOVEMBER_1 = new Date('2026-11-01T15:00:00Z');
@@ -49,104 +54,57 @@ beforeEach(async () => {
 	vi.setSystemTime(NOVEMBER_1);
 	fixture = createFixture();
 	({ db, database } = fixture);
-	await fixture.contact({ full_name: 'Postobón S.A.', phone: '576045765100' });
-	await fixture.contact({ full_name: 'Luz Marina Restrepo', phone: '573104428890' });
-	await fixture.product({
+	POSTOBON = await fixture.contact({ full_name: 'Postobón S.A.', phone: '576045765100' });
+	LUZ_MARINA = await fixture.contact({ full_name: 'Luz Marina Restrepo', phone: '573104428890' });
+	TIFFANY = await fixture.product({
 		name: 'Silla Tiffany dorada',
 		rental_price: '2500',
 		total_quantity: '500'
 	});
-	await fixture.product({
+	ROUND_TABLE = await fixture.product({
 		name: 'Mesa redonda 10 puestos',
 		rental_price: '12000',
 		total_quantity: '500'
 	});
-	await fixture.product({
+	WINE_GLASS = await fixture.product({
 		name: 'Copa para vino tinto',
 		rental_price: '900',
 		total_quantity: '500'
 	});
-	await fixture.product({
+	RIMAX = await fixture.product({
 		name: 'Silla Rimax',
 		rental_price: '1500',
 		total_quantity: '500',
 		active: 'off'
 	});
+	quote1043 = designBrief();
 });
 
 afterEach(() => {
 	vi.useRealTimers();
 });
 
-const POSTOBON = 1;
-const LUZ_MARINA = 2;
-const RIMAX = 4;
-
-// Productos › Editar as the manager saves it: the product as it is, with `changes` typed over it.
-async function editProduct(id: number, changes: Record<string, string>) {
-	const current = await getProduct(db, id, MANAGER);
-	if (null === current) {
-		throw new Error(`Product ${id} not found`);
-	}
-	const form = {
-		id,
-		name: current.name,
-		category: current.category,
-		rental_price: String(current.rentalPrice),
-		active: current.isActive ? 'on' : 'off',
-		...changes
-	};
-	const result = await updateProduct(db, form, MANAGER);
-	if (!result.ok) {
-		throw new Error(result.message);
-	}
-}
-
-// Contactos › Editar as `actor` saves it: the contact as it is, with `changes` typed over it.
-async function editContact(id: number, changes: Record<string, unknown>, actor = MANAGER) {
-	const current = await getContact(db, id, MANAGER);
-	if (null === current) {
-		throw new Error(`Contact ${id} not found`);
-	}
-	const typed = {
-		phone: current.phone,
-		whatsapp: current.whatsapp,
-		full_name: current.fullName,
-		document_id: current.documentId,
-		email: current.email,
-		address_1: current.address1,
-		address_2: current.address2,
-		bank_account: current.bankAccount,
-		notes: current.notes
-	};
-	// An empty field posts as empty text, never as null.
-	const posted = Object.entries(typed).map(([key, value]) => [key, value ?? '']);
-	const form = { id, ...Object.fromEntries(posted), labels: current.labels, ...changes };
-	const result = await updateContact(db, form, actor);
-	if (!result.ok) {
-		throw new Error(JSON.stringify(result));
-	}
-}
-
 // #1043's lines and terms, quoted.
-const quote1043 = {
-	client_id: LUZ_MARINA,
-	client_name: 'Luz Marina Restrepo',
-	event_date: '2026-12-12',
-	valid_until: '2026-12-01',
-	rental_days: 2,
-	quote_items: [
-		{ product_id: 1, qty: 120, unit_price: 2500 },
-		{ product_id: 2, qty: 12, unit_price: 12000 },
-		{ product_id: 3, qty: 120, unit_price: 900 }
-	],
-	discount: 104000,
-	transport_cost: 180000,
-	transported_by: 'COMPANY',
-	address_1: 'Cra 43A #18-95, El Poblado',
-	address_2: 'Salón Social Torre Verde, piso 2',
-	notes: 'Precios incluyen montaje y desmontaje'
-};
+function designBrief() {
+	return {
+		client_id: LUZ_MARINA,
+		client_name: 'Luz Marina Restrepo',
+		event_date: '2026-12-12',
+		valid_until: '2026-12-01',
+		rental_days: 2,
+		quote_items: [
+			{ product_id: TIFFANY, qty: 120, unit_price: 2500 },
+			{ product_id: ROUND_TABLE, qty: 12, unit_price: 12000 },
+			{ product_id: WINE_GLASS, qty: 120, unit_price: 900 }
+		],
+		discount: 104000,
+		transport_cost: 180000,
+		transported_by: 'COMPANY',
+		address_1: 'Cra 43A #18-95, El Poblado',
+		address_2: 'Salón Social Torre Verde, piso 2',
+		notes: 'Precios incluyen montaje y desmontaje'
+	};
+}
 
 async function read(id: number) {
 	const quote = await getQuote(db, id, SALES);
@@ -186,7 +144,6 @@ test('attributes take the event address and the notes, every key optional, and n
 
 test("#1043's lines total $1.180.000, worked out by the service, ignoring any total sent", async () => {
 	const id = await fixture.quote({ ...quote1043, items_total: 1, quote_total: 1 });
-	expect(id).toBe(1);
 	expect(await read(id)).toMatchObject({
 		state: 'VALID',
 		orderId: null,
@@ -219,7 +176,7 @@ test('transport left empty is «por acordar», NULL and out of the total; 0 is a
 });
 
 test('lines follow the order rules: none, a repeated product or an inactive one is refused', async () => {
-	const line = { product_id: 1, qty: 10, unit_price: 2500 };
+	const line = { product_id: TIFFANY, qty: 10, unit_price: 2500 };
 	const refused = [
 		{ quote_items: [] },
 		{ quote_items: [line, { ...line, qty: 5 }] },
@@ -359,7 +316,7 @@ test('«Cliente nuevo» capitalizes the name, and the quote freezes the capitali
 });
 
 test("a quote freezes the picked contact's username, not the typed one; «Cliente nuevo» saves the typed one", async () => {
-	await editContact(LUZ_MARINA, { whatsapp: 'LuzMarinaR' });
+	await fixture.editContact(LUZ_MARINA, { whatsapp: 'LuzMarinaR' });
 	const picked = await fixture.quote({ ...quote1043, client_whatsapp: '@otro_usuario' });
 	expect((await read(picked)).client).toMatchObject({
 		phone: '573104428890',
@@ -388,7 +345,7 @@ test("the client's name and phone are the quote's snapshot: renaming the contact
 		...quote1043,
 		client_name: 'Luz Marina Restrepo (mamá de la novia)'
 	});
-	await editContact(LUZ_MARINA, { full_name: 'Luz M. Restrepo', phone: '573000000000' });
+	await fixture.editContact(LUZ_MARINA, { full_name: 'Luz M. Restrepo', phone: '573000000000' });
 	expect((await read(id)).client).toEqual({
 		name: 'Luz Marina Restrepo (mamá de la novia)',
 		phone: '573104428890',
@@ -399,9 +356,11 @@ test("the client's name and phone are the quote's snapshot: renaming the contact
 });
 
 test('creating logs a QUOTE CREATED event; created_by and updated_by are the actor', async () => {
-	expect(await createQuote(db, quote1043, SALES)).toEqual({ ok: true, id: 1 });
+	const created = await createQuote(db, quote1043, SALES);
+	expect(created).toEqual({ ok: true, id: expect.any(Number) });
 	expect(quoteEvents()).toEqual([expect.objectContaining({ action: 'CREATED', before: null })]);
-	const row = database.prepare('select created_by, updated_by from quotes where id = 1').get();
+	const select = 'select created_by, updated_by from quotes where id = ?';
+	const row = database.prepare(select).get(created.ok ? created.id : null);
 	expect(row).toEqual({ created_by: 'sales', updated_by: 'sales' });
 });
 
@@ -419,9 +378,9 @@ test('an edit logs only the changed fields; a save with no change logs nothing',
 
 test('lines already on the quote keep their frozen name and price; an added line takes today’s', async () => {
 	const id = await fixture.quote(quote1043);
-	await editProduct(1, { name: 'Silla Tiffany', rental_price: '2800' });
-	await editProduct(3, { rental_price: '1000' });
-	const items = [quote1043.quote_items[0], { product_id: 3, qty: 50, unit_price: 1000 }];
+	await fixture.editProduct(TIFFANY, { name: 'Silla Tiffany', rental_price: '2800' });
+	await fixture.editProduct(WINE_GLASS, { rental_price: '1000' });
+	const items = [quote1043.quote_items[0], { product_id: WINE_GLASS, qty: 50, unit_price: 1000 }];
 	await updateQuote(db, { ...quote1043, id, quote_items: items }, SALES);
 	const lines = (await read(id)).items;
 	expect(lines.map((line) => [line.name, line.list_price, line.unit_price])).toEqual([
@@ -469,9 +428,9 @@ test('WAREHOUSE and DRIVER get a 403 creating, editing or reading a quote', asyn
 	expect(database.prepare('select count(*) as count from quotes').get()).toEqual({ count: 1 });
 });
 
-// Today is 1 November: #1 valid through today, #2 expired yesterday, #3 converted. Saved on 31
-// October, the last day #2 and #3 were valid, and #3 converted that day; Jorge's `whatsapp`, if any,
-// is frozen into #3.
+// Today is 1 November: one quote valid through today, one expired yesterday, one converted. Saved
+// on 31 October, the last day the other two were valid, and converted that day; Jorge's `whatsapp`,
+// if any, is frozen into the converted one.
 async function createThreeStates(jorgeFields: Record<string, string> = {}) {
 	vi.setSystemTime(new Date('2026-10-31T15:00:00Z'));
 	const jorgeName = 'Jorge Iván Betancur';
@@ -480,15 +439,20 @@ async function createThreeStates(jorgeFields: Record<string, string> = {}) {
 		phone: '573007712043',
 		...jorgeFields
 	});
-	const line = { product_id: 1, qty: 10, unit_price: 2500 };
+	const line = { product_id: TIFFANY, qty: 10, unit_price: 2500 };
 	const listed = { rental_days: 1, quote_items: [line], discount: 0 };
 	const postobon = { client_id: POSTOBON, client_name: 'Postobón S.A.' };
-	await fixture.quote({ ...listed, ...postobon, valid_until: '2026-11-01' });
-	await fixture.quote({ ...listed, client_id: LUZ_MARINA, valid_until: '2026-10-31' });
+	const valid = await fixture.quote({ ...listed, ...postobon, valid_until: '2026-11-01' });
+	const expired = await fixture.quote({
+		...listed,
+		client_id: LUZ_MARINA,
+		valid_until: '2026-10-31'
+	});
 	const client = { client_id: jorge, client_name: jorgeName };
 	const converted = await fixture.quote({ ...listed, ...client, valid_until: '2026-10-31' });
 	await convert(converted, { ...client, ...listed, order_items: [line] });
 	vi.setSystemTime(NOVEMBER_1);
+	return { valid, expired, converted };
 }
 
 async function listIds(input: object) {
@@ -496,21 +460,21 @@ async function listIds(input: object) {
 }
 
 test('the state filter: valid by default, expired, converted, all, and a tampered value is the default', async () => {
-	await createThreeStates();
-	expect(await listIds({})).toEqual([1]);
-	expect(await listIds({ state: 'VALID' })).toEqual([1]);
-	expect(await listIds({ state: 'EXPIRED' })).toEqual([2]);
-	expect(await listIds({ state: 'CONVERTED' })).toEqual([3]);
-	expect(await listIds({ state: 'ALL' })).toEqual([3, 2, 1]);
+	const { valid, expired, converted } = await createThreeStates();
+	expect(await listIds({})).toEqual([valid]);
+	expect(await listIds({ state: 'VALID' })).toEqual([valid]);
+	expect(await listIds({ state: 'EXPIRED' })).toEqual([expired]);
+	expect(await listIds({ state: 'CONVERTED' })).toEqual([converted]);
+	expect(await listIds({ state: 'ALL' })).toEqual([converted, expired, valid]);
 	const tampered = await listQuotes(db, { state: 'REJECTED' }, SALES);
 	expect([tampered.filters.state, tampered.quotes.map((quote) => quote.id)]).toEqual([
 		'VALID',
-		[1]
+		[valid]
 	]);
 });
 
 test("the SQL state is the state function's, for every row, with Bogotá's today", async () => {
-	await createThreeStates();
+	const { valid, expired } = await createThreeStates();
 	vi.setSystemTime(new Date('2026-11-01T04:30:00Z')); // 11:30 p.m. on 31 October in Bogotá
 	const today = '2026-10-31';
 	const rows = database
@@ -523,29 +487,29 @@ test("the SQL state is the state function's, for every row, with Bogotá's today
 		};
 		expect(row.state).toBe(getQuoteState(validity, today));
 	}
-	expect(await listIds({ state: 'VALID' })).toEqual([2, 1]);
+	expect(await listIds({ state: 'VALID' })).toEqual([expired, valid]);
 	expect(await listIds({ state: 'EXPIRED' })).toEqual([]);
 });
 
 test("the text filter is the order list's: a name in another word order, or three digits of the phone", async () => {
-	await createThreeStates();
-	expect(await listIds({ state: 'ALL', text: 'restrepo  LUZ' })).toEqual([2]);
-	expect(await listIds({ state: 'ALL', text: '576 5' })).toEqual([1]);
-	expect(await listIds({ state: 'ALL', text: 'betancur', page: '1' })).toEqual([3]);
+	const { valid, expired, converted } = await createThreeStates();
+	expect(await listIds({ state: 'ALL', text: 'restrepo  LUZ' })).toEqual([expired]);
+	expect(await listIds({ state: 'ALL', text: '576 5' })).toEqual([valid]);
+	expect(await listIds({ state: 'ALL', text: 'betancur', page: '1' })).toEqual([converted]);
 	expect(await listIds({ state: 'VALID', text: 'restrepo' })).toEqual([]);
 });
 
 test("letters also find the snapshot's username, without the @ and ignoring case", async () => {
-	await createThreeStates({ whatsapp: 'LuzMarinaR' });
-	expect(await listIds({ state: 'ALL', text: 'luzma' })).toEqual([3]);
-	expect(await listIds({ state: 'ALL', text: '@LUZMA' })).toEqual([3]);
+	const { converted } = await createThreeStates({ whatsapp: 'LuzMarinaR' });
+	expect(await listIds({ state: 'ALL', text: 'luzma' })).toEqual([converted]);
+	expect(await listIds({ state: 'ALL', text: '@LUZMA' })).toEqual([converted]);
 });
 
 test('each row carries what the list shows: the state, the event date or none, and a pending transport', async () => {
-	await fixture.quote({ ...quote1043, transport_cost: null, event_date: '' });
+	const id = await fixture.quote({ ...quote1043, transport_cost: null, event_date: '' });
 	const [quote] = (await listQuotes(db, {}, SALES)).quotes;
 	expect(quote).toEqual({
-		id: 1,
+		id,
 		clientName: 'Luz Marina Restrepo',
 		eventDate: null,
 		validUntil: '2026-12-01',
@@ -558,20 +522,23 @@ test('each row carries what the list shows: the state, the event date or none, a
 test('newest first, 20 a page; a page past the last shows the last; no quote at all is told apart', async () => {
 	const empty = await listQuotes(db, {}, SALES);
 	expect([empty.hasQuotes, empty.total, empty.pageCount]).toEqual([false, 0, 1]);
-	const line = { product_id: 1, qty: 10, unit_price: 2500 };
+	const line = { product_id: TIFFANY, qty: 10, unit_price: 2500 };
+	const ids: number[] = [];
 	for (let i = 0; i < 23; i += 1) {
-		await fixture.quote({ client_id: POSTOBON, valid_until: '2026-12-01', quote_items: [line] });
+		const quote = { client_id: POSTOBON, valid_until: '2026-12-01', quote_items: [line] };
+		ids.push(await fixture.quote(quote));
 	}
 	const first = await listQuotes(db, {}, SALES);
 	expect(first.quotes).toHaveLength(QUOTES_PAGE_SIZE);
 	expect([first.quotes[0].id, first.total, first.pageCount, first.hasQuotes]).toEqual([
-		23,
+		ids[22],
 		23,
 		2,
 		true
 	]);
 	const last = await listQuotes(db, { page: '9' }, SALES);
-	expect([last.filters.page, last.quotes.map((quote) => quote.id)]).toEqual([2, [3, 2, 1]]);
+	const oldestThree = ids.slice(0, 3).reverse();
+	expect([last.filters.page, last.quotes.map((quote) => quote.id)]).toEqual([2, oldestThree]);
 	const none = await listQuotes(db, { state: 'EXPIRED' }, SALES);
 	expect([none.total, none.hasQuotes]).toEqual([0, true]);
 });
@@ -586,9 +553,9 @@ test('WAREHOUSE and DRIVER get a 403 on the list', async () => {
 test('the detail names the lines whose product was deactivated since: they stay on the quote', async () => {
 	const id = await fixture.quote(quote1043);
 	expect((await getQuoteDetail(db, id, SALES))?.inactiveProductIds).toEqual([]);
-	await editProduct(2, { active: 'off' });
+	await fixture.editProduct(ROUND_TABLE, { active: 'off' });
 	const quote = await getQuoteDetail(db, id, SALES);
-	expect([quote?.inactiveProductIds, quote?.items.length]).toEqual([[2], 3]);
+	expect([quote?.inactiveProductIds, quote?.items.length]).toEqual([[ROUND_TABLE], 3]);
 	expect(await getQuoteDetail(db, 99, SALES)).toBeNull();
 });
 
@@ -686,13 +653,13 @@ function countRows() {
 
 test('«Duplicar» reprices every line from today’s catalog: name, list price and price to charge', async () => {
 	// Quoted at list $2.500 and charged $2.200; the product now lists at $2.800 under a new name.
-	const lines = [{ product_id: 1, qty: 120, unit_price: 2200 }];
+	const lines = [{ product_id: TIFFANY, qty: 120, unit_price: 2200 }];
 	const id = await fixture.quote({ ...quote1043, quote_items: lines, discount: 0 });
-	await editProduct(1, { name: 'Silla Tiffany oro', rental_price: '2800' });
+	await fixture.editProduct(TIFFANY, { name: 'Silla Tiffany oro', rental_price: '2800' });
 	const copy = await getQuoteDuplicate(db, id, SALES);
 	expect(copy?.draft.items).toEqual([
 		{
-			product_id: 1,
+			product_id: TIFFANY,
 			name: 'Silla Tiffany oro',
 			qty: 120,
 			list_price: 2800,
@@ -716,20 +683,20 @@ test('«Duplicar» reprices every line from today’s catalog: name, list price 
 
 test('«Duplicar» keeps «por acordar», and leaves inactive products out, naming them', async () => {
 	const items = [...quote1043.quote_items, { product_id: RIMAX, qty: 10, unit_price: 1500 }];
-	await editProduct(RIMAX, { active: 'on' });
+	await fixture.editProduct(RIMAX, { active: 'on' });
 	const id = await fixture.quote({ ...quote1043, quote_items: items, transport_cost: null });
-	await editProduct(2, { active: 'off' });
-	await editProduct(RIMAX, { active: 'off' });
+	await fixture.editProduct(ROUND_TABLE, { active: 'off' });
+	await fixture.editProduct(RIMAX, { active: 'off' });
 	const copy = await getQuoteDuplicate(db, id, SALES);
 	expect(copy?.draft.transportCost).toBeNull();
-	expect(copy?.draft.items.map((item) => item.product_id)).toEqual([1, 3]);
+	expect(copy?.draft.items.map((item) => item.product_id)).toEqual([TIFFANY, WINE_GLASS]);
 	expect(copy?.removed).toEqual(['Mesa redonda 10 puestos', 'Silla Rimax']);
 });
 
 test('a quote whose every product is inactive opens empty, and saving it needs a line', async () => {
 	const id = await fixture.quote(quote1043);
-	for (const productId of [1, 2, 3]) {
-		await editProduct(productId, { active: 'off' });
+	for (const productId of [TIFFANY, ROUND_TABLE, WINE_GLASS]) {
+		await fixture.editProduct(productId, { active: 'off' });
 	}
 	const copy = await getQuoteDuplicate(db, id, SALES);
 	expect([copy?.draft.items, copy?.removed.length]).toEqual([[], 3]);
@@ -841,7 +808,7 @@ function countOrders() {
 
 test('the form opens filled from the quote, with its client as the contact is today, and writes nothing', async () => {
 	const id = await fixture.quote(quote1043);
-	await editContact(LUZ_MARINA, { full_name: 'Luz Marina Restrepo Gil' });
+	await fixture.editContact(LUZ_MARINA, { full_name: 'Luz Marina Restrepo Gil' });
 	const before = { ...countRows(), ...countOrders() };
 	const conversion = await getQuoteConversion(db, id, SALES);
 	expect(conversion).toMatchObject({
@@ -858,12 +825,12 @@ test('the form opens filled from the quote, with its client as the contact is to
 test('the conversion marks a client carrying Vetado, for the warning under «Cliente»', async () => {
 	const id = await fixture.quote(quote1043);
 	expect((await getQuoteConversion(db, id, SALES))?.client.isBanned).toBe(false);
-	await editContact(LUZ_MARINA, { labels: ['BANNED'] });
+	await fixture.editContact(LUZ_MARINA, { labels: ['BANNED'] });
 	expect((await getQuoteConversion(db, id, SALES))?.client.isBanned).toBe(true);
 });
 
 test('a client carrying Vetado saves a quote like any other, with no extra step', async () => {
-	await editContact(LUZ_MARINA, { labels: ['BANNED'] });
+	await fixture.editContact(LUZ_MARINA, { labels: ['BANNED'] });
 	expect((await read(await fixture.quote(quote1043))).clientId).toBe(LUZ_MARINA);
 });
 
@@ -896,12 +863,12 @@ test('saving creates a CONFIRMED order and links the quote, with ORDER CREATED a
 
 test('the lines come exactly as quoted, a product deactivated since included', async () => {
 	const lines = [
-		{ product_id: 1, qty: 120, unit_price: 2200 },
-		{ product_id: 3, qty: 120, unit_price: 900 }
+		{ product_id: TIFFANY, qty: 120, unit_price: 2200 },
+		{ product_id: WINE_GLASS, qty: 120, unit_price: 900 }
 	];
 	const id = await fixture.quote({ ...quote1043, quote_items: lines, discount: 0 });
-	await editProduct(1, { name: 'Silla Tiffany', rental_price: '2800' });
-	await editProduct(3, { active: 'off' });
+	await fixture.editProduct(TIFFANY, { name: 'Silla Tiffany', rental_price: '2800' });
+	await fixture.editProduct(WINE_GLASS, { active: 'off' });
 	const orderId = await convert(id, { order_items: lines, discount: 0 });
 	const order = await getOrder(db, orderId, SALES);
 	expect(order?.items.map((item) => [item.name, item.list_price, item.unit_price])).toEqual([
@@ -948,12 +915,12 @@ test("the order's CREATED event carries CONFIRMED, and no STATUS_CHANGED follows
 
 test('saving checks availability once: what is short comes back, «Guardar de todos modos» saves', async () => {
 	const id = await fixture.quote(quote1043);
-	const count = { items: [{ product_id: 1, counted_qty: 100 }] };
+	const count = { items: [{ product_id: TIFFANY, counted_qty: 100 }] };
 	expect(await submitAndApproveCount(db, count, MANAGER)).toMatchObject({ ok: true });
 	const short = await convertQuote(db, { quote: id, order: orderInput() }, SALES);
 	expect(short).toMatchObject({
 		ok: false,
-		shortages: [{ productId: 1, name: 'Silla Tiffany dorada', short: 20 }]
+		shortages: [{ productId: TIFFANY, name: 'Silla Tiffany dorada', short: 20 }]
 	});
 	expect(countOrders()).toEqual({ orders: 0 });
 	expect((await read(id)).state).toBe('VALID');
@@ -1004,8 +971,8 @@ test('an order that came from no quote has no source quote', async () => {
 // «Cotizar de nuevo»: order #1 from quote1043, its lines charged below list, then the catalog moves.
 async function requotedOrder(status: OrderStatus = 'CONFIRMED') {
 	const lines = [
-		{ product_id: 1, qty: 120, unit_price: 2200 },
-		{ product_id: 2, qty: 12, unit_price: 12000 }
+		{ product_id: TIFFANY, qty: 120, unit_price: 2200 },
+		{ product_id: ROUND_TABLE, qty: 12, unit_price: 12000 }
 	];
 	const delivery = { address_1: 'Cra 70 #44-21, Laureles', address_2: 'Salón de eventos' };
 	const orderId = await fixture.order({
@@ -1018,8 +985,8 @@ async function requotedOrder(status: OrderStatus = 'CONFIRMED') {
 		notes: 'Entrar por el portón de servicio',
 		delivery_attributes: { ...delivery, method: 'COMPANY_DELIVERY' }
 	});
-	await editProduct(1, { name: 'Silla Tiffany oro', rental_price: '2800' });
-	await editProduct(2, { active: 'off' });
+	await fixture.editProduct(TIFFANY, { name: 'Silla Tiffany oro', rental_price: '2800' });
+	await fixture.editProduct(ROUND_TABLE, { active: 'off' });
 	return orderId;
 }
 
@@ -1042,7 +1009,7 @@ test('«Cotizar de nuevo» fills the quote from the order at today’s prices, i
 				notes: 'Entrar por el portón de servicio',
 				items: [
 					{
-						product_id: 1,
+						product_id: TIFFANY,
 						name: 'Silla Tiffany oro',
 						qty: 120,
 						list_price: 2800,
@@ -1052,8 +1019,8 @@ test('«Cotizar de nuevo» fills the quote from the order at today’s prices, i
 				]
 			}
 		});
-		await editProduct(1, { name: 'Silla Tiffany dorada', rental_price: '2500' });
-		await editProduct(2, { active: 'on' });
+		await fixture.editProduct(TIFFANY, { name: 'Silla Tiffany dorada', rental_price: '2500' });
+		await fixture.editProduct(ROUND_TABLE, { active: 'on' });
 	}
 });
 
@@ -1115,7 +1082,7 @@ test("the printout carries the contact's document as it is when printed, and non
 		company: { COMPANY_NAME: expect.any(String) }
 	});
 	const { clientId } = await read(id);
-	await editContact(Number(clientId), { document_id: '43521789' }, SALES);
+	await fixture.editContact(Number(clientId), { document_id: '43521789' }, SALES);
 	expect((await getQuotePrintout(db, id, SALES))?.document).toBe('43521789');
 	expect(await getQuotePrintout(db, 99, SALES)).toBeNull();
 });
@@ -1187,7 +1154,7 @@ test("the form's availability counts from the day before the event to the day af
 	await convert(await fixture.quote(quote1043));
 	const chairsFor = async (eventDate: string) => {
 		const availability = await getQuoteAvailability(db, { event_date: eventDate }, SALES);
-		return availability?.find(({ productId }) => 1 === productId)?.available;
+		return availability?.find(({ productId }) => TIFFANY === productId)?.available;
 	};
 	expect(await chairsFor('2026-12-09')).toBe(500);
 	expect(await chairsFor('2026-12-10')).toBe(380);
@@ -1200,7 +1167,7 @@ test('without an event date the form gets no availability, and a saved quote res
 	expect(await getQuoteAvailability(db, { event_date: '' }, SALES)).toBeNull();
 	expect(await getQuoteAvailability(db, { event_date: null }, SALES)).toBeNull();
 	const availability = await getQuoteAvailability(db, { event_date: '2026-12-12' }, SALES);
-	expect(availability?.find(({ productId }) => 1 === productId)?.available).toBe(500);
+	expect(availability?.find(({ productId }) => TIFFANY === productId)?.available).toBe(500);
 });
 
 test("WAREHOUSE and DRIVER get a 403 asking for the quote form's availability", async () => {

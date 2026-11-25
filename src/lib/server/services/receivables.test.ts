@@ -3,7 +3,6 @@ import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { ADMIN, createFixture, DRIVER, MANAGER, SALES, WAREHOUSE } from '../db/fixture';
 import { getCashBook, getReceipt, recordOffset } from './cash';
-import { getContact, updateContact } from './contacts';
 import {
 	cancelOrder,
 	createExtension,
@@ -113,32 +112,6 @@ function receivableLinks() {
 
 async function cancel(orderId: number): Promise<void> {
 	const result = await cancelOrder(db, { id: orderId, reason: 'El cliente canceló' }, MANAGER);
-	if (!result.ok) {
-		throw new Error(JSON.stringify(result));
-	}
-}
-
-// Read with getContact and posted back whole, as the contact's form does.
-async function editContact(id: number, changes: Record<string, unknown>) {
-	const current = await getContact(db, id, MANAGER);
-	if (null === current) {
-		throw new Error(`Contact ${id} not found`);
-	}
-	const typed = {
-		phone: current.phone,
-		whatsapp: current.whatsapp,
-		full_name: current.fullName,
-		document_id: current.documentId,
-		email: current.email,
-		address_1: current.address1,
-		address_2: current.address2,
-		bank_account: current.bankAccount,
-		notes: current.notes
-	};
-	// An empty field posts as empty text, never as null.
-	const posted = Object.entries(typed).map(([key, value]) => [key, value ?? '']);
-	const form = { id, ...Object.fromEntries(posted), labels: current.labels, ...changes };
-	const result = await updateContact(db, form, MANAGER);
 	if (!result.ok) {
 		throw new Error(JSON.stringify(result));
 	}
@@ -580,13 +553,13 @@ test('the detail carries its fields and orders, and hides an automatic document'
 			{ id: second, eventDate: '2026-10-10', orderTotal: 500000 }
 		]
 	});
-	await editContact(POSTOBON, { document_id: '8909039395' });
+	await fixture.editContact(POSTOBON, { document_id: '8909039395' });
 	expect((await detailOf(id)).client.documentId).toBe('8909039395');
 });
 
 test("the detail reads the client's username live from the contact, phone or not", async () => {
 	const { id } = await billedPair();
-	await editContact(POSTOBON, { ...REAL_DOCUMENT, phone: '', whatsapp: 'PostobonSA' });
+	await fixture.editContact(POSTOBON, { ...REAL_DOCUMENT, phone: '', whatsapp: 'PostobonSA' });
 	expect((await detailOf(id)).client).toMatchObject({ phone: null, whatsapp: 'PostobonSA' });
 });
 
@@ -646,7 +619,7 @@ test('?texto= finds the contact by a name in another word order, or digits of th
 
 test("?texto= with letters also finds the contact's username, without the @, ignoring case", async () => {
 	const { postobon } = await issuedForTwoClients();
-	await editContact(POSTOBON, { ...REAL_DOCUMENT, whatsapp: 'LuzMarinaR' });
+	await fixture.editContact(POSTOBON, { ...REAL_DOCUMENT, whatsapp: 'LuzMarinaR' });
 	expect(await listIds({ text: 'luzma' })).toEqual([postobon]);
 	expect(await listIds({ text: '@LUZMA' })).toEqual([postobon]);
 });
@@ -871,7 +844,7 @@ test('a payment links the cuenta as an INSTALLMENT, whatever concept is posted, 
 test("payee is the client's name when recorded: a later rename leaves it", async () => {
 	const { id } = await billedPair();
 	const movementId = await paid(id);
-	await editContact(POSTOBON, { ...REAL_DOCUMENT, full_name: 'Otro nombre' });
+	await fixture.editContact(POSTOBON, { ...REAL_DOCUMENT, full_name: 'Otro nombre' });
 	expect(readMovement(movementId)).toMatchObject({ payee: 'Postobón S.A.' });
 });
 
@@ -1005,7 +978,7 @@ test('the printout reads the client live, and each order with its lines, by numb
 	const lower = await orderFor({ order_items: lineOf(300) });
 	const higher = await orderFor({ order_items: lineOf(500) });
 	const id = await issued([higher, lower]);
-	await editContact(POSTOBON, {
+	await fixture.editContact(POSTOBON, {
 		document_id: '8909039395',
 		address_1: 'Calle 52',
 		address_2: 'Medellín'

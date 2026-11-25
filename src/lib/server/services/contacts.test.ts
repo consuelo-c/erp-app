@@ -2,6 +2,7 @@ import { isHttpError } from '@sveltejs/kit';
 import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import { actorWith, createFixture, MANAGER, SALES } from '../db/fixture';
+import { getEmployee } from './employees';
 import {
 	capitalizeName,
 	contactAttributesSchema,
@@ -335,8 +336,8 @@ test('Sales is rejected changing etiquetas, a set bank account or the document',
 
 test("an employee's document is Manager's and Admin's, and never left empty", async () => {
 	const ana = { phone: '310 442 8890', full_name: 'Ana Pérez', document_id: '1036452118' };
-	await fixture.employee({ roles: ['WAREHOUSE'], ...ana });
-	const id = 1;
+	const { employeeId } = await fixture.employee({ roles: ['WAREHOUSE'], ...ana });
+	const id = (await getEmployee(db, Number(employeeId), MANAGER))!.contactId;
 	expect(await getContact(db, id, SALES)).toMatchObject({ isEmployee: true });
 	expect((await listContacts(db, {}, SALES)).contacts).toMatchObject([{ isEmployee: true }]);
 	await fixture.contact({ phone: '300 771 2043', full_name: 'Jorge Iván Betancur' });

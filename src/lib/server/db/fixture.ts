@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { getTodaysDate } from '$lib/datetime';
 import { nextOperationalStatus, type OperationalStatus } from '$lib/orders';
 import type { Actor, Role } from '../actor';
-import { createContact, getContact } from '../services/contacts';
+import { createContact, getContact, updateContact } from '../services/contacts';
 import { createEmployee } from '../services/employees';
 import { createLogin, getLogin } from '../services/logins';
 import {
@@ -15,7 +15,7 @@ import {
 	recordOrderPayment,
 	type OrderStatus
 } from '../services/orders';
-import { createProduct } from '../services/products';
+import { createProduct, getProduct, updateProduct } from '../services/products';
 import { convertQuote, createQuote } from '../services/quotes';
 import { createMemoryD1 } from './memory-d1';
 
@@ -129,15 +129,21 @@ async function quote(context: Context, fields: Fields = {}): Promise<number> {
 	return savedId('quote', await createQuote(context.db, { ...defaults, ...fields }, MANAGER));
 }
 
-// One legal transition at a time, as the status button moves it, so each leaves its event.
+/**
+ * An existing order moved forward to `target`, one legal transition at a time as the status button
+ * moves it, so each leaves its event.
+ */
 async function advanceTo(
-	db: D1Database,
+	{ db }: Context,
 	id: number,
 	target: OperationalStatus | 'CONFIRMED'
 ): Promise<void> {
 	for (;;) {
 		const current = await getOrder(db, id, MANAGER);
-		if (null === current || target === current.status) {
+		if (null === current) {
+			throw new Error(`advanceTo(): order ${id} not found`);
+		}
+		if (target === current.status) {
 			return;
 		}
 		const to = nextOperationalStatus({
@@ -146,20 +152,28 @@ async function advanceTo(
 			returnMethod: current.pickup.method
 		});
 		if (null === to) {
-			throw new Error(`order() can't reach ${target} from ${current.status} by its methods`);
+			throw new Error(`advanceTo() can't reach ${target} from ${current.status} by its methods`);
 		}
-		savedId('order', await advanceOrder(db, { id, status: to }, MANAGER));
+		savedId('advanceTo', await advanceOrder(db, { id, status: to }, MANAGER));
 	}
 }
 
-// The quote the order converts: the order's client and lines, so they read as quoted.
-async function quoteFor(context: Context, input: Fields, client: Client): Promise<number> {
-	const quoted = { quote_items: input.order_items, rental_days: input.rental_days ?? 1 };
-	return quote(context, null === client.client_id ? quoted : { ...client, ...quoted });
+// The quote the order converts: the order's client and lines, so they read as quoted. A «Cliente
+// nuevo» order's quote is a «Cliente nuevo» one too, typed with the same name and phone.
+async function quoteFor(context: Context, order: Fields): Promise<number> {
+	const { client_id, client_name, client_phone, client_whatsapp } = order;
+	const client = { client_id, client_name, client_phone, client_whatsapp };
+	return quote(context, {
+		...client,
+		quote_items: order.order_items,
+		rental_days: order.rental_days
+	});
 }
 
+type Conversion = { order: Fields; force: boolean };
+
 // «Guardar pedido» on the quote's form: born CONFIRMED, «Guardar de todos modos» unless `force: false`.
-async function convert(context: Context, input: Fields, force: boolean): Promise<number> {
+async function convert(context: Context, { order: input, force }: Conversion): Promise<number> {
 	const client = await clientOf(context, input);
 	const lines = input.order_items ?? (await defaultLines(context));
 	const defaults = {
@@ -174,7 +188,7 @@ async function convert(context: Context, input: Fields, force: boolean): Promise
 		transport_cost: 0
 	};
 	const order = { ...defaults, ...input };
-	const quoteId = await quoteFor(context, order, client);
+	const quoteId = await quoteFor(context, order);
 	const conversion = { quote: quoteId, order, force };
 	return savedId('order', await convertQuote(context.db, conversion, MANAGER));
 }
@@ -191,14 +205,65 @@ async function order(context: Context, fields: OrderFields = {}): Promise<number
 		force = true,
 		...input
 	} = fields;
-	const id = await convert(context, input, force);
+	const id = await convert(context, { order: input, force });
 	if ('CANCELLED' !== status) {
-		await advanceTo(context.db, id, status);
+		await advanceTo(context, id, status);
 		return id;
 	}
-	await advanceTo(context.db, id, cancelledFrom);
+	await advanceTo(context, id, cancelledFrom);
 	savedId('order', await cancelOrder(context.db, { id, reason }, MANAGER));
 	return id;
+}
+
+/** An edit through a form: the row's id, what is typed over it, and who saves it. */
+type Edit = { id: number; changes: Fields; actor: Actor };
+
+// An empty field posts as empty text, as a form does, never as null.
+function asPosted(values: Record<string, string | number | null>): Record<string, string> {
+	return Object.fromEntries(
+		Object.entries(values).map(([key, value]) => [key, null === value ? '' : String(value)])
+	);
+}
+
+/** Contactos › Editar: the contact read back and its whole form posted, `changes` typed over it. */
+async function editContact({ db }: Context, { id, changes, actor }: Edit): Promise<void> {
+	const current = await getContact(db, id, MANAGER);
+	if (null === current) {
+		throw new Error(`editContact(): contact ${id} not found`);
+	}
+	const typed = asPosted({
+		phone: current.phone,
+		whatsapp: current.whatsapp,
+		full_name: current.fullName,
+		document_id: current.documentId,
+		email: current.email,
+		address_1: current.address1,
+		address_2: current.address2,
+		bank_account: current.bankAccount,
+		notes: current.notes
+	});
+	const form = { id, ...typed, labels: current.labels, ...changes };
+	savedId('editContact', await updateContact(db, form, actor));
+}
+
+/** Productos › Editar: the product read back and its whole form posted, `changes` typed over it. */
+async function editProduct({ db }: Context, { id, changes, actor }: Edit): Promise<void> {
+	const current = await getProduct(db, id, MANAGER);
+	if (null === current) {
+		throw new Error(`editProduct(): product ${id} not found`);
+	}
+	const typed = asPosted({
+		name: current.name,
+		category: current.category,
+		variant_group: current.variantGroup,
+		variant_name: current.variantName,
+		description: current.description,
+		website_url: current.websiteUrl,
+		replacement_cost: current.replacementCost,
+		rental_price: current.rentalPrice,
+		active: current.isActive ? 'on' : 'off'
+	});
+	savedId('editProduct', await updateProduct(db, { id, ...typed, ...changes }, actor));
 }
 
 /** A «Pago» in cash today through the order's payment entry: its real movement and receipt. */
@@ -267,6 +332,12 @@ export function createFixture({ catalog = false }: { catalog?: boolean } = {}) {
 		product: (fields?: Fields) => product(context, fields),
 		quote: (fields?: Fields) => quote(context, fields),
 		order: (fields?: OrderFields) => order(context, fields),
+		advanceTo: (id: number, target: OperationalStatus | 'CONFIRMED') =>
+			advanceTo(context, id, target),
+		editContact: (id: number, changes: Fields, actor: Actor = MANAGER) =>
+			editContact(context, { id, changes, actor }),
+		editProduct: (id: number, changes: Fields, actor: Actor = MANAGER) =>
+			editProduct(context, { id, changes, actor }),
 		payment: (orderId: number, fields?: Fields) => payment(context, orderId, fields),
 		employee: (fields: EmployeeFields) => employee(context, fields)
 	};
