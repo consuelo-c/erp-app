@@ -901,6 +901,37 @@ test('DRIVER marks DELIVERED with a note: one STATUS_CHANGED carries it, no EDIT
 	expect((await read(id)).pickup.notes).toBeNull();
 });
 
+test('a note on an external-carrier trip saves, logging the note but not the carrier', async () => {
+	const external = {
+		...order1043.delivery_attributes,
+		method: 'EXTERNAL_CARRIER',
+		carrier_id: WILSON
+	};
+	const id = await create({
+		status: 'PICKED',
+		delivery_attributes: external,
+		pickup_attributes: { ...external, time: '09:00' }
+	});
+	const earlier = orderEvents().length;
+	const delivery = { id, status: 'OUT_FOR_DELIVERY', notes: 'Portería cerrada' };
+	expect(await advanceOrder(db, delivery, DRIVER)).toEqual({ ok: true, id });
+	await advanceOrder(db, { id, status: 'DELIVERED' }, DRIVER);
+	const pickup = { id, status: 'OUT_FOR_PICKUP', notes: 'Llamar antes' };
+	expect(await advanceOrder(db, pickup, DRIVER)).toEqual({ ok: true, id });
+	expect(await status(id)).toBe('OUT_FOR_PICKUP');
+	const changes = orderEvents().slice(earlier);
+	expect(changes.at(0)).toEqual({
+		action: 'STATUS_CHANGED',
+		before: { status: 'PICKED', 'delivery_attributes.notes': null },
+		after: { status: 'OUT_FOR_DELIVERY', 'delivery_attributes.notes': 'Portería cerrada' }
+	});
+	expect(changes.at(-1)).toEqual({
+		action: 'STATUS_CHANGED',
+		before: { status: 'DELIVERED', 'pickup_attributes.notes': null },
+		after: { status: 'OUT_FOR_PICKUP', 'pickup_attributes.notes': 'Llamar antes' }
+	});
+});
+
 test('a pickup transition writes the pickup note; blank clears it, unchanged logs nothing', async () => {
 	const id = await create({ status: 'DELIVERED' });
 	await advanceOrder(db, { id, status: 'OUT_FOR_PICKUP', notes: 'Llamar antes' }, DRIVER);
