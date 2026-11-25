@@ -4,10 +4,12 @@ import { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import { hashPassword, PASSWORD_ITERATIONS } from '../password';
 import { logIn } from '../services/auth';
+import { correctIncident, reportIncident, reverseIncident } from '../services/incidents';
+import { reverseCount, submitAndApproveCount } from '../services/inventory';
 import { getProduct } from '../services/products';
 import { getQuote } from '../services/quotes';
 import { getSystemSettings, updateSystemSettings } from '../services/settings';
-import { createFixture, MANAGER, SALES, TEST_PASSWORD, TEST_PEPPER } from './fixture';
+import { createFixture, DRIVER, MANAGER, SALES, TEST_PASSWORD, TEST_PEPPER } from './fixture';
 
 // Workers adds timingSafeEqual to crypto.subtle; Node doesn't, so the tests lend it node:crypto's.
 Object.assign(crypto.subtle, { timingSafeEqual });
@@ -184,6 +186,30 @@ test('orders: the database rejects an unknown status, delivery method or return 
 	);
 	const order = database.prepare('select has_incident, discount, attributes from orders').get();
 	expect(order).toEqual({ has_incident: 0, discount: 0, attributes: '{}' });
+});
+
+test('incidents: the database rejects an unknown status or responsible party', () => {
+	insertContact('1036452118');
+	insertOrder({});
+	const insert = (party: string, status: string) =>
+		database
+			.prepare(
+				`insert into incidents (order_id, incident_items, incident_description, responsible_party, status, created_at, created_by, updated_at, updated_by) values (1, '[]', 'x', ?, ?, ${AUDIT})`
+			)
+			.run(party, status);
+	expect(() => insert('NEIGHBOR', 'ACTIVE')).toThrow(/CHECK constraint failed/);
+	expect(() => insert('UNDETERMINED', 'CLOSED')).toThrow(/CHECK constraint failed/);
+});
+
+test('inventory_counts: the database rejects an unknown status', () => {
+	const insert = (status: string) =>
+		database
+			.prepare(
+				`insert into inventory_counts (status, inventory_items, created_at, created_by, updated_at, updated_by) values (?, '[]', ${AUDIT})`
+			)
+			.run(status);
+	expect(() => insert('WITHDRAWN')).toThrow(/CHECK constraint failed/);
+	expect(() => insert('PENDING_APPROVAL')).not.toThrow();
 });
 
 test('orders: public_token is unique and client_id must be a contact', () => {
@@ -634,4 +660,59 @@ test('a stored replacement cost that is not whole pesos above zero fails on read
 		.prepare('update products set attributes = ? where id = ?')
 		.run('{"replacement_cost":-3}', id);
 	await expect(getProduct(fixture.db, id, MANAGER)).rejects.toThrow();
+});
+
+test("an order's stale incident flag is worked out again by the next correction", async () => {
+	const fixture = createFixture();
+	const chairs = await fixture.product({ name: 'Silla Tiffany dorada', total_quantity: '500' });
+	const id = await fixture.order({
+		order_items: [{ product_id: chairs, qty: 120, unit_price: 2500 }],
+		status: 'DELIVERED'
+	});
+	const lost = [{ product_id: chairs, qty: 2, outcome: 'LOST' }];
+	const input = { order_id: String(id), incident_description: 'Llegaron mojadas', items: lost };
+	const reported = await reportIncident(fixture.db, input, DRIVER);
+	const incident = reported.ok ? reported.id : 0;
+	fixture.database.prepare('update orders set has_incident = 0 where id = ?').run(id);
+	const recoverable = [{ product_id: chairs, qty: 2, outcome: 'RECOVERABLE' }];
+	const correction = {
+		id: String(incident),
+		incident_description: 'Llegaron rotas',
+		items: recoverable
+	};
+	expect(await correctIncident(fixture.db, correction, DRIVER)).toMatchObject({ ok: true });
+	const row = (column: string, table: string, rowId: number) =>
+		Number(
+			fixture.database.prepare(`select ${column} from ${table} where id = ?`).get(rowId)?.[column]
+		);
+	expect(row('has_incident', 'orders', id)).toBe(1);
+	expect(row('total_quantity', 'products', chairs)).toBe(500);
+});
+
+test("an incident's reversal that lands after a count's approval blocks reversing that count", async () => {
+	const fixture = createFixture();
+	const chairs = await fixture.product({ name: 'Silla Tiffany dorada', total_quantity: '800' });
+	const order = await fixture.order({
+		order_items: [{ product_id: chairs, qty: 120, unit_price: 2500 }],
+		status: 'DELIVERED'
+	});
+	const lost = [{ product_id: chairs, qty: 4, outcome: 'LOST' }];
+	const input = { order_id: order, incident_description: 'No volvieron', items: lost };
+	const reported = await reportIncident(fixture.db, input, DRIVER);
+	const incident = reported.ok ? reported.id : 0;
+	const counted = { items: [{ product_id: chairs, counted_qty: 790 }] };
+	const approved = await submitAndApproveCount(fixture.db, counted, MANAGER);
+	const id = approved.ok ? approved.id : 0;
+	const reversal = { id: incident, reason: 'Aparecieron' };
+	expect(await reverseIncident(fixture.db, reversal, MANAGER)).toMatchObject({ ok: false });
+	// Nothing locks: a reversal checked just before the approval can still land after it.
+	fixture.database
+		.prepare(
+			"insert into events (entity_type, entity_id, action, actor_username, actor_kind, created_at) values ('INCIDENT', ?, 'REVERSED', 'manager', 'user', 0)"
+		)
+		.run(incident);
+	expect(await reverseCount(fixture.db, { id, reason: 'Error' }, MANAGER)).toMatchObject({
+		ok: false,
+		message: 'Silla Tiffany dorada ya tuvo otro movimiento de inventario después de este conteo'
+	});
 });

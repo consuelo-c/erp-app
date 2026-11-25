@@ -1,8 +1,7 @@
-import type { DatabaseSync } from 'node:sqlite';
 import { isHttpError } from '@sveltejs/kit';
-import { beforeEach, expect, test } from 'vitest';
+import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
 import type { Actor, Role } from '../actor';
-import { createMemoryD1 } from '../db/memory-d1';
+import { actorWith, createFixture, DRIVER, MANAGER, SALES, WAREHOUSE } from '../db/fixture';
 import {
 	correctIncident,
 	incidentItemsSchema,
@@ -12,80 +11,46 @@ import {
 	reverseIncident,
 	setResponsibleParty
 } from './incidents';
-import { approveCount, reverseCount, submitCount } from './inventory';
-import { advanceOrder, cancelOrder, getOrderDetail } from './orders';
-import { createOrder } from '../db/test-orders';
-
-const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
-const warehouse: Actor = { ...sales, username: 'bodega', roles: ['WAREHOUSE'] };
-const driver: Actor = { ...sales, username: 'conductor', roles: ['DRIVER'] };
-const manager: Actor = { ...sales, username: 'gerente', roles: ['MANAGER'] };
+import { approveCount, reverseCount, submitAndApproveCount, submitCount } from './inventory';
+import { advanceOrder, getOrderDetail, type OrderStatus } from './orders';
+import { getProduct, updateProduct } from './products';
 
 let db: D1Database;
-let database: DatabaseSync;
+let fixture: ReturnType<typeof createFixture>;
+let CHAIR: number;
+let TABLE: number;
+let TABLECLOTH: number;
 
-const AUDIT = "0, 'admin', 0, 'admin'";
-
-beforeEach(() => {
-	({ db, database } = createMemoryD1());
-	database
-		.prepare(
-			`insert into contacts (phone, full_name, document_id, labels, created_at, created_by, updated_at, updated_by) values ('573104428890', 'Luz Marina Restrepo', '@1', '[]', ${AUDIT})`
-		)
-		.run();
-	for (const name of ['Silla Tiffany dorada', 'Mesa redonda 10 puestos', 'Mantel blanco']) {
-		database
-			.prepare(
-				`insert into products (name, category, rental_price, total_quantity, created_at, created_by, updated_at, updated_by) values (?, 'CHAIRS_TABLES', 1000, 500, ${AUDIT})`
-			)
-			.run(name);
-	}
+beforeEach(async () => {
+	fixture = createFixture();
+	({ db } = fixture);
+	const stocked = (name: string) => fixture.product({ name, total_quantity: '500' });
+	CHAIR = await stocked('Silla Tiffany dorada');
+	TABLE = await stocked('Mesa redonda 10 puestos');
+	TABLECLOTH = await stocked('Mantel blanco');
 });
 
-const CHAIR = 1;
-const TABLE = 2;
-const TABLECLOTH = 3;
+const LINES = () => [
+	{ product_id: CHAIR, qty: 120, unit_price: 2500 },
+	{ product_id: TABLE, qty: 12, unit_price: 12000 }
+];
 
-const address = { address_1: 'Calle 10 # 43-12, El Poblado', address_2: null };
-
-async function createOrderIn(status: string): Promise<number> {
-	const result = await createOrder(
-		db,
-		{
-			client_id: 1,
-			client_name: 'Luz Marina Restrepo',
-			event_date: '2026-08-15',
-			delivery_date: '2026-08-14',
-			pickup_date: '2026-08-16',
-			rental_days: 2,
-			delivery_attributes: { method: 'COMPANY_DELIVERY', time: '14:00', ...address },
-			pickup_attributes: { method: 'COMPANY_PICKUP', time: '09:00', ...address },
-			order_items: [
-				{ product_id: CHAIR, qty: 120, unit_price: 2500 },
-				{ product_id: TABLE, qty: 12, unit_price: 12000 }
-			]
-		},
-		sales
-	);
-	if (!result.ok) {
-		throw new Error(JSON.stringify(result.errors));
-	}
-	database.prepare('update orders set status = ? where id = ?').run(status, result.id);
-	return result.id;
+function createOrderIn(status: OrderStatus): Promise<number> {
+	return fixture.order({ order_items: LINES(), status });
 }
 
 function stock(id: number): number {
-	const row = database.prepare('select total_quantity from products where id = ?').get(id);
+	const row = fixture.database.prepare('select total_quantity from products where id = ?').get(id);
 	return Number(row?.total_quantity);
 }
 
 function hasIncident(orderId: number): number {
-	const row = database.prepare('select has_incident from orders where id = ?').get(orderId);
+	const row = fixture.database.prepare('select has_incident from orders where id = ?').get(orderId);
 	return Number(row?.has_incident);
 }
 
 function events(entityType: string, action: string) {
-	return database
+	return fixture.database
 		.prepare(
 			'select entity_id, actor_username, before, after, reason from events where entity_type = ? and action = ? order by id'
 		)
@@ -99,21 +64,43 @@ function events(entityType: string, action: string) {
 		}));
 }
 
-function report(orderId: number, items: object[], actor: Actor = warehouse) {
+function report(orderId: number, items: object[], actor: Actor = WAREHOUSE) {
 	const input = { order_id: String(orderId), incident_description: ' Llegaron mojadas ', items };
 	return reportIncident(db, input, actor);
 }
 
-test('the database rejects an unknown status or responsible party', () => {
-	const insert = (party: string, status: string) =>
-		database
-			.prepare(
-				`insert into incidents (order_id, incident_items, incident_description, responsible_party, status, created_at, created_by, updated_at, updated_by) values (1, '[]', 'x', ?, ?, ${AUDIT})`
-			)
-			.run(party, status);
-	expect(() => insert('NEIGHBOR', 'ACTIVE')).toThrow(/CHECK constraint failed/);
-	expect(() => insert('UNDETERMINED', 'CLOSED')).toThrow(/CHECK constraint failed/);
-});
+// A report that must be taken: its incident's id.
+async function reported(orderId: number, items: object[], actor: Actor = WAREHOUSE) {
+	const result = await report(orderId, items, actor);
+	if (!result.ok) {
+		throw new Error(result.message);
+	}
+	return result.id;
+}
+
+function incidentRow(id: number) {
+	return fixture.database.prepare('select * from incidents where id = ?').get(id);
+}
+
+// Productos › Editar with «Activo» off, the rest as it is.
+async function deactivate(id: number) {
+	const current = await getProduct(db, id, MANAGER);
+	const form = {
+		id,
+		name: current?.name,
+		category: current?.category,
+		rental_price: String(current?.rentalPrice),
+		active: 'off'
+	};
+	const result = await updateProduct(db, form, MANAGER);
+	if (!result.ok) {
+		throw new Error(result.message);
+	}
+}
+
+function incidentCount() {
+	return fixture.database.prepare('select count(*) as count from incidents').get();
+}
 
 test('the items: at least one, whole quantities, known outcomes and keys, a product once per outcome', () => {
 	const item = { product_id: CHAIR, name: 'Silla Tiffany dorada', qty: 4, outcome: 'LOST' };
@@ -127,34 +114,36 @@ test('the items: at least one, whole quantities, known outcomes and keys, a prod
 });
 
 test('an order not yet with the client, or cancelled, takes no incident', async () => {
-	for (const status of ['CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY', 'CANCELLED']) {
+	for (const status of ['CONFIRMED', 'PICKED', 'OUT_FOR_DELIVERY', 'CANCELLED'] as const) {
 		const id = await createOrderIn(status);
 		const result = await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }]);
 		expect(result).toMatchObject({ ok: false });
 		expect(hasIncident(id)).toBe(0);
 	}
-	expect(database.prepare('select count(*) as count from incidents').get()).toEqual({ count: 0 });
+	expect(incidentCount()).toEqual({ count: 0 });
 	expect(stock(CHAIR)).toBe(500);
 });
 
-async function cancelledFrom(status: string): Promise<number> {
-	const id = await createOrderIn(status);
-	const result = await cancelOrder(db, { id, reason: 'El camión llegó tarde' }, sales);
-	expect(result).toMatchObject({ ok: true });
-	return id;
+function cancelledFrom(status: 'CONFIRMED' | 'PICKED' | 'OUT_FOR_DELIVERY'): Promise<number> {
+	return fixture.order({
+		order_items: LINES(),
+		status: 'CANCELLED',
+		cancelledFrom: status,
+		reason: 'El camión llegó tarde'
+	});
 }
 
 test('an order cancelled on its way takes an incident like any other; from the warehouse, none', async () => {
 	const onItsWay = await cancelledFrom('OUT_FOR_DELIVERY');
 	const damaged = [{ product_id: CHAIR, qty: 3, outcome: 'UNRECOVERABLE' }];
-	expect(await report(onItsWay, damaged, sales)).toMatchObject({ ok: true });
+	expect(await report(onItsWay, damaged, SALES)).toMatchObject({ ok: true });
 	expect(hasIncident(onItsWay)).toBe(1);
 	expect(stock(CHAIR)).toBe(497);
-	for (const status of ['CONFIRMED', 'PICKED']) {
+	for (const status of ['CONFIRMED', 'PICKED'] as const) {
 		const id = await cancelledFrom(status);
-		expect(await report(id, damaged, sales)).toMatchObject({ ok: false });
+		expect(await report(id, damaged, SALES)).toMatchObject({ ok: false });
 	}
-	const detail = await getOrderDetail(db, onItsWay, sales);
+	const detail = await getOrderDetail(db, onItsWay, SALES);
 	expect(detail?.cancellation).toMatchObject({ cancelledFrom: 'OUT_FOR_DELIVERY' });
 });
 
@@ -180,9 +169,8 @@ test("only the order's products, up to each line's quantity across outcomes", as
 
 test('an all-recoverable incident: born undetermined, flags the order, leaves inventory alone', async () => {
 	const id = await createOrderIn('COMPLETED');
-	const result = await report(id, [{ product_id: CHAIR, qty: 6, outcome: 'RECOVERABLE' }]);
-	expect(result).toEqual({ ok: true, id: 1 });
-	expect(database.prepare('select * from incidents').get()).toMatchObject({
+	const incident = await reported(id, [{ product_id: CHAIR, qty: 6, outcome: 'RECOVERABLE' }]);
+	expect(incidentRow(incident)).toMatchObject({
 		order_id: id,
 		incident_description: 'Llegaron mojadas',
 		responsible_party: 'UNDETERMINED',
@@ -190,8 +178,8 @@ test('an all-recoverable incident: born undetermined, flags the order, leaves in
 		reversal_reason: null,
 		reversed_by: null,
 		reversed_at: null,
-		created_by: 'bodega',
-		updated_by: 'bodega'
+		created_by: 'warehouse',
+		updated_by: 'warehouse'
 	});
 	expect(stock(CHAIR)).toBe(500);
 	expect(hasIncident(id)).toBe(1);
@@ -206,12 +194,12 @@ test('a mixed incident subtracts only the lost and unusable, each product once, 
 		{ product_id: CHAIR, qty: 2, outcome: 'UNRECOVERABLE' },
 		{ product_id: TABLE, qty: 1, outcome: 'UNRECOVERABLE' }
 	];
-	expect(await report(id, items, driver)).toMatchObject({ ok: true });
+	const incident = await reported(id, items, DRIVER);
 	expect([stock(CHAIR), stock(TABLE)]).toEqual([494, 499]);
 	expect(events('INCIDENT', 'CREATED')).toEqual([
 		{
-			entityId: 1,
-			actor: 'conductor',
+			entityId: incident,
+			actor: 'driver',
 			before: null,
 			after: {
 				order_id: id,
@@ -232,13 +220,13 @@ test('a mixed incident subtracts only the lost and unusable, each product once, 
 	expect(events('PRODUCT', 'INVENTORY_ADJUSTED')).toEqual([
 		{
 			entityId: CHAIR,
-			actor: 'conductor',
+			actor: 'driver',
 			before: { total_quantity: 500 },
 			after: { total_quantity: 494 }
 		},
 		{
 			entityId: TABLE,
-			actor: 'conductor',
+			actor: 'driver',
 			before: { total_quantity: 500 },
 			after: { total_quantity: 499 }
 		}
@@ -247,7 +235,9 @@ test('a mixed incident subtracts only the lost and unusable, each product once, 
 
 test('a deactivated product is still reported, and inventory may go negative', async () => {
 	const id = await createOrderIn('DELIVERED');
-	database.prepare('update products set active = 0, total_quantity = 2 where id = ?').run(CHAIR);
+	await submitAndApproveCount(db, { items: [{ product_id: CHAIR, counted_qty: 2 }] }, MANAGER);
+	await deactivate(CHAIR);
+	expect(await getProduct(db, CHAIR, MANAGER)).toMatchObject({ isActive: false });
 	expect(await report(id, [{ product_id: CHAIR, qty: 5, outcome: 'LOST' }])).toMatchObject({
 		ok: true
 	});
@@ -256,18 +246,18 @@ test('a deactivated product is still reported, and inventory may go negative', a
 
 test('an incident on a staged order is no edit: it never reads as modified after staging', async () => {
 	const id = await createOrderIn('CONFIRMED');
-	for (const status of ['PICKED', 'OUT_FOR_DELIVERY', 'DELIVERED']) {
-		await advanceOrder(db, { id, status }, driver);
+	for (const status of ['PICKED', 'OUT_FOR_DELIVERY', 'DELIVERED'] as const) {
+		await advanceOrder(db, { id, status }, DRIVER);
 	}
 	await report(id, [{ product_id: CHAIR, qty: 1, outcome: 'LOST' }]);
-	await report(id, [{ product_id: TABLE, qty: 1, outcome: 'RECOVERABLE' }], sales);
-	expect(database.prepare('select count(*) as count from incidents').get()).toEqual({ count: 2 });
+	await report(id, [{ product_id: TABLE, qty: 1, outcome: 'RECOVERABLE' }], SALES);
+	expect(incidentCount()).toEqual({ count: 2 });
 	expect(hasIncident(id)).toBe(1);
 	expect(events('ORDER', 'EDITED')).toEqual([]);
-	expect((await getOrderDetail(db, id, sales))?.modifiedAfterStagingAt).toBeNull();
+	expect((await getOrderDetail(db, id, SALES))?.modifiedAfterStagingAt).toBeNull();
 });
 
-function reverse(id: number, actor: Actor = manager) {
+function reverse(id: number, actor: Actor = MANAGER) {
 	return reverseIncident(db, { id: String(id), reason: ' Las sillas aparecieron ' }, actor);
 }
 
@@ -278,83 +268,92 @@ test('reversing gives the lost and unusable back, records who, when and why, and
 		{ product_id: CHAIR, qty: 3, outcome: 'RECOVERABLE' },
 		{ product_id: TABLE, qty: 1, outcome: 'UNRECOVERABLE' }
 	];
-	await report(id, items);
-	database.prepare('update products set total_quantity = 300 where id = ?').run(CHAIR);
-	expect(await reverse(1)).toEqual({ ok: true, id: 1 });
+	const incident = await reported(id, items);
+	// Another order loses chairs meanwhile: the reversal adds to the stock as it is now.
+	const other = await fixture.order({
+		order_items: [{ product_id: CHAIR, qty: 200, unit_price: 2500 }],
+		status: 'COMPLETED'
+	});
+	await reported(other, [{ product_id: CHAIR, qty: 196, outcome: 'LOST' }]);
+	expect(stock(CHAIR)).toBe(300);
+	expect(await reverse(incident)).toEqual({ ok: true, id: incident });
 	expect([stock(CHAIR), stock(TABLE)]).toEqual([304, 500]);
-	expect(database.prepare('select * from incidents').get()).toMatchObject({
+	expect(incidentRow(incident)).toMatchObject({
 		status: 'REVERSED',
 		reversal_reason: 'Las sillas aparecieron',
-		reversed_by: 'gerente',
+		reversed_by: 'manager',
 		reversed_at: expect.any(Number),
-		updated_by: 'gerente'
+		updated_by: 'manager'
 	});
 	expect(hasIncident(id)).toBe(0);
 	expect(events('INCIDENT', 'REVERSED')).toEqual([
 		{
-			entityId: 1,
-			actor: 'gerente',
+			entityId: incident,
+			actor: 'manager',
 			reason: 'Las sillas aparecieron',
 			before: { status: 'ACTIVE', reversal_reason: null, reversed_by: null, reversed_at: null },
 			after: {
 				status: 'REVERSED',
 				reversal_reason: 'Las sillas aparecieron',
-				reversed_by: 'gerente',
+				reversed_by: 'manager',
 				reversed_at: expect.any(Number)
 			}
 		}
 	]);
-	expect(events('PRODUCT', 'INVENTORY_ADJUSTED').slice(2)).toEqual([
+	expect(events('PRODUCT', 'INVENTORY_ADJUSTED').slice(3)).toEqual([
 		{
 			entityId: CHAIR,
-			actor: 'gerente',
+			actor: 'manager',
 			before: { total_quantity: 300 },
 			after: { total_quantity: 304 }
 		},
 		{
 			entityId: TABLE,
-			actor: 'gerente',
+			actor: 'manager',
 			before: { total_quantity: 499 },
 			after: { total_quantity: 500 }
 		}
 	]);
-	const [incident] = await listIncidents(db, id, manager);
-	expect(incident).toMatchObject({
+	const [listed] = await listIncidents(db, id, MANAGER);
+	expect(listed).toMatchObject({
 		status: 'REVERSED',
-		reversal: { reason: 'Las sillas aparecieron', reversedBy: 'gerente' }
+		reversal: { reason: 'Las sillas aparecieron', reversedBy: 'manager' }
 	});
 });
 
 test('an all-recoverable incident reverses and changes no product', async () => {
 	const id = await createOrderIn('DELIVERED');
-	await report(id, [{ product_id: CHAIR, qty: 6, outcome: 'RECOVERABLE' }]);
-	expect(await reverse(1)).toMatchObject({ ok: true });
+	const incident = await reported(id, [{ product_id: CHAIR, qty: 6, outcome: 'RECOVERABLE' }]);
+	expect(await reverse(incident)).toMatchObject({ ok: true });
 	expect(stock(CHAIR)).toBe(500);
 	expect(events('PRODUCT', 'INVENTORY_ADJUSTED')).toEqual([]);
 });
 
 test('incidents reverse in any order; the flag stays while one is active; twice is refused', async () => {
 	const id = await createOrderIn('COMPLETED');
-	await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }]);
-	await report(id, [{ product_id: TABLE, qty: 1, outcome: 'LOST' }]);
-	expect(await reverse(1)).toMatchObject({ ok: true });
+	const first = await reported(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }]);
+	const second = await reported(id, [{ product_id: TABLE, qty: 1, outcome: 'LOST' }]);
+	expect(await reverse(first)).toMatchObject({ ok: true });
 	expect(hasIncident(id)).toBe(1);
-	expect(await reverse(1)).toMatchObject({ ok: false });
+	expect(await reverse(first)).toMatchObject({ ok: false });
 	expect(stock(CHAIR)).toBe(500);
-	expect(await reverse(2)).toMatchObject({ ok: true });
+	expect(await reverse(second)).toMatchObject({ ok: true });
 	expect(hasIncident(id)).toBe(0);
-	expect((await listIncidents(db, id, manager)).map((incident) => incident.id)).toEqual([2, 1]);
+	expect((await listIncidents(db, id, MANAGER)).map((incident) => incident.id)).toEqual([
+		second,
+		first
+	]);
 });
 
 // Sends a count of `[product, counted]` pairs; `approve` approves it too.
 async function count(counted: [number, number][], approve = true): Promise<number> {
 	const items = counted.map(([product, qty]) => ({ product_id: product, counted_qty: qty }));
-	const result = await submitCount(db, { items }, warehouse);
+	const result = await submitCount(db, { items }, WAREHOUSE);
 	if (!result.ok) {
 		throw new Error(result.message);
 	}
 	if (approve) {
-		expect(await approveCount(db, { id: result.id }, manager)).toMatchObject({ ok: true });
+		expect(await approveCount(db, { id: result.id }, MANAGER)).toMatchObject({ ok: true });
 	}
 	return result.id;
 }
@@ -362,30 +361,30 @@ async function count(counted: [number, number][], approve = true): Promise<numbe
 const FIXED = 'Un conteo aprobado después ya fijó Silla Tiffany dorada';
 
 async function reversalBlock(orderId: number): Promise<string | null> {
-	const [incident] = await listIncidents(db, orderId, manager);
+	const [incident] = await listIncidents(db, orderId, MANAGER);
 	return incident.reversalBlock;
 }
 
 test('a count that applied the lost product, approved after the incident, blocks its reversal', async () => {
 	const id = await createOrderIn('COMPLETED');
-	await report(id, [
+	const incident = await reported(id, [
 		{ product_id: CHAIR, qty: 4, outcome: 'LOST' },
 		{ product_id: TABLE, qty: 1, outcome: 'RECOVERABLE' }
 	]);
 	await count([[CHAIR, 490]]);
 	expect(await reversalBlock(id)).toBe(FIXED);
-	expect(await reverse(1)).toEqual({ ok: false, message: FIXED, errors: {} });
+	expect(await reverse(incident)).toEqual({ ok: false, message: FIXED, errors: {} });
 	expect(stock(CHAIR)).toBe(490);
 	expect(hasIncident(id)).toBe(1);
 });
 
 test('the same count, reversed since, allows it', async () => {
 	const id = await createOrderIn('COMPLETED');
-	await report(id, [{ product_id: CHAIR, qty: 4, outcome: 'LOST' }]);
+	const incident = await reported(id, [{ product_id: CHAIR, qty: 4, outcome: 'LOST' }]);
 	const counted = await count([[CHAIR, 490]]);
-	await reverseCount(db, { id: counted, reason: 'Mal contado' }, manager);
+	await reverseCount(db, { id: counted, reason: 'Mal contado' }, MANAGER);
 	expect(await reversalBlock(id)).toBeNull();
-	expect(await reverse(1)).toMatchObject({ ok: true });
+	expect(await reverse(incident)).toMatchObject({ ok: true });
 	expect(stock(CHAIR)).toBe(500);
 });
 
@@ -398,71 +397,81 @@ test('a count approved after it that applied only another product, or a stale sk
 		],
 		false
 	);
-	await report(id, [{ product_id: CHAIR, qty: 4, outcome: 'LOST' }]);
-	expect(await approveCount(db, { id: stale }, manager)).toMatchObject({ ok: true });
+	const incident = await reported(id, [{ product_id: CHAIR, qty: 4, outcome: 'LOST' }]);
+	expect(await approveCount(db, { id: stale }, MANAGER)).toMatchObject({ ok: true });
 	expect(await reversalBlock(id)).toBeNull();
-	expect(await reverse(1)).toMatchObject({ ok: true });
+	expect(await reverse(incident)).toMatchObject({ ok: true });
 	expect([stock(CHAIR), stock(TABLECLOTH)]).toEqual([500, 497]);
 });
 
 test('a count created after the incident but approved before it allows it: the order is by approval', async () => {
 	const id = await createOrderIn('COMPLETED');
-	const counted = await count([[CHAIR, 490]]);
-	await report(id, [{ product_id: CHAIR, qty: 4, outcome: 'LOST' }]);
-	database
-		.prepare(
-			'update inventory_counts set created_at = 9999999999, reviewed_at = 9999999999 where id = ?'
-		)
-		.run(counted);
+	// The count's clock runs a day ahead of the incident's: its timestamps read as later.
+	vi.useFakeTimers({ toFake: ['Date'] });
+	onTestFinished(() => {
+		vi.useRealTimers();
+	});
+	vi.setSystemTime(new Date('2026-08-15T10:00:00-05:00'));
+	await count([[CHAIR, 490]]);
+	vi.setSystemTime(new Date('2026-08-14T10:00:00-05:00'));
+	const incident = await reported(id, [{ product_id: CHAIR, qty: 4, outcome: 'LOST' }]);
 	expect(await reversalBlock(id)).toBeNull();
-	expect(await reverse(1)).toMatchObject({ ok: true });
+	expect(await reverse(incident)).toMatchObject({ ok: true });
 	expect(stock(CHAIR)).toBe(490);
 });
 
 test('an all-recoverable incident reverses with a count of its product approved after it', async () => {
 	const id = await createOrderIn('COMPLETED');
-	await report(id, [{ product_id: CHAIR, qty: 4, outcome: 'RECOVERABLE' }]);
+	const incident = await reported(id, [{ product_id: CHAIR, qty: 4, outcome: 'RECOVERABLE' }]);
 	await count([[CHAIR, 496]]);
 	expect(await reversalBlock(id)).toBeNull();
-	expect(await reverse(1)).toMatchObject({ ok: true });
+	expect(await reverse(incident)).toMatchObject({ ok: true });
 });
 
 test('a reversal needs a reason', async () => {
 	const id = await createOrderIn('DELIVERED');
-	await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }]);
-	const result = await reverseIncident(db, { id: '1', reason: '  ' }, manager);
+	const incident = await reported(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }]);
+	const result = await reverseIncident(db, { id: String(incident), reason: '  ' }, MANAGER);
 	expect(result).toMatchObject({ ok: false, errors: { reason: expect.any(String) } });
 	expect(hasIncident(id)).toBe(1);
 });
 
 test('the responsible party: changed on an active incident, logged, a save with no change logs nothing', async () => {
 	const id = await createOrderIn('DELIVERED');
-	await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }]);
+	const incident = await reported(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }]);
 	const set = (party: string) =>
-		setResponsibleParty(db, { id: '1', responsible_party: party }, manager);
-	expect(await set('CARRIER')).toEqual({ ok: true, id: 1 });
-	expect(await set('CARRIER')).toEqual({ ok: true, id: 1 });
+		setResponsibleParty(db, { id: String(incident), responsible_party: party }, MANAGER);
+	expect(await set('CARRIER')).toEqual({ ok: true, id: incident });
+	expect(await set('CARRIER')).toEqual({ ok: true, id: incident });
 	expect(await set('NEIGHBOR')).toMatchObject({ ok: false });
 	expect(events('INCIDENT', 'EDITED')).toEqual([
 		{
-			entityId: 1,
-			actor: 'gerente',
+			entityId: incident,
+			actor: 'manager',
 			before: { responsible_party: 'UNDETERMINED' },
 			after: { responsible_party: 'CARRIER' }
 		}
 	]);
-	await reverse(1);
+	await reverse(incident);
 	expect(await set('CLIENT')).toMatchObject({ ok: false });
-	expect((await listIncidents(db, id, manager))[0].responsibleParty).toBe('CARRIER');
+	expect((await listIncidents(db, id, MANAGER))[0].responsibleParty).toBe('CARRIER');
 });
 
 test('listing is open to every role, each incident with whether the actor may correct and reverse it', async () => {
 	const id = await createOrderIn('DELIVERED');
-	await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], driver);
-	await report(id, [{ product_id: TABLE, qty: 1, outcome: 'RECOVERABLE' }], driver);
-	await report(id, [{ product_id: CHAIR, qty: 1, outcome: 'RECOVERABLE' }], sales);
-	await reverse(1);
-	await setResponsibleParty(db, { id: 2, responsible_party: 'CLIENT' }, manager);
+	const reversed = await reported(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], DRIVER);
+	const frozen = await reported(
+		id,
+		[{ product_id: TABLE, qty: 1, outcome: 'RECOVERABLE' }],
+		DRIVER
+	);
+	const bySales = await reported(
+		id,
+		[{ product_id: CHAIR, qty: 1, outcome: 'RECOVERABLE' }],
+		SALES
+	);
+	await reverse(reversed);
+	await setResponsibleParty(db, { id: frozen, responsible_party: 'CLIENT' }, MANAGER);
 	const rights = async (actor: Actor) =>
 		(await listIncidents(db, id, actor)).map((incident) => ({
 			id: incident.id,
@@ -472,9 +481,9 @@ test('listing is open to every role, each incident with whether the actor may co
 			canReverse: incident.canReverse,
 			canSetResponsibleParty: incident.canSetResponsibleParty
 		}));
-	expect(await rights(driver)).toEqual([
+	expect(await rights(DRIVER)).toEqual([
 		{
-			id: 3,
+			id: bySales,
 			isReportedByActor: false,
 			isFrozen: false,
 			canCorrect: false,
@@ -482,7 +491,7 @@ test('listing is open to every role, each incident with whether the actor may co
 			canSetResponsibleParty: false
 		},
 		{
-			id: 2,
+			id: frozen,
 			isReportedByActor: true,
 			isFrozen: true,
 			canCorrect: false,
@@ -490,7 +499,7 @@ test('listing is open to every role, each incident with whether the actor may co
 			canSetResponsibleParty: false
 		},
 		{
-			id: 1,
+			id: reversed,
 			isReportedByActor: true,
 			isFrozen: false,
 			canCorrect: false,
@@ -498,9 +507,9 @@ test('listing is open to every role, each incident with whether the actor may co
 			canSetResponsibleParty: false
 		}
 	]);
-	expect(await rights(sales)).toEqual([
+	expect(await rights(SALES)).toEqual([
 		{
-			id: 3,
+			id: bySales,
 			isReportedByActor: true,
 			isFrozen: false,
 			canCorrect: true,
@@ -508,7 +517,7 @@ test('listing is open to every role, each incident with whether the actor may co
 			canSetResponsibleParty: false
 		},
 		{
-			id: 2,
+			id: frozen,
 			isReportedByActor: false,
 			isFrozen: true,
 			canCorrect: false,
@@ -516,7 +525,7 @@ test('listing is open to every role, each incident with whether the actor may co
 			canSetResponsibleParty: false
 		},
 		{
-			id: 1,
+			id: reversed,
 			isReportedByActor: false,
 			isFrozen: false,
 			canCorrect: false,
@@ -524,12 +533,12 @@ test('listing is open to every role, each incident with whether the actor may co
 			canSetResponsibleParty: false
 		}
 	]);
-	expect(await rights(warehouse)).toEqual(
-		(await rights(driver)).map((incident) => ({ ...incident, isReportedByActor: false }))
+	expect(await rights(WAREHOUSE)).toEqual(
+		(await rights(DRIVER)).map((incident) => ({ ...incident, isReportedByActor: false }))
 	);
-	expect(await rights(manager)).toEqual([
+	expect(await rights(MANAGER)).toEqual([
 		{
-			id: 3,
+			id: bySales,
 			isReportedByActor: false,
 			isFrozen: false,
 			canCorrect: true,
@@ -537,7 +546,7 @@ test('listing is open to every role, each incident with whether the actor may co
 			canSetResponsibleParty: true
 		},
 		{
-			id: 2,
+			id: frozen,
 			isReportedByActor: false,
 			isFrozen: true,
 			canCorrect: false,
@@ -545,7 +554,7 @@ test('listing is open to every role, each incident with whether the actor may co
 			canSetResponsibleParty: true
 		},
 		{
-			id: 1,
+			id: reversed,
 			isReportedByActor: false,
 			isFrozen: false,
 			canCorrect: false,
@@ -557,22 +566,22 @@ test('listing is open to every role, each incident with whether the actor may co
 
 test('the reporter reverses their own unfrozen incident, with a reason', async () => {
 	const id = await createOrderIn('DELIVERED');
-	await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], driver);
-	const blank = await reverseIncident(db, { id: '1', reason: ' ' }, driver);
+	const incident = await reported(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], DRIVER);
+	const blank = await reverseIncident(db, { id: String(incident), reason: ' ' }, DRIVER);
 	expect(blank).toMatchObject({ ok: false, errors: { reason: expect.any(String) } });
-	expect(await reverse(1, driver)).toEqual({ ok: true, id: 1 });
+	expect(await reverse(incident, DRIVER)).toEqual({ ok: true, id: incident });
 	expect(stock(CHAIR)).toBe(500);
 	expect(hasIncident(id)).toBe(0);
-	expect(events('INCIDENT', 'REVERSED')[0]).toMatchObject({ actor: 'conductor' });
+	expect(events('INCIDENT', 'REVERSED')[0]).toMatchObject({ actor: 'driver' });
 });
 
 test("a reporter can't reverse someone else's incident nor their own once frozen", async () => {
 	const id = await createOrderIn('DELIVERED');
-	await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], driver);
-	await report(id, [{ product_id: TABLE, qty: 1, outcome: 'LOST' }], driver);
-	await setResponsibleParty(db, { id: 2, responsible_party: 'CARRIER' }, manager);
-	expect(await reverse(1, sales)).toMatchObject({ ok: false });
-	expect(await reverse(2, driver)).toEqual({
+	const chairs = await reported(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], DRIVER);
+	const table = await reported(id, [{ product_id: TABLE, qty: 1, outcome: 'LOST' }], DRIVER);
+	await setResponsibleParty(db, { id: table, responsible_party: 'CARRIER' }, MANAGER);
+	expect(await reverse(chairs, SALES)).toMatchObject({ ok: false });
+	expect(await reverse(table, DRIVER)).toEqual({
 		ok: false,
 		message: 'El Gerente ya le puso responsable: no se puede revertir.',
 		errors: {}
@@ -583,59 +592,58 @@ test("a reporter can't reverse someone else's incident nor their own once frozen
 
 test('the manager reverses any active incident, frozen or not', async () => {
 	const id = await createOrderIn('DELIVERED');
-	await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], driver);
-	await report(id, [{ product_id: TABLE, qty: 1, outcome: 'LOST' }], sales);
-	await setResponsibleParty(db, { id: 2, responsible_party: 'CLIENT' }, manager);
-	expect(await reverse(1)).toMatchObject({ ok: true });
-	expect(await reverse(2)).toMatchObject({ ok: true });
+	const chairs = await reported(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], DRIVER);
+	const table = await reported(id, [{ product_id: TABLE, qty: 1, outcome: 'LOST' }], SALES);
+	await setResponsibleParty(db, { id: table, responsible_party: 'CLIENT' }, MANAGER);
+	expect(await reverse(chairs)).toMatchObject({ ok: true });
+	expect(await reverse(table)).toMatchObject({ ok: true });
 	expect(hasIncident(id)).toBe(0);
 });
 
 test('SALES, WAREHOUSE and DRIVER get a 403 changing the responsible party', async () => {
 	const id = await createOrderIn('DELIVERED');
-	await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }]);
+	const incident = await reported(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }]);
 	for (const role of ['SALES', 'WAREHOUSE', 'DRIVER'] satisfies Role[]) {
-		const actor: Actor = { ...sales, roles: [role] };
 		const refusal = await setResponsibleParty(
 			db,
-			{ id: 1, responsible_party: 'CLIENT' },
-			actor
+			{ id: incident, responsible_party: 'CLIENT' },
+			actorWith(role)
 		).catch((caught: unknown) => caught);
 		expect(isHttpError(refusal, 403)).toBe(true);
 	}
-	expect(await listIncidents(db, id, manager)).toMatchObject([
+	expect(await listIncidents(db, id, MANAGER)).toMatchObject([
 		{ responsibleParty: 'UNDETERMINED' }
 	]);
 });
 
-function correct(id: number, items: object[], actor: Actor = driver) {
+function correct(id: number, items: object[], actor: Actor = DRIVER) {
 	const input = { id: String(id), incident_description: 'Llegaron rotas', items };
 	return correctIncident(db, input, actor);
 }
 
 test('the reporter corrects their own: stock moves by the difference, logged before and after', async () => {
 	const id = await createOrderIn('DELIVERED');
-	await report(
+	const incident = await reported(
 		id,
 		[
 			{ product_id: CHAIR, qty: 4, outcome: 'LOST' },
 			{ product_id: TABLE, qty: 1, outcome: 'UNRECOVERABLE' }
 		],
-		driver
+		DRIVER
 	);
 	const corrected = [
 		{ product_id: CHAIR, qty: 2, outcome: 'LOST' },
 		{ product_id: CHAIR, qty: 2, outcome: 'RECOVERABLE' },
 		{ product_id: TABLE, qty: 1, outcome: 'LOST' }
 	];
-	expect(await correct(1, corrected)).toEqual({ ok: true, id: 1 });
+	expect(await correct(incident, corrected)).toEqual({ ok: true, id: incident });
 	expect([stock(CHAIR), stock(TABLE)]).toEqual([498, 499]);
-	const row = database.prepare('select * from incidents').get();
+	const row = incidentRow(incident);
 	expect(row).toMatchObject({
 		incident_description: 'Llegaron rotas',
 		status: 'ACTIVE',
-		created_by: 'conductor',
-		updated_by: 'conductor'
+		created_by: 'driver',
+		updated_by: 'driver'
 	});
 	expect(JSON.parse(String(row?.incident_items))).toEqual([
 		{ product_id: CHAIR, name: 'Silla Tiffany dorada', qty: 2, outcome: 'LOST' },
@@ -644,8 +652,8 @@ test('the reporter corrects their own: stock moves by the difference, logged bef
 	]);
 	const [event] = events('INCIDENT', 'EDITED');
 	expect(event).toMatchObject({
-		entityId: 1,
-		actor: 'conductor',
+		entityId: incident,
+		actor: 'driver',
 		before: { incident_description: 'Llegaron mojadas' },
 		after: { incident_description: 'Llegaron rotas' }
 	});
@@ -654,7 +662,7 @@ test('the reporter corrects their own: stock moves by the difference, logged bef
 	expect(events('PRODUCT', 'INVENTORY_ADJUSTED').slice(2)).toEqual([
 		{
 			entityId: CHAIR,
-			actor: 'conductor',
+			actor: 'driver',
 			before: { total_quantity: 496 },
 			after: { total_quantity: 498 }
 		}
@@ -663,50 +671,52 @@ test('the reporter corrects their own: stock moves by the difference, logged bef
 
 test("a reporter can't correct someone else's incident nor their own once frozen", async () => {
 	const id = await createOrderIn('DELIVERED');
-	await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], driver);
-	await report(id, [{ product_id: TABLE, qty: 1, outcome: 'LOST' }], driver);
-	await setResponsibleParty(db, { id: 2, responsible_party: 'CARRIER' }, manager);
+	const chairs = await reported(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], DRIVER);
+	const table = await reported(id, [{ product_id: TABLE, qty: 1, outcome: 'LOST' }], DRIVER);
+	await setResponsibleParty(db, { id: table, responsible_party: 'CARRIER' }, MANAGER);
 	const more = [{ product_id: CHAIR, qty: 1, outcome: 'LOST' }];
-	expect(await correct(1, more, sales)).toEqual({
+	expect(await correct(chairs, more, SALES)).toEqual({
 		ok: false,
 		message: 'Solo quien la reportó o el Gerente puede corregirla.',
 		errors: {}
 	});
-	expect(await correct(2, [{ product_id: TABLE, qty: 2, outcome: 'LOST' }])).toEqual({
+	expect(await correct(table, [{ product_id: TABLE, qty: 2, outcome: 'LOST' }])).toEqual({
 		ok: false,
 		message: 'El Gerente ya le puso responsable: no se puede corregir.',
 		errors: {}
 	});
-	await reverse(1, driver);
-	expect(await correct(1, more)).toMatchObject({ ok: false });
+	await reverse(chairs, DRIVER);
+	expect(await correct(chairs, more)).toMatchObject({ ok: false });
 	expect([stock(CHAIR), stock(TABLE)]).toEqual([500, 499]);
 	expect(events('INCIDENT', 'EDITED')).toHaveLength(1);
 });
 
 test('the manager corrects any unfrozen incident, not a frozen one; the reporter stays', async () => {
 	const id = await createOrderIn('DELIVERED');
-	await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], driver);
-	await report(id, [{ product_id: TABLE, qty: 1, outcome: 'LOST' }], sales);
-	await setResponsibleParty(db, { id: 2, responsible_party: 'CLIENT' }, manager);
-	expect(await correct(1, [{ product_id: CHAIR, qty: 3, outcome: 'LOST' }], manager)).toEqual({
+	const chairs = await reported(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], DRIVER);
+	const table = await reported(id, [{ product_id: TABLE, qty: 1, outcome: 'LOST' }], SALES);
+	await setResponsibleParty(db, { id: table, responsible_party: 'CLIENT' }, MANAGER);
+	expect(await correct(chairs, [{ product_id: CHAIR, qty: 3, outcome: 'LOST' }], MANAGER)).toEqual({
 		ok: true,
-		id: 1
+		id: chairs
 	});
 	expect(stock(CHAIR)).toBe(497);
+	expect(incidentRow(chairs)).toMatchObject({ created_by: 'driver', updated_by: 'manager' });
 	expect(
-		database.prepare('select created_by, updated_by from incidents where id = 1').get()
-	).toEqual({ created_by: 'conductor', updated_by: 'gerente' });
-	expect(await correct(2, [{ product_id: TABLE, qty: 2, outcome: 'LOST' }], manager)).toMatchObject(
-		{ ok: false }
-	);
+		await correct(table, [{ product_id: TABLE, qty: 2, outcome: 'LOST' }], MANAGER)
+	).toMatchObject({ ok: false });
 	expect(stock(TABLE)).toBe(499);
 });
 
 test('a correction is validated like a report', async () => {
 	const id = await createOrderIn('DELIVERED');
-	await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], driver);
-	expect(await correct(1, [])).toMatchObject({ ok: false, errors: { items: expect.any(String) } });
-	expect(await correct(1, [{ product_id: TABLECLOTH, qty: 1, outcome: 'LOST' }])).toMatchObject({
+	const incident = await reported(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], DRIVER);
+	expect(await correct(incident, [])).toMatchObject({
+		ok: false,
+		errors: { items: expect.any(String) }
+	});
+	const tablecloth = [{ product_id: TABLECLOTH, qty: 1, outcome: 'LOST' }];
+	expect(await correct(incident, tablecloth)).toMatchObject({
 		ok: false,
 		errors: { 'items.0.product_id': 'Ese producto no está en el pedido' }
 	});
@@ -714,7 +724,7 @@ test('a correction is validated like a report', async () => {
 		{ product_id: TABLE, qty: 10, outcome: 'LOST' },
 		{ product_id: TABLE, qty: 3, outcome: 'RECOVERABLE' }
 	];
-	expect(await correct(1, tooMany)).toMatchObject({
+	expect(await correct(incident, tooMany)).toMatchObject({
 		ok: false,
 		errors: { 'items.1.qty': 'El pedido tiene 12: no se pueden reportar más' }
 	});
@@ -722,13 +732,13 @@ test('a correction is validated like a report', async () => {
 		{ product_id: CHAIR, qty: 1, outcome: 'LOST' },
 		{ product_id: CHAIR, qty: 1, outcome: 'LOST' }
 	];
-	expect(await correct(1, twice)).toMatchObject({ ok: false });
+	expect(await correct(incident, twice)).toMatchObject({ ok: false });
 	const blankInput = {
-		id: '1',
+		id: String(incident),
 		incident_description: ' ',
 		items: [{ product_id: CHAIR, qty: 1, outcome: 'LOST' }]
 	};
-	expect(await correctIncident(db, blankInput, driver)).toMatchObject({
+	expect(await correctIncident(db, blankInput, DRIVER)).toMatchObject({
 		ok: false,
 		errors: { incident_description: expect.any(String) }
 	});
@@ -736,59 +746,47 @@ test('a correction is validated like a report', async () => {
 	expect(events('INCIDENT', 'EDITED')).toEqual([]);
 });
 
-test("every correction works the order's flag out again", async () => {
-	const id = await createOrderIn('DELIVERED');
-	await report(id, [{ product_id: CHAIR, qty: 2, outcome: 'LOST' }], driver);
-	database.prepare('update orders set has_incident = 0 where id = ?').run(id);
-	expect(await correct(1, [{ product_id: CHAIR, qty: 2, outcome: 'RECOVERABLE' }])).toMatchObject({
-		ok: true
-	});
-	expect(hasIncident(id)).toBe(1);
-	expect(stock(CHAIR)).toBe(500);
-});
-
 const COUNT_BLOCK =
 	'No se puede cambiar la cantidad perdida o inservible de Silla Tiffany dorada: un conteo aprobado ya la fijó. Puedes cambiar la descripción y lo recuperable.';
 
 test("a count approved after it blocks changing that product's lost total, and only that", async () => {
 	const id = await createOrderIn('COMPLETED');
-	await report(
+	const incident = await reported(
 		id,
 		[
 			{ product_id: CHAIR, qty: 4, outcome: 'LOST' },
 			{ product_id: TABLE, qty: 1, outcome: 'LOST' }
 		],
-		driver
+		DRIVER
 	);
 	await count([[CHAIR, 490]]);
 	const moreChairs = [
 		{ product_id: CHAIR, qty: 5, outcome: 'LOST' },
 		{ product_id: TABLE, qty: 1, outcome: 'LOST' }
 	];
-	expect(await correct(1, moreChairs)).toEqual({ ok: false, message: COUNT_BLOCK, errors: {} });
+	const blocked = { ok: false, message: COUNT_BLOCK, errors: {} };
+	expect(await correct(incident, moreChairs)).toEqual(blocked);
 	const noChairs = [{ product_id: TABLE, qty: 1, outcome: 'LOST' }];
-	expect(await correct(1, noChairs)).toEqual({ ok: false, message: COUNT_BLOCK, errors: {} });
+	expect(await correct(incident, noChairs)).toEqual(blocked);
 	const sameTotal = [
 		{ product_id: CHAIR, qty: 2, outcome: 'LOST' },
 		{ product_id: CHAIR, qty: 2, outcome: 'UNRECOVERABLE' },
 		{ product_id: CHAIR, qty: 3, outcome: 'RECOVERABLE' },
 		{ product_id: TABLE, qty: 2, outcome: 'LOST' }
 	];
-	expect(await correct(1, sameTotal)).toEqual({ ok: true, id: 1 });
+	expect(await correct(incident, sameTotal)).toEqual({ ok: true, id: incident });
 	expect([stock(CHAIR), stock(TABLE)]).toEqual([490, 498]);
-	expect(database.prepare('select incident_description from incidents').get()).toEqual({
-		incident_description: 'Llegaron rotas'
-	});
+	expect(incidentRow(incident)).toMatchObject({ incident_description: 'Llegaron rotas' });
 });
 
 test('the active incidents a damage charge names: what was lost and whose fault, never a reversed one', async () => {
 	const id = await createOrderIn('OUT_FOR_PICKUP');
-	await report(id, [{ product_id: CHAIR, qty: 4, outcome: 'LOST' }]);
-	await report(id, [{ product_id: TABLE, qty: 1, outcome: 'UNRECOVERABLE' }]);
-	expect(await reverse(1)).toMatchObject({ ok: true });
-	expect(await listActiveIncidents(db, id, driver)).toEqual([
+	const chairs = await reported(id, [{ product_id: CHAIR, qty: 4, outcome: 'LOST' }]);
+	const table = await reported(id, [{ product_id: TABLE, qty: 1, outcome: 'UNRECOVERABLE' }]);
+	expect(await reverse(chairs)).toMatchObject({ ok: true });
+	expect(await listActiveIncidents(db, id, DRIVER)).toEqual([
 		{
-			id: 2,
+			id: table,
 			items: [
 				{ product_id: TABLE, name: 'Mesa redonda 10 puestos', qty: 1, outcome: 'UNRECOVERABLE' }
 			],
