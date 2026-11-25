@@ -4,8 +4,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import { hashPassword, PASSWORD_ITERATIONS } from '../password';
 import { logIn } from '../services/auth';
+import { getProduct } from '../services/products';
+import { getQuote } from '../services/quotes';
 import { getSystemSettings, updateSystemSettings } from '../services/settings';
-import { createFixture, MANAGER, TEST_PASSWORD, TEST_PEPPER } from './fixture';
+import { createFixture, MANAGER, SALES, TEST_PASSWORD, TEST_PEPPER } from './fixture';
 
 // Workers adds timingSafeEqual to crypto.subtle; Node doesn't, so the tests lend it node:crypto's.
 Object.assign(crypto.subtle, { timingSafeEqual });
@@ -602,4 +604,34 @@ test('General loads and saves with the retired ORDERS_SUGGESTED_ADVANCE_PCT row 
 	});
 	expect(readValue('COMPANY_NAME')).toMatchObject({ value: 'Banquetes C' });
 	expect(readValue('ORDERS_SUGGESTED_ADVANCE_PCT')).toEqual({ value: '50', updated_by: 'system' });
+});
+
+test('a quote saved before «Quién transporta» existed reads as the company', async () => {
+	const fixture = createFixture();
+	const clientId = await fixture.contact({
+		full_name: 'Luz Marina Restrepo',
+		phone: '573104428890'
+	});
+	const productId = await fixture.product({ name: 'Silla Tiffany dorada' });
+	fixture.database.exec(
+		`insert into quotes (public_token, client_id, valid_until, rental_days, client_attributes,
+		quote_items, items_total, quote_total, created_at, created_by, updated_at, updated_by)
+		values ('legacyquote01', ${clientId}, '2026-12-01', 1,
+		'{"name":"Luz Marina Restrepo","phone":"573104428890","whatsapp":null}',
+		'[{"product_id":${productId},"name":"Silla Tiffany dorada","qty":10,"list_price":2500,"unit_price":2500,"line_total":25000}]',
+		25000, 25000, 0, 'admin', 0, 'admin')`
+	);
+	const { id } = fixture.database
+		.prepare("select id from quotes where public_token = 'legacyquote01'")
+		.get() as { id: number };
+	expect((await getQuote(fixture.db, id, SALES))?.transportedBy).toBe('COMPANY');
+});
+
+test('a stored replacement cost that is not whole pesos above zero fails on read', async () => {
+	const fixture = createFixture();
+	const id = await fixture.product({ name: 'Silla Tiffany' });
+	fixture.database
+		.prepare('update products set attributes = ? where id = ?')
+		.run('{"replacement_cost":-3}', id);
+	await expect(getProduct(fixture.db, id, MANAGER)).rejects.toThrow();
 });
