@@ -5,7 +5,7 @@ on:
 
 jobs:
   # The job name is the required status check in the main ruleset: keep it "test".
-  # Only the PR's changes are tested and linted; deploy.yml runs the full suite before deploying.
+  # Only the PR's changes are tested and linted (`npm run verify`); deploy.yml runs the full suite.
   test:
     runs-on: ubuntu-latest
     steps:
@@ -23,15 +23,5 @@ jobs:
           key: node-modules-${{ runner.os }}-node24-${{ hashFiles('package-lock.json') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: npm ci
-      # The changed files' tests and those of every file importing them; a config change reruns all.
-      - run: npx vitest run --changed origin/${{ github.base_ref }} --passWithNoTests
-      - name: ESLint on the changed files
-        run: |
-          git diff -z --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD \
-            | grep -zE '\.(js|ts|svelte)$' \
-            | xargs -0 -r npx eslint --no-warn-ignored
-      - name: Stylelint on the changed files
-        run: |
-          git diff -z --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD \
-            | grep -zE '^src/.*\.(css|svelte)$' \
-            | xargs -0 -r npx stylelint --allow-empty-input
+      # lint-staged's commit-hook tasks over the PR's changed files; fails if a fix or format changes one.
+      - run: npm run verify
