@@ -1,8 +1,8 @@
 import { isHttpError } from '@sveltejs/kit';
 import type { DatabaseSync } from 'node:sqlite';
-import { beforeEach, expect, test } from 'vitest';
-import type { Actor, Role } from '../actor';
-import { createMemoryD1 } from '../db/memory-d1';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { createFixture, DRIVER, MANAGER, SALES, WAREHOUSE } from '../db/fixture';
+import { submitAndApproveCount } from './inventory';
 import {
 	createProduct,
 	getProduct,
@@ -11,13 +11,16 @@ import {
 	updateProduct
 } from './products';
 
-const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
-
 let db: D1Database;
 let database: DatabaseSync;
+let product: ReturnType<typeof createFixture>['product'];
 
 beforeEach(() => {
-	({ db, database } = createMemoryD1());
+	({ db, database, product } = createFixture());
+});
+
+afterEach(() => {
+	vi.useRealTimers();
 });
 
 const chair = {
@@ -38,14 +41,6 @@ const golden = {
 	active: 'on'
 };
 
-async function create(input: Record<string, string>): Promise<number> {
-	const result = await createProduct(db, input, manager);
-	if (!result.ok) {
-		throw new Error(result.message);
-	}
-	return result.id;
-}
-
 function events() {
 	return database
 		.prepare('select entity_type, action, before, after from events order by id')
@@ -53,8 +48,8 @@ function events() {
 }
 
 test('creating stores digits only and writes a PRODUCT / CREATED event', async () => {
-	const id = await create(chair);
-	expect(await getProduct(db, id, manager)).toEqual({
+	const id = await product(chair);
+	expect(await getProduct(db, id, MANAGER)).toEqual({
 		id,
 		name: 'Silla Tiffany',
 		category: 'CHAIRS_TABLES',
@@ -71,8 +66,8 @@ test('creating stores digits only and writes a PRODUCT / CREATED event', async (
 });
 
 test('editing logs only the changed fields in before/after', async () => {
-	const id = await create(chair);
-	await updateProduct(db, { ...chair, id, rental_price: '9.000' }, manager);
+	const id = await product(chair);
+	await updateProduct(db, { ...chair, id, rental_price: '9.000' }, MANAGER);
 	const edited = events()[1];
 	expect(edited).toMatchObject({ entity_type: 'PRODUCT', action: 'EDITED' });
 	expect(JSON.parse(String(edited.before))).toEqual({ rental_price: 8000 });
@@ -80,17 +75,17 @@ test('editing logs only the changed fields in before/after', async () => {
 });
 
 test('an empty description saves no key, and a typed one keeps its line breaks', async () => {
-	const id = await create({ ...chair, description: '  ' });
+	const id = await product({ ...chair, description: '  ' });
 	const attributes = () =>
 		database.prepare('select attributes from products where id = ?').get(id)?.attributes;
 	expect(attributes()).toBe('{}');
-	await updateProduct(db, { ...chair, id, description: 'Blanca.\n\nPlegable.' }, manager);
-	expect((await getProduct(db, id, manager))?.description).toBe('Blanca.\n\nPlegable.');
+	await updateProduct(db, { ...chair, id, description: 'Blanca.\n\nPlegable.' }, MANAGER);
+	expect((await getProduct(db, id, MANAGER))?.description).toBe('Blanca.\n\nPlegable.');
 });
 
 test('editing the description logs attributes.description in before/after', async () => {
-	const id = await create({ ...chair, description: 'Blanca' });
-	await updateProduct(db, { ...chair, id, description: 'Dorada' }, manager);
+	const id = await product({ ...chair, description: 'Blanca' });
+	await updateProduct(db, { ...chair, id, description: 'Dorada' }, MANAGER);
 	const edited = events()[1];
 	expect(JSON.parse(String(edited.before))).toEqual({ 'attributes.description': 'Blanca' });
 	expect(JSON.parse(String(edited.after))).toEqual({ 'attributes.description': 'Dorada' });
@@ -98,20 +93,20 @@ test('editing the description logs attributes.description in before/after', asyn
 
 test('a page address is trimmed and gets https:// when typed without it', async () => {
 	const typed = '  consueloc.com/producto/mantel-dorado/ ';
-	const id = await create({ ...chair, website_url: typed });
-	const saved = (await getProduct(db, id, manager))?.websiteUrl;
+	const id = await product({ ...chair, website_url: typed });
+	const saved = (await getProduct(db, id, MANAGER))?.websiteUrl;
 	expect(saved).toBe('https://consueloc.com/producto/mantel-dorado/');
-	const elsewhere = await create({
+	const elsewhere = await product({
 		...chair,
 		name: 'Copa',
 		website_url: 'https://example.org/copa'
 	});
-	expect((await getProduct(db, elsewhere, manager))?.websiteUrl).toBe('https://example.org/copa');
+	expect((await getProduct(db, elsewhere, MANAGER))?.websiteUrl).toBe('https://example.org/copa');
 });
 
 test('an address that is not https, or not an address, is rejected on its field', async () => {
 	for (const address of ['http://x', 'no es una url']) {
-		expect(await createProduct(db, { ...chair, website_url: address }, manager)).toEqual({
+		expect(await createProduct(db, { ...chair, website_url: address }, MANAGER)).toEqual({
 			ok: false,
 			message: 'Escribe una dirección web válida, que empiece con https://',
 			field: 'website_url'
@@ -120,21 +115,21 @@ test('an address that is not https, or not an address, is rejected on its field'
 });
 
 test('an empty address saves no key, and two products may share one', async () => {
-	const id = await create({ ...chair, website_url: ' ' });
+	const id = await product({ ...chair, website_url: ' ' });
 	const attributes = database.prepare('select attributes from products where id = ?').get(id);
 	expect(attributes?.attributes).toBe('{}');
 	const page = 'https://consueloc.com/producto/mantel-cuadrado/';
-	const goldenId = await create({ ...golden, website_url: page });
+	const goldenId = await product({ ...golden, website_url: page });
 	const red = { ...golden, new_variant_group: '', variant_group: golden.new_variant_group };
 	expect(
-		await createProduct(db, { ...red, variant_name: 'Rojo', website_url: page }, manager)
+		await createProduct(db, { ...red, variant_name: 'Rojo', website_url: page }, MANAGER)
 	).toMatchObject({ ok: true });
-	expect((await getProduct(db, goldenId, manager))?.websiteUrl).toBe(page);
+	expect((await getProduct(db, goldenId, MANAGER))?.websiteUrl).toBe(page);
 });
 
 test('editing the address logs attributes.website_url in before/after', async () => {
-	const id = await create({ ...chair, website_url: 'https://consueloc.com/a/' });
-	await updateProduct(db, { ...chair, id, website_url: 'https://consueloc.com/b/' }, manager);
+	const id = await product({ ...chair, website_url: 'https://consueloc.com/a/' });
+	await updateProduct(db, { ...chair, id, website_url: 'https://consueloc.com/b/' }, MANAGER);
 	const edited = events()[1];
 	expect(JSON.parse(String(edited.before))).toEqual({
 		'attributes.website_url': 'https://consueloc.com/a/'
@@ -145,53 +140,53 @@ test('editing the address logs attributes.website_url in before/after', async ()
 });
 
 test('an edit ignores total_quantity, which stays out of the EDITED event', async () => {
-	const id = await create(chair);
-	await updateProduct(db, { ...chair, id, total_quantity: '80', rental_price: '9.000' }, manager);
-	expect((await getProduct(db, id, manager))?.totalQuantity).toBe(120);
+	const id = await product(chair);
+	await updateProduct(db, { ...chair, id, total_quantity: '80', rental_price: '9.000' }, MANAGER);
+	expect((await getProduct(db, id, MANAGER))?.totalQuantity).toBe(120);
 	expect(JSON.parse(String(events()[1].after))).toEqual({ rental_price: 9000 });
 });
 
 test('Inactivo deactivates the product, which stays in the list', async () => {
-	const id = await create(chair);
-	await updateProduct(db, { ...chair, id, active: 'off' }, manager);
-	expect((await listProducts(db, {}, manager)).products).toMatchObject([{ id, isActive: false }]);
+	const id = await product(chair);
+	await updateProduct(db, { ...chair, id, active: 'off' }, MANAGER);
+	expect((await listProducts(db, {}, MANAGER)).products).toMatchObject([{ id, isActive: false }]);
 });
 
 test('the picker lists each group once, with its category', async () => {
-	await create(golden);
+	await product(golden);
 	const picked = { ...golden, new_variant_group: '', variant_group: 'Mantel cuadrado 50×50' };
-	await create({ ...picked, variant_name: 'Rojo' });
-	await create(chair);
-	expect(await listVariantGroups(db, manager)).toEqual([
+	await product({ ...picked, variant_name: 'Rojo' });
+	await product(chair);
+	expect(await listVariantGroups(db, MANAGER)).toEqual([
 		{ name: 'Mantel cuadrado 50×50', category: 'LINENS' }
 	]);
 });
 
 test('a variant group and a variant name go together', async () => {
-	const withoutName = await createProduct(db, { ...golden, variant_name: '' }, manager);
+	const withoutName = await createProduct(db, { ...golden, variant_name: '' }, MANAGER);
 	expect(withoutName).toMatchObject({ ok: false, field: 'variant_name' });
-	const withoutGroup = await createProduct(db, { ...golden, new_variant_group: '' }, manager);
+	const withoutGroup = await createProduct(db, { ...golden, new_variant_group: '' }, MANAGER);
 	expect(withoutGroup).toMatchObject({ ok: false, field: 'variant_group' });
 });
 
 test('a variant already in its group, ignoring case, fails on the UNIQUE index with a message on Variante', async () => {
-	await create(golden);
+	await product(golden);
 	const picked = { ...golden, new_variant_group: '', variant_group: 'Mantel cuadrado 50×50' };
-	const result = await createProduct(db, { ...picked, variant_name: 'DORADO' }, manager);
+	const result = await createProduct(db, { ...picked, variant_name: 'DORADO' }, MANAGER);
 	expect(result).toEqual({
 		ok: false,
 		message: 'Esa variante ya existe en el grupo',
 		field: 'variant_name'
 	});
-	expect((await create({ ...picked, variant_name: 'Rojo' })) > 0).toBe(true);
+	expect((await product({ ...picked, variant_name: 'Rojo' })) > 0).toBe(true);
 });
 
 test('a new group matching an existing one, ignoring case, must be picked from the list', async () => {
-	await create(golden);
+	await product(golden);
 	const result = await createProduct(
 		db,
 		{ ...golden, new_variant_group: 'MANTEL cuadrado 50×50', variant_name: 'Rojo' },
-		manager
+		MANAGER
 	);
 	expect(result).toMatchObject({ ok: false, field: 'new_variant_group' });
 });
@@ -200,25 +195,24 @@ test('a picked group that does not exist is rejected', async () => {
 	const result = await createProduct(
 		db,
 		{ ...golden, new_variant_group: '', variant_group: 'Mantel redondo' },
-		manager
+		MANAGER
 	);
 	expect(result).toMatchObject({ ok: false, field: 'variant_group' });
 });
 
 test('the price per day must be above zero; the total quantity may be zero', async () => {
-	const free = await createProduct(db, { ...chair, rental_price: '0' }, manager);
+	const free = await createProduct(db, { ...chair, rental_price: '0' }, MANAGER);
 	expect(free).toMatchObject({ ok: false, field: 'rental_price' });
-	expect((await create({ ...chair, total_quantity: '0' })) > 0).toBe(true);
+	expect((await product({ ...chair, total_quantity: '0' })) > 0).toBe(true);
 });
 
 test('SALES lists products but cannot open, create or edit one', async () => {
-	const id = await create(chair);
-	const sales: Actor = { ...manager, roles: ['SALES'] };
-	expect((await listProducts(db, {}, sales)).products).toHaveLength(1);
+	const id = await product(chair);
+	expect((await listProducts(db, {}, SALES)).products).toHaveLength(1);
 	const refusals = await Promise.all([
-		getProduct(db, id, sales).catch((caught: unknown) => caught),
-		createProduct(db, chair, sales).catch((caught: unknown) => caught),
-		updateProduct(db, { ...chair, id }, sales).catch((caught: unknown) => caught)
+		getProduct(db, id, SALES).catch((caught: unknown) => caught),
+		createProduct(db, chair, SALES).catch((caught: unknown) => caught),
+		updateProduct(db, { ...chair, id }, SALES).catch((caught: unknown) => caught)
 	]);
 	for (const refusal of refusals) {
 		expect(isHttpError(refusal, 403)).toBe(true);
@@ -226,8 +220,7 @@ test('SALES lists products but cannot open, create or edit one', async () => {
 });
 
 test('WAREHOUSE and DRIVER get a 403 on the list', async () => {
-	for (const role of ['WAREHOUSE', 'DRIVER'] satisfies Role[]) {
-		const actor: Actor = { ...manager, roles: [role] };
+	for (const actor of [WAREHOUSE, DRIVER]) {
 		await expect(listProducts(db, {}, actor)).rejects.toSatisfy((thrown) =>
 			isHttpError(thrown, 403)
 		);
@@ -235,18 +228,18 @@ test('WAREHOUSE and DRIVER get a 403 on the list', async () => {
 });
 
 test('the list narrows by text and category, each variant on its own', async () => {
-	await create(chair);
-	await create(golden);
+	await product(chair);
+	await product(golden);
 	const red = { name: 'Mantel cuadrado 50×50 — Rojo', variant_name: 'Rojo' };
-	await create({
+	await product({
 		...golden,
 		...red,
 		new_variant_group: '',
 		variant_group: 'Mantel cuadrado 50×50'
 	});
-	await create({ ...chair, name: 'Copa cristalería', category: 'GLASSWARE' });
+	await product({ ...chair, name: 'Copa cristalería', category: 'GLASSWARE' });
 	const names = async (input: Record<string, string>) =>
-		(await listProducts(db, input, manager)).products.map(({ name }) => name);
+		(await listProducts(db, input, MANAGER)).products.map(({ name }) => name);
 	expect(await names({ search: 'ROJO' })).toEqual([red.name]);
 	expect(await names({ search: '50×50' })).toEqual([golden.name, red.name]);
 	expect(await names({ search: 'cristaleria' })).toEqual(['Copa cristalería']);
@@ -257,48 +250,47 @@ test('the list narrows by text and category, each variant on its own', async () 
 });
 
 test('the list dates each product by the last event that changed its total_quantity', async () => {
-	const id = await create(chair);
-	const log = (after: object, createdAt: number) =>
-		database
-			.prepare(
-				"insert into events (entity_type, entity_id, action, actor_username, actor_kind, after, created_at) values ('PRODUCT', ?, 'EDITED', 'gerente', 'user', ?, ?)"
-			)
-			.run(id, JSON.stringify(after), createdAt);
-	log({ total_quantity: 100 }, 2_000_000_000);
-	log({ rental_price: 9000 }, 2_100_000_000);
-	// Seeded: no event at all, so its creation.
-	database
-		.prepare(
-			"insert into products (name, category, rental_price, total_quantity, created_at, created_by, updated_at, updated_by) values ('Copa', 'GLASSWARE', 900, 10, 1800000000, 'seed', 1800000000, 'seed')"
-		)
-		.run();
-	const dates = (await listProducts(db, {}, manager)).products.map(
-		({ name, quantityUpdatedAt }) => [name, quantityUpdatedAt]
-	);
+	// The catalog's products are seeded with no event at all, so each is dated by its creation.
+	({ db, database, product } = createFixture({ catalog: true }));
+	vi.useFakeTimers({ toFake: ['Date'] });
+	vi.setSystemTime(1_900_000_000_000);
+	const id = await product(chair);
+	vi.setSystemTime(2_000_000_000_000);
+	const count = { items: [{ product_id: id, counted_qty: 100 }] };
+	expect(await submitAndApproveCount(db, count, MANAGER)).toMatchObject({ ok: true });
+	vi.setSystemTime(2_100_000_000_000);
+	await updateProduct(db, { ...chair, id, rental_price: '9.000' }, MANAGER);
+	const seeded = database
+		.prepare("select id, created_at from products where name = 'Tablones'")
+		.get();
+	const dates = (await listProducts(db, {}, MANAGER)).products.map(({ id, quantityUpdatedAt }) => [
+		id,
+		quantityUpdatedAt
+	]);
 	expect(dates).toEqual(
 		expect.arrayContaining([
-			['Silla Tiffany', 2_000_000_000],
-			['Copa', 1_800_000_000]
+			[id, 2_000_000_000],
+			[seeded?.id, seeded?.created_at]
 		])
 	);
 });
 
 test('a replacement cost is saved in whole pesos and read back', async () => {
-	const id = await create({ ...chair, replacement_cost: '$95.000' });
-	expect((await getProduct(db, id, manager))?.replacementCost).toBe(95000);
+	const id = await product({ ...chair, replacement_cost: '$95.000' });
+	expect((await getProduct(db, id, MANAGER))?.replacementCost).toBe(95000);
 });
 
 test('clearing the replacement cost removes the key, leaving the product without a cost', async () => {
-	const id = await create({ ...chair, replacement_cost: '95.000' });
-	await updateProduct(db, { ...chair, id, replacement_cost: ' ' }, manager);
+	const id = await product({ ...chair, replacement_cost: '95.000' });
+	await updateProduct(db, { ...chair, id, replacement_cost: ' ' }, MANAGER);
 	const attributes = database.prepare('select attributes from products where id = ?').get(id);
 	expect(attributes?.attributes).toBe('{}');
-	expect((await getProduct(db, id, manager))?.replacementCost).toBeNull();
+	expect((await getProduct(db, id, MANAGER))?.replacementCost).toBeNull();
 });
 
 test('a replacement cost that is not whole pesos above zero is refused on its field', async () => {
 	for (const typed of ['0', '$0', '-5.000', '95.000,50', '95,5', '12.5', 'mucho']) {
-		expect(await createProduct(db, { ...chair, replacement_cost: typed }, manager)).toEqual({
+		expect(await createProduct(db, { ...chair, replacement_cost: typed }, MANAGER)).toEqual({
 			ok: false,
 			message: 'Escribe el costo en pesos enteros, mayor que cero',
 			field: 'replacement_cost'
@@ -307,18 +299,10 @@ test('a replacement cost that is not whole pesos above zero is refused on its fi
 });
 
 test('a change of replacement cost is logged in the product EDITED event', async () => {
-	const id = await create({ ...chair, replacement_cost: '95.000' });
-	await updateProduct(db, { ...chair, id, replacement_cost: '$110.000' }, manager);
+	const id = await product({ ...chair, replacement_cost: '95.000' });
+	await updateProduct(db, { ...chair, id, replacement_cost: '$110.000' }, MANAGER);
 	const edited = events()[1];
 	expect(edited).toMatchObject({ entity_type: 'PRODUCT', action: 'EDITED' });
 	expect(JSON.parse(String(edited.before))).toEqual({ 'attributes.replacement_cost': 95000 });
 	expect(JSON.parse(String(edited.after))).toEqual({ 'attributes.replacement_cost': 110000 });
-});
-
-test('a stored replacement cost that is not whole pesos above zero fails on read', async () => {
-	const id = await create(chair);
-	database
-		.prepare('update products set attributes = ? where id = ?')
-		.run('{"replacement_cost":-3}', id);
-	await expect(getProduct(db, id, manager)).rejects.toThrow();
 });

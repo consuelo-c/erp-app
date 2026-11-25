@@ -1,35 +1,43 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import { beforeEach, expect, test } from 'vitest';
-import { createMemoryD1 } from '../db/memory-d1';
-import { hashPassword, PASSWORD_ITERATIONS } from '../password';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import type { Role } from '../actor';
+import { ADMIN, createFixture, TEST_PASSWORD, TEST_PEPPER } from '../db/fixture';
 import { logIn, logOut, SESSION_SECONDS, validateSession } from './auth';
+import { deactivateLogin } from './logins';
 
 // Workers adds timingSafeEqual to crypto.subtle; Node doesn't, so the tests lend it node:crypto's.
 Object.assign(crypto.subtle, { timingSafeEqual });
 
-const secrets = { pepper: 'test-pepper', adminPassword: 'clave-admin' };
+const secrets = { pepper: TEST_PEPPER, adminPassword: 'clave-admin' };
 const request = { ip: '203.0.113.7', userAgent: 'Prueba/1.0' };
 const DAY = 24 * 60 * 60;
 
+let fixture: ReturnType<typeof createFixture>;
 let db: D1Database;
 let database: DatabaseSync;
 
 beforeEach(() => {
-	({ db, database } = createMemoryD1());
+	vi.useFakeTimers({ toFake: ['Date'] });
+	fixture = createFixture();
+	({ db, database } = fixture);
+});
+
+afterEach(() => {
+	vi.useRealTimers();
 });
 
 function attempt(username: string, password: string) {
 	return logIn(db, { username, password }, { secrets, request });
 }
 
-async function addUser(username: string, options: { active?: number; iterations?: number } = {}) {
-	const stored = await hashPassword('clave', secrets.pepper, options.iterations);
-	database
-		.prepare(
-			`insert into users (username, roles, password_hash, password_salt, password_iterations, active, created_at, created_by, updated_at, updated_by) values (?, '["SALES"]', ?, ?, ?, ?, 0, 'admin', 0, 'admin')`
-		)
-		.run(username, stored.hash, stored.salt, stored.iterations, options.active ?? 1);
+// A login of a real employee, with the fixture's password.
+function addUser(username: string, roles: Role[] = ['SALES']) {
+	return fixture.employee({ roles, username });
+}
+
+function loginIdOf(username: string): number {
+	return Number(database.prepare('select id from users where username = ?').get(username)?.id);
 }
 
 function now() {
@@ -48,9 +56,9 @@ test('the first attempt on an empty users creates admin, once, from ADMIN_PASSWO
 });
 
 test('admin is created even when other logins exist, and never again once it does', async () => {
-	await addUser('bodega');
+	const bodega = await addUser('bodega', ['ADMIN']);
 	expect(await attempt('admin', 'clave-admin')).not.toBeNull();
-	database.exec("update users set active = 0 where username = 'admin'");
+	expect((await deactivateLogin(db, { id: loginIdOf('admin') }, bodega)).ok).toBe(true);
 	expect(await attempt('admin', 'clave-admin')).toBeNull();
 	const usernames = database.prepare('select username from users order by id').all();
 	expect(usernames.map((row) => row.username)).toEqual(['bodega', 'admin']);
@@ -58,12 +66,12 @@ test('admin is created even when other logins exist, and never again once it doe
 
 test('the username is matched in lowercase', async () => {
 	await addUser('bodega');
-	expect(await attempt('  Bodega ', 'clave')).not.toBeNull();
+	expect(await attempt('  Bodega ', TEST_PASSWORD)).not.toBeNull();
 });
 
 test('an unknown username and a wrong password fail alike, each logging LOGIN_FAILED', async () => {
 	await addUser('bodega');
-	expect(await attempt('nadie', 'clave')).toBeNull();
+	expect(await attempt('nadie', TEST_PASSWORD)).toBeNull();
 	expect(await attempt('bodega', 'mala')).toBeNull();
 	const failures = database.prepare("select * from events where action = 'LOGIN_FAILED'").all();
 	expect(failures).toHaveLength(2);
@@ -72,13 +80,14 @@ test('an unknown username and a wrong password fail alike, each logging LOGIN_FA
 });
 
 test('an inactive login cannot log in', async () => {
-	await addUser('conductor', { active: 0 });
-	expect(await attempt('conductor', 'clave')).toBeNull();
+	await addUser('conductor', ['DRIVER']);
+	expect((await deactivateLogin(db, { id: loginIdOf('conductor') }, ADMIN)).ok).toBe(true);
+	expect(await attempt('conductor', TEST_PASSWORD)).toBeNull();
 });
 
 test('the session row holds the SHA-256 of the token and expires in 30 days', async () => {
 	await addUser('ventas');
-	const session = await attempt('ventas', 'clave');
+	const session = await attempt('ventas', TEST_PASSWORD);
 	const row = database.prepare('select * from sessions').get();
 	expect(row?.id).toBe(createHash('sha256').update(session!.token).digest('hex'));
 	expect(row?.id).not.toBe(session!.token);
@@ -90,25 +99,16 @@ test('the session row holds the SHA-256 of the token and expires in 30 days', as
 	});
 });
 
-test('a successful login re-hashes a password stored with a lower iteration count', async () => {
-	await addUser('gerente', { iterations: 1000 });
-	expect(await attempt('gerente', 'clave')).not.toBeNull();
-	const row = database.prepare('select password_iterations from users').get();
-	expect(row?.password_iterations).toBe(PASSWORD_ITERATIONS);
-	expect(await attempt('gerente', 'clave')).not.toBeNull();
-});
-
 test('a session renews only once less than half its life remains', async () => {
-	await addUser('ventas');
-	const { token } = (await attempt('ventas', 'clave'))!;
-	const setExpiry = (seconds: number) =>
-		database.prepare('update sessions set expires_at = ?').run(seconds);
+	const ventas = await addUser('ventas');
+	const { token, expiresAt } = (await attempt('ventas', TEST_PASSWORD))!;
+	const later = (days: number) =>
+		vi.setSystemTime((expiresAt - SESSION_SECONDS + days * DAY) * 1000);
 
-	const halfLifeLeft = now() + 20 * DAY;
-	setExpiry(halfLifeLeft);
-	expect((await validateSession(db, token))?.expiresAt).toBe(halfLifeLeft);
+	later(10); // 20 days, more than half its life, remain
+	expect((await validateSession(db, token))?.expiresAt).toBe(expiresAt);
 
-	setExpiry(now() + 10 * DAY);
+	later(20); // 10 days remain
 	const renewed = await validateSession(db, token);
 	expect(renewed?.expiresAt).toBeGreaterThanOrEqual(now() + SESSION_SECONDS - 5);
 	expect(database.prepare('select expires_at from sessions').get()?.expires_at).toBe(
@@ -116,7 +116,7 @@ test('a session renews only once less than half its life remains', async () => {
 	);
 	expect(renewed?.actor).toEqual({
 		username: 'ventas',
-		employeeId: null,
+		employeeId: ventas.employeeId,
 		roles: ['SALES'],
 		kind: 'user'
 	});
@@ -124,8 +124,8 @@ test('a session renews only once less than half its life remains', async () => {
 
 test('an expired or unknown token gives no session, and the expired row is removed', async () => {
 	await addUser('ventas');
-	const { token } = (await attempt('ventas', 'clave'))!;
-	database.prepare('update sessions set expires_at = ?').run(now() - 1);
+	const { token, expiresAt } = (await attempt('ventas', TEST_PASSWORD))!;
+	vi.setSystemTime(expiresAt * 1000);
 	expect(await validateSession(db, token)).toBeNull();
 	expect(database.prepare('select count(*) as count from sessions').get()?.count).toBe(0);
 	expect(await validateSession(db, 'not-a-token')).toBeNull();
@@ -133,7 +133,7 @@ test('an expired or unknown token gives no session, and the expired row is remov
 
 test('logging out deletes the session row and logs LOGOUT; an unknown token does nothing', async () => {
 	await addUser('ventas');
-	const { token } = (await attempt('ventas', 'clave'))!;
+	const { token } = (await attempt('ventas', TEST_PASSWORD))!;
 	await logOut(db, token, request);
 	expect(database.prepare('select count(*) as count from sessions').get()?.count).toBe(0);
 	expect(await validateSession(db, token)).toBeNull();

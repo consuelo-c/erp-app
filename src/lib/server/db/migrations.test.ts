@@ -1,6 +1,20 @@
+import { timingSafeEqual } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
+import { hashPassword, PASSWORD_ITERATIONS } from '../password';
+import { logIn } from '../services/auth';
+import { correctIncident, reportIncident, reverseIncident } from '../services/incidents';
+import { reverseCount, submitAndApproveCount } from '../services/inventory';
+import { getProduct } from '../services/products';
+import { getQuote } from '../services/quotes';
+import { issueReceivable } from '../services/receivables';
+import { getAuditLog } from '../services/reports';
+import { getSystemSettings, updateSystemSettings } from '../services/settings';
+import { createFixture, DRIVER, MANAGER, SALES, TEST_PASSWORD, TEST_PEPPER } from './fixture';
+
+// Workers adds timingSafeEqual to crypto.subtle; Node doesn't, so the tests lend it node:crypto's.
+Object.assign(crypto.subtle, { timingSafeEqual });
 
 let database: DatabaseSync;
 
@@ -174,6 +188,30 @@ test('orders: the database rejects an unknown status, delivery method or return 
 	);
 	const order = database.prepare('select has_incident, discount, attributes from orders').get();
 	expect(order).toEqual({ has_incident: 0, discount: 0, attributes: '{}' });
+});
+
+test('incidents: the database rejects an unknown status or responsible party', () => {
+	insertContact('1036452118');
+	insertOrder({});
+	const insert = (party: string, status: string) =>
+		database
+			.prepare(
+				`insert into incidents (order_id, incident_items, incident_description, responsible_party, status, created_at, created_by, updated_at, updated_by) values (1, '[]', 'x', ?, ?, ${AUDIT})`
+			)
+			.run(party, status);
+	expect(() => insert('NEIGHBOR', 'ACTIVE')).toThrow(/CHECK constraint failed/);
+	expect(() => insert('UNDETERMINED', 'CLOSED')).toThrow(/CHECK constraint failed/);
+});
+
+test('inventory_counts: the database rejects an unknown status', () => {
+	const insert = (status: string) =>
+		database
+			.prepare(
+				`insert into inventory_counts (status, inventory_items, created_at, created_by, updated_at, updated_by) values (?, '[]', ${AUDIT})`
+			)
+			.run(status);
+	expect(() => insert('WITHDRAWN')).toThrow(/CHECK constraint failed/);
+	expect(() => insert('PENDING_APPROVAL')).not.toThrow();
 });
 
 test('orders: public_token is unique and client_id must be a contact', () => {
@@ -473,6 +511,24 @@ test('events rejects UPDATE and DELETE', () => {
 	expect(() => database.exec('delete from events')).toThrow(/append-only/);
 });
 
+test('events: an event never carries both an id and a key', () => {
+	expect(() =>
+		database.exec(
+			"insert into events (entity_type, entity_id, entity_key, action, actor_username, actor_kind, created_at) values ('SETTINGS', 1, 'COMPANY_NAME', 'EDITED', 'admin', 'user', 0)"
+		)
+	).toThrow(/CHECK constraint failed/);
+});
+
+test('contacts: document_id is required and unique', () => {
+	insertContact('1036452118');
+	expect(() => insertContact('1036452118')).toThrow(/UNIQUE/);
+	expect(() =>
+		database.exec(
+			`insert into contacts (phone, full_name, created_at, created_by, updated_at, updated_by) values ('13055550142', 'Tourist', ${AUDIT})`
+		)
+	).toThrow(/NOT NULL/);
+});
+
 test('events rejects an unknown actor_kind', () => {
 	expect(() =>
 		database.exec(
@@ -529,4 +585,159 @@ test('cash_movements: the three new expense concepts go out on no link, like OTH
 		expect(() => insertMovement({ concept, amount: 100 })).toThrow(/CHECK/);
 		expect(() => insertMovement({ concept, amount: -100, entityType: 'ORDER' })).toThrow(/CHECK/);
 	}
+});
+
+// Rows only an older version of the app left behind: no service writes them anymore.
+
+test('a successful login re-hashes a password stored with a lower iteration count', async () => {
+	const fixture = createFixture();
+	await fixture.employee({ roles: ['MANAGER'], username: 'gerente' });
+	const older = await hashPassword(TEST_PASSWORD, TEST_PEPPER, 1000);
+	fixture.database
+		.prepare(
+			"update users set password_hash = ?, password_salt = ?, password_iterations = ? where username = 'gerente'"
+		)
+		.run(older.hash, older.salt, older.iterations);
+	const attempt = () =>
+		logIn(
+			fixture.db,
+			{ username: 'gerente', password: TEST_PASSWORD },
+			{
+				secrets: { pepper: TEST_PEPPER, adminPassword: 'clave-admin' },
+				request: { ip: '203.0.113.7', userAgent: 'Prueba/1.0' }
+			}
+		);
+	expect(await attempt()).not.toBeNull();
+	const row = fixture.database
+		.prepare("select password_iterations from users where username = 'gerente'")
+		.get();
+	expect(row?.password_iterations).toBe(PASSWORD_ITERATIONS);
+	expect(await attempt()).not.toBeNull();
+});
+
+test('General loads and saves with the retired ORDERS_SUGGESTED_ADVANCE_PCT row still stored', async () => {
+	const { db, database: stored } = createFixture();
+	stored.exec(
+		"insert into settings (key, value, created_at, created_by, updated_at, updated_by) values ('ORDERS_SUGGESTED_ADVANCE_PCT', '50', 0, 'system', 0, 'system')"
+	);
+	const readValue = (key: string) =>
+		stored.prepare('select value, updated_by from settings where key = ?').get(key);
+	const modules = ['COMPANY', 'QUOTES'] as const;
+	const values = await getSystemSettings(db, [...modules], MANAGER);
+	expect(values).not.toHaveProperty('ORDERS_SUGGESTED_ADVANCE_PCT');
+	// General has no clock times: the form posts each value as it was read.
+	const form = { ...values, COMPANY_NAME: 'Banquetes C' };
+	expect(await updateSystemSettings(db, { modules: [...modules], values: form }, MANAGER)).toEqual({
+		ok: true
+	});
+	expect(readValue('COMPANY_NAME')).toMatchObject({ value: 'Banquetes C' });
+	expect(readValue('ORDERS_SUGGESTED_ADVANCE_PCT')).toEqual({ value: '50', updated_by: 'system' });
+});
+
+test('a quote saved before «Quién transporta» existed reads as the company', async () => {
+	const fixture = createFixture();
+	const clientId = await fixture.contact({
+		full_name: 'Luz Marina Restrepo',
+		phone: '573104428890'
+	});
+	const productId = await fixture.product({ name: 'Silla Tiffany dorada' });
+	fixture.database.exec(
+		`insert into quotes (public_token, client_id, valid_until, rental_days, client_attributes,
+		quote_items, items_total, quote_total, created_at, created_by, updated_at, updated_by)
+		values ('legacyquote01', ${clientId}, '2026-12-01', 1,
+		'{"name":"Luz Marina Restrepo","phone":"573104428890","whatsapp":null}',
+		'[{"product_id":${productId},"name":"Silla Tiffany dorada","qty":10,"list_price":2500,"unit_price":2500,"line_total":25000}]',
+		25000, 25000, 0, 'admin', 0, 'admin')`
+	);
+	const { id } = fixture.database
+		.prepare("select id from quotes where public_token = 'legacyquote01'")
+		.get() as { id: number };
+	expect((await getQuote(fixture.db, id, SALES))?.transportedBy).toBe('COMPANY');
+});
+
+test('a stored replacement cost that is not whole pesos above zero fails on read', async () => {
+	const fixture = createFixture();
+	const id = await fixture.product({ name: 'Silla Tiffany' });
+	fixture.database
+		.prepare('update products set attributes = ? where id = ?')
+		.run('{"replacement_cost":-3}', id);
+	await expect(getProduct(fixture.db, id, MANAGER)).rejects.toThrow();
+});
+
+test("an order's stale incident flag is worked out again by the next correction", async () => {
+	const fixture = createFixture();
+	const chairs = await fixture.product({ name: 'Silla Tiffany dorada', total_quantity: '500' });
+	const id = await fixture.order({
+		order_items: [{ product_id: chairs, qty: 120, unit_price: 2500 }],
+		status: 'DELIVERED'
+	});
+	const lost = [{ product_id: chairs, qty: 2, outcome: 'LOST' }];
+	const input = { order_id: String(id), incident_description: 'Llegaron mojadas', items: lost };
+	const reported = await reportIncident(fixture.db, input, DRIVER);
+	const incident = reported.ok ? reported.id : 0;
+	fixture.database.prepare('update orders set has_incident = 0 where id = ?').run(id);
+	const recoverable = [{ product_id: chairs, qty: 2, outcome: 'RECOVERABLE' }];
+	const correction = {
+		id: String(incident),
+		incident_description: 'Llegaron rotas',
+		items: recoverable
+	};
+	expect(await correctIncident(fixture.db, correction, DRIVER)).toMatchObject({ ok: true });
+	const row = (column: string, table: string, rowId: number) =>
+		Number(
+			fixture.database.prepare(`select ${column} from ${table} where id = ?`).get(rowId)?.[column]
+		);
+	expect(row('has_incident', 'orders', id)).toBe(1);
+	expect(row('total_quantity', 'products', chairs)).toBe(500);
+});
+
+test("an incident's reversal that lands after a count's approval blocks reversing that count", async () => {
+	const fixture = createFixture();
+	const chairs = await fixture.product({ name: 'Silla Tiffany dorada', total_quantity: '800' });
+	const order = await fixture.order({
+		order_items: [{ product_id: chairs, qty: 120, unit_price: 2500 }],
+		status: 'DELIVERED'
+	});
+	const lost = [{ product_id: chairs, qty: 4, outcome: 'LOST' }];
+	const input = { order_id: order, incident_description: 'No volvieron', items: lost };
+	const reported = await reportIncident(fixture.db, input, DRIVER);
+	const incident = reported.ok ? reported.id : 0;
+	const counted = { items: [{ product_id: chairs, counted_qty: 790 }] };
+	const approved = await submitAndApproveCount(fixture.db, counted, MANAGER);
+	const id = approved.ok ? approved.id : 0;
+	const reversal = { id: incident, reason: 'Aparecieron' };
+	expect(await reverseIncident(fixture.db, reversal, MANAGER)).toMatchObject({ ok: false });
+	// Nothing locks: a reversal checked just before the approval can still land after it.
+	fixture.database
+		.prepare(
+			"insert into events (entity_type, entity_id, action, actor_username, actor_kind, created_at) values ('INCIDENT', ?, 'REVERSED', 'manager', 'user', 0)"
+		)
+		.run(incident);
+	expect(await reverseCount(fixture.db, { id, reason: 'Error' }, MANAGER)).toMatchObject({
+		ok: false,
+		message: 'Silla Tiffany dorada ya tuvo otro movimiento de inventario después de este conteo'
+	});
+});
+
+test('the cuenta de cobro number continues a sequence set by hand, and its orders find it', async () => {
+	const fixture = createFixture();
+	const orderId = await fixture.order();
+	// Production's numbering was set straight in sqlite_sequence to follow the paper cuentas.
+	fixture.database.exec("insert into sqlite_sequence (name, seq) values ('receivables', 4793)");
+	const issued = { orders: [orderId], payment_terms: 'Contado' };
+	expect(await issueReceivable(fixture.db, issued, MANAGER)).toEqual({ ok: true, id: 4794 });
+	const order = fixture.database
+		.prepare('select receivable_id from orders where id = ?')
+		.get(orderId);
+	expect(order).toEqual({ receivable_id: 4794 });
+});
+
+test("an Event whose record's row is gone still links, under its plain id", async () => {
+	const fixture = createFixture();
+	// Rows are never deleted: only a row lost outside the app leaves an Event pointing nowhere.
+	fixture.database.exec(
+		"insert into events (entity_type, entity_id, action, actor_username, actor_kind, created_at) values ('EMPLOYEE', 99, 'EDITED', 'manager', 'user', 0)"
+	);
+	const [event] = (await getAuditLog(fixture.db, {}, MANAGER)).events;
+	expect(event.link).toEqual({ href: '/personal/99', label: '99' });
 });

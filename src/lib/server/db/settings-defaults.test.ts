@@ -1,20 +1,15 @@
-import { readdirSync, readFileSync } from 'node:fs';
-import { DatabaseSync } from 'node:sqlite';
+import { readFileSync } from 'node:fs';
+import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import { SETTINGS, type SettingKey } from '$lib/settings';
+import { createMemoryD1 } from './memory-d1';
 
 const defaults = readFileSync('scripts/settings-defaults.sql', 'utf8');
 
 let database: DatabaseSync;
 
 beforeEach(() => {
-	database = new DatabaseSync(':memory:');
-	const files = readdirSync('migrations')
-		.filter((file) => file.endsWith('.sql'))
-		.sort();
-	for (const file of files) {
-		database.exec(readFileSync(`migrations/${file}`, 'utf8'));
-	}
+	({ database } = createMemoryD1());
 	database.exec(defaults);
 });
 

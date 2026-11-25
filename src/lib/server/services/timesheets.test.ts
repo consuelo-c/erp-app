@@ -1,10 +1,9 @@
 import { isHttpError } from '@sveltejs/kit';
-import { readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Actor } from '../actor';
-import { createMemoryD1 } from '../db/memory-d1';
-import { createEmployee } from './employees';
+import { actorWith, createFixture, MANAGER } from '../db/fixture';
+import { openWeek, recordPayment, saveDraft } from './payroll';
 import {
 	clearEmployeeDay,
 	clearOwnDay,
@@ -15,40 +14,30 @@ import {
 	saveOwnPunch
 } from './timesheets';
 
-const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
-
 const TODAY = '2026-07-31'; // a Friday
 
+let fixture: ReturnType<typeof createFixture>;
 let db: D1Database;
 let database: DatabaseSync;
 let ana: Actor;
 
-async function hire(idNumber: string, start: string): Promise<number> {
-	const result = await createEmployee(
-		db,
-		{
-			phone: `310${idNumber.slice(-7)}`,
-			full_name: 'Ana Pérez',
-			document_id: idNumber,
-			monthly_salary: '1750905',
-			position: 'Ventas',
-			start
-		},
-		manager
-	);
-	if (!result.ok) {
-		throw new Error(result.message);
-	}
-	return result.id;
+// Another employee, on payroll from `start`.
+async function hire(start: string, fields: Record<string, string> = {}): Promise<number> {
+	const { employeeId } = await fixture.employee({ roles: ['WAREHOUSE'], start, ...fields });
+	return Number(employeeId);
 }
 
 beforeEach(async () => {
 	vi.useFakeTimers({ toFake: ['Date'] });
 	vi.setSystemTime(new Date(`${TODAY}T17:00:00Z`)); // noon in Bogotá
-	({ db, database } = createMemoryD1());
-	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
-	const employeeId = await hire('1036452118', '2026-07-01');
-	ana = { username: 'ventas', employeeId, roles: ['WAREHOUSE'], kind: 'user' };
+	fixture = createFixture();
+	({ db, database } = fixture);
+	ana = await fixture.employee({
+		roles: ['WAREHOUSE'],
+		full_name: 'Ana Pérez',
+		position: 'Ventas',
+		start: '2026-07-01'
+	});
 });
 
 afterEach(() => {
@@ -95,7 +84,7 @@ test('correcting a punch logs only that punch, before and after', async () => {
 });
 
 test('the punch goes to the actor’s employee, whatever employee the input names', async () => {
-	const other = await hire('71384902', '2026-07-01');
+	const other = await hire('2026-07-01');
 	const input = { work_date: TODAY, punch: 'morningIn', ...at('07:00'), employee_id: other };
 	await saveOwnPunch(db, input, ana);
 	expect(database.prepare('select employee_id from timesheets').all()).toEqual([
@@ -104,7 +93,7 @@ test('the punch goes to the actor’s employee, whatever employee the input name
 });
 
 test('a login with no employee can’t punch and has no hours to show', async () => {
-	const noEmployee = { ...ana, employeeId: null };
+	const noEmployee = actorWith('WAREHOUSE');
 	const result = await saveOwnPunch(
 		db,
 		{ work_date: TODAY, punch: 'morningIn', ...at('07:00') },
@@ -213,30 +202,30 @@ test('a future or malformed day is a 404', async () => {
 	}
 });
 
-test('a manager logs a punch for the employee chosen in the selector, signed as the manager', async () => {
+test('a MANAGER logs a punch for the employee chosen in the selector, signed as the manager', async () => {
 	const input = {
 		employee_id: String(ana.employeeId),
 		work_date: TODAY,
 		punch: 'morningIn',
 		...at('07:00')
 	};
-	expect(await saveEmployeePunch(db, input, manager)).toEqual({ ok: true });
+	expect(await saveEmployeePunch(db, input, MANAGER)).toEqual({ ok: true });
 	expect(database.prepare('select employee_id, created_by from timesheets').all()).toEqual([
-		{ employee_id: ana.employeeId, created_by: 'gerente' }
+		{ employee_id: ana.employeeId, created_by: 'manager' }
 	]);
-	const hours = await getEmployeeHours(db, { employeeId: ana.employeeId, date: TODAY }, manager);
+	const hours = await getEmployeeHours(db, { employeeId: ana.employeeId, date: TODAY }, MANAGER);
 	expect(hours.employeeName).toBe('Ana Pérez');
 	expect(hours.day.punches.morningIn).toBe('07:00');
 });
 
-test('a manager’s punch follows the same rules: no unknown employee, no day outside the employment', async () => {
+test('a MANAGER’s punch follows the same rules: no unknown employee, no day outside the employment', async () => {
 	const base = { work_date: TODAY, punch: 'morningIn', ...at('07:00') };
-	expect(await saveEmployeePunch(db, { ...base, employee_id: '999' }, manager)).toEqual({
+	expect(await saveEmployeePunch(db, { ...base, employee_id: '999' }, MANAGER)).toEqual({
 		ok: false,
 		message: 'Escoge el empleado'
 	});
 	const before = { ...base, employee_id: String(ana.employeeId), work_date: '2026-06-30' };
-	expect(await saveEmployeePunch(db, before, manager)).toEqual({
+	expect(await saveEmployeePunch(db, before, MANAGER)).toEqual({
 		ok: false,
 		message: 'Ese día no hace parte de ningún período laboral'
 	});
@@ -251,7 +240,7 @@ test('only ADMIN and MANAGER see or log another employee’s hours; an unknown o
 	};
 	const forbidden = await saveEmployeePunch(db, input, ana).catch((caught: unknown) => caught);
 	expect(isHttpError(forbidden, 403)).toBe(true);
-	const unknown = await getEmployeeHours(db, { employeeId: 999, date: TODAY }, manager).catch(
+	const unknown = await getEmployeeHours(db, { employeeId: 999, date: TODAY }, MANAGER).catch(
 		(caught: unknown) => caught
 	);
 	expect(isHttpError(unknown, 404)).toBe(true);
@@ -295,13 +284,13 @@ test('clearing follows the punch rules: own day only, and no day outside the emp
 	});
 });
 
-test('a manager clears a day of the employee chosen in the selector; no one else can', async () => {
+test('a MANAGER clears a day of the employee chosen in the selector; no one else can', async () => {
 	const input = { employee_id: String(ana.employeeId), work_date: TODAY };
-	await saveEmployeePunch(db, { ...input, punch: 'morningIn', ...at('07:00') }, manager);
-	expect(await clearEmployeeDay(db, input, manager)).toEqual({ ok: true });
-	const hours = await getEmployeeHours(db, { employeeId: ana.employeeId, date: TODAY }, manager);
+	await saveEmployeePunch(db, { ...input, punch: 'morningIn', ...at('07:00') }, MANAGER);
+	expect(await clearEmployeeDay(db, input, MANAGER)).toEqual({ ok: true });
+	const hours = await getEmployeeHours(db, { employeeId: ana.employeeId, date: TODAY }, MANAGER);
 	expect(hours.day.punches.morningIn).toBeNull();
-	expect(await clearEmployeeDay(db, { ...input, employee_id: '999' }, manager)).toEqual({
+	expect(await clearEmployeeDay(db, { ...input, employee_id: '999' }, MANAGER)).toEqual({
 		ok: false,
 		message: 'Escoge el empleado'
 	});
@@ -309,30 +298,45 @@ test('a manager clears a day of the employee chosen in the selector; no one else
 	expect(isHttpError(forbidden, 403)).toBe(true);
 });
 
-// A settlement as far as the hours care: whose, which week, and whether it's paid.
-function settle(employeeId: number | null, periodStart: string, status: 'DRAFT' | 'PAID') {
-	database
-		.prepare(
-			`insert into payroll_runs (employee_id, status, week_number, period_start, period_end,
-			payment_date, employee_snapshot, prepared_by, earnings, deductions,
-			settings_snapshot, total_earnings, total_deductions, net_pay,
-			created_at, created_by, updated_at, updated_by)
-			values (?, ?, 1, ?, '', '', '{}', 'gerente', '[]', '[]', '{}', 0, 0, 0, 0, 'gerente', 0, 'gerente')`
-		)
-		.run(employeeId, status, periodStart);
+// The employee's week settled through Nómina as the screen proposes it: saved as a draft, or paid.
+async function settle(employeeId: number | null, periodStart: string, status: 'DRAFT' | 'PAID') {
+	const { draft } = await openWeek(db, { employeeId, week: periodStart }, MANAGER);
+	if (null === draft) {
+		throw new Error(`No draft for ${periodStart}`);
+	}
+	const quantities = draft.earnings.flatMap(({ concept, qty }) =>
+		null === qty ? [] : [[concept, String(qty)]]
+	);
+	const form = {
+		employee_id: String(employeeId),
+		period_start: periodStart,
+		week_number: String(draft.weekNumber),
+		payment_date: draft.paymentDate,
+		...Object.fromEntries(quantities),
+		NON_SALARY_BONUS: '0',
+		LOANS: '0',
+		OTHER: '0'
+	};
+	const result =
+		'PAID' === status
+			? await recordPayment(db, { ...form, payment_method: 'CASH' }, MANAGER)
+			: await saveDraft(db, form, MANAGER);
+	if (!result.ok) {
+		throw new Error(result.message);
+	}
 }
 
 test("a PAID settlement locks the employee's punches in its extra-hours range, for every role", async () => {
 	// Monday 27 July: its extra hours run from Saturday 25 to Friday 31, today.
 	await saveOwnPunch(db, { work_date: TODAY, punch: 'morningIn', ...at('07:00') }, ana);
-	settle(ana.employeeId, '2026-07-27', 'PAID');
+	await settle(ana.employeeId, '2026-07-27', 'PAID');
 	const locked = { ok: false, message: 'Ese día ya se pagó en la nómina: no se puede cambiar' };
 	const punch = { work_date: TODAY, punch: 'morningOut', ...at('12:00') };
 	expect(await saveOwnPunch(db, punch, ana)).toEqual(locked);
 	expect(await clearOwnDay(db, { work_date: TODAY }, ana)).toEqual(locked);
 	const forAna = { employee_id: String(ana.employeeId) };
-	expect(await saveEmployeePunch(db, { ...punch, ...forAna }, manager)).toEqual(locked);
-	expect(await clearEmployeeDay(db, { work_date: TODAY, ...forAna }, manager)).toEqual(locked);
+	expect(await saveEmployeePunch(db, { ...punch, ...forAna }, MANAGER)).toEqual(locked);
+	expect(await clearEmployeeDay(db, { work_date: TODAY, ...forAna }, MANAGER)).toEqual(locked);
 	// The day before the range is still the previous settlement's, which isn't paid.
 	const friday24 = { work_date: '2026-07-24', punch: 'morningIn', ...at('07:00') };
 	expect(await saveOwnPunch(db, friday24, ana)).toEqual({ ok: true });
@@ -350,23 +354,23 @@ test("a PAID settlement locks the employee's punches in its extra-hours range, f
 });
 
 test("a draft locks nothing, and another employee's payment doesn't lock anyone else's days", async () => {
-	settle(ana.employeeId, '2026-07-27', 'DRAFT');
-	const otherId = await hire('71384902', '2026-07-01');
-	settle(otherId, '2026-07-27', 'PAID');
+	await settle(ana.employeeId, '2026-07-27', 'DRAFT');
+	const otherId = await hire('2026-07-01');
+	await settle(otherId, '2026-07-27', 'PAID');
 	const punch = { work_date: TODAY, punch: 'morningIn', ...at('07:00') };
 	expect(await saveOwnPunch(db, punch, ana)).toEqual({ ok: true });
 	expect(await clearOwnDay(db, { work_date: TODAY }, ana)).toEqual({ ok: true });
 });
 
 test('the team week has everyone employed that week, by name, with seven days of punches', async () => {
-	await hire('71384902', '2026-08-03'); // starts the week after
-	const carlos = await hire('98765432', '2026-07-29');
+	await hire('2026-08-03'); // starts the week after
+	const carlos = await hire('2026-07-29', { full_name: 'Carlos Vélez' });
 	await saveEmployeePunch(
 		db,
 		{ employee_id: String(carlos), work_date: '2026-07-29', punch: 'morningIn', ...at('06:30') },
-		manager
+		MANAGER
 	);
-	const { weekStart, team } = await getTeamWeek(db, {}, manager);
+	const { weekStart, team } = await getTeamWeek(db, {}, MANAGER);
 	expect(weekStart).toBe('2026-07-27');
 	expect(team.map((member) => member.employeeId)).toEqual([ana.employeeId, carlos]);
 	expect(team[1].days).toHaveLength(7);
@@ -393,7 +397,7 @@ test("the team week totals each employee's regular hours and overtime", async ()
 	for (const [workDate, punch, time] of punches) {
 		await saveOwnPunch(db, { work_date: workDate, punch, ...at(time) }, ana);
 	}
-	const { team } = await getTeamWeek(db, { week: '2026-07-22' }, manager);
+	const { team } = await getTeamWeek(db, { week: '2026-07-22' }, MANAGER);
 	expect(team[0]).toMatchObject({ regularMinutes: 14 * 60, overtimeMinutes: 6 * 60 });
 });
 

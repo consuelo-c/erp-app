@@ -2,7 +2,7 @@ import { isHttpError } from '@sveltejs/kit';
 import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import type { Actor } from '../actor';
-import { createMemoryD1 } from '../db/memory-d1';
+import { ADMIN, createFixture, MANAGER, TEST_PEPPER } from '../db/fixture';
 import { logIn } from './auth';
 import { createEmployee, endEmployment } from './employees';
 import {
@@ -17,24 +17,23 @@ import {
 	updateRoles
 } from './logins';
 
-const admin: Actor = { username: 'admin', employeeId: null, roles: ['ADMIN'], kind: 'user' };
-const manager: Actor = { ...admin, username: 'gerente', roles: ['MANAGER'] };
-const pepper = 'test-pepper';
+const pepper = TEST_PEPPER;
 
 let db: D1Database;
 let database: DatabaseSync;
 
 beforeEach(() => {
-	({ db, database } = createMemoryD1());
+	({ db, database } = createFixture());
 });
 
+// An employee with no login yet, through Empleados › Nuevo: what a login is created for.
 async function hire(fullName: string, idNumber: string): Promise<number> {
 	const phone = `310${idNumber.slice(-7)}`;
 	const input = { phone, full_name: fullName, document_id: idNumber, monthly_salary: '1423500' };
 	const result = await createEmployee(
 		db,
 		{ ...input, position: 'Bodega', start: '2024-07-15' },
-		admin
+		ADMIN
 	);
 	if (!result.ok) {
 		throw new Error(result.message);
@@ -44,8 +43,17 @@ async function hire(fullName: string, idNumber: string): Promise<number> {
 
 const bodega = { username: ' Bodega ', roles: ['WAREHOUSE', 'DRIVER'], password: 'clave-bodega' };
 
-function create(input: Record<string, unknown>, actor: Actor = admin) {
+function create(input: Record<string, unknown>, actor: Actor = ADMIN) {
 	return createLogin({ db, pepper }, { employee_id: '', ...input }, actor);
+}
+
+// A login through Logins › Nuevo, as the admin: its id; a refusal throws with its reason.
+async function created(input: Record<string, unknown>): Promise<number> {
+	const result = await create(input);
+	if (!result.ok) {
+		throw new Error(result.message);
+	}
+	return result.id;
 }
 
 function logInAs(username: string, password: string) {
@@ -70,12 +78,11 @@ function lastEvent() {
 
 test('creates a login with several roles and an employee; it can log in', async () => {
 	const carlos = await hire('Carlos Vélez', '71384902');
-	const result = await create({ ...bodega, employee_id: String(carlos) });
-	expect(result.ok).toBe(true);
+	const id = await created({ ...bodega, employee_id: String(carlos) });
 
-	expect(await listLogins(db, admin)).toEqual([
+	expect(await listLogins(db, ADMIN)).toEqual([
 		{
-			id: 1,
+			id,
 			username: 'bodega',
 			roles: ['WAREHOUSE', 'DRIVER'],
 			employee: { id: carlos, fullName: 'Carlos Vélez' },
@@ -118,17 +125,19 @@ test('rejects the reserved username, a taken one, no roles and a short password'
 });
 
 test('changing roles logs the old and new set, in ROLES order', async () => {
-	await create(bodega);
-	expect((await updateRoles(db, { id: '1', roles: ['DRIVER', 'SALES'] }, admin)).ok).toBe(true);
-	expect((await getLogin(db, 1, admin))?.roles).toEqual(['SALES', 'DRIVER']);
+	const id = await created(bodega);
+	expect((await updateRoles(db, { id: String(id), roles: ['DRIVER', 'SALES'] }, ADMIN)).ok).toBe(
+		true
+	);
+	expect((await getLogin(db, id, ADMIN))?.roles).toEqual(['SALES', 'DRIVER']);
 	const edited = database.prepare("select before, after from events where action = 'EDITED'").get();
 	expect(JSON.parse(String(edited?.before))).toEqual({ roles: '["WAREHOUSE","DRIVER"]' });
 	expect(JSON.parse(String(edited?.after))).toEqual({ roles: '["SALES","DRIVER"]' });
 });
 
 test('an admin cannot drop ADMIN from their own login', async () => {
-	await create({ ...bodega, username: 'admin', roles: ['ADMIN'] });
-	expect(await updateRoles(db, { id: 1, roles: ['MANAGER'] }, admin)).toEqual({
+	const id = await created({ ...bodega, username: 'admin', roles: ['ADMIN'] });
+	expect(await updateRoles(db, { id, roles: ['MANAGER'] }, ADMIN)).toEqual({
 		ok: false,
 		message: 'No puedes quitarte el rol de Administrador'
 	});
@@ -138,10 +147,10 @@ test('only the currently employed without a login can be given one', async () =>
 	const carlos = await hire('Carlos Vélez', '71384902');
 	const jorge = await hire('Jorge Salamanca', '98552017');
 	await hire('Ana Pérez', '1036452118');
-	await endEmployment(db, { id: jorge, end: '2026-03-31' }, admin);
+	await endEmployment(db, { id: jorge, end: '2026-03-31' }, ADMIN);
 	await create({ ...bodega, employee_id: String(carlos) });
 
-	expect(await listEmployeesWithoutLogin(db, admin)).toEqual([{ id: 3, fullName: 'Ana Pérez' }]);
+	expect(await listEmployeesWithoutLogin(db, ADMIN)).toEqual([{ id: 3, fullName: 'Ana Pérez' }]);
 	for (const employeeId of [carlos, jorge]) {
 		expect(await create({ ...bodega, username: 'otro', employee_id: String(employeeId) })).toEqual({
 			ok: false,
@@ -151,13 +160,11 @@ test('only the currently employed without a login can be given one', async () =>
 });
 
 test('setting a password ends the sessions and keeps the hash out of events', async () => {
-	await create(bodega);
+	const id = await created(bodega);
 	await logInAs('bodega', 'clave-bodega');
 	expect(sessionCount()).toBe(1);
 
-	expect((await setPassword({ db, pepper }, { id: 1, password: 'clave-nueva' }, admin)).ok).toBe(
-		true
-	);
+	expect((await setPassword({ db, pepper }, { id, password: 'clave-nueva' }, ADMIN)).ok).toBe(true);
 	expect(sessionCount()).toBe(0);
 	expect(await logInAs('bodega', 'clave-bodega')).toBeNull();
 	expect(await logInAs('bodega', 'clave-nueva')).not.toBeNull();
@@ -172,15 +179,15 @@ test('setting a password ends the sessions and keeps the hash out of events', as
 test('reassigning moves the login, ends its sessions and leaves the previous employee as is', async () => {
 	const carlos = await hire('Carlos Vélez', '71384902');
 	const ana = await hire('Ana Pérez', '1036452118');
-	await create({ ...bodega, employee_id: String(carlos) });
+	const id = await created({ ...bodega, employee_id: String(carlos) });
 	await logInAs('bodega', 'clave-bodega');
 	const carlosRow = () => database.prepare('select * from employees where id = ?').get(carlos);
 	const before = carlosRow();
 
-	const input = { id: 1, employee_id: String(ana), password: 'clave-de-ana' };
-	expect((await reassignLogin({ db, pepper }, input, admin)).ok).toBe(true);
+	const input = { id, employee_id: String(ana), password: 'clave-de-ana' };
+	expect((await reassignLogin({ db, pepper }, input, ADMIN)).ok).toBe(true);
 
-	expect((await getLogin(db, 1, admin))?.employee).toEqual({ id: ana, fullName: 'Ana Pérez' });
+	expect((await getLogin(db, id, ADMIN))?.employee).toEqual({ id: ana, fullName: 'Ana Pérez' });
 	expect(carlosRow()).toEqual(before);
 	expect(sessionCount()).toBe(0);
 	expect(await logInAs('bodega', 'clave-de-ana')).not.toBeNull();
@@ -191,36 +198,36 @@ test('reassigning moves the login, ends its sessions and leaves the previous emp
 });
 
 test('reassigning to the same employee is rejected', async () => {
-	await create(bodega);
-	const input = { id: 1, employee_id: '', password: 'clave-nueva' };
-	expect(await reassignLogin({ db, pepper }, input, admin)).toEqual({
+	const id = await created(bodega);
+	const input = { id, employee_id: '', password: 'clave-nueva' };
+	expect(await reassignLogin({ db, pepper }, input, ADMIN)).toEqual({
 		ok: false,
 		message: 'Escoge un empleado distinto al actual'
 	});
 });
 
 test('deactivating keeps the row with active = 0 and ends its sessions', async () => {
-	await create(bodega);
+	const id = await created(bodega);
 	await logInAs('bodega', 'clave-bodega');
-	expect((await deactivateLogin(db, { id: 1 }, admin)).ok).toBe(true);
+	expect((await deactivateLogin(db, { id }, ADMIN)).ok).toBe(true);
 
-	expect(database.prepare('select active from users where id = 1').get()).toEqual({ active: 0 });
+	expect(database.prepare('select active from users where id = ?').get(id)).toEqual({ active: 0 });
 	expect(sessionCount()).toBe(0);
 	expect(await logInAs('bodega', 'clave-bodega')).toBeNull();
-	expect(await deactivateLogin(db, { id: 1 }, admin)).toEqual({
+	expect(await deactivateLogin(db, { id }, ADMIN)).toEqual({
 		ok: false,
 		message: 'Este login ya está inactivo'
 	});
 });
 
 test('reactivating lets the login in again with its password', async () => {
-	await create(bodega);
-	expect(await reactivateLogin(db, { id: 1 }, admin)).toEqual({
+	const id = await created(bodega);
+	expect(await reactivateLogin(db, { id }, ADMIN)).toEqual({
 		ok: false,
 		message: 'Este login ya está activo'
 	});
-	await deactivateLogin(db, { id: 1 }, admin);
-	expect((await reactivateLogin(db, { id: 1 }, admin)).ok).toBe(true);
+	await deactivateLogin(db, { id }, ADMIN);
+	expect((await reactivateLogin(db, { id }, ADMIN)).ok).toBe(true);
 
 	expect(await logInAs('bodega', 'clave-bodega')).not.toBeNull();
 	const event = lastEvent();
@@ -229,28 +236,28 @@ test('reactivating lets the login in again with its password', async () => {
 });
 
 test('an admin cannot deactivate their own login', async () => {
-	await create({ ...bodega, username: 'admin', roles: ['ADMIN'] });
-	expect(await deactivateLogin(db, { id: 1 }, admin)).toEqual({
+	const id = await created({ ...bodega, username: 'admin', roles: ['ADMIN'] });
+	expect(await deactivateLogin(db, { id }, ADMIN)).toEqual({
 		ok: false,
 		message: 'No puedes desactivar tu propio login'
 	});
 });
 
 test('MANAGER cannot create, assign roles, set passwords, reassign, (de)activate or list', async () => {
-	await expect(create(bodega, manager)).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
-	await expect(updateRoles(db, { id: 1, roles: ['ADMIN'] }, manager)).rejects.toSatisfy((thrown) =>
+	await expect(create(bodega, MANAGER)).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
+	await expect(updateRoles(db, { id: 1, roles: ['ADMIN'] }, MANAGER)).rejects.toSatisfy((thrown) =>
 		isHttpError(thrown, 403)
 	);
 	const forbidden = (thrown: unknown) => isHttpError(thrown, 403);
 	const password = { id: 1, password: 'clave-nueva' };
-	await expect(setPassword({ db, pepper }, password, manager)).rejects.toSatisfy(forbidden);
+	await expect(setPassword({ db, pepper }, password, MANAGER)).rejects.toSatisfy(forbidden);
 	await expect(
-		reassignLogin({ db, pepper }, { ...password, employee_id: '' }, manager)
+		reassignLogin({ db, pepper }, { ...password, employee_id: '' }, MANAGER)
 	).rejects.toSatisfy(forbidden);
-	await expect(deactivateLogin(db, { id: 1 }, manager)).rejects.toSatisfy(forbidden);
-	await expect(reactivateLogin(db, { id: 1 }, manager)).rejects.toSatisfy(forbidden);
-	await expect(listLogins(db, manager)).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
-	await expect(listEmployeesWithoutLogin(db, manager)).rejects.toSatisfy((thrown) =>
+	await expect(deactivateLogin(db, { id: 1 }, MANAGER)).rejects.toSatisfy(forbidden);
+	await expect(reactivateLogin(db, { id: 1 }, MANAGER)).rejects.toSatisfy(forbidden);
+	await expect(listLogins(db, MANAGER)).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
+	await expect(listEmployeesWithoutLogin(db, MANAGER)).rejects.toSatisfy((thrown) =>
 		isHttpError(thrown, 403)
 	);
 	expect(database.prepare('select count(*) as count from users').get()?.count).toBe(0);

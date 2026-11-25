@@ -1,9 +1,8 @@
 import { isHttpError } from '@sveltejs/kit';
-import { readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
-import type { Actor, Role } from '../actor';
-import { createMemoryD1 } from '../db/memory-d1';
+import { actorWith, createFixture, MANAGER, SALES } from '../db/fixture';
+import { getEmployee } from './employees';
 import {
 	capitalizeName,
 	contactAttributesSchema,
@@ -22,40 +21,17 @@ import {
 	searchClients,
 	updateContact
 } from './contacts';
-import { createEmployee } from './employees';
 
-function actorWith(role: Role): Actor {
-	return { username: role.toLowerCase(), employeeId: null, roles: [role], kind: 'user' };
-}
-
-const manager = actorWith('MANAGER');
-const sales = actorWith('SALES');
-
+let fixture: ReturnType<typeof createFixture>;
 let db: D1Database;
 let database: DatabaseSync;
 
 beforeEach(() => {
-	({ db, database } = createMemoryD1());
-	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
+	fixture = createFixture();
+	({ db, database } = fixture);
 });
 
 const luzMarina = { phone: '310 442 8890', full_name: 'Luz Marina Restrepo' };
-
-// Contactos always asks for one: each contact a test creates gets its own unless it types one.
-let documents = 0;
-
-async function create(input: Record<string, unknown>, actor: Actor = manager): Promise<number> {
-	documents += 1;
-	const result = await createContact(
-		db,
-		{ document_id: String(70000000 + documents), ...input },
-		actor
-	);
-	if (!result.ok) {
-		throw new Error(result.message);
-	}
-	return result.id;
-}
 
 async function rejection(promise: Promise<unknown>): Promise<number | null> {
 	try {
@@ -76,14 +52,14 @@ test('attributes take only their five keys: {} is valid, an unknown key is rejec
 test('labels: a key not in CONTACTS_LABELS or a repeated one is refused on its field', async () => {
 	for (const labels of [['PHOTOGRAPHER'], ['CHEF', 'CHEF']]) {
 		expect(
-			await createContact(db, { ...luzMarina, document_id: '1036452118', labels }, manager)
+			await createContact(db, { ...luzMarina, document_id: '1036452118', labels }, MANAGER)
 		).toMatchObject({ ok: false, errors: { labels: expect.any(String) } });
 	}
 	expect(database.prepare('select count(*) as count from contacts').get()).toEqual({ count: 0 });
 });
 
 test('a contact saves its phone normalized and its optional fields in attributes', async () => {
-	const id = await create({
+	const id = await fixture.contact({
 		...luzMarina,
 		document_id: '1.036.452.118',
 		email: 'luzmarina.r@gmail.com',
@@ -91,7 +67,7 @@ test('a contact saves its phone normalized and its optional fields in attributes
 		address_2: '',
 		labels: ['DECORATOR', 'BANNED']
 	});
-	expect(await getContact(db, id, sales)).toEqual({
+	expect(await getContact(db, id, SALES)).toEqual({
 		id,
 		phone: '573104428890',
 		whatsapp: null,
@@ -112,7 +88,7 @@ test('a contact saves its phone normalized and its optional fields in attributes
 });
 
 test('a phone that is not valid, or a missing name, comes back on its field', async () => {
-	const result = await createContact(db, { phone: '442 8890', full_name: ' ' }, sales);
+	const result = await createContact(db, { phone: '442 8890', full_name: ' ' }, SALES);
 	expect(result).toMatchObject({
 		ok: false,
 		errors: {
@@ -132,12 +108,12 @@ test.each([
 	],
 	['neither', { phone: '', whatsapp: ' ' }, { phone: null, whatsapp: null }]
 ])('a contact saves with %s', async (_, typed, saved) => {
-	const id = await create({ full_name: 'Luz Marina Restrepo', ...typed });
-	expect(await getContact(db, id, sales)).toMatchObject(saved);
+	const id = await fixture.contact({ full_name: 'Luz Marina Restrepo', phone: '', ...typed });
+	expect(await getContact(db, id, SALES)).toMatchObject(saved);
 });
 
 test('a username that is not valid comes back on its field', async () => {
-	const result = await createContact(db, { ...luzMarina, whatsapp: 'mayc.com' }, sales);
+	const result = await createContact(db, { ...luzMarina, whatsapp: 'mayc.com' }, SALES);
 	expect(result).toMatchObject({
 		ok: false,
 		errors: { whatsapp: 'Escriba el usuario como aparece en WhatsApp, por ejemplo @mayc47.' }
@@ -145,26 +121,30 @@ test('a username that is not valid comes back on its field', async () => {
 });
 
 test('a username another contact has, in any case, is named for the warning and still saves', async () => {
-	const luz = await create({ ...luzMarina, whatsapp: 'LuzMarinaR' });
+	const luz = await fixture.contact({ ...luzMarina, whatsapp: 'LuzMarinaR' });
 	const input = { whatsapp: '@luzmarinar', exceptId: null };
-	expect(await findWhatsappOwner(db, input, sales)).toBe('Luz Marina Restrepo');
-	const other = await create({ full_name: 'Luz Marina Arango', whatsapp: 'luzmarinar' });
-	expect(await getContact(db, other, sales)).toMatchObject({ whatsapp: 'luzmarinar' });
+	expect(await findWhatsappOwner(db, input, SALES)).toBe('Luz Marina Restrepo');
+	const other = await fixture.contact({ full_name: 'Luz Marina Arango', whatsapp: 'luzmarinar' });
+	expect(await getContact(db, other, SALES)).toMatchObject({ whatsapp: 'luzmarinar' });
 	// The contact's own username doesn't count; an invalid or missing one names no one.
-	expect(await findWhatsappOwner(db, { whatsapp: 'LuzMarinaR', exceptId: other }, sales)).toBe(
+	expect(await findWhatsappOwner(db, { whatsapp: 'LuzMarinaR', exceptId: other }, SALES)).toBe(
 		'Luz Marina Restrepo'
 	);
-	expect(await findWhatsappOwner(db, { whatsapp: 'nadie', exceptId: luz }, sales)).toBeNull();
-	expect(await findWhatsappOwner(db, { whatsapp: 'may..c', exceptId: null }, sales)).toBeNull();
-	expect(await findWhatsappOwner(db, { whatsapp: null, exceptId: null }, sales)).toBeNull();
+	expect(await findWhatsappOwner(db, { whatsapp: 'nadie', exceptId: luz }, SALES)).toBeNull();
+	expect(await findWhatsappOwner(db, { whatsapp: 'may..c', exceptId: null }, SALES)).toBeNull();
+	expect(await findWhatsappOwner(db, { whatsapp: null, exceptId: null }, SALES)).toBeNull();
 	const driver = actorWith('DRIVER');
 	expect(await rejection(findWhatsappOwner(db, input, driver))).toBe(403);
 });
 
 test("changing a contact's username logs it with before and after", async () => {
-	const id = await create({ ...luzMarina, document_id: '1036452118', whatsapp: 'LuzMarinaR' });
+	const id = await fixture.contact({
+		...luzMarina,
+		document_id: '1036452118',
+		whatsapp: 'LuzMarinaR'
+	});
 	const edit = { ...luzMarina, id, document_id: '1036452118', whatsapp: '@LuzMarina_R' };
-	expect(await updateContact(db, edit, sales)).toEqual({ ok: true, id });
+	expect(await updateContact(db, edit, SALES)).toEqual({ ok: true, id });
 	const edited = database.prepare("select before, after from events where action = 'EDITED'").get();
 	expect(JSON.parse(String(edited?.before))).toEqual({ whatsapp: 'LuzMarinaR' });
 	expect(JSON.parse(String(edited?.after))).toEqual({ whatsapp: 'LuzMarina_R' });
@@ -172,25 +152,25 @@ test("changing a contact's username logs it with before and after", async () => 
 
 test('the email is validated only when it has a value', async () => {
 	const typed = { ...luzMarina, document_id: '1036452118' };
-	const result = await createContact(db, { ...typed, email: 'luzmarina' }, sales);
+	const result = await createContact(db, { ...typed, email: 'luzmarina' }, SALES);
 	expect(result).toMatchObject({ ok: false, errors: { email: expect.any(String) } });
-	expect((await createContact(db, { ...typed, email: '' }, sales)).ok).toBe(true);
+	expect((await createContact(db, { ...typed, email: '' }, SALES)).ok).toBe(true);
 });
 
 test("a company's branches share its switchboard: two contacts can have one phone", async () => {
-	await create({ ...luzMarina, document_id: '900.456.123-4' });
-	await create({
+	await fixture.contact({ ...luzMarina, document_id: '900.456.123-4' });
+	await fixture.contact({
 		phone: '+57 3104428890',
 		full_name: 'Sucursal Centro',
 		document_id: '9004561235'
 	});
-	expect((await listContacts(db, { search: '442 8890' }, sales)).contacts).toHaveLength(2);
+	expect((await listContacts(db, { search: '442 8890' }, SALES)).contacts).toHaveLength(2);
 });
 
 test("the list carries each contact's phone and username, either one null", async () => {
-	await create({ full_name: 'Mayra Castaño', whatsapp: '@MayC47' });
-	await create(luzMarina);
-	const { contacts } = await listContacts(db, {}, sales);
+	await fixture.contact({ full_name: 'Mayra Castaño', phone: '', whatsapp: '@MayC47' });
+	await fixture.contact(luzMarina);
+	const { contacts } = await listContacts(db, {}, SALES);
 	expect(contacts.map(({ phone, whatsapp }) => ({ phone, whatsapp }))).toEqual([
 		{ phone: '573104428890', whatsapp: null },
 		{ phone: null, whatsapp: 'MayC47' }
@@ -203,35 +183,19 @@ test('the automatic document is @ and 8 symbols of Crockford base32', () => {
 });
 
 test('one document per contact, never typed as an automatic one', async () => {
-	await create({ ...luzMarina, document_id: '1.036.452.118' });
+	await fixture.contact({ ...luzMarina, document_id: '1.036.452.118' });
 	const result = await createContact(
 		db,
 		{ phone: '300 771 2043', full_name: 'Jorge Iván Betancur', document_id: '1036452118' },
-		manager
+		MANAGER
 	);
 	expect(result).toMatchObject({
 		ok: false,
 		errors: { document_id: 'Esa cédula o NIT ya es de Luz Marina Restrepo' }
 	});
 	expect(
-		await createContact(db, { ...luzMarina, document_id: '@ABCDEFGH' }, manager)
+		await createContact(db, { ...luzMarina, document_id: '@ABCDEFGH' }, MANAGER)
 	).toMatchObject({ ok: false, errors: { document_id: expect.stringContaining('automáticos') } });
-	expect(() =>
-		database
-			.prepare(
-				`insert into contacts (phone, full_name, document_id, created_at, created_by, updated_at, updated_by)
-				values ('13055550142', 'Tourist', '1036452118', 0, 'test', 0, 'test')`
-			)
-			.run()
-	).toThrow(/UNIQUE/);
-	expect(() =>
-		database
-			.prepare(
-				`insert into contacts (phone, full_name, created_at, created_by, updated_at, updated_by)
-				values ('13055550142', 'Tourist', 0, 'test', 0, 'test')`
-			)
-			.run()
-	).toThrow(/NOT NULL/);
 });
 
 const DOCUMENT_REQUIRED = { ok: false, errors: { document_id: 'Escribe la cédula o NIT' } };
@@ -239,7 +203,7 @@ const DOCUMENT_REQUIRED = { ok: false, errors: { document_id: 'Escribe la cédul
 test('Contactos never creates a contact without a real document', async () => {
 	for (const documentId of [undefined, '', ' . - ']) {
 		const typed = { ...luzMarina, document_id: documentId };
-		expect(await createContact(db, typed, manager)).toMatchObject(DOCUMENT_REQUIRED);
+		expect(await createContact(db, typed, MANAGER)).toMatchObject(DOCUMENT_REQUIRED);
 	}
 	expect(database.prepare('select count(*) as count from contacts').get()).toEqual({ count: 0 });
 });
@@ -253,15 +217,15 @@ async function newClient(): Promise<{ id: number; automatic: string }> {
 		fullName: 'Luz Marina Restrepo',
 		documentId: automatic
 	};
-	const [inserted] = await db.batch(newClientStatements(db, sales, client));
+	const [inserted] = await db.batch(newClientStatements(db, SALES, client));
 	return { id: inserted.meta.last_row_id, automatic };
 }
 
 test('Contactos never saves an edit that leaves the document empty or still automatic', async () => {
 	const { id, automatic } = await newClient();
-	expect(await getContact(db, id, sales)).toMatchObject({ hasAutoDocument: true });
+	expect(await getContact(db, id, SALES)).toMatchObject({ hasAutoDocument: true });
 	for (const documentId of ['', automatic]) {
-		for (const actor of [sales, manager]) {
+		for (const actor of [SALES, MANAGER]) {
 			const typed = { ...luzMarina, document_id: documentId, id };
 			expect(await updateContact(db, typed, actor)).toMatchObject(
 				'' === documentId
@@ -270,18 +234,18 @@ test('Contactos never saves an edit that leaves the document empty or still auto
 			);
 		}
 	}
-	const real = await create({ ...luzMarina, document_id: '1036452118' });
+	const real = await fixture.contact({ ...luzMarina, document_id: '1036452118' });
 	expect(
-		await updateContact(db, { ...luzMarina, document_id: '', id: real }, manager)
+		await updateContact(db, { ...luzMarina, document_id: '', id: real }, MANAGER)
 	).toMatchObject(DOCUMENT_REQUIRED);
-	expect((await getContact(db, real, manager))?.documentId).toBe('1036452118');
+	expect((await getContact(db, real, MANAGER))?.documentId).toBe('1036452118');
 });
 
 test('Sales types the real document over an automatic one, and on a new contact', async () => {
 	const { id } = await newClient();
 	const typed = { ...luzMarina, document_id: '1.036.452.118', id };
-	expect(await updateContact(db, typed, sales)).toEqual({ ok: true, id });
-	expect(await getContact(db, id, sales)).toMatchObject({
+	expect(await updateContact(db, typed, SALES)).toEqual({ ok: true, id });
+	expect(await getContact(db, id, SALES)).toMatchObject({
 		documentId: '1036452118',
 		hasAutoDocument: false
 	});
@@ -292,33 +256,37 @@ test('Sales types the real document over an automatic one, and on a new contact'
 		full_name: 'Jorge Iván Betancur',
 		document_id: '71234567'
 	};
-	const created = await createContact(db, jorge, sales);
+	const created = await createContact(db, jorge, SALES);
 	expect(created).toMatchObject({ ok: true });
 });
 
 test('once real, only Manager and Admin change the document: Sales gets a 403', async () => {
-	const id = await create({ ...luzMarina, document_id: '1036452118' }, sales);
+	const id = await fixture.contact({ ...luzMarina, document_id: '1036452118' });
 	const kept = { ...luzMarina, document_id: '1.036.452.118', bank_account: 'Nequi 310 442 8890' };
-	expect(await updateContact(db, { ...kept, id }, sales)).toEqual({ ok: true, id });
-	expect(await rejection(updateContact(db, { ...kept, document_id: '71384902', id }, sales))).toBe(
+	expect(await updateContact(db, { ...kept, id }, SALES)).toEqual({ ok: true, id });
+	expect(await rejection(updateContact(db, { ...kept, document_id: '71384902', id }, SALES))).toBe(
 		403
 	);
 	for (const [actor, documentId] of [
-		[manager, '71384902'],
+		[MANAGER, '71384902'],
 		[actorWith('ADMIN'), '900.312.554-1']
 	] as const) {
 		const changed = { ...kept, document_id: documentId, id };
 		expect(await updateContact(db, changed, actor)).toEqual({ ok: true, id });
 	}
-	expect((await getContact(db, id, manager))?.documentId).toBe('9003125541');
+	expect((await getContact(db, id, MANAGER))?.documentId).toBe('9003125541');
 });
 
 test('search by name or by three digits of the phone, with the etiqueta filter, a page at a time', async () => {
-	await create({ phone: '300 771 2043', full_name: 'Jorge Iván Betancur' });
-	await create({ ...luzMarina, labels: ['DECORATOR'] });
-	await create({ phone: '311 908 5512', full_name: 'Wilson Muñoz', labels: ['TRANSPORTER'] });
+	await fixture.contact({ phone: '300 771 2043', full_name: 'Jorge Iván Betancur' });
+	await fixture.contact({ ...luzMarina, labels: ['DECORATOR'] });
+	await fixture.contact({
+		phone: '311 908 5512',
+		full_name: 'Wilson Muñoz',
+		labels: ['TRANSPORTER']
+	});
 	const names = async (input: Record<string, unknown>) =>
-		(await listContacts(db, input, sales)).contacts.map((contact) => contact.fullName);
+		(await listContacts(db, input, SALES)).contacts.map((contact) => contact.fullName);
 
 	expect(await names({})).toEqual(['Jorge Iván Betancur', 'Luz Marina Restrepo', 'Wilson Muñoz']);
 	expect(await names({ search: 'marina' })).toEqual(['Luz Marina Restrepo']);
@@ -332,15 +300,15 @@ test('search by name or by three digits of the phone, with the etiqueta filter, 
 	expect(await names({ search: 'Decorador' })).toEqual([]);
 
 	for (let i = 0; i < 19; i++) {
-		await create({ phone: `320 000 00${10 + i}`, full_name: `Zoila ${i}` });
+		await fixture.contact({ phone: `320 000 00${10 + i}`, full_name: `Zoila ${i}` });
 	}
-	const first = await listContacts(db, {}, sales);
+	const first = await listContacts(db, {}, SALES);
 	expect(first).toMatchObject({ total: 22, pageCount: 2, filters: { page: 1 } });
 	expect(first.contacts).toHaveLength(20);
-	const second = await listContacts(db, { page: '2' }, sales);
+	const second = await listContacts(db, { page: '2' }, SALES);
 	expect(second.contacts.map((contact) => contact.fullName)).toEqual(['Zoila 8', 'Zoila 9']);
 	// Past the last page, a typed URL gets the last one.
-	expect((await listContacts(db, { page: '1000' }, sales)).filters.page).toBe(2);
+	expect((await listContacts(db, { page: '1000' }, SALES)).filters.page).toBe(2);
 });
 
 const withAccount = {
@@ -351,7 +319,7 @@ const withAccount = {
 };
 
 test('Sales is rejected changing etiquetas, a set bank account or the document', async () => {
-	const id = await create(withAccount);
+	const id = await fixture.contact(withAccount);
 	for (const change of [
 		{ labels: [] },
 		{ labels: ['DECORATOR', 'BANNED'] },
@@ -359,40 +327,39 @@ test('Sales is rejected changing etiquetas, a set bank account or the document',
 		{ bank_account: '' },
 		{ document_id: '71384902' }
 	]) {
-		expect(await rejection(updateContact(db, { ...withAccount, ...change, id }, sales))).toBe(403);
+		expect(await rejection(updateContact(db, { ...withAccount, ...change, id }, SALES))).toBe(403);
 	}
-	expect(await rejection(createContact(db, { ...withAccount, phone: '3007712043' }, sales))).toBe(
+	expect(await rejection(createContact(db, { ...withAccount, phone: '3007712043' }, SALES))).toBe(
 		403
 	);
 });
 
 test("an employee's document is Manager's and Admin's, and never left empty", async () => {
 	const ana = { phone: '310 442 8890', full_name: 'Ana Pérez', document_id: '1036452118' };
-	const hired = { ...ana, monthly_salary: '1750905', position: 'Bodega', start: '2026-07-01' };
-	await createEmployee(db, hired, manager);
-	const id = 1;
-	expect(await getContact(db, id, sales)).toMatchObject({ isEmployee: true });
-	expect((await listContacts(db, {}, sales)).contacts).toMatchObject([{ isEmployee: true }]);
-	await create({ phone: '300 771 2043', full_name: 'Jorge Iván Betancur' });
-	expect((await listContacts(db, { label: 'EMPLOYEE' }, sales)).contacts).toMatchObject([
+	const { employeeId } = await fixture.employee({ roles: ['WAREHOUSE'], ...ana });
+	const id = (await getEmployee(db, Number(employeeId), MANAGER))!.contactId;
+	expect(await getContact(db, id, SALES)).toMatchObject({ isEmployee: true });
+	expect((await listContacts(db, {}, SALES)).contacts).toMatchObject([{ isEmployee: true }]);
+	await fixture.contact({ phone: '300 771 2043', full_name: 'Jorge Iván Betancur' });
+	expect((await listContacts(db, { label: 'EMPLOYEE' }, SALES)).contacts).toMatchObject([
 		{ fullName: 'Ana Pérez' }
 	]);
-	expect(await rejection(updateContact(db, { ...ana, document_id: '1', id }, sales))).toBe(403);
-	expect(await updateContact(db, { ...ana, full_name: 'Ana P.', id }, sales)).toEqual({
+	expect(await rejection(updateContact(db, { ...ana, document_id: '1', id }, SALES))).toBe(403);
+	expect(await updateContact(db, { ...ana, full_name: 'Ana P.', id }, SALES)).toEqual({
 		ok: true,
 		id
 	});
-	expect(await updateContact(db, { ...ana, document_id: '', id }, manager)).toMatchObject(
+	expect(await updateContact(db, { ...ana, document_id: '', id }, MANAGER)).toMatchObject(
 		DOCUMENT_REQUIRED
 	);
 });
 
 test('an edit logs only the changed attributes key, old and new', async () => {
-	const id = await create({ ...withAccount, notes: 'Llamar tarde' });
+	const id = await fixture.contact({ ...withAccount, notes: 'Llamar tarde' });
 	await updateContact(
 		db,
 		{ ...withAccount, notes: 'Llamar tarde', bank_account: 'Daviplata 1', id },
-		manager
+		MANAGER
 	);
 	const edit = database.prepare("select before, after from events where action = 'EDITED'").all();
 	expect(
@@ -406,9 +373,9 @@ test('an edit logs only the changed attributes key, old and new', async () => {
 });
 
 test("an edit logs the etiquetas' keys, old and new, and the order picked changes nothing", async () => {
-	const id = await create(withAccount);
-	await updateContact(db, { ...withAccount, labels: ['DECORATOR', 'BANNED'], id }, manager);
-	await updateContact(db, { ...withAccount, labels: ['BANNED', 'DECORATOR'], id }, manager);
+	const id = await fixture.contact(withAccount);
+	await updateContact(db, { ...withAccount, labels: ['DECORATOR', 'BANNED'], id }, MANAGER);
+	await updateContact(db, { ...withAccount, labels: ['BANNED', 'DECORATOR'], id }, MANAGER);
 	const edit = database.prepare("select before, after from events where action = 'EDITED'").all();
 	expect(
 		edit.map(({ before, after }) => [JSON.parse(String(before)), JSON.parse(String(after))])
@@ -416,14 +383,14 @@ test("an edit logs the etiquetas' keys, old and new, and the order picked change
 });
 
 test('an etiqueta not in CONTACTS_LABELS, or an old service link, reads as every contact', async () => {
-	await create({ ...luzMarina, labels: ['DECORATOR'] });
-	await create({ phone: '311 908 5512', full_name: 'Wilson Muñoz' });
+	await fixture.contact({ ...luzMarina, labels: ['DECORATOR'] });
+	await fixture.contact({ phone: '311 908 5512', full_name: 'Wilson Muñoz' });
 	for (const input of [{ label: 'NO_EXISTE' }, { service: 'DECORATOR' }]) {
-		const page = await listContacts(db, input, sales);
+		const page = await listContacts(db, input, SALES);
 		expect(page.contacts).toHaveLength(2);
 		expect(page.filters.label).toBeUndefined();
 	}
-	const decorators = await listContacts(db, { label: 'DECORATOR' }, sales);
+	const decorators = await listContacts(db, { label: 'DECORATOR' }, SALES);
 	expect(decorators).toMatchObject({
 		contacts: [{ fullName: 'Luz Marina Restrepo', labels: ['DECORATOR'] }],
 		filters: { label: 'DECORATOR' }
@@ -432,16 +399,20 @@ test('an etiqueta not in CONTACTS_LABELS, or an old service link, reads as every
 });
 
 test('an edit that changes nothing writes nothing', async () => {
-	const id = await create(withAccount);
-	await updateContact(db, { ...withAccount, phone: '+57 310 442 8890', id }, sales);
+	const id = await fixture.contact(withAccount);
+	await updateContact(db, { ...withAccount, phone: '+57 310 442 8890', id }, SALES);
 	expect(database.prepare('select count(*) as count from events').get()).toEqual({ count: 1 });
 });
 
 test('letters also find the username, without the @ and ignoring case; digits only the phone', async () => {
-	await create({ full_name: 'Luz Marina', whatsapp: 'LuzMarinaR' });
-	await create({ phone: '310 442 8890', full_name: 'Jorge Betancur', whatsapp: 'jorge442' });
+	await fixture.contact({ full_name: 'Luz Marina', whatsapp: 'LuzMarinaR' });
+	await fixture.contact({
+		phone: '310 442 8890',
+		full_name: 'Jorge Betancur',
+		whatsapp: 'jorge442'
+	});
 	const names = async (search: string) =>
-		(await listContacts(db, { search }, sales)).contacts.map((contact) => contact.fullName);
+		(await listContacts(db, { search }, SALES)).contacts.map((contact) => contact.fullName);
 	expect(await names('luzma')).toEqual(['Luz Marina']);
 	expect(await names('@LUZMA')).toEqual(['Luz Marina']);
 	expect(await names('@jorge')).toEqual(['Jorge Betancur']);
@@ -459,16 +430,16 @@ test('Warehouse and Driver have no access to contacts', async () => {
 
 test('the order form finds clients by name, address or phone, by name, with their address', async () => {
 	const company = { ...luzMarina, full_name: 'Eventos Restrepo S.A.S.', document_id: '900312554' };
-	const companyId = await create(company);
-	const luzMarinaId = await create({
+	const companyId = await fixture.contact(company);
+	const luzMarinaId = await fixture.contact({
 		...luzMarina,
 		address_1: 'Cra 43A #18-95, El Poblado',
 		address_2: 'Piso 2'
 	});
-	await create({ phone: '311 222 3344', full_name: 'Otro' });
+	await fixture.contact({ phone: '311 222 3344', full_name: 'Otro' });
 	const ids = async (typed: string) =>
-		(await searchClients(db, typed, sales)).map((client) => client.id);
-	expect(await searchClients(db, '+57 310 442 8890', sales)).toEqual([
+		(await searchClients(db, typed, SALES)).map((client) => client.id);
+	expect(await searchClients(db, '+57 310 442 8890', SALES)).toEqual([
 		{
 			id: companyId,
 			fullName: 'Eventos Restrepo S.A.S.',
@@ -492,22 +463,22 @@ test('the order form finds clients by name, address or phone, by name, with thei
 	expect(await ids('poblado MARINA')).toEqual([luzMarinaId]);
 	expect(await ids('piso 2')).toEqual([luzMarinaId]);
 	expect(await ids('44')).toEqual([]);
-	const username = await create({ full_name: 'Mayra', whatsapp: 'LuzMarinaR' });
+	const username = await fixture.contact({ full_name: 'Mayra', whatsapp: 'LuzMarinaR' });
 	expect(await ids('luzma')).toEqual([username]);
 	expect(await ids('@LUZMA')).toEqual([username]);
 	expect(await rejection(searchClients(db, 'luz', actorWith('WAREHOUSE')))).toBe(403);
 });
 
 test('a client carrying Vetado is found marked, for the forms’ warning under «Cliente»', async () => {
-	const id = await create({ ...luzMarina, labels: ['BANNED'] });
-	const other = await create({ phone: '311 222 3344', full_name: 'Luz Elena' });
-	const found = await searchClients(db, 'luz', sales);
+	const id = await fixture.contact({ ...luzMarina, labels: ['BANNED'] });
+	const other = await fixture.contact({ phone: '311 222 3344', full_name: 'Luz Elena' });
+	const found = await searchClients(db, 'luz', SALES);
 	expect(found.map(({ id, isBanned }) => ({ id, isBanned }))).toEqual([
 		{ id: other, isBanned: false },
 		{ id, isBanned: true }
 	]);
-	expect(await isBannedClient(db, id, sales)).toBe(true);
-	expect(await isBannedClient(db, other, sales)).toBe(false);
+	expect(await isBannedClient(db, id, SALES)).toBe(true);
+	expect(await isBannedClient(db, other, SALES)).toBe(false);
 });
 
 test.each([
@@ -521,35 +492,40 @@ test.each([
 	["ana-maría o'neill", "Ana-María O'Neill"]
 ])('a new contact typed «%s» is saved «%s»', async (typed, saved) => {
 	expect(capitalizeName(typed)).toBe(saved);
-	const id = await create({ full_name: typed });
-	expect((await getContact(db, id, sales))?.fullName).toBe(saved);
+	const id = await fixture.contact({ full_name: typed });
+	expect((await getContact(db, id, SALES))?.fullName).toBe(saved);
 });
 
 test('an edit saves the name exactly as typed', async () => {
-	const id = await create({ ...luzMarina, document_id: '1036452118' });
+	const id = await fixture.contact({ ...luzMarina, document_id: '1036452118' });
 	const edit = { ...luzMarina, full_name: 'luz marina restrepo', document_id: '1036452118', id };
-	expect(await updateContact(db, edit, sales)).toEqual({ ok: true, id });
-	expect((await getContact(db, id, sales))?.fullName).toBe('luz marina restrepo');
+	expect(await updateContact(db, edit, SALES)).toEqual({ ok: true, id });
+	expect((await getContact(db, id, SALES))?.fullName).toBe('luz marina restrepo');
 });
 
 test('the transporters are the contacts with TRANSPORTER, by name, with phone and username', async () => {
-	await create({
+	await fixture.contact({
+		phone: '',
 		whatsapp: '@WilsonMudanzas',
 		full_name: 'Wilson Muñoz',
 		labels: ['TRANSPORTER']
 	});
-	await create({
+	await fixture.contact({
 		phone: '604 444 1290',
 		full_name: 'Transportes La 80',
 		labels: ['TRANSPORTER', 'DECORATOR']
 	});
-	await create({ phone: '312 555 7788', full_name: 'Paula Andrea Ríos', labels: ['DECORATOR'] });
-	await create(luzMarina);
-	expect((await listTransporters(db, sales)).map(({ fullName }) => fullName)).toEqual([
+	await fixture.contact({
+		phone: '312 555 7788',
+		full_name: 'Paula Andrea Ríos',
+		labels: ['DECORATOR']
+	});
+	await fixture.contact(luzMarina);
+	expect((await listTransporters(db, SALES)).map(({ fullName }) => fullName)).toEqual([
 		'Transportes La 80',
 		'Wilson Muñoz'
 	]);
-	expect((await listTransporters(db, sales))[1]).toMatchObject({
+	expect((await listTransporters(db, SALES))[1]).toMatchObject({
 		fullName: 'Wilson Muñoz',
 		phone: null,
 		whatsapp: 'WilsonMudanzas'
@@ -558,7 +534,7 @@ test('the transporters are the contacts with TRANSPORTER, by name, with phone an
 
 // Configuración › Etiquetas.
 
-const labelNames = async () => (await listLabelRows(db, manager)).map(({ name }) => name);
+const labelNames = async () => (await listLabelRows(db, MANAGER)).map(({ name }) => name);
 
 function settingsEvents() {
 	return database
@@ -568,9 +544,9 @@ function settingsEvents() {
 }
 
 test('the editor lists every etiqueta A–Z with how many contacts carry it', async () => {
-	await create({ ...luzMarina, labels: ['DECORATOR', 'CHEF'] });
-	await create({ phone: '311 908 5512', full_name: 'Wilson Muñoz', labels: ['CHEF'] });
-	const rows = await listLabelRows(db, manager);
+	await fixture.contact({ ...luzMarina, labels: ['DECORATOR', 'CHEF'] });
+	await fixture.contact({ phone: '311 908 5512', full_name: 'Wilson Muñoz', labels: ['CHEF'] });
+	const rows = await listLabelRows(db, MANAGER);
 	expect(rows.map(({ name }) => name)).toEqual([
 		'Barista',
 		'Bartender',
@@ -592,14 +568,14 @@ test('the editor lists every etiqueta A–Z with how many contacts carry it', as
 });
 
 test('«Nueva etiqueta» adds one sorted by name; a blank or repeated name is refused', async () => {
-	expect(await createLabel(db, { name: '  Proveedor de carpas ' }, manager)).toEqual({ ok: true });
+	expect(await createLabel(db, { name: '  Proveedor de carpas ' }, MANAGER)).toEqual({ ok: true });
 	expect(await labelNames()).toContain('Proveedor de carpas');
-	expect((await listLabelRows(db, manager)).map(({ key }) => key)).toContain('PROVEEDOR_DE_CARPAS');
-	expect(await createLabel(db, { name: '   ' }, manager)).toEqual({
+	expect((await listLabelRows(db, MANAGER)).map(({ key }) => key)).toContain('PROVEEDOR_DE_CARPAS');
+	expect(await createLabel(db, { name: '   ' }, MANAGER)).toEqual({
 		ok: false,
 		message: 'Escribe el nombre'
 	});
-	expect(await createLabel(db, { name: 'vetado' }, manager)).toEqual({
+	expect(await createLabel(db, { name: 'vetado' }, MANAGER)).toEqual({
 		ok: false,
 		message: 'Ya existe una etiqueta con ese nombre'
 	});
@@ -609,10 +585,10 @@ test('«Nueva etiqueta» adds one sorted by name; a blank or repeated name is re
 });
 
 test('renaming changes only the name: the contacts keep the key and read the new name', async () => {
-	const id = await create({ ...luzMarina, labels: ['WEDDING_PLANNER'] });
+	const id = await fixture.contact({ ...luzMarina, labels: ['WEDDING_PLANNER'] });
 	const renamed = { key: 'WEDDING_PLANNER', name: 'Organizador de bodas' };
-	expect(await renameLabel(db, renamed, manager)).toEqual({ ok: true });
-	expect((await getContact(db, id, manager))?.labels).toEqual(['WEDDING_PLANNER']);
+	expect(await renameLabel(db, renamed, MANAGER)).toEqual({ ok: true });
+	expect((await getContact(db, id, MANAGER))?.labels).toEqual(['WEDDING_PLANNER']);
 	expect(
 		database
 			.prepare(
@@ -621,10 +597,10 @@ test('renaming changes only the name: the contacts keep the key and read the new
 			.get()
 	).toEqual({ count: 0 });
 	expect(await labelNames()).toContain('Organizador de bodas');
-	expect(await renameLabel(db, { key: 'BANNED', name: 'Bloqueado' }, manager)).toEqual({
+	expect(await renameLabel(db, { key: 'BANNED', name: 'Bloqueado' }, MANAGER)).toEqual({
 		ok: true
 	});
-	expect(await renameLabel(db, { key: 'CHEF', name: 'bloqueado' }, manager)).toMatchObject({
+	expect(await renameLabel(db, { key: 'CHEF', name: 'bloqueado' }, MANAGER)).toMatchObject({
 		ok: false
 	});
 	expect(settingsEvents()[0]).toEqual([
@@ -636,13 +612,13 @@ test('renaming changes only the name: the contacts keep the key and read the new
 test('deleting strips the key from every contact that carries it, in the same batch', async () => {
 	const carriers = [];
 	for (const name of ['Ana', 'Beto', 'Carla', 'Dora']) {
-		carriers.push(await create({ full_name: name, labels: ['BARISTA', 'CHEF'] }));
+		carriers.push(await fixture.contact({ full_name: name, labels: ['BARISTA', 'CHEF'] }));
 	}
-	const other = await create({ ...luzMarina, labels: ['CHEF'] });
-	expect(await deleteLabel(db, { key: 'BARISTA' }, manager)).toEqual({ ok: true });
+	const other = await fixture.contact({ ...luzMarina, labels: ['CHEF'] });
+	expect(await deleteLabel(db, { key: 'BARISTA' }, MANAGER)).toEqual({ ok: true });
 	expect(await labelNames()).not.toContain('Barista');
 	for (const id of [...carriers, other]) {
-		expect((await getContact(db, id, manager))?.labels).toEqual(['CHEF']);
+		expect((await getContact(db, id, MANAGER))?.labels).toEqual(['CHEF']);
 	}
 	const contactEdits = database
 		.prepare(
@@ -662,9 +638,9 @@ test('deleting strips the key from every contact that carries it, in the same ba
 });
 
 test('an etiqueta no contact carries is deleted too; Transportador and Vetado never', async () => {
-	expect(await deleteLabel(db, { key: 'BARTENDER' }, manager)).toEqual({ ok: true });
+	expect(await deleteLabel(db, { key: 'BARTENDER' }, MANAGER)).toEqual({ ok: true });
 	for (const key of ['TRANSPORTER', 'BANNED']) {
-		expect(await deleteLabel(db, { key }, manager)).toMatchObject({ ok: false });
+		expect(await deleteLabel(db, { key }, MANAGER)).toMatchObject({ ok: false });
 	}
 	expect(await labelNames()).toEqual(expect.arrayContaining(['Transportador', 'Vetado']));
 });

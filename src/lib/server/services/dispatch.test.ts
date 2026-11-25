@@ -1,39 +1,26 @@
-import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
-import type { Actor } from '../actor';
-import { createMemoryD1 } from '../db/memory-d1';
+import { createFixture, DRIVER, SALES } from '../db/fixture';
 import { getDispatchDay } from './dispatch';
-import { advanceOrder, cancelOrder, createExtension } from './orders';
-import { createOrder } from '../db/test-orders';
-
-const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
-const driver: Actor = { ...sales, username: 'conductor', roles: ['DRIVER'] };
+import { createExtension, updateOrder, type OrderStatus } from './orders';
 
 const TODAY = '2026-08-14';
-const AUDIT = "0, 'admin', 0, 'admin'";
-const WILSON = 2;
 
 let db: D1Database;
-let database: DatabaseSync;
+let fixture: ReturnType<typeof createFixture>;
+let LUZ_MARINA: number;
+let CHAIRS: number;
 
-beforeEach(() => {
-	({ db, database } = createMemoryD1());
-	const contact = database.prepare(
-		`insert into contacts (phone, full_name, document_id, labels, created_at, created_by, updated_at, updated_by) values (?, ?, ?, ?, ${AUDIT})`
-	);
-	contact.run('573104428890', 'Luz Marina Restrepo', '@luz', '[]');
-	contact.run('573119085512', 'Wilson Muñoz', '@wilson', '["TRANSPORTER"]');
-	database
-		.prepare(
-			`insert into products (name, category, rental_price, total_quantity, active, created_at, created_by, updated_at, updated_by) values ('Silla Tiffany dorada', 'CHAIRS_TABLES', 2500, 500, 1, ${AUDIT})`
-		)
-		.run();
+beforeEach(async () => {
+	fixture = createFixture();
+	({ db } = fixture);
 	// 8 p.m. in Bogotá: already the next day in UTC.
 	vi.useFakeTimers({ toFake: ['Date'] });
 	vi.setSystemTime(new Date(`${TODAY}T20:00:00-05:00`));
 	onTestFinished(() => {
 		vi.useRealTimers();
 	});
+	LUZ_MARINA = await fixture.contact({ full_name: 'Luz Marina Restrepo' });
+	CHAIRS = await fixture.product({ name: 'Silla Tiffany dorada', rental_price: '2.500' });
 });
 
 const address = { address_1: 'Calle 10 # 43-12, El Poblado', address_2: 'Salón Los Arrayanes' };
@@ -45,41 +32,32 @@ type Trips = {
 	pickup_date?: string;
 };
 
-async function create(status: string, trips: Trips = {}): Promise<number> {
-	const result = await createOrder(
-		db,
-		{
-			client_id: 1,
-			client_name: 'Luz Marina Restrepo',
-			client_phone: '310 442 8890',
-			event_date: TODAY,
-			delivery_date: trips.delivery_date ?? TODAY,
-			// Two days on: a delivery's test isn't crowded by its own pickup.
-			pickup_date: trips.pickup_date ?? '2026-08-16',
-			rental_days: 1,
-			delivery_attributes: {
-				method: 'COMPANY_DELIVERY',
-				time: '14:00',
-				...address,
-				...trips.delivery
-			},
-			pickup_attributes: { method: 'COMPANY_PICKUP', time: '09:00', ...address, ...trips.pickup },
-			order_items: [{ product_id: 1, qty: 10, unit_price: 2500 }],
-			discount: 0,
-			transport_cost: 0,
-			deposit_amount: 0
+function orderInput(trips: Trips = {}) {
+	return {
+		client_id: LUZ_MARINA,
+		client_name: 'Luz Marina Restrepo',
+		event_date: TODAY,
+		delivery_date: trips.delivery_date ?? TODAY,
+		// Two days on: a delivery's test isn't crowded by its own pickup.
+		pickup_date: trips.pickup_date ?? '2026-08-16',
+		rental_days: 1,
+		delivery_attributes: {
+			method: 'COMPANY_DELIVERY',
+			time: '14:00',
+			...address,
+			...trips.delivery
 		},
-		sales
-	);
-	if (!result.ok) {
-		throw new Error(JSON.stringify(result.errors));
-	}
-	database.prepare('update orders set status = ? where id = ?').run(status, result.id);
-	return result.id;
+		pickup_attributes: { method: 'COMPANY_PICKUP', time: '09:00', ...address, ...trips.pickup },
+		order_items: [{ product_id: CHAIRS, qty: 10, unit_price: 2500 }]
+	};
+}
+
+async function create(status: OrderStatus, trips: Trips = {}): Promise<number> {
+	return fixture.order({ ...orderInput(trips), status });
 }
 
 async function rows(date?: string) {
-	return (await getDispatchDay(db, date, driver)).rows;
+	return (await getDispatchDay(db, date, DRIVER)).rows;
 }
 
 async function trips(date?: string) {
@@ -89,7 +67,7 @@ async function trips(date?: string) {
 test("at 8 p.m. in Bogotá it's still that day: tomorrow's order doesn't show", async () => {
 	const today = await create('CONFIRMED');
 	await create('CONFIRMED', { delivery_date: '2026-08-15' });
-	const day = await getDispatchDay(db, null, driver);
+	const day = await getDispatchDay(db, null, DRIVER);
 	expect([day.today, day.date]).toEqual([TODAY, TODAY]);
 	expect(day.rows.map((row) => row.id)).toEqual([today]);
 });
@@ -103,8 +81,12 @@ test('a day holds every method and every state but a cancelled one', async () =>
 	});
 	const delivered = await create('DELIVERED');
 	await create('CANCELLED', { pickup_date: TODAY });
-	const onItsWay = await create('OUT_FOR_DELIVERY', { pickup_date: TODAY });
-	await cancelOrder(db, { id: onItsWay, reason: 'Llegó tarde' }, sales);
+	await fixture.order({
+		...orderInput({ pickup_date: TODAY }),
+		status: 'CANCELLED',
+		cancelledFrom: 'OUT_FOR_DELIVERY',
+		reason: 'Llegó tarde'
+	});
 	expect(await trips()).toEqual([
 		`delivery ${client}`,
 		`pickup ${returned}`,
@@ -133,21 +115,18 @@ test("an extension is never a delivery: it's a pickup on its own date, named by 
 		db,
 		{
 			parent_order_id: String(parent),
-			client_id: 1,
+			client_id: LUZ_MARINA,
 			client_name: 'Luz Marina Restrepo',
-			client_phone: '310 442 8890',
 			event_date: TODAY,
 			delivery_date: TODAY,
 			pickup_date: TODAY,
 			rental_days: 1,
 			delivery_attributes: { method: 'COMPANY_DELIVERY', time: null, ...address },
 			pickup_attributes: { method: 'COMPANY_PICKUP', time: null, ...address },
-			order_items: [{ product_id: 1, qty: 4, unit_price: 2500 }],
-			discount: 0,
-			transport_cost: 0,
-			deposit_amount: 0
+			order_items: [{ product_id: CHAIRS, qty: 4, unit_price: 2500 }],
+			transport_cost: 0
 		},
-		sales
+		SALES
 	);
 	if (!result.ok) {
 		throw new Error(JSON.stringify(result.errors));
@@ -187,9 +166,14 @@ test('today keeps what is still pending up to 4 days late, never what was done',
 });
 
 test("an external carrier's row carries that direction's carrier", async () => {
-	const carrier = { method: 'EXTERNAL_CARRIER', carrier_id: WILSON };
+	const wilson = await fixture.contact({
+		full_name: 'Wilson Muñoz',
+		phone: '311 908 5512',
+		labels: ['TRANSPORTER']
+	});
+	const carrier = { method: 'EXTERNAL_CARRIER', carrier_id: wilson };
 	const id = await create('CONFIRMED', { delivery: carrier });
-	const [row] = (await getDispatchDay(db, null, sales)).rows;
+	const [row] = (await getDispatchDay(db, null, SALES)).rows;
 	expect(row).toMatchObject({
 		id,
 		clientName: 'Luz Marina Restrepo',
@@ -205,7 +189,7 @@ test('another day holds only what is dated on it, none late, whatever its state'
 	const delivery = await create('CONFIRMED', { delivery_date: SUNDAY, pickup_date: '2026-08-17' });
 	await create('CANCELLED', { delivery_date: SUNDAY });
 	await create('CONFIRMED', { delivery_date: '2026-08-13', pickup_date: '2026-08-15' });
-	const day = await getDispatchDay(db, SUNDAY, driver);
+	const day = await getDispatchDay(db, SUNDAY, DRIVER);
 	expect(day.date).toBe(SUNDAY);
 	expect(day.rows.map((row) => [row.direction, row.id, row.isLate])).toEqual([
 		['pickup', stillConfirmed, false],
@@ -219,22 +203,19 @@ test('another day holds only what is dated on it, none late, whatever its state'
 });
 
 test('a malformed day is today', async () => {
-	expect((await getDispatchDay(db, 'mañana', driver)).date).toBe(TODAY);
+	expect((await getDispatchDay(db, 'mañana', DRIVER)).date).toBe(TODAY);
 });
 
 test('a row says whether its order was modified after staging, both of its rows alike', async () => {
 	const untouched = await create('CONFIRMED', { pickup_date: TODAY });
-	const edited = await create('CONFIRMED', {
+	const editedTrips = {
 		delivery: { time: '15:00' },
 		pickup: { time: '16:00' },
 		pickup_date: TODAY
-	});
-	await advanceOrder(db, { id: edited, status: 'PICKED' }, driver);
-	database
-		.prepare(
-			`insert into events (entity_type, entity_id, action, actor_username, actor_kind, after, created_at) values ('ORDER', ?, 'EDITED', 'ventas', 'user', '{"rental_days":3}', 0)`
-		)
-		.run(edited);
+	};
+	const edited = await create('PICKED', editedTrips);
+	const edit = { ...orderInput(editedTrips), id: edited, rental_days: 3 };
+	expect(await updateOrder(db, edit, SALES)).toEqual({ ok: true, id: edited });
 	expect(
 		(await rows()).map((row) => [`${row.direction} ${row.id}`, row.modifiedAfterStaging])
 	).toEqual([

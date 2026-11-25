@@ -1,82 +1,107 @@
 import { isHttpError, isRedirect } from '@sveltejs/kit';
 import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
-import type { Actor, Role } from '$lib/server/actor';
-import { createMemoryD1 } from '$lib/server/db/memory-d1';
+import type { Actor } from '$lib/server/actor';
+import { ADMIN, createFixture, DRIVER, MANAGER, SALES, WAREHOUSE } from '$lib/server/db/fixture';
 import { createPublicToken } from '$lib/server/public-token';
+import { getPublicToken } from '$lib/server/services/orders';
+import {
+	convertQuote,
+	getQuotePublicToken,
+	getSourceQuoteId,
+	updateQuote
+} from '$lib/server/services/quotes';
+import {
+	getSystemSettings,
+	updateSystemSettings,
+	updateTerms
+} from '$lib/server/services/settings';
 import { handle } from '../../../hooks.server';
 import { load as loadLayout } from './+layout.server';
 import { load } from './+page.server';
 import { load as loadOrder } from '../../mi-pedido/[token]/+page.server';
 
-const AUDIT = "0, 'admin', 0, 'admin'";
 const ORIGIN = 'https://app.example.com';
+
+// Wednesday 14 October 2026, when the quotes are saved, and the 28th, when they're opened.
+const OCTOBER_14 = new Date('2026-10-14T15:00:00Z');
+const OCTOBER_28 = new Date('2026-10-28T15:00:00Z');
 
 let db: D1Database;
 let database: DatabaseSync;
+let fixture: ReturnType<typeof createFixture>;
+let TIFFANY: number;
+let postobon: number | undefined;
 
-beforeEach(() => {
-	({ db, database } = createMemoryD1());
-	database.exec(
-		`insert into contacts (phone, full_name, document_id, labels, created_at, created_by, updated_at, updated_by) values ('576045765100', 'Postobón S.A.', '8909039395', '[]', ${AUDIT});
-		insert into settings (key, value, created_at, created_by, updated_at, updated_by) values ('COMPANY_WHATSAPP', '573105550142', ${AUDIT}), ('TERMS_CONDITIONS', '## Depósito', ${AUDIT})`
-	);
-	// Wednesday 28 October 2026 in Bogotá.
+beforeEach(async () => {
 	vi.useFakeTimers({ toFake: ['Date'] });
-	vi.setSystemTime(new Date('2026-10-28T15:00:00Z'));
+	vi.setSystemTime(OCTOBER_28);
 	onTestFinished(() => {
 		vi.useRealTimers();
 	});
+	fixture = createFixture();
+	({ db, database } = fixture);
+	postobon = undefined;
+	TIFFANY = await fixture.product({ name: 'Silla Tiffany dorada', rental_price: '2500' });
+	const values = await getSystemSettings(db, ['COMPANY'], MANAGER);
+	const form = { ...values, COMPANY_WHATSAPP: '573105550142' };
+	await updateSystemSettings(db, { modules: ['COMPANY'], values: form }, MANAGER);
+	await updateTerms(db, { text: '## Depósito' }, MANAGER);
 });
 
-function actor(role: Role): Actor {
-	return { username: role.toLowerCase(), employeeId: null, roles: [role], kind: 'user' };
+/** Postobón, the quotes' client; `fields` over it only before its first quote. */
+async function client(fields: Record<string, unknown> = {}): Promise<number> {
+	postobon ??= await fixture.contact({
+		full_name: 'Postobón S.A.',
+		phone: '604 576 5100',
+		document_id: '8909039395',
+		...fields
+	});
+	return postobon;
 }
 
-type QuoteRow = {
-	validUntil?: string;
-	orderId?: number;
-	orderStatus?: 'CONFIRMED' | 'DELIVERED' | 'CANCELLED';
-	transportCost?: number | null;
-};
+type Seed = { validUntil?: string; transportCost?: number | null };
 
-/** The client link token of the order each converted quote is inserted with, by order id. */
-const orderTokens = new Map<number, string>();
+/** The quote as Sales types it: 200 chairs at $2.200, less $40.000. */
+async function quoteInput({ validUntil = '2026-11-30', transportCost = 250000 }: Seed = {}) {
+	return {
+		client_id: await client(),
+		client_name: 'Postobón S.A.',
+		event_date: '2026-12-12',
+		valid_until: validUntil,
+		rental_days: 1,
+		quote_items: [{ product_id: TIFFANY, qty: 200, unit_price: 2200 }],
+		discount: 40000,
+		transport_cost: transportCost,
+		transported_by: 'COMPANY',
+		address_1: 'Hacienda Fizebad',
+		notes: 'Montaje desde las 7:00 a.m.'
+	};
+}
 
-const ITEMS = [
-	{
-		product_id: 1,
-		name: 'Silla Tiffany dorada',
-		qty: 200,
-		list_price: 2500,
-		unit_price: 2200,
-		line_total: 440000
-	}
-];
+/** A quote saved on 14 October: its id and its client link's token. */
+async function saveQuote(seed: Seed = {}): Promise<{ id: number; token: string }> {
+	vi.setSystemTime(OCTOBER_14);
+	const id = await fixture.quote(await quoteInput(seed));
+	vi.setSystemTime(OCTOBER_28);
+	return { id, token: String(await getQuotePublicToken(db, id, SALES)) };
+}
 
-/** A quote straight into the table, and its client link's token. */
-function insertQuote({
-	validUntil = '2026-11-30',
-	orderId,
-	orderStatus = 'CONFIRMED',
-	transportCost = 250000
-}: QuoteRow = {}) {
-	const token = createPublicToken();
-	const total = 440000 - 40000 + (transportCost ?? 0);
-	if (undefined !== orderId) {
-		orderTokens.set(orderId, createPublicToken());
-		database.exec(
-			`insert into orders (id, public_token, client_id, status, event_date, delivery_date, pickup_date, rental_days, client_attributes, delivery_attributes, pickup_attributes, order_items, items_total, order_total, created_at, created_by, updated_at, updated_by)
-			values (${orderId}, '${orderTokens.get(orderId)}', 1, '${orderStatus}', '2026-12-12', '2026-12-11', '2026-12-13', 1, '{}', '{"method":"COMPANY_DELIVERY"}', '{"method":"COMPANY_PICKUP"}', '[]', 0, 0, ${AUDIT})`
-		);
-	}
-	database
-		.prepare(
-			`insert into quotes (public_token, client_id, order_id, event_date, valid_until, rental_days, client_attributes, quote_items, items_total, discount, transport_cost, quote_total, attributes, created_at, created_by, updated_at, updated_by)
-			values (?, 1, ?, '2026-12-12', ?, 1, '{"name":"Postobón S.A.","phone":"576045765100","whatsapp":null}', ?, 440000, 40000, ?, ?, '{"address_1":"Hacienda Fizebad","notes":"Montaje desde las 7:00 a.m."}', unixepoch('2026-10-14 15:00:00'), 'ventas', 0, 'ventas')`
-		)
-		.run(token, orderId ?? null, validUntil, JSON.stringify(ITEMS), transportCost, total);
-	return token;
+type Converted = { quoteToken: string; orderId: number; orderToken: string };
+
+// An order's quote link and the order's own: the order converted from its quote, then moved on.
+async function tokensOf(orderId: number): Promise<Converted> {
+	const quoteId = Number(await getSourceQuoteId(db, orderId, SALES));
+	return {
+		quoteToken: String(await getQuotePublicToken(db, quoteId, SALES)),
+		orderId,
+		orderToken: String(await getPublicToken(db, orderId, SALES))
+	};
+}
+
+/** A quote converted into an order in `status`. */
+async function convertedQuote(status: 'CONFIRMED' | 'DELIVERED' | 'CANCELLED' = 'CONFIRMED') {
+	return tokensOf(await fixture.order({ client_id: await client(), status }));
 }
 
 type PageData = Exclude<Awaited<ReturnType<typeof load>>, void>;
@@ -103,10 +128,10 @@ const isUnavailable = (thrown: unknown) =>
 	isHttpError(thrown, 404) && 'Esta cotización ya no está disponible' === thrown.body.message;
 
 test('a valid quote shows, with no session, built for the client: no phone, document or list price', async () => {
-	const token = insertQuote();
+	const { id, token } = await saveQuote();
 	const data = await open(token);
 	expect(data.quote).toEqual({
-		id: 1,
+		id,
 		createdOn: '2026-10-14',
 		validUntil: '2026-11-30',
 		clientName: 'Postobón S.A.',
@@ -124,7 +149,7 @@ test('a valid quote shows, with no session, built for the client: no phone, docu
 	});
 	expect(data.terms).toBe('<h2>Depósito</h2>\n');
 	const shown = JSON.stringify(data);
-	for (const hidden of ['576045765100', '8909039395', 'client_id', 'list_price', 'ventas']) {
+	for (const hidden of ['576045765100', '8909039395', 'client_id', 'list_price', 'manager']) {
 		expect(shown).not.toContain(hidden);
 	}
 	expect(Object.keys(data.quote)).not.toEqual(
@@ -133,11 +158,8 @@ test('a valid quote shows, with no session, built for the client: no phone, docu
 });
 
 test("the load sends neither the client's phone nor username: its keys, listed", async () => {
-	const token = insertQuote();
-	database.exec(
-		`update quotes set client_attributes = json_set(client_attributes, '$.whatsapp', 'PostobonEventos');
-		update contacts set whatsapp = 'PostobonEventos'`
-	);
+	await client({ whatsapp: 'PostobonEventos' });
+	const { token } = await saveQuote();
 	const data = await open(token);
 	expect(Object.keys(data).sort()).toEqual(['changesHref', 'confirmHref', 'quote', 'terms']);
 	expect(Object.keys(data.quote).sort()).toEqual(
@@ -166,93 +188,116 @@ test("the load sends neither the client's phone nor username: its keys, listed",
 });
 
 test('«por acordar» transport: no price, and the total leaves it out', async () => {
-	const data = await open(insertQuote({ transportCost: null }));
+	const data = await open((await saveQuote({ transportCost: null })).token);
 	expect(data.quote).toMatchObject({ transportCost: null, quoteTotal: 400000 });
 });
 
 test('«Quién transporta» reaches the client: the company, or the client who picks up', async () => {
-	const token = insertQuote();
+	const { id, token } = await saveQuote();
 	expect((await open(token)).quote.transportedBy).toBe('COMPANY');
-	database.exec("update quotes set transported_by = 'CLIENT'");
+	const byClient = { ...(await quoteInput()), id, transported_by: 'CLIENT' };
+	expect(await updateQuote(db, byClient, SALES)).toEqual({ ok: true, id });
 	expect((await open(token)).quote.transportedBy).toBe('CLIENT');
 });
 
 test('expired, unknown, or a quote id: the same 404, «ya no está disponible»', async () => {
-	const expired = insertQuote({ validUntil: '2026-10-27' });
-	for (const token of [expired, createPublicToken(), '12', '1']) {
+	const expired = await saveQuote({ validUntil: '2026-10-27' });
+	const valid = await saveQuote();
+	const ids = [String(expired.id), String(valid.id)];
+	for (const token of [expired.token, createPublicToken(), ...ids]) {
 		await expect(open(token)).rejects.toSatisfy(isUnavailable);
 	}
 });
 
 test('an expired quote renewed to a later «Válida hasta» opens again at the same link', async () => {
-	const token = insertQuote({ validUntil: '2026-10-27' });
+	const { id, token } = await saveQuote({ validUntil: '2026-10-27' });
 	await expect(open(token)).rejects.toSatisfy(isUnavailable);
-	database.exec("update quotes set valid_until = '2026-11-15'");
-	expect((await open(token)).quote.id).toBe(1);
+	const renewed = await quoteInput({ validUntil: '2026-11-15' });
+	expect(await updateQuote(db, { ...renewed, id }, SALES)).toEqual({ ok: true, id });
+	expect((await open(token)).quote.id).toBe(id);
 });
 
 test("a converted quote's link goes to its order's page, whatever the order's status or «Válida hasta»", async () => {
-	const statuses = ['CONFIRMED', 'DELIVERED', 'CANCELLED'] as const;
-	for (const [index, orderStatus] of statuses.entries()) {
-		const orderId = 1060 + index;
-		const token = insertQuote({ orderId, orderStatus });
-		expect(await redirectOf(token)).toBe(`/mi-pedido/${orderTokens.get(orderId)}`);
+	for (const status of ['CONFIRMED', 'DELIVERED', 'CANCELLED'] as const) {
+		const { quoteToken, orderToken } = await convertedQuote(status);
+		expect(await redirectOf(quoteToken)).toBe(`/mi-pedido/${orderToken}`);
 	}
-	const past = insertQuote({ orderId: 1070, validUntil: '2026-10-01' });
-	expect(await redirectOf(past)).toBe(`/mi-pedido/${orderTokens.get(1070)}`);
+	// Converted on 14 October, valid until the 15th: past its «Válida hasta» now.
+	const { id, token } = await saveQuote({ validUntil: '2026-10-15' });
+	vi.setSystemTime(OCTOBER_14);
+	const order = {
+		client_id: await client(),
+		client_name: 'Postobón S.A.',
+		event_date: '2026-12-12',
+		delivery_date: '2026-12-11',
+		pickup_date: '2026-12-13',
+		rental_days: 1,
+		delivery_attributes: { method: 'COMPANY_DELIVERY', time: null, address_1: 'Hacienda Fizebad' },
+		pickup_attributes: { method: 'COMPANY_PICKUP', time: null, address_1: 'Hacienda Fizebad' },
+		order_items: [{ product_id: TIFFANY, qty: 200, unit_price: 2200 }],
+		transport_cost: 0
+	};
+	const converted = await convertQuote(db, { quote: id, order, force: true }, SALES);
+	vi.setSystemTime(OCTOBER_28);
+	if (!converted.ok) {
+		throw new Error(JSON.stringify(converted));
+	}
+	const pastToken = await getPublicToken(db, converted.id, SALES);
+	expect(await redirectOf(token)).toBe(`/mi-pedido/${pastToken}`);
 });
 
 test("WAREHOUSE and DRIVER follow a converted quote's link to the order's operational detail", async () => {
-	const token = insertQuote({ orderId: 1060 });
-	for (const role of ['WAREHOUSE', 'DRIVER'] satisfies Role[]) {
-		const location = await redirectOf(token, actor(role));
-		const orderToken = String(orderTokens.get(1060));
+	const { quoteToken, orderId, orderToken } = await convertedQuote();
+	for (const user of [WAREHOUSE, DRIVER]) {
+		const location = await redirectOf(quoteToken, user);
 		expect(location).toBe(`/mi-pedido/${orderToken}`);
-		const event = { locals: { user: actor(role) }, params: { token: orderToken } };
+		const event = { locals: { user }, params: { token: orderToken } };
 		await expect(loadOrder({ ...event, platform: { env: { DB: db } } } as never)).rejects.toSatisfy(
-			(thrown) => isRedirect(thrown) && '/despachos/1060' === thrown.location
+			(thrown) => isRedirect(thrown) && `/despachos/${orderId}` === thrown.location
 		);
 	}
 });
 
 test('opening it writes nothing: events and sessions unchanged', async () => {
-	const token = insertQuote();
-	const converted = insertQuote({ orderId: 1060 });
+	const { token } = await saveQuote();
+	const { quoteToken: converted } = await convertedQuote();
 	const count = (table: string) =>
 		database.prepare(`select count(*) as total from ${table}`).get()?.total;
 	const before = [count('events'), count('sessions')];
 	await open(token);
-	await open(token, actor('WAREHOUSE'));
+	await open(token, WAREHOUSE);
 	await redirectOf(converted);
-	await redirectOf(converted, actor('DRIVER'));
+	await redirectOf(converted, DRIVER);
 	expect([count('events'), count('sessions')]).toEqual(before);
 });
 
 test('SALES, MANAGER and ADMIN go to the quote, whatever its state', async () => {
-	const tokens = [
-		insertQuote(),
-		insertQuote({ validUntil: '2026-10-27' }),
-		insertQuote({ orderId: 1060 })
+	const converted = await convertedQuote();
+	const quotes = [
+		await saveQuote(),
+		await saveQuote({ validUntil: '2026-10-27' }),
+		{
+			id: Number(await getSourceQuoteId(db, converted.orderId, SALES)),
+			token: converted.quoteToken
+		}
 	];
-	for (const role of ['SALES', 'MANAGER', 'ADMIN'] satisfies Role[]) {
-		for (const [index, token] of tokens.entries()) {
-			expect(await redirectOf(token, actor(role))).toBe(`/cotizaciones/${index + 1}`);
+	for (const user of [SALES, MANAGER, ADMIN]) {
+		for (const { id, token } of quotes) {
+			expect(await redirectOf(token, user)).toBe(`/cotizaciones/${id}`);
 		}
 	}
 });
 
 test("WAREHOUSE and DRIVER get the client's page; an unknown token is the same 404 for everyone", async () => {
-	const valid = insertQuote();
-	const expired = insertQuote({ validUntil: '2026-10-27' });
-	for (const role of ['WAREHOUSE', 'DRIVER'] satisfies Role[]) {
-		expect((await open(valid, actor(role))).quote.id).toBe(1);
-		await expect(open(expired, actor(role))).rejects.toSatisfy(isUnavailable);
+	const valid = await saveQuote();
+	const expired = await saveQuote({ validUntil: '2026-10-27' });
+	for (const user of [WAREHOUSE, DRIVER]) {
+		expect((await open(valid.token, user)).quote.id).toBe(valid.id);
+		await expect(open(expired.token, user)).rejects.toSatisfy(isUnavailable);
 	}
 	const unknown = createPublicToken();
-	for (const user of [null, ...(['SALES', 'MANAGER', 'ADMIN', 'WAREHOUSE', 'DRIVER'] as const)]) {
-		await expect(open(unknown, null === user ? null : actor(user))).rejects.toSatisfy(
-			isUnavailable
-		);
+	for (const user of [null, SALES, MANAGER, ADMIN, WAREHOUSE, DRIVER]) {
+		await expect(open(unknown, user)).rejects.toSatisfy(isUnavailable);
 	}
 });
 
@@ -263,14 +308,14 @@ function textOf(href: string | null): string | null {
 }
 
 test("the two buttons and the floating icon carry their messages and the page's own URL", async () => {
-	const token = insertQuote();
+	const { id, token } = await saveQuote();
 	const page = `${ORIGIN}/mi-cotizacion/${token}`;
 	const data = await open(token);
-	expect(textOf(data.confirmHref)).toBe(`Hola. Quiero confirmar la cotización #1 ${page}`);
+	expect(textOf(data.confirmHref)).toBe(`Hola. Quiero confirmar la cotización #${id} ${page}`);
 	expect(textOf(data.changesHref)).toBe(
-		`Hola. Quiero solicitar cambios en la cotización #1 ${page}`
+		`Hola. Quiero solicitar cambios en la cotización #${id} ${page}`
 	);
-	expect(data.confirmHref).toContain(encodeURIComponent(`la cotización #1 ${page}`));
+	expect(data.confirmHref).toContain(encodeURIComponent(`la cotización #${id} ${page}`));
 	for (const path of [`/mi-cotizacion/${token}`, `/mi-cotizacion/${createPublicToken()}`]) {
 		const url = new URL(`${ORIGIN}${path}`);
 		const layout = await loadLayout({ platform: { env: { DB: db } }, url } as never);

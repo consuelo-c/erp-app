@@ -1,8 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { isHttpError } from '@sveltejs/kit';
 import { beforeEach, expect, test } from 'vitest';
-import type { Actor } from '../actor';
-import { createMemoryD1 } from '../db/memory-d1';
+import { createFixture, DRIVER, MANAGER, SALES, WAREHOUSE } from '../db/fixture';
 import { reportIncident, reverseIncident } from './incidents';
 import {
 	approveCount,
@@ -18,38 +17,30 @@ import {
 	submitAndApproveCount,
 	submitCount
 } from './inventory';
-import { createOrder } from '../db/test-orders';
-
-const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
-const warehouse: Actor = { ...sales, username: 'bodega', roles: ['WAREHOUSE'] };
-const driver: Actor = { ...sales, username: 'conductor', roles: ['DRIVER'] };
-const manager: Actor = { ...sales, username: 'gerente', roles: ['MANAGER'] };
+import { createExtension, type OrderStatus } from './orders';
 
 let db: D1Database;
 let database: DatabaseSync;
+let fixture: ReturnType<typeof createFixture>;
+let LUZ_MARINA: number;
+let CHAIR: number;
+let TABLECLOTH: number;
 
-const AUDIT = "0, 'admin', 0, 'admin'";
-
-const CHAIR = 1;
-const TABLECLOTH = 2;
-
-beforeEach(() => {
-	({ db, database } = createMemoryD1());
-	for (const [name, quantity, active] of [
-		['Silla Tiffany dorada', 800, 1],
-		['Mantel blanco 3×3', 120, 0]
-	]) {
-		database
-			.prepare(
-				`insert into products (name, category, rental_price, total_quantity, active, created_at, created_by, updated_at, updated_by) values (?, 'CHAIRS_TABLES', 1000, ?, ?, ${AUDIT})`
-			)
-			.run(name, quantity, active);
-	}
-	database
-		.prepare(
-			`insert into contacts (phone, full_name, document_id, labels, created_at, created_by, updated_at, updated_by) values ('573104428890', 'Luz Marina Restrepo', '@1', '[]', ${AUDIT})`
-		)
-		.run();
+beforeEach(async () => {
+	fixture = createFixture();
+	({ db, database } = fixture);
+	CHAIR = await fixture.product({
+		name: 'Silla Tiffany dorada',
+		rental_price: '1.000',
+		total_quantity: '800'
+	});
+	TABLECLOTH = await fixture.product({
+		name: 'Mantel blanco 3×3',
+		rental_price: '1.000',
+		total_quantity: '120',
+		active: 'off'
+	});
+	LUZ_MARINA = await fixture.contact({ full_name: 'Luz Marina Restrepo' });
 });
 
 function stock(id: number): number {
@@ -61,16 +52,12 @@ function countRows(): number {
 	return Number(database.prepare('select count(*) as count from inventory_counts').get()?.count);
 }
 
-test('the database rejects an unknown status', () => {
-	const insert = (status: string) =>
-		database
-			.prepare(
-				`insert into inventory_counts (status, inventory_items, created_at, created_by, updated_at, updated_by) values (?, '[]', ${AUDIT})`
-			)
-			.run(status);
-	expect(() => insert('WITHDRAWN')).toThrow(/CHECK constraint failed/);
-	expect(() => insert('PENDING_APPROVAL')).not.toThrow();
-});
+function countProductEvents(): number {
+	const row = database.prepare(
+		"select count(*) as count from events where entity_type = 'PRODUCT'"
+	);
+	return Number(row.get()?.count);
+}
 
 test('the items: at least one, whole counted quantities, known keys, a product once', () => {
 	const item = {
@@ -101,9 +88,13 @@ test('a warehouse login sends a count pending approval, changing no product', as
 		{ product_id: CHAIR, counted_qty: 792 },
 		{ product_id: TABLECLOTH, counted_qty: 120 }
 	];
-	expect(await submitCount(db, { items }, warehouse)).toEqual({ ok: true, id: 1 });
-	database.prepare("update products set name = 'Silla Tiffany oro' where id = ?").run(CHAIR);
-	expect(database.prepare('select * from inventory_counts').get()).toMatchObject({
+	const productEvents = countProductEvents();
+	const result = await submitCount(db, { items }, WAREHOUSE);
+	expect(result).toEqual({ ok: true, id: expect.any(Number) });
+	const id = result.ok ? result.id : 0;
+	expect(countProductEvents()).toBe(productEvents);
+	await fixture.editProduct(CHAIR, { name: 'Silla Tiffany oro' });
+	expect(count(id)).toMatchObject({
 		status: 'PENDING_APPROVAL',
 		review_note: null,
 		reviewed_by: null,
@@ -111,8 +102,8 @@ test('a warehouse login sends a count pending approval, changing no product', as
 		reversal_reason: null,
 		reversed_by: null,
 		reversed_at: null,
-		created_by: 'bodega',
-		updated_by: 'bodega'
+		created_by: 'warehouse',
+		updated_by: 'warehouse'
 	});
 	const row = database.prepare('select inventory_items from inventory_counts').get();
 	expect(JSON.parse(String(row?.inventory_items))).toEqual([
@@ -127,28 +118,25 @@ test('a warehouse login sends a count pending approval, changing no product', as
 		.all();
 	expect(events).toEqual([
 		{
-			entity_id: 1,
+			entity_id: id,
 			action: 'CREATED',
-			actor_username: 'bodega',
+			actor_username: 'warehouse',
 			before: null,
 			after: JSON.stringify({ status: 'PENDING_APPROVAL', inventory_items: row?.inventory_items })
 		}
 	]);
-	expect(
-		database.prepare("select count(*) as count from events where entity_type = 'PRODUCT'").get()
-	).toEqual({ count: 0 });
 });
 
 test('a driver sends one too; sales gets a 403 and saves nothing', async () => {
 	const items = [{ product_id: CHAIR, counted_qty: 800 }];
-	expect(await submitCount(db, { items }, driver)).toMatchObject({ ok: true });
-	const refused = await submitCount(db, { items }, sales).catch((error: unknown) => error);
+	expect(await submitCount(db, { items }, DRIVER)).toMatchObject({ ok: true });
+	const refused = await submitCount(db, { items }, SALES).catch((error: unknown) => error);
 	expect(isHttpError(refused, 403)).toBe(true);
 	expect(countRows()).toBe(1);
 });
 
 test('no rows, a repeated product or one that does not exist save nothing', async () => {
-	expect(await submitCount(db, { items: [] }, warehouse)).toMatchObject({
+	expect(await submitCount(db, { items: [] }, WAREHOUSE)).toMatchObject({
 		ok: false,
 		errors: { items: expect.any(String) }
 	});
@@ -156,9 +144,9 @@ test('no rows, a repeated product or one that does not exist save nothing', asyn
 		{ product_id: CHAIR, counted_qty: 1 },
 		{ product_id: CHAIR, counted_qty: 2 }
 	];
-	expect(await submitCount(db, { items: twice }, warehouse)).toMatchObject({ ok: false });
+	expect(await submitCount(db, { items: twice }, WAREHOUSE)).toMatchObject({ ok: false });
 	const missing = [{ product_id: 99, counted_qty: 1 }];
-	expect(await submitCount(db, { items: missing }, warehouse)).toMatchObject({
+	expect(await submitCount(db, { items: missing }, WAREHOUSE)).toMatchObject({
 		ok: false,
 		errors: { 'items.0.product_id': expect.any(String) }
 	});
@@ -168,41 +156,43 @@ test('no rows, a repeated product or one that does not exist save nothing', asyn
 // Sends a count as warehouse: `[product, counted]` pairs.
 async function send(...counted: [number, number][]): Promise<number> {
 	const items = counted.map(([product, qty]) => ({ product_id: product, counted_qty: qty }));
-	const result = await submitCount(db, { items }, warehouse);
+	const result = await submitCount(db, { items }, WAREHOUSE);
 	if (!result.ok) {
 		throw new Error(result.message);
 	}
 	return result.id;
 }
 
+const address = { address_1: 'Calle 10 # 43-12, El Poblado', address_2: null };
+
+// Luz Marina's order of `qty` chairs, as typed: also what an extension of it types.
+function chairsOrder(qty: number) {
+	return {
+		client_id: LUZ_MARINA,
+		client_name: 'Luz Marina Restrepo',
+		event_date: '2026-08-15',
+		delivery_date: '2026-08-14',
+		pickup_date: '2026-08-16',
+		rental_days: 2,
+		delivery_attributes: { method: 'COMPANY_DELIVERY', time: '14:00', ...address },
+		pickup_attributes: { method: 'COMPANY_PICKUP', time: '09:00', ...address },
+		order_items: [{ product_id: CHAIR, qty, unit_price: 2500 }],
+		transport_cost: 0
+	};
+}
+
 // An order renting `qty` chairs, in `status`.
-async function rentChairs(qty = 120, status = 'DELIVERED'): Promise<number> {
-	const address = { address_1: 'Calle 10 # 43-12, El Poblado', address_2: null };
-	const order = await createOrder(
-		db,
-		{
-			client_id: 1,
-			client_name: 'Luz Marina Restrepo',
-			event_date: '2026-08-15',
-			delivery_date: '2026-08-14',
-			pickup_date: '2026-08-16',
-			rental_days: 2,
-			delivery_attributes: { method: 'COMPANY_DELIVERY', time: '14:00', ...address },
-			pickup_attributes: { method: 'COMPANY_PICKUP', time: '09:00', ...address },
-			order_items: [{ product_id: CHAIR, qty, unit_price: 2500 }]
-		},
-		sales
-	);
-	if (!order.ok) {
-		throw new Error(order.message);
-	}
-	database.prepare('update orders set status = ? where id = ?').run(status, order.id);
-	return order.id;
+function rentChairs(qty = 120, status: OrderStatus = 'DELIVERED'): Promise<number> {
+	return fixture.order({ ...chairsOrder(qty), status });
 }
 
 // A delivered order with 120 chairs and an incident losing `lost` of them, or finding them damaged.
 async function loseChairs(lost: number, outcome = 'LOST'): Promise<number> {
-	const order = await rentChairs();
+	return reportOn(await rentChairs(), lost, outcome);
+}
+
+// An incident on `order` losing `lost` chairs, or finding them damaged.
+async function reportOn(order: number, lost: number, outcome = 'LOST'): Promise<number> {
 	const incident = await reportIncident(
 		db,
 		{
@@ -210,7 +200,7 @@ async function loseChairs(lost: number, outcome = 'LOST'): Promise<number> {
 			incident_description: 'No volvieron',
 			items: [{ product_id: CHAIR, qty: lost, outcome }]
 		},
-		driver
+		DRIVER
 	);
 	if (!incident.ok) {
 		throw new Error(incident.message);
@@ -237,7 +227,7 @@ function events(entityType: string, action: string) {
 
 test('approving applies each item, records who reviewed it and why, and logs only what changed', async () => {
 	const id = await send([CHAIR, 792], [TABLECLOTH, 120]);
-	expect(await approveCount(db, { id, note: '  Revisado con Juan ' }, manager)).toEqual({
+	expect(await approveCount(db, { id, note: '  Revisado con Juan ' }, MANAGER)).toEqual({
 		ok: true,
 		id
 	});
@@ -245,23 +235,23 @@ test('approving applies each item, records who reviewed it and why, and logs onl
 	expect(count(id)).toMatchObject({
 		status: 'APPROVED',
 		review_note: 'Revisado con Juan',
-		reviewed_by: 'gerente',
+		reviewed_by: 'manager',
 		reviewed_at: expect.any(Number),
 		reversed_by: null,
-		updated_by: 'gerente'
+		updated_by: 'manager'
 	});
 	expect(applied(id)).toEqual([true, true]);
 	expect(events('INVENTORY_COUNT', 'APPROVED')).toEqual([
 		expect.objectContaining({
 			entity_id: id,
-			actor_username: 'gerente',
+			actor_username: 'manager',
 			reason: 'Revisado con Juan'
 		})
 	]);
 	expect(events('PRODUCT', 'INVENTORY_ADJUSTED')).toEqual([
 		{
 			entity_id: CHAIR,
-			actor_username: 'gerente',
+			actor_username: 'manager',
 			before: JSON.stringify({ total_quantity: 800 }),
 			after: JSON.stringify({ total_quantity: 792 }),
 			reason: null
@@ -272,7 +262,7 @@ test('approving applies each item, records who reviewed it and why, and logs onl
 test('a lost incident between the count and its approval makes its item stale: skipped, the rest applied', async () => {
 	const id = await send([CHAIR, 790], [TABLECLOTH, 118]);
 	await loseChairs(4);
-	expect(await previewApproval(db, { id }, manager)).toEqual({
+	expect(await previewApproval(db, { id }, MANAGER)).toEqual({
 		changes: [
 			{ product_id: TABLECLOTH, name: 'Mantel blanco 3×3', from: 120, to: 118, isCorrected: false }
 		],
@@ -280,11 +270,11 @@ test('a lost incident between the count and its approval makes its item stale: s
 		removed: [],
 		overlaps: []
 	});
-	expect(await approveCount(db, { id }, manager)).toMatchObject({ ok: true });
+	expect(await approveCount(db, { id }, MANAGER)).toMatchObject({ ok: true });
 	expect([stock(CHAIR), stock(TABLECLOTH)]).toEqual([796, 118]);
 	expect(applied(id)).toEqual([false, true]);
 	const adjusted = events('PRODUCT', 'INVENTORY_ADJUSTED').filter(
-		(event) => 'gerente' === event.actor_username
+		(event) => 'manager' === event.actor_username
 	);
 	expect(adjusted.map((event) => event.entity_id)).toEqual([TABLECLOTH]);
 });
@@ -292,8 +282,8 @@ test('a lost incident between the count and its approval makes its item stale: s
 test('an incident reversed before the approval leaves the item applicable', async () => {
 	const id = await send([CHAIR, 790]);
 	const incident = await loseChairs(4);
-	await reverseIncident(db, { id: incident, reason: 'Aparecieron' }, manager);
-	expect(await approveCount(db, { id }, manager)).toMatchObject({ ok: true });
+	await reverseIncident(db, { id: incident, reason: 'Aparecieron' }, MANAGER);
+	expect(await approveCount(db, { id }, MANAGER)).toMatchObject({ ok: true });
 	expect(stock(CHAIR)).toBe(790);
 	expect(applied(id)).toEqual([true]);
 });
@@ -301,20 +291,20 @@ test('an incident reversed before the approval leaves the item applicable', asyn
 test('overlapping counts warn; approving one makes the other stale only where it changed the product', async () => {
 	const first = await send([CHAIR, 790], [TABLECLOTH, 118]);
 	const second = await send([CHAIR, 800], [TABLECLOTH, 110]);
-	const preview = await previewApproval(db, { id: second }, manager);
+	const preview = await previewApproval(db, { id: second }, MANAGER);
 	expect(preview).toMatchObject({
 		overlaps: [
 			{
 				id: first,
-				createdBy: 'bodega',
+				createdBy: 'warehouse',
 				products: ['Silla Tiffany dorada', 'Mantel blanco 3×3']
 			}
 		]
 	});
-	expect(await approveCount(db, { id: second }, manager)).toMatchObject({ ok: true });
+	expect(await approveCount(db, { id: second }, MANAGER)).toMatchObject({ ok: true });
 	expect([stock(CHAIR), stock(TABLECLOTH)]).toEqual([800, 110]);
 	// The chairs landed on the first count's system_qty: still applicable.
-	expect(await previewApproval(db, { id: first }, manager)).toEqual({
+	expect(await previewApproval(db, { id: first }, MANAGER)).toEqual({
 		changes: [
 			{ product_id: CHAIR, name: 'Silla Tiffany dorada', from: 800, to: 790, isCorrected: false }
 		],
@@ -322,7 +312,7 @@ test('overlapping counts warn; approving one makes the other stale only where it
 		removed: [],
 		overlaps: []
 	});
-	expect(await approveCount(db, { id: first }, manager)).toMatchObject({ ok: true });
+	expect(await approveCount(db, { id: first }, MANAGER)).toMatchObject({ ok: true });
 	expect([stock(CHAIR), stock(TABLECLOTH)]).toEqual([790, 110]);
 	expect(applied(first)).toEqual([true, false]);
 });
@@ -331,17 +321,17 @@ test('a count whose items are all stale is not approved and writes nothing; it c
 	const id = await send([CHAIR, 790]);
 	await loseChairs(4);
 	const written = Number(database.prepare('select count(*) as count from events').get()?.count);
-	expect(await approveCount(db, { id }, manager)).toMatchObject({ ok: false });
+	expect(await approveCount(db, { id }, MANAGER)).toMatchObject({ ok: false });
 	expect(count(id)).toMatchObject({ status: 'PENDING_APPROVAL', reviewed_by: null });
 	expect(database.prepare('select count(*) as count from events').get()).toEqual({
 		count: written
 	});
-	expect(await rejectCount(db, { id, note: 'Contar de nuevo' }, manager)).toEqual({ ok: true, id });
+	expect(await rejectCount(db, { id, note: 'Contar de nuevo' }, MANAGER)).toEqual({ ok: true, id });
 	expect(stock(CHAIR)).toBe(796);
 	expect(count(id)).toMatchObject({
 		status: 'REJECTED',
 		review_note: 'Contar de nuevo',
-		reviewed_by: 'gerente',
+		reviewed_by: 'manager',
 		reviewed_at: expect.any(Number)
 	});
 	expect(applied(id)).toEqual([undefined]);
@@ -352,39 +342,41 @@ test('a count whose items are all stale is not approved and writes nothing; it c
 
 test('a count is reviewed once: approving twice or rejecting after changes nothing more', async () => {
 	const id = await send([CHAIR, 792]);
-	expect(await approveCount(db, { id }, manager)).toMatchObject({ ok: true });
-	database.prepare('update products set total_quantity = 800 where id = ?').run(CHAIR);
-	expect(await approveCount(db, { id }, manager)).toMatchObject({ ok: false });
-	expect(await rejectCount(db, { id }, manager)).toMatchObject({ ok: false });
-	expect(stock(CHAIR)).toBe(800);
+	expect(await approveCount(db, { id }, MANAGER)).toMatchObject({ ok: true });
+	// The chairs move on: a second approval would land them back on 792.
+	await loseChairs(8);
+	expect(await approveCount(db, { id }, MANAGER)).toMatchObject({ ok: false });
+	expect(await rejectCount(db, { id }, MANAGER)).toMatchObject({ ok: false });
+	expect(stock(CHAIR)).toBe(784);
 	expect(count(id).status).toBe('APPROVED');
 	expect(events('INVENTORY_COUNT', 'APPROVED')).toHaveLength(1);
-	expect(await previewApproval(db, { id }, manager)).toMatchObject({
+	expect(await previewApproval(db, { id }, MANAGER)).toMatchObject({
 		ok: false,
 		message: 'Ese conteo ya fue revisado'
 	});
-	expect(await previewApproval(db, { id: 99 }, manager)).toMatchObject({
+	expect(await previewApproval(db, { id: 99 }, MANAGER)).toMatchObject({
 		ok: false,
 		message: 'Ese conteo no existe'
 	});
-	expect(await approveCount(db, { id: 99 }, manager)).toMatchObject({ ok: false });
+	expect(await approveCount(db, { id: 99 }, MANAGER)).toMatchObject({ ok: false });
 });
 
 test('«Guardar y aprobar» sends and approves one count, both events on its id', async () => {
 	const pending = await send([CHAIR, 790]);
 	const items = [{ product_id: CHAIR, counted_qty: 795 }];
-	expect(await previewApproval(db, { items }, manager)).toMatchObject({
+	expect(await previewApproval(db, { items }, MANAGER)).toMatchObject({
 		changes: [{ product_id: CHAIR, from: 800, to: 795 }],
 		stale: [],
 		overlaps: [{ id: pending, products: ['Silla Tiffany dorada'] }]
 	});
-	const result = await submitAndApproveCount(db, { items, note: 'Conteo de cierre' }, manager);
-	expect(result).toEqual({ ok: true, id: 2 });
+	const result = await submitAndApproveCount(db, { items, note: 'Conteo de cierre' }, MANAGER);
+	expect(result).toEqual({ ok: true, id: expect.any(Number) });
+	const id = result.ok ? result.id : 0;
 	expect(stock(CHAIR)).toBe(795);
-	expect(count(2)).toMatchObject({
+	expect(count(id)).toMatchObject({
 		status: 'APPROVED',
-		created_by: 'gerente',
-		reviewed_by: 'gerente'
+		created_by: 'manager',
+		reviewed_by: 'manager'
 	});
 	const logged = database
 		.prepare(
@@ -393,15 +385,15 @@ test('«Guardar y aprobar» sends and approves one count, both events on its id'
 		.all();
 	expect(logged).toEqual([
 		{ entity_id: pending, action: 'CREATED' },
-		{ entity_id: 2, action: 'CREATED' },
-		{ entity_id: 2, action: 'APPROVED' }
+		{ entity_id: id, action: 'CREATED' },
+		{ entity_id: id, action: 'APPROVED' }
 	]);
 });
 
 test('a corrected quantity is applied and what was counted is kept beside it', async () => {
 	const id = await send([CHAIR, 110], [TABLECLOTH, 118]);
 	const edits = [{ product_id: CHAIR, corrected_qty: 808 }];
-	expect(await previewApproval(db, { id, edits }, manager)).toEqual({
+	expect(await previewApproval(db, { id, edits }, MANAGER)).toEqual({
 		changes: [
 			{ product_id: CHAIR, name: 'Silla Tiffany dorada', from: 800, to: 808, isCorrected: true },
 			{ product_id: TABLECLOTH, name: 'Mantel blanco 3×3', from: 120, to: 118, isCorrected: false }
@@ -410,7 +402,7 @@ test('a corrected quantity is applied and what was counted is kept beside it', a
 		removed: [],
 		overlaps: []
 	});
-	expect(await approveCount(db, { id, edits }, manager)).toEqual({ ok: true, id });
+	expect(await approveCount(db, { id, edits }, MANAGER)).toEqual({ ok: true, id });
 	expect([stock(CHAIR), stock(TABLECLOTH)]).toEqual([808, 118]);
 	expect(count(id).inventory_items).toEqual([
 		{
@@ -438,10 +430,10 @@ test('a removed row is never applied and overlaps no other count', async () => {
 	const other = await send([TABLECLOTH, 115]);
 	const id = await send([CHAIR, 790], [TABLECLOTH, 118]);
 	const edits = [{ product_id: TABLECLOTH, removed: true }];
-	expect(await previewApproval(db, { id }, manager)).toMatchObject({
+	expect(await previewApproval(db, { id }, MANAGER)).toMatchObject({
 		overlaps: [{ id: other, products: ['Mantel blanco 3×3'] }]
 	});
-	expect(await previewApproval(db, { id, edits }, manager)).toEqual({
+	expect(await previewApproval(db, { id, edits }, MANAGER)).toEqual({
 		changes: [
 			{ product_id: CHAIR, name: 'Silla Tiffany dorada', from: 800, to: 790, isCorrected: false }
 		],
@@ -449,7 +441,7 @@ test('a removed row is never applied and overlaps no other count', async () => {
 		removed: [{ product_id: TABLECLOTH, name: 'Mantel blanco 3×3' }],
 		overlaps: []
 	});
-	expect(await approveCount(db, { id, edits }, manager)).toMatchObject({ ok: true });
+	expect(await approveCount(db, { id, edits }, MANAGER)).toMatchObject({ ok: true });
 	expect([stock(CHAIR), stock(TABLECLOTH)]).toEqual([790, 120]);
 	expect(count(id).inventory_items[1]).toEqual({
 		product_id: TABLECLOTH,
@@ -460,7 +452,7 @@ test('a removed row is never applied and overlaps no other count', async () => {
 		applied: false
 	});
 	// Nothing verified it: the other count's tablecloths still apply.
-	expect(await approveCount(db, { id: other }, manager)).toMatchObject({ ok: true });
+	expect(await approveCount(db, { id: other }, MANAGER)).toMatchObject({ ok: true });
 	expect(stock(TABLECLOTH)).toBe(115);
 });
 
@@ -472,16 +464,16 @@ test('a stale row only takes a removal: a correction to it is refused and saves 
 		ok: false,
 		message: 'Silla Tiffany dorada está desactualizado: solo se puede eliminar'
 	};
-	expect(await previewApproval(db, { id, edits }, manager)).toMatchObject(refusal);
-	expect(await approveCount(db, { id, edits }, manager)).toMatchObject(refusal);
+	expect(await previewApproval(db, { id, edits }, MANAGER)).toMatchObject(refusal);
+	expect(await approveCount(db, { id, edits }, MANAGER)).toMatchObject(refusal);
 	expect(count(id).status).toBe('PENDING_APPROVAL');
 	expect(stock(CHAIR)).toBe(796);
 	const removal = [{ product_id: CHAIR, removed: true }];
-	expect(await previewApproval(db, { id, edits: removal }, manager)).toMatchObject({
+	expect(await previewApproval(db, { id, edits: removal }, MANAGER)).toMatchObject({
 		stale: [],
 		removed: [{ product_id: CHAIR }]
 	});
-	expect(await approveCount(db, { id, edits: removal }, manager)).toMatchObject({ ok: true });
+	expect(await approveCount(db, { id, edits: removal }, MANAGER)).toMatchObject({ ok: true });
 	expect(stock(CHAIR)).toBe(796);
 	expect(applied(id)).toEqual([false, true]);
 });
@@ -497,12 +489,12 @@ test("edits name the count's products once, each corrected or removed", async ()
 			{ product_id: CHAIR, corrected_qty: 4 }
 		]
 	]) {
-		expect(await approveCount(db, { id, edits }, manager)).toMatchObject({ ok: false });
+		expect(await approveCount(db, { id, edits }, MANAGER)).toMatchObject({ ok: false });
 	}
 	expect(count(id).status).toBe('PENDING_APPROVAL');
 	// A correction equal to what was counted changes nothing.
 	const edits = [{ product_id: CHAIR, corrected_qty: 790 }];
-	expect(await approveCount(db, { id, edits }, manager)).toMatchObject({ ok: true });
+	expect(await approveCount(db, { id, edits }, MANAGER)).toMatchObject({ ok: true });
 	expect(count(id).inventory_items[0]).not.toHaveProperty('corrected_qty');
 });
 
@@ -510,13 +502,13 @@ test('a count whose rows are all stale or removed can only be rejected, and reje
 	const id = await send([CHAIR, 790], [TABLECLOTH, 118]);
 	await loseChairs(4);
 	const edits = [{ product_id: TABLECLOTH, removed: true }];
-	expect(await approveCount(db, { id, edits }, manager)).toMatchObject({
+	expect(await approveCount(db, { id, edits }, MANAGER)).toMatchObject({
 		ok: false,
 		message:
 			'Ningún producto se aplica: todos están desactualizados o eliminados. Este conteo solo se puede rechazar'
 	});
 	expect(count(id).status).toBe('PENDING_APPROVAL');
-	expect(await rejectCount(db, { id, edits }, manager)).toEqual({ ok: true, id });
+	expect(await rejectCount(db, { id, edits }, MANAGER)).toEqual({ ok: true, id });
 	expect(count(id).inventory_items).toEqual([
 		{ product_id: CHAIR, name: 'Silla Tiffany dorada', system_qty: 800, counted_qty: 790 },
 		{ product_id: TABLECLOTH, name: 'Mantel blanco 3×3', system_qty: 120, counted_qty: 118 }
@@ -526,7 +518,7 @@ test('a count whose rows are all stale or removed can only be rejected, and reje
 
 async function approved(...counted: [number, number][]): Promise<number> {
 	const id = await send(...counted);
-	expect(await approveCount(db, { id }, manager)).toMatchObject({ ok: true });
+	expect(await approveCount(db, { id }, MANAGER)).toMatchObject({ ok: true });
 	return id;
 }
 
@@ -534,20 +526,20 @@ const BLOCKED = 'Silla Tiffany dorada ya tuvo otro movimiento de inventario desp
 
 test('reversing sets each applied product back, records who and why, and logs what it restores', async () => {
 	const id = await approved([CHAIR, 792], [TABLECLOTH, 118]);
-	expect(await reverseCount(db, { id, reason: ' ' }, manager)).toMatchObject({
+	expect(await reverseCount(db, { id, reason: ' ' }, MANAGER)).toMatchObject({
 		ok: false,
 		errors: { reason: 'Escribe el motivo' }
 	});
-	expect(await reverseCount(db, { id, reason: 'Se contó la bodega equivocada' }, manager)).toEqual({
+	expect(await reverseCount(db, { id, reason: 'Se contó la bodega equivocada' }, MANAGER)).toEqual({
 		ok: true,
 		id
 	});
 	expect([stock(CHAIR), stock(TABLECLOTH)]).toEqual([800, 120]);
 	expect(count(id)).toMatchObject({
 		status: 'REVERSED',
-		reviewed_by: 'gerente',
+		reviewed_by: 'manager',
 		reversal_reason: 'Se contó la bodega equivocada',
-		reversed_by: 'gerente',
+		reversed_by: 'manager',
 		reversed_at: expect.any(Number)
 	});
 	expect(applied(id)).toEqual([true, true]);
@@ -574,9 +566,9 @@ test('reversing a corrected approval restores the stock as it was before the cou
 		{ product_id: CHAIR, corrected_qty: 808 },
 		{ product_id: TABLECLOTH, removed: true }
 	];
-	expect(await approveCount(db, { id, edits }, manager)).toMatchObject({ ok: true });
+	expect(await approveCount(db, { id, edits }, MANAGER)).toMatchObject({ ok: true });
 	expect([stock(CHAIR), stock(TABLECLOTH)]).toEqual([808, 120]);
-	expect(await reverseCount(db, { id, reason: 'Error' }, manager)).toMatchObject({ ok: true });
+	expect(await reverseCount(db, { id, reason: 'Error' }, MANAGER)).toMatchObject({ ok: true });
 	expect([stock(CHAIR), stock(TABLECLOTH)]).toEqual([800, 120]);
 	expect(count(id).inventory_items[0]).toMatchObject({ counted_qty: 110, corrected_qty: 808 });
 });
@@ -584,11 +576,11 @@ test('reversing a corrected approval restores the stock as it was before the cou
 test('a skipped stale item is left as it is: only the applied ones are restored', async () => {
 	const id = await send([CHAIR, 790], [TABLECLOTH, 118]);
 	await loseChairs(4);
-	await approveCount(db, { id }, manager);
-	expect(await reverseCount(db, { id, reason: 'Error' }, manager)).toMatchObject({ ok: true });
+	await approveCount(db, { id }, MANAGER);
+	expect(await reverseCount(db, { id, reason: 'Error' }, MANAGER)).toMatchObject({ ok: true });
 	expect([stock(CHAIR), stock(TABLECLOTH)]).toEqual([796, 120]);
 	const restored = events('PRODUCT', 'INVENTORY_ADJUSTED').filter(
-		(event) => 'gerente' === event.actor_username
+		(event) => 'manager' === event.actor_username
 	);
 	expect(restored.map((event) => event.entity_id)).toEqual([TABLECLOTH, TABLECLOTH]);
 });
@@ -596,7 +588,7 @@ test('a skipped stale item is left as it is: only the applied ones are restored'
 test('a lost incident on the same product after the approval blocks the reversal', async () => {
 	const id = await approved([CHAIR, 790]);
 	await loseChairs(4);
-	expect(await reverseCount(db, { id, reason: 'Error' }, manager)).toEqual({
+	expect(await reverseCount(db, { id, reason: 'Error' }, MANAGER)).toEqual({
 		ok: false,
 		message: BLOCKED,
 		errors: {}
@@ -608,46 +600,28 @@ test('a lost incident on the same product after the approval blocks the reversal
 test('a lost incident on another product, or a recoverable one on the same, allows it', async () => {
 	const other = await approved([TABLECLOTH, 118]);
 	await loseChairs(4);
-	expect(await reverseCount(db, { id: other, reason: 'Error' }, manager)).toMatchObject({
+	expect(await reverseCount(db, { id: other, reason: 'Error' }, MANAGER)).toMatchObject({
 		ok: true
 	});
 	const same = await approved([CHAIR, 790]);
 	await loseChairs(3, 'RECOVERABLE');
-	expect(await reverseCount(db, { id: same, reason: 'Error' }, manager)).toMatchObject({
+	expect(await reverseCount(db, { id: same, reason: 'Error' }, MANAGER)).toMatchObject({
 		ok: true
 	});
 	expect([stock(CHAIR), stock(TABLECLOTH)]).toEqual([796, 120]);
 });
 
-test('reversing an older incident on the same product after the approval blocks it', async () => {
-	const incident = await loseChairs(4);
-	const id = await approved([CHAIR, 790]);
-	expect(await reverseIncident(db, { id: incident, reason: 'Aparecieron' }, manager)).toMatchObject(
-		{ ok: false }
-	);
-	// Nothing locks: a reversal checked just before the approval can still land after it.
-	database
-		.prepare(
-			"insert into events (entity_type, entity_id, action, actor_username, actor_kind, created_at) values ('INCIDENT', ?, 'REVERSED', 'gerente', 'user', 0)"
-		)
-		.run(incident);
-	expect(await reverseCount(db, { id, reason: 'Error' }, manager)).toMatchObject({
-		ok: false,
-		message: BLOCKED
-	});
-});
-
 test('another count applying the product blocks it when approved later, even reversed since', async () => {
 	const first = await approved([CHAIR, 790]);
 	const second = await approved([CHAIR, 795], [TABLECLOTH, 118]);
-	expect(await reverseCount(db, { id: first, reason: 'Error' }, manager)).toMatchObject({
+	expect(await reverseCount(db, { id: first, reason: 'Error' }, MANAGER)).toMatchObject({
 		ok: false,
 		message: BLOCKED
 	});
-	expect(await reverseCount(db, { id: second, reason: 'Error' }, manager)).toMatchObject({
+	expect(await reverseCount(db, { id: second, reason: 'Error' }, MANAGER)).toMatchObject({
 		ok: true
 	});
-	expect(await reverseCount(db, { id: first, reason: 'Error' }, manager)).toMatchObject({
+	expect(await reverseCount(db, { id: first, reason: 'Error' }, MANAGER)).toMatchObject({
 		ok: false
 	});
 });
@@ -655,13 +629,13 @@ test('another count applying the product blocks it when approved later, even rev
 test('another count created later but approved earlier allows it: the order is by approval', async () => {
 	const first = await send([CHAIR, 790]);
 	const second = await send([CHAIR, 800]);
-	await approveCount(db, { id: second }, manager);
-	await approveCount(db, { id: first }, manager);
-	expect(await reverseCount(db, { id: first, reason: 'Error' }, manager)).toMatchObject({
+	await approveCount(db, { id: second }, MANAGER);
+	await approveCount(db, { id: first }, MANAGER);
+	expect(await reverseCount(db, { id: first, reason: 'Error' }, MANAGER)).toMatchObject({
 		ok: true
 	});
 	expect(stock(CHAIR)).toBe(800);
-	expect(await reverseCount(db, { id: second, reason: 'Error' }, manager)).toMatchObject({
+	expect(await reverseCount(db, { id: second, reason: 'Error' }, MANAGER)).toMatchObject({
 		ok: false,
 		message: BLOCKED
 	});
@@ -670,16 +644,16 @@ test('another count created later but approved earlier allows it: the order is b
 test('a pending, rejected, reversed or missing count is not reversed', async () => {
 	const pending = await send([CHAIR, 790]);
 	const rejected = await send([CHAIR, 790]);
-	await rejectCount(db, { id: rejected }, manager);
+	await rejectCount(db, { id: rejected }, MANAGER);
 	const reversed = await approved([TABLECLOTH, 118]);
-	await reverseCount(db, { id: reversed, reason: 'Error' }, manager);
+	await reverseCount(db, { id: reversed, reason: 'Error' }, MANAGER);
 	for (const id of [pending, rejected, reversed]) {
-		expect(await reverseCount(db, { id, reason: 'Error' }, manager)).toMatchObject({
+		expect(await reverseCount(db, { id, reason: 'Error' }, MANAGER)).toMatchObject({
 			ok: false,
 			message: 'Solo se revierte un conteo aprobado'
 		});
 	}
-	expect(await reverseCount(db, { id: 99, reason: 'Error' }, manager)).toMatchObject({
+	expect(await reverseCount(db, { id: 99, reason: 'Error' }, MANAGER)).toMatchObject({
 		ok: false,
 		message: 'Ese conteo no existe'
 	});
@@ -693,7 +667,7 @@ test('the review list: pending first, then reviewed, each newest first, with sta
 	const newer = await send([CHAIR, 795], [TABLECLOTH, 120]);
 	const latest = await send([TABLECLOTH, 119]);
 	await loseChairs(4);
-	expect(await listCounts(db, manager)).toEqual(
+	expect(await listCounts(db, MANAGER)).toEqual(
 		[
 			{ id: latest, status: 'PENDING_APPROVAL', staleCount: 0, overlapIds: [newer] },
 			{ id: newer, status: 'PENDING_APPROVAL', staleCount: 1, overlapIds: [latest, older] },
@@ -702,7 +676,7 @@ test('the review list: pending first, then reviewed, each newest first, with sta
 		].map((row) => ({
 			...row,
 			createdAt: expect.any(Number),
-			createdBy: 'bodega',
+			createdBy: 'warehouse',
 			productCount: count(row.id).inventory_items.length
 		}))
 	);
@@ -710,18 +684,18 @@ test('the review list: pending first, then reviewed, each newest first, with sta
 
 test('a count read: a pending one with what approving would do, an approved one with why it cannot be reversed', async () => {
 	const first = await approved([CHAIR, 790]);
-	expect(await getCount(db, String(first), manager)).toMatchObject({
+	expect(await getCount(db, String(first), MANAGER)).toMatchObject({
 		status: 'APPROVED',
-		reviewedBy: 'gerente',
+		reviewedBy: 'manager',
 		preview: null,
 		reversalBlock: null
 	});
 	const pending = await send([CHAIR, 780], [TABLECLOTH, 118]);
 	await approved([CHAIR, 785]);
-	expect(await getCount(db, first, manager)).toMatchObject({ reversalBlock: BLOCKED });
-	expect(await getCount(db, pending, manager)).toMatchObject({
+	expect(await getCount(db, first, MANAGER)).toMatchObject({ reversalBlock: BLOCKED });
+	expect(await getCount(db, pending, MANAGER)).toMatchObject({
 		status: 'PENDING_APPROVAL',
-		createdBy: 'bodega',
+		createdBy: 'warehouse',
 		reviewedAt: null,
 		reversalBlock: null,
 		preview: {
@@ -730,29 +704,31 @@ test('a count read: a pending one with what approving would do, an approved one 
 			overlaps: []
 		}
 	});
-	expect(await getCount(db, 99, manager)).toBeNull();
-	expect(await getCount(db, 'abc', manager)).toBeNull();
+	expect(await getCount(db, 99, MANAGER)).toBeNull();
+	expect(await getCount(db, 'abc', MANAGER)).toBeNull();
 });
 
 async function suggested(): Promise<number[]> {
-	return (await getSuggestedProducts(db, warehouse)).map((row) => row.product_id);
+	return (await getSuggestedProducts(db, WAREHOUSE)).map((row) => row.product_id);
 }
 
 test('a recoverable incident suggests its product with its units and orders; reversed or lost-only ones do not', async () => {
-	expect(await getSuggestedProducts(db, driver)).toEqual([]);
+	expect(await getSuggestedProducts(db, DRIVER)).toEqual([]);
 	await loseChairs(4);
 	const reversed = await loseChairs(2, 'RECOVERABLE');
-	await reverseIncident(db, { id: reversed, reason: 'Error' }, manager);
+	await reverseIncident(db, { id: reversed, reason: 'Error' }, MANAGER);
 	expect(await suggested()).toEqual([]);
-	await loseChairs(10, 'RECOVERABLE');
-	await loseChairs(3, 'RECOVERABLE');
-	expect(await getSuggestedProducts(db, warehouse)).toEqual([
+	const ten = await rentChairs();
+	await reportOn(ten, 10, 'RECOVERABLE');
+	const three = await rentChairs();
+	await reportOn(three, 3, 'RECOVERABLE');
+	expect(await getSuggestedProducts(db, WAREHOUSE)).toEqual([
 		{
 			product_id: CHAIR,
 			name: 'Silla Tiffany dorada',
 			total_quantity: 796,
 			recoverable: 13,
-			order_ids: [3, 4]
+			order_ids: [ten, three]
 		}
 	]);
 });
@@ -761,11 +737,11 @@ test('a count that applied the product after the incident verifies it; reversing
 	await loseChairs(10, 'RECOVERABLE');
 	const id = await approved([CHAIR, 800]);
 	expect(await suggested()).toEqual([]);
-	await reverseCount(db, { id, reason: 'Error' }, manager);
+	await reverseCount(db, { id, reason: 'Error' }, MANAGER);
 	expect(await suggested()).toEqual([CHAIR]);
 	await approved([CHAIR, 800]);
 	await loseChairs(5, 'RECOVERABLE');
-	expect(await getSuggestedProducts(db, warehouse)).toMatchObject([{ recoverable: 5 }]);
+	expect(await getSuggestedProducts(db, WAREHOUSE)).toMatchObject([{ recoverable: 5 }]);
 });
 
 test('a count of another product, a stale skip, or a pending or rejected count verify nothing', async () => {
@@ -773,16 +749,16 @@ test('a count of another product, a stale skip, or a pending or rejected count v
 	await approved([TABLECLOTH, 118]);
 	const stale = await send([CHAIR, 790], [TABLECLOTH, 120]);
 	await loseChairs(4);
-	await approveCount(db, { id: stale }, manager);
+	await approveCount(db, { id: stale }, MANAGER);
 	expect(applied(stale)).toEqual([false, true]);
 	await send([CHAIR, 790]);
-	await rejectCount(db, { id: await send([CHAIR, 790]) }, manager);
+	await rejectCount(db, { id: await send([CHAIR, 790]) }, MANAGER);
 	expect(await suggested()).toEqual([CHAIR]);
 });
 
 test('an inactive product with a recoverable incident is still suggested', async () => {
 	await loseChairs(10, 'RECOVERABLE');
-	database.prepare('update products set active = 0 where id = ?').run(CHAIR);
+	await fixture.editProduct(CHAIR, { active: 'off' });
 	expect(await suggested()).toEqual([CHAIR]);
 });
 
@@ -790,31 +766,27 @@ test('«En alquiler» adds the orders out at events; an extension only once its 
 	await rentChairs(100, 'OUT_FOR_DELIVERY');
 	const original = await rentChairs(200, 'DELIVERED');
 	await rentChairs(300, 'OUT_FOR_PICKUP');
-	for (const status of ['PICKED', 'CONFIRMED', 'COMPLETED']) {
+	for (const status of ['PICKED', 'CONFIRMED', 'COMPLETED'] as const) {
 		await rentChairs(1000, status);
 	}
-	const extension = await rentChairs(50, 'DELIVERED');
-	database
-		.prepare(
-			"update orders set attributes = json_set(attributes, '$.parent_order_id', ?) where id = ?"
-		)
-		.run(original, extension);
-	expect(await getUnitsOnRent(db, warehouse)).toEqual({ [CHAIR]: 600 });
-	database.prepare("update orders set status = 'COMPLETED' where id = ?").run(original);
-	expect(await getUnitsOnRent(db, driver)).toEqual({ [CHAIR]: 450 });
+	const extension = { ...chairsOrder(50), pickup_date: '2026-08-18', parent_order_id: original };
+	expect(await createExtension(db, extension, SALES)).toMatchObject({ ok: true });
+	expect(await getUnitsOnRent(db, WAREHOUSE)).toEqual({ [CHAIR]: 600 });
+	await fixture.advanceTo(original, 'COMPLETED');
+	expect(await getUnitsOnRent(db, DRIVER)).toEqual({ [CHAIR]: 450 });
 });
 
 test('«Buscar otro producto» offers the active products only', async () => {
-	expect(await listCountableProducts(db, driver)).toEqual([
+	expect(await listCountableProducts(db, DRIVER)).toEqual([
 		{ product_id: CHAIR, name: 'Silla Tiffany dorada', total_quantity: 800 }
 	]);
 });
 
 test('sales reads neither the suggested list, «En alquiler» nor the products to count', async () => {
 	for (const call of [
-		getSuggestedProducts(db, sales),
-		getUnitsOnRent(db, sales),
-		listCountableProducts(db, sales)
+		getSuggestedProducts(db, SALES),
+		getUnitsOnRent(db, SALES),
+		listCountableProducts(db, SALES)
 	]) {
 		expect(isHttpError(await call.catch((error: unknown) => error), 403)).toBe(true);
 	}
@@ -823,7 +795,7 @@ test('sales reads neither the suggested list, «En alquiler» nor the products t
 test('only ADMIN and MANAGER review: the others get a 403 and save nothing', async () => {
 	const id = await send([CHAIR, 790]);
 	const items = [{ product_id: CHAIR, counted_qty: 795 }];
-	for (const actor of [warehouse, driver, sales]) {
+	for (const actor of [WAREHOUSE, DRIVER, SALES]) {
 		for (const call of [
 			approveCount(db, { id }, actor),
 			rejectCount(db, { id }, actor),

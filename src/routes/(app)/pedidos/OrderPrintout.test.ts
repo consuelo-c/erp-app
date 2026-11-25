@@ -1,11 +1,8 @@
 import { readFileSync } from 'node:fs';
-import type { DatabaseSync } from 'node:sqlite';
 import { compile } from 'svelte/compiler';
 import { render } from 'svelte/server';
 import { beforeAll, expect, test, vi } from 'vitest';
-import type { Actor } from '$lib/server/actor';
-import { createMemoryD1 } from '$lib/server/db/memory-d1';
-import { createOrder } from '$lib/server/db/test-orders';
+import { createFixture, SALES } from '$lib/server/db/fixture';
 import {
 	getOrderPrintout,
 	type OrderPrintout as Printout,
@@ -20,12 +17,11 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock('$app/state', () => state);
 
-const AUDIT = "0, 'admin', 0, 'admin'";
-const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
 const address = { address_1: 'Calle 10 # 43-12, El Poblado', address_2: null };
 
-let db: D1Database;
-let database: DatabaseSync;
+let fixture: ReturnType<typeof createFixture>;
+let LUZ_MARINA: number;
+let TIFFANY: number;
 let printout: Printout;
 
 type Movements = { deposits?: number[]; installments?: number[] };
@@ -35,12 +31,12 @@ type MovementKind = { concept: string; refundConcept: string };
 const DEPOSIT: MovementKind = { concept: 'SECURITY_DEPOSIT', refundConcept: 'DEPOSIT_REFUND' };
 const INSTALLMENT: MovementKind = { concept: 'INSTALLMENT', refundConcept: 'INSTALLMENT_REFUND' };
 
-/** A movement on order `orderId`, its refund's concept when `amount` is negative. */
-function insertMovement(orderId: number, { concept, refundConcept }: MovementKind, amount: number) {
-	database.exec(
-		`insert into cash_movements (concept, payment_method, amount, movement_date, entity_type, entity_id, payee, receipt_number, created_at, created_by, updated_at, updated_by)
-		values ('${amount > 0 ? concept : refundConcept}', 'CASH', ${amount}, '2026-08-10', 'ORDER', ${orderId}, 'Luz Marina Restrepo', (select coalesce(max(receipt_number), 0) + 1 from cash_movements), ${AUDIT})`
-	);
+/** A movement on order `orderId` through its payment entry, its refund when `amount` is negative. */
+async function pay(orderId: number, { concept, refundConcept }: MovementKind, amount: number) {
+	await fixture.payment(orderId, {
+		concept: amount > 0 ? concept : refundConcept,
+		amount: String(Math.abs(amount))
+	});
 }
 
 /**
@@ -51,34 +47,24 @@ async function printoutWith(
 	depositAmount: number,
 	{ deposits = [], installments = [] }: Movements = {}
 ): Promise<Printout> {
-	const created = await createOrder(
-		db,
-		{
-			client_id: 1,
-			client_name: 'Luz Marina Restrepo',
-			client_phone: '310 442 8890',
-			event_date: '2026-08-15',
-			delivery_date: '2026-08-14',
-			pickup_date: '2026-08-16',
-			rental_days: 2,
-			delivery_attributes: { method: 'COMPANY_DELIVERY', time: '14:00', ...address },
-			pickup_attributes: { method: 'COMPANY_PICKUP', time: '09:00', ...address },
-			order_items: [{ product_id: 1, qty: 10, unit_price: 2500 }],
-			discount: 0,
-			deposit_amount: depositAmount
-		},
-		sales
-	);
-	if (!created.ok) {
-		throw new Error(JSON.stringify(created.errors));
-	}
+	const id = await fixture.order({
+		client_id: LUZ_MARINA,
+		event_date: '2026-08-15',
+		delivery_date: '2026-08-14',
+		pickup_date: '2026-08-16',
+		rental_days: 2,
+		delivery_attributes: { method: 'COMPANY_DELIVERY', time: '14:00', ...address },
+		pickup_attributes: { method: 'COMPANY_PICKUP', time: '09:00', ...address },
+		order_items: [{ product_id: TIFFANY, qty: 10, unit_price: 2500 }],
+		deposit_amount: depositAmount
+	});
 	for (const amount of deposits) {
-		insertMovement(created.id, DEPOSIT, amount);
+		await pay(id, DEPOSIT, amount);
 	}
 	for (const amount of installments) {
-		insertMovement(created.id, INSTALLMENT, amount);
+		await pay(id, INSTALLMENT, amount);
 	}
-	const read = await getOrderPrintout(db, String(created.id), sales);
+	const read = await getOrderPrintout(fixture.db, String(id), SALES);
 	if (null === read) {
 		throw new Error('No printout');
 	}
@@ -87,12 +73,13 @@ async function printoutWith(
 
 // One real order's sheet; each case swaps only the client's frozen phone and username.
 beforeAll(async () => {
-	({ db, database } = createMemoryD1());
-	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
-	database.exec(
-		`insert into contacts (phone, full_name, document_id, labels, created_at, created_by, updated_at, updated_by) values ('573104428890', 'Luz Marina Restrepo', '@luz', '[]', ${AUDIT});
-		insert into products (name, category, rental_price, total_quantity, active, created_at, created_by, updated_at, updated_by) values ('Silla Tiffany dorada', 'CHAIRS_TABLES', 2500, 500, 1, ${AUDIT})`
-	);
+	fixture = createFixture();
+	LUZ_MARINA = await fixture.contact({ full_name: 'Luz Marina Restrepo', phone: '310 442 8890' });
+	TIFFANY = await fixture.product({
+		name: 'Silla Tiffany dorada',
+		rental_price: '2500',
+		total_quantity: '500'
+	});
 	printout = await printoutWith(0);
 });
 

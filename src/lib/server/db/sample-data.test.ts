@@ -1,11 +1,12 @@
-import { readdirSync, readFileSync } from 'node:fs';
-import { DatabaseSync } from 'node:sqlite';
+import { readFileSync } from 'node:fs';
+import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
-import { rolesSchema, type Actor } from '../actor';
+import { rolesSchema } from '../actor';
 import { publicTokenSchema } from '../public-token';
 import { verifyPassword } from '../password';
 import { calculateOrderTotals, receivableLine } from '$lib/orders';
 import { createMemoryD1 } from './memory-d1';
+import { MANAGER } from './fixture';
 import { openWeek } from '../services/payroll';
 import { movementSchema } from '../services/cash';
 import { SETTINGS } from '$lib/settings';
@@ -25,18 +26,11 @@ import { getReceivableDetail, getReceivablePrintout } from '../services/receivab
 
 const catalog = readFileSync('scripts/catalog.sql', 'utf8');
 const sampleData = readFileSync('scripts/sample-data.sql', 'utf8');
-const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
 
 let database: DatabaseSync;
 
 beforeEach(() => {
-	database = new DatabaseSync(':memory:');
-	const files = readdirSync('migrations')
-		.filter((file) => file.endsWith('.sql'))
-		.sort();
-	for (const file of files) {
-		database.exec(readFileSync(`migrations/${file}`, 'utf8'));
-	}
+	({ database } = createMemoryD1());
 	database.exec(catalog);
 	database.exec(sampleData);
 });
@@ -46,10 +40,7 @@ function readAll(table: string) {
 }
 
 test('inserts no product but the retired «Silla Rimax», on no order', () => {
-	const catalogOnly = new DatabaseSync(':memory:');
-	for (const file of readdirSync('migrations').filter((each) => each.endsWith('.sql'))) {
-		catalogOnly.exec(readFileSync(`migrations/${file}`, 'utf8'));
-	}
+	const { database: catalogOnly } = createMemoryD1();
 	catalogOnly.exec(catalog);
 	const catalogNames = catalogOnly.prepare('select name from products').all();
 	const added = readAll('products').filter(
@@ -243,10 +234,10 @@ test("the week of 12 October's settlement fills each of the five overtime rows",
 	memory.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
 	memory.exec(catalog);
 	memory.exec(sampleData);
-	const { employees } = await openWeek(db, { employeeId: null, week: '2026-10-12' }, manager);
+	const { employees } = await openWeek(db, { employeeId: null, week: '2026-10-12' }, MANAGER);
 	expect(employees).toHaveLength(4);
 	const weeks = await Promise.all(
-		employees.map(({ id }) => openWeek(db, { employeeId: id, week: '2026-10-12' }, manager))
+		employees.map(({ id }) => openWeek(db, { employeeId: id, week: '2026-10-12' }, MANAGER))
 	);
 	const filled = weeks
 		.flatMap(({ draft }) => draft?.earnings ?? [])
@@ -385,7 +376,7 @@ test('loads two pending counts sharing a product, one stale, and a rejected one'
 			true
 		);
 	}
-	const counts = await listCounts(openSeededD1(), manager);
+	const counts = await listCounts(openSeededD1(), MANAGER);
 	expect(
 		counts.map(({ id, status, staleCount, overlapIds }) => [id, status, staleCount, overlapIds])
 	).toEqual([
@@ -401,14 +392,14 @@ test('loads two pending counts sharing a product, one stale, and a rejected one'
 });
 
 test('#1043 is paid $500.000 of $1.980.000 and holds a $200.000 deposit', async () => {
-	const order = await getOrderDetail(openSeededD1(), 1043, manager);
+	const order = await getOrderDetail(openSeededD1(), 1043, MANAGER);
 	expect([order?.paid, order?.balanceDue, order?.depositHeld]).toEqual([500000, 1480000, 200000]);
 });
 
 test('#1009, paid in two, and #1012, its deposit given back, owe and hold nothing', async () => {
 	const db = openSeededD1();
 	for (const id of [1009, 1012]) {
-		const order = await getOrderDetail(db, id, manager);
+		const order = await getOrderDetail(db, id, MANAGER);
 		expect([order?.balanceDue, order?.depositHeld], String(id)).toEqual([0, 0]);
 	}
 });
@@ -487,7 +478,7 @@ test("loads Postobón's open #1 and expired #2, and #3 converted into #1043 with
 });
 
 test("Nº 4794 groups Postobón's #1060 and #1061 and is unpaid", async () => {
-	const receivable = await getReceivableDetail(openSeededD1(), 4794, manager);
+	const receivable = await getReceivableDetail(openSeededD1(), 4794, MANAGER);
 	expect(receivable).toMatchObject({
 		paymentTerms: 'Contado',
 		client: { name: 'Postobón S.A.', documentId: '8909039395' },
@@ -502,7 +493,7 @@ test("Nº 4794 groups Postobón's #1060 and #1061 and is unpaid", async () => {
 test("#1060 and #1061 carry Nº 4794's balance, and #1072 none", async () => {
 	const db = openSeededD1();
 	const balanceOf = async (id: number) =>
-		(await getOrderDetail(db, id, manager))?.receivableBalance;
+		(await getOrderDetail(db, id, MANAGER))?.receivableBalance;
 	expect(await Promise.all([1060, 1061, 1072].map(balanceOf))).toEqual([2390000, 2390000, null]);
 });
 
@@ -515,16 +506,16 @@ test("#1072 is Postobón's too, COMPLETED and unbilled", () => {
 
 test("Nº 4795 bills Postobón's cancelled #1073 alone, paid: «Anulada», and #1073 is owed it", async () => {
 	const db = openSeededD1();
-	const receivable = await getReceivableDetail(db, 4795, manager);
+	const receivable = await getReceivableDetail(db, 4795, MANAGER);
 	expect(receivable).toMatchObject({ total: 0, paid: 770000, balance: -770000, isVoid: true });
 	expect(receivable?.orders).toEqual([expect.objectContaining({ id: 1073, isCancelled: true })]);
-	const order = await getOrderDetail(db, 1073, manager);
+	const order = await getOrderDetail(db, 1073, MANAGER);
 	expect(order).toMatchObject({ status: 'CANCELLED', receivableId: 4795, owedToClient: 770000 });
 });
 
 test("Nº 4796 bills Postobón's CONFIRMED #1074 alone, with its advance paid on the order", async () => {
 	const db = openSeededD1();
-	const receivable = await getReceivableDetail(db, 4796, manager);
+	const receivable = await getReceivableDetail(db, 4796, MANAGER);
 	expect(receivable).toMatchObject({
 		total: 1115000,
 		paid: 300000,
@@ -532,9 +523,9 @@ test("Nº 4796 bills Postobón's CONFIRMED #1074 alone, with its advance paid on
 		isVoid: false
 	});
 	expect(receivable?.orders.map((order) => order.id)).toEqual([1074]);
-	const printout = await getReceivablePrintout(db, 4796, manager);
+	const printout = await getReceivablePrintout(db, 4796, MANAGER);
 	expect(printout).toMatchObject({ paid: 300000, balance: 815000 });
-	const order = await getOrderDetail(db, 1074, manager);
+	const order = await getOrderDetail(db, 1074, MANAGER);
 	expect(order).toMatchObject({ status: 'CONFIRMED', receivableId: 4796 });
 	expect(order && receivableLine(order)).toBe('Entregar cuenta de cobro Nº 4796');
 });

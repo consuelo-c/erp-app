@@ -1,11 +1,10 @@
 import { isHttpError } from '@sveltejs/kit';
-import { readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Actor } from '../actor';
-import { createMemoryD1 } from '../db/memory-d1';
+import { createFixture, MANAGER } from '../db/fixture';
 import { movementStatements } from './cash';
-import { createEmployee, endEmployment, updateEmployee } from './employees';
+import { endEmployment, updateEmployee } from './employees';
 import {
 	getReceipt,
 	openWeek,
@@ -14,8 +13,8 @@ import {
 	type Draft,
 	type PayrollWeek
 } from './payroll';
-
-const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
+import { updateHolidays } from './settings';
+import { saveEmployeePunch } from './timesheets';
 
 // Saturday the 17th: the week settled is Monday 12 to Saturday 17, and its extra hours run from
 // Saturday 10 to Friday 16.
@@ -23,51 +22,61 @@ const TODAY = '2026-10-17';
 const WEEK = '2026-10-12';
 const PREVIOUS_WEEK = '2026-10-05';
 
+let fixture: ReturnType<typeof createFixture>;
 let db: D1Database;
 let database: DatabaseSync;
+let ana: Actor;
 let anaId: number;
 
-async function hire(fullName: string, idNumber: string, start: string): Promise<number> {
-	const result = await createEmployee(
-		db,
-		{
-			phone: `310${idNumber.slice(-7)}`,
-			full_name: fullName,
-			document_id: idNumber,
-			monthly_salary: '1750905',
-			position: 'Bodega',
-			start
-		},
-		manager
-	);
-	if (!result.ok) {
-		throw new Error(result.message);
+// Another employee on payroll from `start`.
+async function hire(fullName: string, start: string): Promise<number> {
+	const { employeeId } = await fixture.employee({
+		roles: ['WAREHOUSE'],
+		full_name: fullName,
+		start
+	});
+	return Number(employeeId);
+}
+
+const PUNCHES = ['morningIn', 'morningOut', 'afternoonIn', 'afternoonOut'];
+
+// Ana's day as the MANAGER logs it in Horas, one punch at a time; null leaves that punch as it is.
+async function punch(workDate: string, ...times: [string, string, string | null, string | null]) {
+	for (const [index, time] of times.entries()) {
+		if (null === time) {
+			continue;
+		}
+		const [hour, minute] = time.split(':').map(Number);
+		const dial = {
+			hour: String(hour % 12 || 12),
+			minute: String(minute),
+			period: hour < 12 ? 'am' : 'pm'
+		};
+		const input = {
+			employee_id: String(anaId),
+			work_date: workDate,
+			punch: PUNCHES[index],
+			...dial
+		};
+		const result = await saveEmployeePunch(db, input, MANAGER);
+		if (!result.ok) {
+			throw new Error(result.message);
+		}
 	}
-	return result.id;
-}
-
-function punch(workDate: string, ...times: [string, string, string | null, string | null]) {
-	database
-		.prepare(
-			`insert into timesheets (employee_id, work_date, morning_in, morning_out, afternoon_in, afternoon_out,
-			created_at, created_by, updated_at, updated_by) values (?, ?, ?, ?, ?, ?, 0, 'test', 0, 'test')
-			on conflict (employee_id, work_date) do update set morning_in = excluded.morning_in,
-			morning_out = excluded.morning_out, afternoon_in = excluded.afternoon_in,
-			afternoon_out = excluded.afternoon_out`
-		)
-		.run(anaId, workDate, ...times);
-}
-
-function setSetting(key: string, value: string) {
-	database.prepare('update settings set value = ? where key = ?').run(value, key);
 }
 
 beforeEach(async () => {
 	vi.useFakeTimers({ toFake: ['Date'] });
 	vi.setSystemTime(new Date(`${TODAY}T17:00:00Z`)); // noon in Bogotá
-	({ db, database } = createMemoryD1());
-	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
-	anaId = await hire('Ana Pérez', '1036452118', '2026-07-01');
+	fixture = createFixture();
+	({ db, database } = fixture);
+	ana = await fixture.employee({
+		roles: ['WAREHOUSE'],
+		full_name: 'Ana Pérez',
+		document_id: '1036452118',
+		start: '2026-07-01'
+	});
+	anaId = Number(ana.employeeId);
 });
 
 afterEach(() => {
@@ -75,7 +84,7 @@ afterEach(() => {
 });
 
 async function open(week = WEEK, employeeId: number | null = anaId): Promise<PayrollWeek> {
-	return openWeek(db, { employeeId, week }, manager);
+	return openWeek(db, { employeeId, week }, MANAGER);
 }
 
 async function openDraft(week = WEEK): Promise<Draft> {
@@ -117,8 +126,8 @@ function runRow() {
 }
 
 test('a new draft comes pre-filled: six days, Sunday rest, the hours log, and nothing typed in', async () => {
-	punch('2026-10-11', '08:00', '10:00', null, null); // Sunday: every hour is a holiday hour
-	punch('2026-10-15', '07:00', '12:00', '13:00', '17:00'); // 9 h: 2 h daytime overtime
+	await punch('2026-10-11', '08:00', '10:00', null, null); // Sunday: every hour is a holiday hour
+	await punch('2026-10-15', '07:00', '12:00', '13:00', '17:00'); // 9 h: 2 h daytime overtime
 	const draft = await openDraft();
 	expect(draft.isSaved).toBe(false);
 	expect(draft.paymentDate).toBe(TODAY);
@@ -141,9 +150,9 @@ test('a new draft comes pre-filled: six days, Sunday rest, the hours log, and no
 });
 
 test('a new draft only counts the days employed: hired or gone mid-week', async () => {
-	const hiredId = await hire('Luis Gómez', '71384902', '2026-10-15'); // Thursday
-	const goneId = await hire('Pedro Ruiz', '98765432', '2026-07-01');
-	await endEmployment(db, { id: String(goneId), end: '2026-10-13' }, manager); // Tuesday
+	const hiredId = await hire('Luis Gómez', '2026-10-15'); // Thursday
+	const goneId = await hire('Pedro Ruiz', '2026-07-01');
+	await endEmployment(db, { id: String(goneId), end: '2026-10-13' }, MANAGER); // Tuesday
 	for (const [employeeId, days] of [
 		[hiredId, 3],
 		[goneId, 2]
@@ -156,15 +165,15 @@ test('a new draft only counts the days employed: hired or gone mid-week', async 
 });
 
 test("a week's own Saturday and Sunday hours go to the next week's settlement", async () => {
-	punch('2026-10-10', '07:00', '12:00', '13:00', '16:00'); // Saturday the 10th: 1 h overtime
+	await punch('2026-10-10', '07:00', '12:00', '13:00', '16:00'); // Saturday the 10th: 1 h overtime
 	expect(line(await openDraft(PREVIOUS_WEEK), 'OVERTIME_DAY').qty).toBe(0);
 	expect(line(await openDraft(WEEK), 'OVERTIME_DAY').qty).toBe(1);
 });
 
 test('saving creates the draft with its event and snapshots; saving again edits it', async () => {
-	punch('2026-10-15', '07:00', '12:00', '13:00', '17:00');
+	await punch('2026-10-15', '07:00', '12:00', '13:00', '17:00');
 	const draft = await openDraft();
-	expect(await saveDraft(db, formOf(draft, WEEK, { NON_SALARY_BONUS: '50.000' }), manager)).toEqual(
+	expect(await saveDraft(db, formOf(draft, WEEK, { NON_SALARY_BONUS: '50.000' }), MANAGER)).toEqual(
 		{
 			ok: true
 		}
@@ -173,7 +182,7 @@ test('saving creates the draft with its event and snapshots; saving again edits 
 	expect(row).toMatchObject({
 		status: 'DRAFT',
 		period_end: TODAY,
-		prepared_by: 'gerente'
+		prepared_by: 'manager'
 	});
 	expect(JSON.parse(String(row.employee_snapshot))).toEqual({
 		full_name: 'Ana Pérez',
@@ -190,7 +199,7 @@ test('saving creates the draft with its event and snapshots; saving again edits 
 	const reopened = await openDraft();
 	expect(reopened.isSaved).toBe(true);
 	expect(line(reopened, 'NON_SALARY_BONUS').amount).toBe(50000);
-	expect(await saveDraft(db, formOf(reopened, WEEK, { LOANS: '30000' }), manager)).toEqual({
+	expect(await saveDraft(db, formOf(reopened, WEEK, { LOANS: '30000' }), MANAGER)).toEqual({
 		ok: true
 	});
 	const events = database
@@ -199,30 +208,30 @@ test('saving creates the draft with its event and snapshots; saving again edits 
 	expect(events).toEqual([{ action: 'CREATED' }, { action: 'EDITED' }]);
 });
 
-test('opening a draft recalculates the hours rows, keeping the ones the manager corrected', async () => {
-	punch('2026-10-11', '08:00', '10:00', null, null);
-	punch('2026-10-15', '07:00', '12:00', '13:00', '17:00');
+test('opening a draft recalculates the hours rows, keeping the ones the MANAGER corrected', async () => {
+	await punch('2026-10-11', '08:00', '10:00', null, null);
+	await punch('2026-10-15', '07:00', '12:00', '13:00', '17:00');
 	const draft = await openDraft();
-	await saveDraft(db, formOf(draft, WEEK, { OVERTIME_DAY: '1' }), manager);
-	punch('2026-10-11', '08:00', '11:00', null, null); // 3 h now
-	punch('2026-10-15', '07:00', '12:00', '13:00', '18:00'); // 3 h now
+	await saveDraft(db, formOf(draft, WEEK, { OVERTIME_DAY: '1' }), MANAGER);
+	await punch('2026-10-11', '08:00', '11:00', null, null); // 3 h now
+	await punch('2026-10-15', '07:00', '12:00', '13:00', '18:00'); // 3 h now
 	const reopened = await openDraft();
 	expect(line(reopened, 'HOLIDAY_OVERTIME_DAY')).toMatchObject({ qty: 3, derivedQty: 3 });
 	expect(line(reopened, 'OVERTIME_DAY')).toMatchObject({ qty: 1, derivedQty: 3, amount: 10422 });
 });
 
 test('the hours rows keep the exact minute: an untouched row never reads as corrected', async () => {
-	punch('2026-10-15', '07:00', '12:00', '13:00', '15:17'); // 17 min of overtime
+	await punch('2026-10-15', '07:00', '12:00', '13:00', '15:17'); // 17 min of overtime
 	const draft = await openDraft();
 	expect(formOf(draft, WEEK).OVERTIME_DAY).toBe('0.28');
-	await saveDraft(db, formOf(draft, WEEK), manager);
-	punch('2026-10-15', '07:00', '12:00', '13:00', '15:30');
+	await saveDraft(db, formOf(draft, WEEK), MANAGER);
+	await punch('2026-10-15', '07:00', '12:00', '13:00', '15:30');
 	expect(line(await openDraft(), 'OVERTIME_DAY')).toMatchObject({ qty: 0.5, derivedQty: 0.5 });
 });
 
 test('a draft uses the current settings: a holiday added while preparing it counts', async () => {
-	punch('2026-10-15', '07:00', '12:00', '13:00', '17:00');
-	await saveDraft(db, formOf(await openDraft(), WEEK), manager);
+	await punch('2026-10-15', '07:00', '12:00', '13:00', '17:00');
+	await saveDraft(db, formOf(await openDraft(), WEEK), MANAGER);
 	const holidays = JSON.parse(
 		String(
 			database.prepare("select value from settings where key = 'PAYROLL_HOLIDAYS'").get()?.value
@@ -231,11 +240,12 @@ test('a draft uses the current settings: a holiday added while preparing it coun
 	const withThursday = [...holidays, { date: '2026-10-15', label: 'Prueba' }].sort(
 		(first, second) => first.date.localeCompare(second.date)
 	);
-	setSetting('PAYROLL_HOLIDAYS', JSON.stringify(withThursday));
+	const added = await updateHolidays(db, { holidays: JSON.stringify(withThursday) }, MANAGER);
+	expect(added).toEqual({ ok: true });
 	const reopened = await openDraft();
 	expect(line(reopened, 'OVERTIME_DAY').qty).toBe(0);
 	expect(line(reopened, 'HOLIDAY_OVERTIME_DAY').qty).toBe(9);
-	await saveDraft(db, formOf(reopened, WEEK), manager);
+	await saveDraft(db, formOf(reopened, WEEK), MANAGER);
 	const snapshot = JSON.parse(String(runRow().settings_snapshot));
 	expect(JSON.parse(snapshot.PAYROLL_HOLIDAYS)).toContainEqual({
 		date: '2026-10-15',
@@ -245,14 +255,14 @@ test('a draft uses the current settings: a holiday added while preparing it coun
 
 test('«Otros» is not saved without a description', async () => {
 	const draft = await openDraft();
-	const result = await saveDraft(db, formOf(draft, WEEK, { OTHER: '20.000' }), manager);
+	const result = await saveDraft(db, formOf(draft, WEEK, { OTHER: '20.000' }), MANAGER);
 	expect(result).toMatchObject({
 		ok: false,
 		errors: { 'OTHER.description': 'Escribe la descripción. «Otros» no se guarda sin ella.' }
 	});
 	expect(runRow()).toBeUndefined();
 	const described = { OTHER: '20.000', 'OTHER.description': 'Copa rota pedido #1043' };
-	expect(await saveDraft(db, formOf(draft, WEEK, described), manager)).toEqual({ ok: true });
+	expect(await saveDraft(db, formOf(draft, WEEK, described), MANAGER)).toEqual({ ok: true });
 	expect((await openDraft()).deductions.at(-1)).toEqual({
 		concept: 'OTHER',
 		amount: 20000,
@@ -262,17 +272,17 @@ test('«Otros» is not saved without a description', async () => {
 
 test('the week number is proposed as the previous one + 1, and is editable', async () => {
 	const previous = await openDraft(PREVIOUS_WEEK);
-	await saveDraft(db, formOf(previous, PREVIOUS_WEEK, { week_number: '41' }), manager);
+	await saveDraft(db, formOf(previous, PREVIOUS_WEEK, { week_number: '41' }), MANAGER);
 	const draft = await openDraft();
 	expect(draft).toMatchObject({ weekNumber: 42, previousWeekNumber: 41 });
-	await saveDraft(db, formOf(draft, WEEK, { week_number: '43' }), manager);
+	await saveDraft(db, formOf(draft, WEEK, { week_number: '43' }), MANAGER);
 	expect((await openDraft()).weekNumber).toBe(43);
 });
 
 test('the first settlement of January is proposed as week 1', async () => {
 	vi.setSystemTime(new Date('2027-01-02T17:00:00Z'));
 	const december = await openDraft('2026-12-21');
-	await saveDraft(db, formOf(december, '2026-12-21', { week_number: '51' }), manager);
+	await saveDraft(db, formOf(december, '2026-12-21', { week_number: '51' }), MANAGER);
 	// Monday 28 December to Saturday 2 January: paid in January.
 	expect(await openDraft('2026-12-28')).toMatchObject({ weekNumber: 1, previousWeekNumber: null });
 });
@@ -297,8 +307,8 @@ test('the PAYROLL movement takes the next comprobante de egreso number', async (
 		entity_id: null,
 		attributes: { description: 'Compra de jabón' }
 	} as const;
-	await db.batch(movementStatements(db, manager, expense));
-	await recordPayment(db, { ...formOf(await openDraft(), WEEK), ...CASH }, manager);
+	await db.batch(movementStatements(db, MANAGER, expense));
+	await recordPayment(db, { ...formOf(await openDraft(), WEEK), ...CASH }, MANAGER);
 	const payroll = database
 		.prepare("select receipt_number from cash_movements where concept = 'PAYROLL'")
 		.get();
@@ -308,7 +318,7 @@ test('the PAYROLL movement takes the next comprobante de egreso number', async (
 test('recording the payment marks it PAID and writes its PAYROLL movement, in one action', async () => {
 	const draft = await openDraft();
 	const typed = { NON_SALARY_BONUS: '50.000' };
-	expect(await recordPayment(db, { ...formOf(draft, WEEK, typed), ...CASH }, manager)).toEqual({
+	expect(await recordPayment(db, { ...formOf(draft, WEEK, typed), ...CASH }, MANAGER)).toEqual({
 		ok: true
 	});
 	const row = runRow();
@@ -339,28 +349,37 @@ test('recording the payment marks it PAID and writes its PAYROLL movement, in on
 });
 
 test('a paid settlement shows what was stored and is never written again', async () => {
-	await recordPayment(db, { ...formOf(await openDraft(), WEEK), ...CASH }, manager);
-	punch('2026-10-15', '07:00', '12:00', '13:00', '17:00');
+	await recordPayment(db, { ...formOf(await openDraft(), WEEK), ...CASH }, MANAGER);
+	// Its hours are locked once paid; a raise is what would change a recalculated settlement.
+	const raise = {
+		id: String(anaId),
+		phone: '3106452118',
+		full_name: 'Ana Pérez',
+		document_id: '1036452118',
+		monthly_salary: '2.000.000',
+		position: 'Bodega'
+	};
+	expect(await updateEmployee(db, raise, MANAGER)).toEqual({ ok: true, id: anaId });
 	const paid = await openDraft();
 	expect(paid.status).toBe('PAID');
-	expect(line(paid, 'OVERTIME_DAY').qty).toBe(0);
+	expect(line(paid, 'DAYS_WORKED')).toMatchObject({ qty: 6, amount: 350181 });
 	expect(paid.payment).toMatchObject({
 		method: 'CASH',
 		amount: paid.netPay,
 		movementDate: TODAY,
-		recordedBy: 'gerente',
+		recordedBy: 'manager',
 		employeeName: 'Ana Pérez'
 	});
 	const refusal = { ok: false, message: 'Esta liquidación ya se pagó: no se puede cambiar' };
-	expect(await saveDraft(db, formOf(paid, WEEK), manager)).toMatchObject(refusal);
-	expect(await recordPayment(db, { ...formOf(paid, WEEK), ...CASH }, manager)).toMatchObject(
+	expect(await saveDraft(db, formOf(paid, WEEK), MANAGER)).toMatchObject(refusal);
+	expect(await recordPayment(db, { ...formOf(paid, WEEK), ...CASH }, MANAGER)).toMatchObject(
 		refusal
 	);
 	expect(movements()).toHaveLength(1);
 });
 
 test('a settlement paid before a rename keeps the old name and ID number', async () => {
-	await recordPayment(db, { ...formOf(await openDraft(), WEEK), ...CASH }, manager);
+	await recordPayment(db, { ...formOf(await openDraft(), WEEK), ...CASH }, MANAGER);
 	const renamed = {
 		id: String(anaId),
 		phone: '3106452118',
@@ -369,7 +388,7 @@ test('a settlement paid before a rename keeps the old name and ID number', async
 		monthly_salary: '1750905',
 		position: 'Bodega'
 	};
-	expect(await updateEmployee(db, renamed, manager)).toEqual({ ok: true, id: anaId });
+	expect(await updateEmployee(db, renamed, MANAGER)).toEqual({ ok: true, id: anaId });
 	expect((await openDraft()).payment).toMatchObject({
 		employeeName: 'Ana Pérez',
 		employeeIdNumber: '1036452118'
@@ -386,17 +405,17 @@ test("a transfer keeps a copy of the account, pre-filled from the employee's", a
 		position: 'Bodega',
 		salary_bank_account: 'Bancolombia ahorros 0123-456789-01'
 	};
-	await updateEmployee(db, details, manager);
+	await updateEmployee(db, details, MANAGER);
 	const draft = await openDraft();
 	expect(draft.employeeBankAccount).toBe('Bancolombia ahorros 0123-456789-01');
 	const transfer = { payment_method: 'TRANSFER', bank_account: '' };
-	expect(await recordPayment(db, { ...formOf(draft, WEEK), ...transfer }, manager)).toMatchObject({
+	expect(await recordPayment(db, { ...formOf(draft, WEEK), ...transfer }, MANAGER)).toMatchObject({
 		ok: false,
 		errors: { bank_account: 'Escribe la cuenta a la que se transfiere' }
 	});
 	expect(runRow()).toBeUndefined();
 	const otherAccount = { payment_method: 'TRANSFER', bank_account: 'Nequi 300 123 4567' };
-	await recordPayment(db, { ...formOf(draft, WEEK), ...otherAccount }, manager);
+	await recordPayment(db, { ...formOf(draft, WEEK), ...otherAccount }, MANAGER);
 	expect(movements()).toMatchObject([{ attributes: '{"bank_account":"Nequi 300 123 4567"}' }]);
 	expect((await openDraft()).payment).toMatchObject({
 		bankAccount: 'Nequi 300 123 4567',
@@ -407,12 +426,12 @@ test("a transfer keeps a copy of the account, pre-filled from the employee's", a
 test('with «Otro», recording fails without «¿Cuál medio de pago?», which lands in attributes', async () => {
 	const draft = await openDraft();
 	const other = { payment_method: 'OTHER', bank_account: 'ignorada' };
-	expect(await recordPayment(db, { ...formOf(draft, WEEK), ...other }, manager)).toMatchObject({
+	expect(await recordPayment(db, { ...formOf(draft, WEEK), ...other }, MANAGER)).toMatchObject({
 		ok: false,
 		errors: { payment_method_other: 'Escribe cuál medio de pago se usó' }
 	});
 	const described = { ...other, payment_method_other: 'Nequi' };
-	expect(await recordPayment(db, { ...formOf(draft, WEEK), ...described }, manager)).toEqual({
+	expect(await recordPayment(db, { ...formOf(draft, WEEK), ...described }, MANAGER)).toEqual({
 		ok: true
 	});
 	expect(movements()).toMatchObject([
@@ -422,59 +441,53 @@ test('with «Otro», recording fails without «¿Cuál medio de pago?», which l
 });
 
 test('the employee picked earlier is kept if they worked the period, or the first one shows', async () => {
-	const luisId = await hire('Luis Gómez', '71384902', '2026-07-01');
-	const leftId = await hire('Pedro Ruiz', '98765432', '2026-07-01');
-	await endEmployment(db, { id: String(leftId), end: '2026-09-30' }, manager);
+	const luisId = await hire('Luis Gómez', '2026-07-01');
+	const leftId = await hire('Pedro Ruiz', '2026-07-01');
+	await endEmployment(db, { id: String(leftId), end: '2026-09-30' }, MANAGER);
 	const opened = (preferredEmployeeId: number) =>
-		openWeek(db, { employeeId: null, preferredEmployeeId, week: WEEK }, manager);
+		openWeek(db, { employeeId: null, preferredEmployeeId, week: WEEK }, MANAGER);
 	expect((await opened(luisId)).draft?.employeeId).toBe(luisId);
 	// Pedro left in September: the first one of the week, never a 404.
 	expect((await opened(leftId)).draft?.employeeId).toBe(anaId);
 });
 
 test('only the employees who worked in the period are offered, and only to ADMIN and MANAGER', async () => {
-	const leftId = await hire('Luis Gómez', '71384902', '2026-07-01');
-	await endEmployment(db, { id: String(leftId), end: '2026-09-30' }, manager);
+	const leftId = await hire('Luis Gómez', '2026-07-01');
+	await endEmployment(db, { id: String(leftId), end: '2026-09-30' }, MANAGER);
 	const week = await open(WEEK, null);
 	expect(week.employees.map(({ fullName }) => fullName)).toEqual(['Ana Pérez']);
 	expect(week.draft?.employeeId).toBe(anaId);
 	await expect(open(WEEK, leftId)).rejects.toSatisfy(
 		(thrown) => isHttpError(thrown) && 404 === thrown.status
 	);
-	const warehouse: Actor = {
-		username: 'bodega',
-		employeeId: anaId,
-		roles: ['WAREHOUSE'],
-		kind: 'user'
-	};
-	await expect(openWeek(db, { employeeId: anaId, week: WEEK }, warehouse)).rejects.toSatisfy(
+	await expect(openWeek(db, { employeeId: anaId, week: WEEK }, ana)).rejects.toSatisfy(
 		(thrown) => isHttpError(thrown) && 403 === thrown.status
 	);
-	expect(await saveDraft(db, { employee_id: String(leftId) }, manager)).toMatchObject({
+	expect(await saveDraft(db, { employee_id: String(leftId) }, MANAGER)).toMatchObject({
 		ok: false
 	});
 });
 
 test('the receipt prints a paid settlement: its snapshot, who prepared it, and the company header', async () => {
 	const draft = await openDraft();
-	const notPaid = await getReceipt(db, { employeeId: anaId, week: WEEK }, manager).catch(
+	const notPaid = await getReceipt(db, { employeeId: anaId, week: WEEK }, MANAGER).catch(
 		(caught: unknown) => caught
 	);
 	expect(isHttpError(notPaid, 404)).toBe(true);
-	await recordPayment(db, { ...formOf(draft, WEEK), ...CASH }, manager);
-	const receipt = await getReceipt(db, { employeeId: anaId, week: TODAY }, manager);
+	await recordPayment(db, { ...formOf(draft, WEEK), ...CASH }, MANAGER);
+	const receipt = await getReceipt(db, { employeeId: anaId, week: TODAY }, MANAGER);
 	expect(receipt.periodStart).toBe(WEEK);
 	expect(receipt.extraHours).toEqual({ start: '2026-10-10', end: '2026-10-16' });
 	expect(receipt.payment).toMatchObject({
 		employeeName: 'Ana Pérez',
 		employeeIdNumber: '1036452118',
 		employeePosition: 'Bodega',
-		preparedBy: 'gerente'
+		preparedBy: 'manager'
 	});
 	expect(receipt.company.COMPANY_NAME).toBe('Banquetes Consuelo C');
 	// Another employee's id never falls back to Ana's receipt.
-	const otherId = await hire('Luis Gómez', '71000111', '2026-07-01');
-	const other = await getReceipt(db, { employeeId: otherId, week: WEEK }, manager).catch(
+	const otherId = await hire('Luis Gómez', '2026-07-01');
+	const other = await getReceipt(db, { employeeId: otherId, week: WEEK }, MANAGER).catch(
 		(caught: unknown) => caught
 	);
 	expect(isHttpError(other, 404)).toBe(true);
