@@ -5,10 +5,10 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",
-		"build": "wrangler types && vite build",
+		"build": "wrangler types --env-file .env.example && vite build",
 		"preview": "wrangler dev .svelte-kit/cloudflare/_worker.js --port 4173",
 		"prepare": "husky",
-		"typecheck": "wrangler types && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"typecheck": "wrangler types --env-file .env.example && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"lint": "run-p lint:*",
 		"lint:js": "eslint .",
 		"lint:css": "stylelint \"src/**/*.{css,svelte}\" --allow-empty-input",
