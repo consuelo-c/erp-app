@@ -182,7 +182,7 @@ test("changing a quote's validity moves no existing quote's «Válida hasta»", 
 	};
 	expect(await updateSystemSettings(db, { modules, values: form }, manager)).toEqual({ ok: true });
 	expect(readValue('QUOTES_VALIDITY_DAYS')).toMatchObject({ value: '15' });
-	expect(before).toHaveLength(3);
+	expect(before).toHaveLength(6);
 	expect(readValidity()).toEqual(before);
 });
 

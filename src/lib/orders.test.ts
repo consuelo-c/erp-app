@@ -138,8 +138,8 @@ function linesOf(count: number): number[] {
 	return Array.from({ length: count }, (_, index) => index);
 }
 
-// The quote's closing, notes and totals, takes 7 rows of each column; the order's, 2 on the left
-// for the signature and 7 on the right for the totals.
+// A closing of 7 rows under each column, as a quote's with a few lines of notes beside its totals;
+// the order's, 2 on the left for the signature and 7 on the right for the totals.
 const QUOTE_CLOSING = { left: 7, right: 7 };
 const ORDER_CLOSING = { left: 2, right: 7 };
 
@@ -205,6 +205,14 @@ test('a later sheet holds 18 rows a column, 16 and 11 on the last one under an o
 		[16, 11]
 	]);
 	expect(pages.flat(2)).toEqual(linesOf(57));
+});
+
+test('a closing taller than its column leaves that column empty, the lines going to the other', () => {
+	expect(columnLengths(splitIntoColumnPages(linesOf(6), { left: 40, right: 6 }))).toEqual([[0, 6]]);
+	expect(columnLengths(splitIntoColumnPages(linesOf(12), { left: 40, right: 6 }))).toEqual([
+		[6, 6],
+		[0, 0]
+	]);
 });
 
 function orderOf(id: number, lineCount: number) {

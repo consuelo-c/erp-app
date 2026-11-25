@@ -1,7 +1,7 @@
 -- Sample data, development only: stock for the catalog products it uses and a retired chair, a few
 -- contacts, five employees, a login per role on four of them, their punches from 10 to 18 October
 -- 2026, fifty-five orders between 1 and 18 October (the brief's three among them), three counts, the
--- orders' and standalone cash movements, three quotes, and three cuentas de cobro. Its lines and
+-- orders' and standalone cash movements, six quotes, and three cuentas de cobro. Its lines and
 -- counts name catalog.sql's products, so it runs after it.
 -- `npm run db:seed` loads it into the local D1 after settings-defaults.sql and catalog.sql;
 -- deploy.yml never applies it. Idempotent: a product whose name exists, a contact whose document
@@ -522,8 +522,9 @@ ORDER BY column1;
 -- Postobón's #1, open until 31 December 2027, to convert and print; its #2, expired, with no event
 -- date, transport «por acordar», a negotiated table and the retired «Silla Rimax», for the conversion
 -- warning, the empty transport on the order form and «Duplicar» repricing and leaving a product out;
--- and #3, #1043's lines and terms, converted into it. Each line is `[name, qty]` priced from the
--- catalog with the formula, or `[name, qty, unit_price]` when the price was negotiated. created_at
+-- #3, #1043's lines and terms, converted into it; #4 to #6, the lines of #1075, #1076 and #1077 (20,
+-- 30 and 50 products) as open quotes, to see how a long one prints. Each line is `[name, qty]` priced
+-- from the catalog with the formula, or `[name, qty, unit_price]` when the price was negotiated. created_at
 -- is fixed, not unixepoch(): it's the date the quote prints, and «Válida hasta» counts from it. Each
 -- has its own fixed token, so «Su cotización» opens at /mi-cotizacion/q000000000001.
 WITH sample (id, document_id, order_id, event_date, valid_until, rental_days, discount, transport_cost, lines, attributes, created_at) AS (VALUES
@@ -538,7 +539,19 @@ WITH sample (id, document_id, order_id, event_date, valid_until, rental_days, di
 	(3, '1036452118', 1043, '2026-10-17', '2026-10-15', 2, 91200, 180000,
 		'[["Sillas Tiffany",120],["Mesas Redondas",12],["Copas para Vino Tinto",120]]',
 		'{"address_1":"Cra 43A #18-95, El Poblado","address_2":"Salón Social Torre Verde, piso 2"}',
-		'2026-09-15 21:00:00')
+		'2026-09-15 21:00:00'),
+	(4, '@9TNB5WQE', NULL, '2026-10-17', '2026-12-31', 2, 0, 60000,
+		'[["Tenedores Grandes",40],["Tablones",4],["Mesas Cuadradas",6],["Mesas Redondas",8],["Sillas plásticas para Adultos",60],["Sillas para Niños",10],["Sobremanteles 150cm X 150cm para mesas redondas y tablones",8],["Platos Base Acero Inoxidable",30],["Platos Base Mimbre (Redondo)",20],["Platos Redondos Base",40],["Platos Cuadrados Base",40],["Platos para Mantequilla",40],["Pocilletas",30],["Pocillos para café",30],["Bandejas de Cristal",6],["Samovares de 13 litros",2],["Bowl grande",1],["Cucharón grande",2],["Cuchara de Gin Tonic",30],["Vaso pequeño para gaseosa o jugo",40]]',
+		'{"notes":"Cotización de prueba con 20 productos distintos, para revisar las impresiones."}',
+		'2026-10-10 10:00:00'),
+	(5, '1040338912', NULL, '2026-10-18', '2026-12-31', 1, 0, 80000,
+		'[["Tenedores Grandes",40],["Tablones",4],["Mesas Cuadradas",6],["Mesas Redondas",8],["Sillas plásticas para Adultos",60],["Sillas para Niños",10],["Sobremanteles 150cm X 150cm para mesas redondas y tablones",8],["Platos Base Acero Inoxidable",30],["Platos Base Mimbre (Redondo)",20],["Platos Redondos Base",40],["Platos Cuadrados Base",40],["Platos para Mantequilla",40],["Pocilletas",30],["Pocillos para café",30],["Bandejas de Cristal",6],["Samovares de 13 litros",2],["Bowl grande",1],["Cucharón grande",2],["Cuchara de Gin Tonic",30],["Vaso pequeño para gaseosa o jugo",40],["Platos Cuadrados Fuerte Grande",20],["Samovares 12 Litros",1],["Quinciañero",2],["Copas para Vino Tinto",60],["Forros para Sillas en Spandex",60],["Cuchara Medidora",6],["Soporte para tortas metálico mediano",1],["Soporte para Torta Metalico Pequeño",1],["Base giratoria para torta",1],["Cucharón pequeño",4]]',
+		'{"notes":"Cotización de prueba con 30 productos distintos, para revisar las impresiones."}',
+		'2026-10-10 10:00:00'),
+	(6, '@4MZT7QJD', NULL, '2026-10-17', '2026-12-31', 2, 0, 120000,
+		'[["Tenedores Grandes",1],["Tablones",8],["Mesas Cuadradas",15],["Mesas Redondas",22],["Sillas plásticas para Adultos",29],["Sillas para Niños",36],["Sobremanteles 150cm X 150cm para mesas redondas y tablones",3],["Platos Base Acero Inoxidable",10],["Platos Base Mimbre (Redondo)",17],["Platos Redondos Base",24],["Platos Cuadrados Base",31],["Platos para Mantequilla",38],["Pocilletas",5],["Platos para Pocillos",12],["Pocillos para café",19],["Bandejas de Cristal",26],["Almendreras",33],["Vasos Roqueros",40],["Vaso Cervecero",7],["Vasos para Agua",14],["Copas para Agua",21],["Copas para Vino Blanco",28],["Copas para Vino Tinto",35],["Copas de Jerez",2],["Copas de Coctel",9],["Copas para Champaña",16],["Copas de Aguardiente",23],["Copas para Helado",30],["Copas de Margarita",37],["Copas para Salpicón",4],["Decanter",11],["Cuchara Grande",18],["Cuchillos",25],["Palitas para Mantequilla",32],["Pinzas para Servir",39],["Cucharas para Servir",6],["Tapa Platos (Redondo)",13],["Jarras en Acero",20],["Hieleras en Acero con Pinza",27],["Quinciañero",34],["Baúl para Regalos",1],["Ceniceros de vidrio",8],["Cafeteras en Porcelana",15],["Tablones para Niños",22],["Platos Cuadrados Postre",29],["Platos Redondos Entrada",36],["Platos Redondos Postre",3],["Platos Redondos Hondos",10],["Azucareras de Porcelana",17],["Copas de Tequila",24]]',
+		'{"notes":"Cotización de prueba con 50 productos distintos, para revisar las impresiones."}',
+		'2026-10-10 10:00:00')
 ),
 priced AS (
 	SELECT sample.*, (
