@@ -1,10 +1,8 @@
-import { readdirSync, readFileSync } from 'node:fs';
-import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
+import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
-import type { Actor } from './actor';
 import { auditedInsert, auditedUpdate, diffFields } from './audit';
-
-const manager: Actor = { username: 'gerente', employeeId: 1, roles: ['MANAGER'], kind: 'user' };
+import { MANAGER } from './db/fixture';
+import { createMemoryD1 } from './db/memory-d1';
 
 let database: DatabaseSync;
 
@@ -24,13 +22,7 @@ function readEvents() {
 }
 
 beforeEach(() => {
-	database = new DatabaseSync(':memory:');
-	const files = readdirSync('migrations')
-		.filter((file) => file.endsWith('.sql'))
-		.sort();
-	for (const file of files) {
-		database.exec(readFileSync(`migrations/${file}`, 'utf8'));
-	}
+	({ database } = createMemoryD1());
 	// A table with an INTEGER id, like every table after settings.
 	database.exec(
 		'create table sample_rows (id integer primary key, name text not null, created_at integer not null, created_by text not null, updated_at integer not null, updated_by text not null)'
@@ -42,12 +34,12 @@ test('an insert fills all four audit columns, with updated_* equal to created_*'
 		auditedInsert(db, {
 			table: 'sample_rows',
 			entityType: 'SAMPLE_ROW',
-			actor: manager,
+			actor: MANAGER,
 			values: { name: 'Silla' }
 		})
 	);
 	const row = database.prepare('select * from sample_rows').get();
-	expect(row).toMatchObject({ name: 'Silla', created_by: 'gerente', updated_by: 'gerente' });
+	expect(row).toMatchObject({ name: 'Silla', created_by: 'manager', updated_by: 'manager' });
 	expect(row?.created_at).toBeTypeOf('number');
 	expect(row?.updated_at).toBe(row?.created_at);
 });
@@ -58,7 +50,7 @@ test('an insert logs CREATED with the new id and a null before', () => {
 		auditedInsert(db, {
 			table: 'sample_rows',
 			entityType: 'SAMPLE_ROW',
-			actor: manager,
+			actor: MANAGER,
 			values: { name: 'Silla' }
 		})
 	);
@@ -67,7 +59,7 @@ test('an insert logs CREATED with the new id and a null before', () => {
 			entity_type: 'SAMPLE_ROW',
 			entity_id: 8,
 			action: 'CREATED',
-			actor_username: 'gerente',
+			actor_username: 'manager',
 			actor_kind: 'user',
 			before: null,
 			after: '{"name":"Silla"}'
@@ -83,7 +75,7 @@ test('an update logs before and after with only the changed fields', () => {
 		auditedUpdate(db, {
 			table: 'settings',
 			entityType: 'SETTINGS',
-			actor: manager,
+			actor: MANAGER,
 			idColumn: 'key',
 			id: 'PAYROLL_PENSION_RATE',
 			current: { key: 'PAYROLL_PENSION_RATE', value: '4' },
@@ -93,7 +85,7 @@ test('an update logs before and after with only the changed fields', () => {
 	expect(database.prepare('select value, created_by, updated_by from settings').get()).toEqual({
 		value: '5',
 		created_by: 'system',
-		updated_by: 'gerente'
+		updated_by: 'manager'
 	});
 	expect(readEvents()).toEqual([
 		expect.objectContaining({
@@ -110,7 +102,7 @@ test('an update that changes nothing writes nothing', () => {
 	const statements = auditedUpdate(db, {
 		table: 'sample_rows',
 		entityType: 'SAMPLE_ROW',
-		actor: manager,
+		actor: MANAGER,
 		id: 1,
 		current: { name: 'Silla' },
 		changes: { name: 'Silla' }
@@ -130,7 +122,7 @@ test('a column name that is not a plain identifier is rejected', () => {
 		auditedInsert(db, {
 			table: 'sample_rows',
 			entityType: 'SAMPLE_ROW',
-			actor: manager,
+			actor: MANAGER,
 			values: { 'name) values (1); --': 'x' }
 		})
 	).toThrow(/identifier/);
@@ -141,7 +133,7 @@ test('logged fields reach the event of an insert, not the row', () => {
 		auditedInsert(db, {
 			table: 'sample_rows',
 			entityType: 'SAMPLE_ROW',
-			actor: manager,
+			actor: MANAGER,
 			values: { name: 'Silla' },
 			logged: { order_ids: '[1,2]' }
 		})
@@ -156,7 +148,7 @@ test('logged fields alone are a change: the row refreshes its audit columns and 
 		auditedUpdate(db, {
 			table: 'sample_rows',
 			entityType: 'SAMPLE_ROW',
-			actor: manager,
+			actor: MANAGER,
 			id: 1,
 			current: { name: 'Silla' },
 			changes: { name: 'Silla' },
@@ -164,7 +156,7 @@ test('logged fields alone are a change: the row refreshes its audit columns and 
 		})
 	);
 	const row = database.prepare('select * from sample_rows').get();
-	expect(row).toMatchObject({ name: 'Silla', updated_by: 'gerente' });
+	expect(row).toMatchObject({ name: 'Silla', updated_by: 'manager' });
 	const [edited] = readEvents();
 	expect(JSON.parse(String(edited.before))).toEqual({ order_ids: '[1]' });
 	expect(JSON.parse(String(edited.after))).toEqual({ order_ids: '[1,2]' });

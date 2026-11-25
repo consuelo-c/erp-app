@@ -1,19 +1,14 @@
-import { readdirSync, readFileSync } from 'node:fs';
-import { DatabaseSync } from 'node:sqlite';
+import { readFileSync } from 'node:fs';
+import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
+import { createMemoryD1 } from './memory-d1';
 
 const catalog = readFileSync('scripts/catalog.sql', 'utf8');
 
 let database: DatabaseSync;
 
 beforeEach(() => {
-	database = new DatabaseSync(':memory:');
-	const files = readdirSync('migrations')
-		.filter((file) => file.endsWith('.sql'))
-		.sort();
-	for (const file of files) {
-		database.exec(readFileSync(`migrations/${file}`, 'utf8'));
-	}
+	({ database } = createMemoryD1());
 	database.exec(catalog);
 });
 
@@ -33,23 +28,23 @@ test('loads the thirteen variant groups at their prices, every variant a linen',
 			from products where variant_group is not null group by variant_group order by variant_group`
 		)
 		.all();
-	expect(groups.map((group) => [group.variant_group, group.low, group.high, group.category])).toEqual(
-		[
-			['Caminos de mesa', 8000, 8000, 'LINENS'],
-			['Fajones para vestidos de silla', 1800, 1800, 'LINENS'],
-			['Forros para sillas', 3800, 3800, 'LINENS'],
-			['Manteles para Mesas Cuadradas', 7000, 7000, 'LINENS'],
-			['Manteles para Mesas Redondas de 1 metro', 10000, 10000, 'LINENS'],
-			['Manteles para Mesas Redondas de 1.20 diámetro', 16000, 16000, 'LINENS'],
-			['Manteles para Tablones', 9000, 9000, 'LINENS'],
-			['Manteles para Tablones Doble', 16000, 16000, 'LINENS'],
-			['Pañoletas', 1500, 1500, 'LINENS'],
-			['Ruches', 16000, 16000, 'LINENS'],
-			['Servilletas de Tela', 1500, 1500, 'LINENS'],
-			['Sobremanteles 75cm X 75cm para mesa cuadrada', 3000, 3000, 'LINENS'],
-			['Sobremanteles Redondos', 10000, 10000, 'LINENS']
-		]
-	);
+	expect(
+		groups.map((group) => [group.variant_group, group.low, group.high, group.category])
+	).toEqual([
+		['Caminos de mesa', 8000, 8000, 'LINENS'],
+		['Fajones para vestidos de silla', 1800, 1800, 'LINENS'],
+		['Forros para sillas', 3800, 3800, 'LINENS'],
+		['Manteles para Mesas Cuadradas', 7000, 7000, 'LINENS'],
+		['Manteles para Mesas Redondas de 1 metro', 10000, 10000, 'LINENS'],
+		['Manteles para Mesas Redondas de 1.20 diámetro', 16000, 16000, 'LINENS'],
+		['Manteles para Tablones', 9000, 9000, 'LINENS'],
+		['Manteles para Tablones Doble', 16000, 16000, 'LINENS'],
+		['Pañoletas', 1500, 1500, 'LINENS'],
+		['Ruches', 16000, 16000, 'LINENS'],
+		['Servilletas de Tela', 1500, 1500, 'LINENS'],
+		['Sobremanteles 75cm X 75cm para mesa cuadrada', 3000, 3000, 'LINENS'],
+		['Sobremanteles Redondos', 10000, 10000, 'LINENS']
+	]);
 	const misnamed = readProducts().filter(
 		(product) =>
 			null !== product.variant_group &&
@@ -62,7 +57,11 @@ test('loads the thirteen variant groups at their prices, every variant a linen',
 test('«Alquiler» leaves three names; a group’s own product, Catering, a variation and the imported overlays stay out', () => {
 	const names = readProducts().map((product) => product.name);
 	expect(names).toEqual(
-		expect.arrayContaining(['Caminos de mesa — Yute', 'Forros para sillas — Beige', 'Sillas Tiffany'])
+		expect.arrayContaining([
+			'Caminos de mesa — Yute',
+			'Forros para sillas — Beige',
+			'Sillas Tiffany'
+		])
 	);
 	const absent = [
 		'Manteles para Tablones',
