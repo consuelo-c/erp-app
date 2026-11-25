@@ -1,95 +1,104 @@
-import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
-import type { Actor } from '../actor';
-import { createMemoryD1 } from '../db/memory-d1';
-import { movementStatements } from './cash';
-import { createOrder } from '../db/test-orders';
+import { createFixture, DRIVER, MANAGER, SALES } from '../db/fixture';
 import { createPublicToken } from '../public-token';
+import { reportIncident } from './incidents';
+import { advanceOrder, getPublicToken, type OrderStatus } from './orders';
 import {
 	findOrderIdByToken,
 	getClientTerms,
 	getPublicOrder,
 	getWhatsAppHref
 } from './public-orders';
-
-const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
-
-const AUDIT = "0, 'admin', 0, 'admin'";
+import { issueReceivable, recordReceivablePayment } from './receivables';
+import { getSystemSettings, updateSystemSettings, updateTerms } from './settings';
 
 let db: D1Database;
-let database: DatabaseSync;
+let fixture: ReturnType<typeof createFixture>;
+let LUZ_MARINA: number;
+let WILSON: number;
+let TIFFANY: number;
+let MESA: number;
+let COPA: number;
 
-beforeEach(() => {
-	({ db, database } = createMemoryD1());
-	const contact = database.prepare(
-		`insert into contacts (phone, full_name, document_id, labels, created_at, created_by, updated_at, updated_by) values (?, ?, ?, ?, ${AUDIT})`
-	);
-	contact.run('573104428890', 'Luz Marina Restrepo', '@luz', '[]');
-	contact.run('573119085512', 'Wilson Muñoz', '@wilson', '["TRANSPORTER"]');
-	const product = database.prepare(
-		`insert into products (name, category, rental_price, total_quantity, active, created_at, created_by, updated_at, updated_by) values (?, 'CHAIRS_TABLES', ?, 500, 1, ${AUDIT})`
-	);
-	product.run('Silla Tiffany dorada', 2500);
-	product.run('Mesa redonda 10 puestos', 12000);
-	product.run('Copa para vino tinto', 900);
+beforeEach(async () => {
 	// Saturday 17 October 2026, 9 a.m. in Bogotá: #1043's event day.
 	vi.useFakeTimers({ toFake: ['Date'] });
 	vi.setSystemTime(new Date('2026-10-17T14:00:00Z'));
 	onTestFinished(() => {
 		vi.useRealTimers();
 	});
+	fixture = createFixture();
+	({ db } = fixture);
+	LUZ_MARINA = await fixture.contact({ full_name: 'Luz Marina Restrepo', phone: '310 442 8890' });
+	WILSON = await fixture.contact({
+		full_name: 'Wilson Muñoz',
+		phone: '311 908 5512',
+		labels: ['TRANSPORTER']
+	});
+	const stocked = { total_quantity: '500' };
+	TIFFANY = await fixture.product({
+		name: 'Silla Tiffany dorada',
+		rental_price: '2500',
+		...stocked
+	});
+	MESA = await fixture.product({
+		name: 'Mesa redonda 10 puestos',
+		rental_price: '12000',
+		...stocked
+	});
+	COPA = await fixture.product({ name: 'Copa para vino tinto', rental_price: '900', ...stocked });
 });
 
-const WILSON = 2;
 const address = { address_1: 'Cra 43A #18-95, El Poblado', address_2: 'Salón Social Torre Verde' };
 
 // The Design Brief's order #1043.
-const order1043 = {
-	client_id: 1,
-	client_name: 'Luz Marina Restrepo',
-	event_date: '2026-10-17',
-	delivery_date: '2026-10-16',
-	pickup_date: '2026-10-18',
-	rental_days: 2,
-	delivery_attributes: { method: 'COMPANY_DELIVERY', time: '14:00', ...address },
-	pickup_attributes: { method: 'COMPANY_PICKUP', time: '09:00', ...address },
-	order_items: [
-		{ product_id: 1, qty: 120, unit_price: 2500 },
-		{ product_id: 2, qty: 12, unit_price: 12000 },
-		{ product_id: 3, qty: 120, unit_price: 900 }
-	],
-	discount: 104000,
-	transport_cost: 180000,
-	deposit_amount: 200000
-};
+function order1043() {
+	return {
+		client_id: LUZ_MARINA,
+		event_date: '2026-10-17',
+		delivery_date: '2026-10-16',
+		pickup_date: '2026-10-18',
+		rental_days: 2,
+		delivery_attributes: { method: 'COMPANY_DELIVERY', time: '14:00', ...address },
+		pickup_attributes: { method: 'COMPANY_PICKUP', time: '09:00', ...address },
+		order_items: [
+			{ product_id: TIFFANY, qty: 120, unit_price: 2500 },
+			{ product_id: MESA, qty: 12, unit_price: 12000 },
+			{ product_id: COPA, qty: 120, unit_price: 900 }
+		],
+		discount: 104000,
+		transport_cost: 180000,
+		deposit_amount: 200000
+	};
+}
 
-/** An order in `status`, and its client link's token. */
-async function create(status = 'CONFIRMED', input: object = {}): Promise<string> {
-	const result = await createOrder(db, { ...order1043, ...input }, sales);
-	if (!result.ok) {
-		throw new Error(JSON.stringify(result.errors));
-	}
-	database.prepare('update orders set status = ? where id = ?').run(status, result.id);
-	const row = database.prepare('select public_token from orders where id = ?').get(result.id);
-	return String(row?.public_token);
+/** #1043 (with `fields` over it) in `status`, and its client link's token. */
+async function create(
+	status: OrderStatus = 'CONFIRMED',
+	fields: object = {}
+): Promise<{ id: number; token: string }> {
+	const id = await fixture.order({ ...order1043(), ...fields, status });
+	return { id, token: String(await getPublicToken(db, id, SALES)) };
+}
+
+// Configuración › Empresa as the manager saves it, with the WhatsApp typed over it.
+async function setCompanyWhatsApp(whatsapp: string): Promise<void> {
+	const values = await getSystemSettings(db, ['COMPANY'], MANAGER);
+	const form = { ...values, COMPANY_WHATSAPP: whatsapp };
+	expect(await updateSystemSettings(db, { modules: ['COMPANY'], values: form }, MANAGER)).toEqual({
+		ok: true
+	});
 }
 
 test("#1043's page: the printout's figures, and exactly the fields the client sees", async () => {
-	const token = await create();
-	await db.batch(
-		movementStatements(db, sales, {
-			concept: 'INSTALLMENT',
-			amount: 500000,
-			payment_method: 'TRANSFER',
-			movement_date: '2026-10-10',
-			entity_type: 'ORDER',
-			entity_id: 1,
-			reverses_id: null,
-			attributes: {}
-		})
-	);
+	const { id, token } = await create();
+	await fixture.payment(id, {
+		amount: '500.000',
+		payment_method: 'TRANSFER',
+		movement_date: '2026-10-10'
+	});
 	expect(await getPublicOrder(db, token)).toEqual({
-		id: 1,
+		id,
 		status: 'CONFIRMED',
 		clientName: 'Luz Marina Restrepo',
 		eventDate: '2026-10-17',
@@ -117,42 +126,46 @@ test("#1043's page: the printout's figures, and exactly the fields the client se
 });
 
 test("a billed order carries its cuenta's balance, net of the cuenta's own payment", async () => {
-	const token = await create('COMPLETED');
-	database.exec(
-		`insert into receivables (id, client_id, issue_date, attributes, created_at, created_by, updated_at, updated_by)
-		values (4794, 1, '2026-10-20', '{"payment_terms":"Contado"}', 0, 'admin', 0, 'admin');
-		update orders set receivable_id = 4794 where id = 1`
-	);
-	await db.batch(
-		movementStatements(db, sales, {
-			concept: 'INSTALLMENT',
-			amount: 300000,
-			payment_method: 'TRANSFER',
-			movement_date: '2026-10-21',
-			entity_type: 'RECEIVABLE',
-			entity_id: 4794,
-			reverses_id: null,
-			attributes: {}
-		})
-	);
+	const { id, token } = await create('COMPLETED');
+	const issued = await issueReceivable(db, { orders: [id], payment_terms: 'Contado' }, SALES);
+	if (!issued.ok) {
+		throw new Error(issued.message);
+	}
 	expect(await getPublicOrder(db, token)).toMatchObject({
-		receivableId: 4794,
-		receivableBalance: 880000
+		receivableId: issued.id,
+		receivableBalance: 1180000
+	});
+	// A cuenta is paid once and in full: its own payment leaves nothing.
+	const payment = {
+		id: String(issued.id),
+		payment_method: 'CASH',
+		amount: '1.180.000',
+		movement_date: '2026-10-17'
+	};
+	expect(await recordReceivablePayment(db, payment, MANAGER)).toMatchObject({ ok: true });
+	expect(await getPublicOrder(db, token)).toMatchObject({
+		receivableId: issued.id,
+		receivableBalance: 0
 	});
 });
 
 test('never the carrier, trip dates, times, notes, list prices, phone, incident or payments', async () => {
 	const external = { method: 'EXTERNAL_CARRIER', carrier_id: WILSON, time: '14:00', ...address };
-	const token = await create('DELIVERED', {
+	const { id, token } = await create('DELIVERED', {
 		delivery_attributes: external,
-		pickup_attributes: { ...external, address_1: 'Finca La Esperanza' },
+		pickup_attributes: {
+			method: 'COMPANY_PICKUP',
+			time: '14:00',
+			address_1: 'Finca La Esperanza'
+		},
 		notes: 'Cliente difícil'
 	});
-	database
-		.prepare(
-			"update orders set has_incident = 1, delivery_attributes = json_set(delivery_attributes, '$.notes', 'Portería cerrada')"
-		)
-		.run();
+	// The driver's note on the pickup, then a chair lost: an active incident.
+	const pickup = { id, status: 'OUT_FOR_PICKUP', notes: 'Portería cerrada' };
+	expect(await advanceOrder(db, pickup, DRIVER)).toMatchObject({ ok: true });
+	const items = [{ product_id: TIFFANY, qty: 1, outcome: 'LOST' }];
+	const incident = { order_id: id, incident_description: 'Se perdió una silla', items };
+	expect(await reportIncident(db, incident, DRIVER)).toMatchObject({ ok: true });
 	const order = await getPublicOrder(db, token);
 	const keys = JSON.stringify(order).match(/"\w+":/g) ?? [];
 	for (const forbidden of [
@@ -191,32 +204,29 @@ test('never the carrier, trip dates, times, notes, list prices, phone, incident 
 test('an unknown token, an event 31 days past or an id: no page', async () => {
 	expect(await getPublicOrder(db, createPublicToken())).toBeNull();
 	const thirtyOneDaysAgo = await create('COMPLETED', { event_date: '2026-09-16' });
-	expect(await getPublicOrder(db, thirtyOneDaysAgo)).toBeNull();
-	expect(await getPublicOrder(db, '1')).toBeNull();
-	expect(await getPublicOrder(db, 1)).toBeNull();
+	expect(await getPublicOrder(db, thirtyOneDaysAgo.token)).toBeNull();
+	const { id } = await create();
+	expect(await getPublicOrder(db, String(id))).toBeNull();
+	expect(await getPublicOrder(db, id)).toBeNull();
 });
 
 test('an event 30 days past and a cancelled order still open', async () => {
 	const thirtyDaysAgo = await create('COMPLETED', { event_date: '2026-09-17' });
-	expect(await getPublicOrder(db, thirtyDaysAgo)).toMatchObject({ status: 'COMPLETED' });
-	expect(await getPublicOrder(db, await create('CANCELLED'))).toMatchObject({
+	expect(await getPublicOrder(db, thirtyDaysAgo.token)).toMatchObject({ status: 'COMPLETED' });
+	expect(await getPublicOrder(db, (await create('CANCELLED')).token)).toMatchObject({
 		status: 'CANCELLED'
 	});
 });
 
 test("the staff's link finds any order by its token, old included, never by its id", async () => {
 	const old = await create('COMPLETED', { event_date: '2026-01-10' });
-	expect(await findOrderIdByToken(db, old)).toBe(1);
+	expect(await findOrderIdByToken(db, old.token)).toBe(old.id);
 	expect(await findOrderIdByToken(db, createPublicToken())).toBeNull();
-	expect(await findOrderIdByToken(db, '1')).toBeNull();
+	expect(await findOrderIdByToken(db, String(old.id))).toBeNull();
 });
 
 test("the WhatsApp link: the company's number, its text encoded", async () => {
-	database
-		.prepare(
-			`insert or replace into settings (key, value, created_at, created_by, updated_at, updated_by) values ('COMPANY_WHATSAPP', ?, ${AUDIT})`
-		)
-		.run('573105550142');
+	await setCompanyWhatsApp('573105550142');
 	const href = new URL(String(await getWhatsAppHref(db, 'Hola. ¿Y mi pedido #1043?')));
 	expect(`${href.origin}${href.pathname}`).toBe('https://wa.me/573105550142');
 	expect(href.searchParams.get('text')).toBe('Hola. ¿Y mi pedido #1043?');
@@ -224,37 +234,26 @@ test("the WhatsApp link: the company's number, its text encoded", async () => {
 });
 
 test('the terms as stored, empty while there are none', async () => {
-	const setTerms = (value: string) =>
-		database
-			.prepare(
-				`insert or replace into settings (key, value, created_at, created_by, updated_at, updated_by) values ('TERMS_CONDITIONS', ?, ${AUDIT})`
-			)
-			.run(value);
-	setTerms('');
 	expect(await getClientTerms(db)).toBe('');
-	setTerms('## Depósito\n\nSe devuelve al recoger.');
+	const terms = { text: '## Depósito\n\nSe devuelve al recoger.' };
+	expect(await updateTerms(db, terms, MANAGER)).toEqual({ ok: true });
 	expect(await getClientTerms(db)).toBe('## Depósito\n\nSe devuelve al recoger.');
 });
 
 test('the client sees «Cobrado por novedades», kept from the deposit, apart from Pagado and Saldo', async () => {
-	const token = await create('OUT_FOR_PICKUP');
-	const movement = (concept: string, amount: number) =>
-		movementStatements(db, sales, {
-			concept: concept as 'INSTALLMENT',
-			amount,
-			payment_method: 'CASH',
-			movement_date: '2026-10-18',
-			entity_type: 'ORDER',
-			entity_id: 1,
-			reverses_id: null,
-			attributes: {}
-		});
-	await db.batch([
-		...movement('INSTALLMENT', 500000),
-		...movement('SECURITY_DEPOSIT', 200000),
-		...movement('DEPOSIT_REFUND', -150000),
-		...movement('DAMAGE_CHARGE', 150000)
-	]);
+	const { id, token } = await create('OUT_FOR_PICKUP');
+	await fixture.payment(id, { amount: '500.000' });
+	await fixture.payment(id, { concept: 'SECURITY_DEPOSIT', amount: '200.000' });
+	const items = [{ product_id: COPA, qty: 10, outcome: 'LOST' }];
+	const incident = { order_id: id, incident_description: 'Copas rotas', items };
+	expect(await reportIncident(db, incident, DRIVER)).toMatchObject({ ok: true });
+	// Kept from the deposit: the charge and its paired «Devolución de depósito».
+	await fixture.payment(id, {
+		concept: 'DAMAGE_CHARGE',
+		amount: '150.000',
+		fee_source: 'DEPOSIT',
+		description: 'Copas rotas'
+	});
 	expect(await getPublicOrder(db, token)).toMatchObject({
 		paid: 500000,
 		balanceDue: 680000,

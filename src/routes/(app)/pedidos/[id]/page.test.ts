@@ -1,11 +1,8 @@
 import { isRedirect } from '@sveltejs/kit';
-import { readFileSync } from 'node:fs';
 import { render } from 'svelte/server';
 import { beforeEach, expect, test, vi } from 'vitest';
-import type { Actor } from '$lib/server/actor';
-import { createMemoryD1 } from '$lib/server/db/memory-d1';
-import { createOrder } from '$lib/server/db/test-orders';
-import { createQuote } from '$lib/server/services/quotes';
+import { createFixture, MANAGER, SALES } from '$lib/server/db/fixture';
+import { getContact, updateContact } from '$lib/server/services/contacts';
 import {
 	actions as quoteEditActions,
 	load as loadQuoteEdit
@@ -23,8 +20,6 @@ import Page from './+page.svelte';
 const state = vi.hoisted(() => ({ page: { url: new URL('http://localhost/pedidos/1') } }));
 vi.mock('$app/state', () => state);
 
-const AUDIT = "0, 'admin', 0, 'admin'";
-const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
 const address = { address_1: 'Calle 10 # 43-12, El Poblado', address_2: null };
 
 const GREEN = 'Pedido guardado con éxito';
@@ -33,46 +28,41 @@ const BLUE =
 const BLUE_WITHOUT_DEPOSIT =
 	'El transporte y el total son lo que se le cobra al cliente, no pagos recibidos. Registra el pago con «Registrar pago».';
 
-const orderInput = {
-	client_id: 1,
-	client_name: 'Luz Marina Restrepo',
-	client_phone: '310 442 8890',
-	event_date: '2026-08-15',
-	delivery_date: '2026-08-14',
-	pickup_date: '2026-08-16',
-	rental_days: 2,
-	delivery_attributes: { method: 'COMPANY_DELIVERY', time: '14:00', ...address },
-	pickup_attributes: { method: 'COMPANY_PICKUP', time: '09:00', ...address },
-	order_items: [{ product_id: 1, qty: 10, unit_price: 2500 }],
-	discount: 0,
-	transport_cost: 180000,
-	deposit_amount: 200000
-};
-
 let db: D1Database;
-let database: ReturnType<typeof createMemoryD1>['database'];
+let fixture: ReturnType<typeof createFixture>;
+let LUZ_MARINA: number;
+let orderInput: Record<string, unknown>;
 
-beforeEach(() => {
-	({ db, database } = createMemoryD1());
-	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
-	database.exec(
-		`insert into contacts (phone, full_name, document_id, labels, created_at, created_by, updated_at, updated_by) values ('573104428890', 'Luz Marina Restrepo', '@573104428890', '[]', ${AUDIT});
-		insert into products (name, category, rental_price, total_quantity, active, created_at, created_by, updated_at, updated_by) values ('Silla Tiffany dorada', 'CHAIRS_TABLES', 2500, 500, 1, ${AUDIT})`
-	);
+beforeEach(async () => {
+	fixture = createFixture();
+	({ db } = fixture);
+	LUZ_MARINA = await fixture.contact({ full_name: 'Luz Marina Restrepo', phone: '310 442 8890' });
+	const product = await fixture.product({ name: 'Silla Tiffany dorada', rental_price: '2500' });
+	orderInput = {
+		client_id: LUZ_MARINA,
+		client_name: 'Luz Marina Restrepo',
+		client_phone: '310 442 8890',
+		event_date: '2026-08-15',
+		delivery_date: '2026-08-14',
+		pickup_date: '2026-08-16',
+		rental_days: 2,
+		delivery_attributes: { method: 'COMPANY_DELIVERY', time: '14:00', ...address },
+		pickup_attributes: { method: 'COMPANY_PICKUP', time: '09:00', ...address },
+		order_items: [{ product_id: product, qty: 10, unit_price: 2500 }],
+		discount: 0,
+		transport_cost: 180000,
+		deposit_amount: 200000
+	};
 });
 
-async function newOrder(overrides: object = {}): Promise<number> {
-	const created = await createOrder(db, { ...orderInput, ...overrides }, sales);
-	if (!created.ok) {
-		throw new Error(JSON.stringify(created));
-	}
-	return created.id;
+function newOrder(overrides: object = {}): Promise<number> {
+	return fixture.order({ ...orderInput, ...overrides });
 }
 
 async function detailAt(id: number, query: string): Promise<string> {
 	state.page.url = new URL(`http://localhost/pedidos/${id}${query}`);
 	const event = {
-		locals: { user: sales },
+		locals: { user: SALES },
 		params: { id: String(id) },
 		platform: { env: { DB: db } }
 	};
@@ -98,7 +88,7 @@ function postOf(order: object, url = 'http://localhost/'): object {
 	formData.set('order', JSON.stringify(order));
 	formData.set('force', '1');
 	const request = new Request(url, { method: 'POST', body: formData });
-	return { locals: { user: sales }, platform: { env: { DB: db } }, request, url: new URL(url) };
+	return { locals: { user: SALES }, platform: { env: { DB: db } }, request, url: new URL(url) };
 }
 
 test('a new order’s detail shows the green notice and under it the blue one', async () => {
@@ -126,31 +116,14 @@ test('a saved edit shows only the green notice; a later visit or a payment, neit
 });
 
 test('«Convertir en pedido» › «Guardar pedido» lands on the new order with `guardado=nuevo`', async () => {
-	const quote = await createQuote(
-		db,
-		{
-			client_id: 1,
-			client_name: 'Luz Marina Restrepo',
-			valid_until: '2099-12-31',
-			rental_days: 2,
-			quote_items: orderInput.order_items,
-			discount: 0,
-			transport_cost: 180000,
-			transported_by: 'COMPANY'
-		},
-		sales
-	);
-	if (!quote.ok) {
-		throw new Error(JSON.stringify(quote));
-	}
-	const post = postOf(orderInput, `http://localhost/pedidos/nuevo?cotizacion=${quote.id}`);
+	const quote = await newQuote();
+	const post = postOf(orderInput, `http://localhost/pedidos/nuevo?cotizacion=${quote}`);
 	const location = await locationAfter(() => convertActions.default(post as never));
 	expect(location).toMatch(/^\/pedidos\/\d+\?guardado=nuevo$/);
 });
 
 test('«Extender pedido» lands on the extension with `guardado=nuevo`', async () => {
-	const parent = await newOrder();
-	database.exec(`update orders set status = 'DELIVERED' where id = ${parent}`);
+	const parent = await newOrder({ status: 'DELIVERED' });
 	const post = {
 		...postOf({ ...orderInput, pickup_date: '2026-08-20' }),
 		params: { id: String(parent) }
@@ -169,8 +142,27 @@ test('saving an edit lands on the order with `guardado` alone', async () => {
 
 const BANNED_WARNING = '⚠ Cliente vetado. Puedes continuar igual.';
 
-function banClient() {
-	database.exec(`update contacts set labels = '["BANNED"]' where id = 1`);
+// Contactos › Editar as the manager saves it: Luz Marina as she is, labelled Vetado.
+async function banClient() {
+	const current = await getContact(db, LUZ_MARINA, MANAGER);
+	if (null === current) {
+		throw new Error('Luz Marina not found');
+	}
+	const typed = {
+		phone: current.phone,
+		whatsapp: current.whatsapp,
+		full_name: current.fullName,
+		document_id: current.documentId,
+		email: current.email,
+		address_1: current.address1,
+		address_2: current.address2,
+		bank_account: current.bankAccount,
+		notes: current.notes
+	};
+	// An empty field posts as empty text, never as null.
+	const posted = Object.entries(typed).map(([key, value]) => [key, value ?? '']);
+	const form = { id: LUZ_MARINA, ...Object.fromEntries(posted), labels: ['BANNED'] };
+	expect(await updateContact(db, form, MANAGER)).toMatchObject({ ok: true });
 }
 
 type Route = { page: unknown; load: unknown };
@@ -178,7 +170,7 @@ type Route = { page: unknown; load: unknown };
 // The form as the route renders it, its data from the route's own load.
 async function rendered({ page, load }: Route, params: object, url = 'http://localhost/') {
 	const event = {
-		locals: { user: sales },
+		locals: { user: SALES },
 		params,
 		platform: { env: { DB: db } },
 		url: new URL(url)
@@ -187,23 +179,21 @@ async function rendered({ page, load }: Route, params: object, url = 'http://loc
 	return render(page as never, { props: { data, form: null } as never }).body;
 }
 
-const quoteInput = {
-	client_id: 1,
-	client_name: 'Luz Marina Restrepo',
-	valid_until: '2099-12-31',
-	rental_days: 2,
-	quote_items: orderInput.order_items,
-	discount: 0,
-	transport_cost: 180000,
-	transported_by: 'COMPANY'
-};
+function quoteInput() {
+	return {
+		client_id: LUZ_MARINA,
+		client_name: 'Luz Marina Restrepo',
+		valid_until: '2099-12-31',
+		rental_days: 2,
+		quote_items: orderInput.order_items,
+		discount: 0,
+		transport_cost: 180000,
+		transported_by: 'COMPANY'
+	};
+}
 
-async function newQuote(): Promise<number> {
-	const quote = await createQuote(db, quoteInput, sales);
-	if (!quote.ok) {
-		throw new Error(JSON.stringify(quote));
-	}
-	return quote.id;
+function newQuote(): Promise<number> {
+	return fixture.quote(quoteInput());
 }
 
 test('a Vetado client warns under «Cliente» when the order loads, and the edit still saves', async () => {
@@ -211,7 +201,7 @@ test('a Vetado client warns under «Cliente» when the order loads, and the edit
 	expect(await rendered({ page: EditPage, load: loadEdit }, { id: String(id) })).not.toContain(
 		BANNED_WARNING
 	);
-	banClient();
+	await banClient();
 	expect(await rendered({ page: EditPage, load: loadEdit }, { id: String(id) })).toContain(
 		BANNED_WARNING
 	);
@@ -223,7 +213,7 @@ test('a Vetado client warns under «Cliente» when the order loads, and the edit
 
 test('a Vetado client warns under «Cliente» when a quote loads, edited or converted, and it saves', async () => {
 	const quote = await newQuote();
-	banClient();
+	await banClient();
 	const edit = await rendered({ page: QuoteEditPage, load: loadQuoteEdit }, { id: String(quote) });
 	expect(edit).toContain(BANNED_WARNING);
 	const url = `http://localhost/pedidos/nuevo?cotizacion=${quote}`;
@@ -231,9 +221,9 @@ test('a Vetado client warns under «Cliente» when a quote loads, edited or conv
 		BANNED_WARNING
 	);
 	const formData = new FormData();
-	formData.set('quote', JSON.stringify(quoteInput));
+	formData.set('quote', JSON.stringify(quoteInput()));
 	const request = new Request('http://localhost/', { method: 'POST', body: formData });
-	const post = { locals: { user: sales }, platform: { env: { DB: db } }, request };
+	const post = { locals: { user: SALES }, platform: { env: { DB: db } }, request };
 	const saved = () => quoteEditActions.default({ ...post, params: { id: String(quote) } } as never);
 	expect(await locationAfter(saved)).toBe(`/cotizaciones/${quote}?guardado`);
 });
