@@ -1,11 +1,10 @@
 import { isHttpError } from '@sveltejs/kit';
-import { readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import { toDialTime } from '$lib/datetime';
 import { getSettingInput, type SettingModule } from '$lib/settings';
-import type { Actor } from '../actor';
-import { createMemoryD1 } from '../db/memory-d1';
+import { ADMIN, createFixture, DRIVER, MANAGER, SALES, WAREHOUSE } from '../db/fixture';
+import { openWeek, recordPayment, saveDraft } from './payroll';
 import {
 	getHelp,
 	getHolidays,
@@ -21,26 +20,16 @@ import {
 	type SystemSettings
 } from './settings';
 
-const admin: Actor = { username: 'admin', employeeId: null, roles: ['ADMIN'], kind: 'user' };
-const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
-const sales: Actor = { username: 'ventas', employeeId: null, roles: ['SALES'], kind: 'user' };
-const warehouse: Actor = {
-	username: 'bodega',
-	employeeId: null,
-	roles: ['WAREHOUSE'],
-	kind: 'user'
-};
-const driver: Actor = { username: 'conductor', employeeId: null, roles: ['DRIVER'], kind: 'user' };
-
 // Both screens' modules: Configuración's and Nómina's.
 const modules: SettingModule[] = ['COMPANY', 'QUOTES', 'PAYROLL'];
 
+let fixture: ReturnType<typeof createFixture>;
 let db: D1Database;
 let database: DatabaseSync;
 
 beforeEach(() => {
-	({ db, database } = createMemoryD1());
-	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
+	fixture = createFixture();
+	({ db, database } = fixture);
 });
 
 // The form as the screen posts it: a clock time as hour, minutes and a.m. or p.m.
@@ -59,16 +48,19 @@ function readValue(key: string) {
 	return database.prepare('select value, updated_by from settings where key = ?').get(key);
 }
 
+// The settings' own events: a settlement a test pays leaves its own, which aren't these.
 function readEvents() {
 	return database
-		.prepare('select entity_type, entity_id, entity_key, action, before, after from events')
+		.prepare(
+			"select entity_type, entity_id, entity_key, action, before, after from events where entity_type = 'SETTINGS'"
+		)
 		.all();
 }
 
 test('only ADMIN and MANAGER read or edit the settings', async () => {
 	const refusals = [
-		getSystemSettings(db, modules, sales).catch((caught) => caught),
-		updateSystemSettings(db, { modules, values: {} }, sales).catch((caught) => caught)
+		getSystemSettings(db, modules, SALES).catch((caught) => caught),
+		updateSystemSettings(db, { modules, values: {} }, SALES).catch((caught) => caught)
 	];
 	for (const refusal of await Promise.all(refusals)) {
 		expect(isHttpError(refusal, 403)).toBe(true);
@@ -76,7 +68,7 @@ test('only ADMIN and MANAGER read or edit the settings', async () => {
 });
 
 test('the settings come in the screen order, without the holidays, left to their own editor', async () => {
-	const values = await getSystemSettings(db, modules, manager);
+	const values = await getSystemSettings(db, modules, MANAGER);
 	expect(values).not.toHaveProperty('PAYROLL_HOLIDAYS');
 	// The screen's order, not the query's: the night shift starts before it ends.
 	const keys = Object.keys(values);
@@ -85,21 +77,21 @@ test('the settings come in the screen order, without the holidays, left to their
 });
 
 test('saving the settings unchanged writes nothing', async () => {
-	const form = toForm(await getSystemSettings(db, modules, manager));
-	expect(await updateSystemSettings(db, { modules, values: form }, manager)).toEqual({ ok: true });
+	const form = toForm(await getSystemSettings(db, modules, MANAGER));
+	expect(await updateSystemSettings(db, { modules, values: form }, MANAGER)).toEqual({ ok: true });
 	expect(readEvents()).toEqual([]);
 });
 
 test('each changed key is saved as typed and logs its own SETTINGS event by key', async () => {
 	const form = {
-		...toForm(await getSystemSettings(db, modules, manager)),
+		...toForm(await getSystemSettings(db, modules, MANAGER)),
 		PAYROLL_MINIMUM_WAGE: '1.800.000',
 		'PAYROLL_NIGHT_START.hour': '9',
 		'PAYROLL_NIGHT_START.minute': '30',
 		'PAYROLL_NIGHT_START.period': 'pm'
 	};
-	expect(await updateSystemSettings(db, { modules, values: form }, manager)).toEqual({ ok: true });
-	expect(readValue('PAYROLL_MINIMUM_WAGE')).toEqual({ value: '1800000', updated_by: 'gerente' });
+	expect(await updateSystemSettings(db, { modules, values: form }, MANAGER)).toEqual({ ok: true });
+	expect(readValue('PAYROLL_MINIMUM_WAGE')).toEqual({ value: '1800000', updated_by: 'manager' });
 	expect(readValue('PAYROLL_NIGHT_START')).toMatchObject({ value: '21:30' });
 	expect(readEvents()).toEqual([
 		{
@@ -116,12 +108,12 @@ test('each changed key is saved as typed and logs its own SETTINGS event by key'
 
 test('an invalid field saves nothing and comes back with its message', async () => {
 	const form = {
-		...toForm(await getSystemSettings(db, modules, manager)),
+		...toForm(await getSystemSettings(db, modules, MANAGER)),
 		COMPANY_NAME: 'Banquetes C',
 		PAYROLL_HOURS_PER_MONTH: '',
 		'PAYROLL_NIGHT_END.hour': '13'
 	};
-	expect(await updateSystemSettings(db, { modules, values: form }, manager)).toEqual({
+	expect(await updateSystemSettings(db, { modules, values: form }, MANAGER)).toEqual({
 		ok: false,
 		errors: {
 			PAYROLL_HOURS_PER_MONTH: 'Escribe un número entero mayor que cero',
@@ -133,91 +125,72 @@ test('an invalid field saves nothing and comes back with its message', async () 
 });
 
 test('an empty WhatsApp is refused; a valid one is stored normalized', async () => {
-	const form = toForm(await getSystemSettings(db, modules, manager));
+	const form = toForm(await getSystemSettings(db, modules, MANAGER));
 	expect(
-		await updateSystemSettings(db, { modules, values: { ...form, COMPANY_WHATSAPP: ' ' } }, manager)
+		await updateSystemSettings(db, { modules, values: { ...form, COMPANY_WHATSAPP: ' ' } }, MANAGER)
 	).toMatchObject({ ok: false, errors: { COMPANY_WHATSAPP: expect.any(String) } });
 	expect(readValue('COMPANY_WHATSAPP')).toEqual({ value: '573006113392', updated_by: 'system' });
 	const typed = { ...form, COMPANY_WHATSAPP: '310 555 0142' };
-	expect(await updateSystemSettings(db, { modules, values: typed }, manager)).toEqual({ ok: true });
-	expect(readValue('COMPANY_WHATSAPP')).toEqual({ value: '573105550142', updated_by: 'gerente' });
+	expect(await updateSystemSettings(db, { modules, values: typed }, MANAGER)).toEqual({ ok: true });
+	expect(readValue('COMPANY_WHATSAPP')).toEqual({ value: '573105550142', updated_by: 'manager' });
 });
 
 test('each tab reads and saves only its own modules: Nómina ignores a general field', async () => {
-	const values = await getSystemSettings(db, ['PAYROLL'], manager);
+	const values = await getSystemSettings(db, ['PAYROLL'], MANAGER);
 	expect(values).not.toHaveProperty('COMPANY_NAME');
 	expect(values).toHaveProperty('PAYROLL_MINIMUM_WAGE');
 	const form = { ...toForm(values), COMPANY_NAME: '' };
-	expect(await updateSystemSettings(db, { modules: ['PAYROLL'], values: form }, manager)).toEqual({
+	expect(await updateSystemSettings(db, { modules: ['PAYROLL'], values: form }, MANAGER)).toEqual({
 		ok: true
 	});
 	expect(readValue('COMPANY_NAME')).toMatchObject({ value: 'Banquetes Consuelo C' });
 	expect(readEvents()).toEqual([]);
 });
 
-test('General loads and saves with the retired ORDERS_SUGGESTED_ADVANCE_PCT row still stored', async () => {
-	database.exec(
-		"insert into settings (key, value, created_at, created_by, updated_at, updated_by) values ('ORDERS_SUGGESTED_ADVANCE_PCT', '50', 0, 'system', 0, 'system')"
-	);
-	const general: SettingModule[] = ['COMPANY', 'QUOTES'];
-	const values = await getSystemSettings(db, general, manager);
-	expect(values).not.toHaveProperty('ORDERS_SUGGESTED_ADVANCE_PCT');
-	const form = { ...toForm(values), COMPANY_NAME: 'Banquetes C' };
-	expect(await updateSystemSettings(db, { modules: general, values: form }, manager)).toEqual({
-		ok: true
-	});
-	expect(readValue('COMPANY_NAME')).toMatchObject({ value: 'Banquetes C' });
-	expect(readValue('ORDERS_SUGGESTED_ADVANCE_PCT')).toEqual({ value: '50', updated_by: 'system' });
-});
-
 test("changing a quote's validity moves no existing quote's «Válida hasta»", async () => {
-	database.exec(readFileSync('scripts/catalog.sql', 'utf8'));
-	database.exec(readFileSync('scripts/sample-data.sql', 'utf8'));
+	await fixture.quote();
+	await fixture.quote({ valid_until: '2030-01-31' });
 	const readValidity = () =>
 		database.prepare('select id, valid_until from quotes order by id').all();
 	const before = readValidity();
 	const form = {
-		...toForm(await getSystemSettings(db, modules, manager)),
+		...toForm(await getSystemSettings(db, modules, MANAGER)),
 		QUOTES_VALIDITY_DAYS: '15'
 	};
-	expect(await updateSystemSettings(db, { modules, values: form }, manager)).toEqual({ ok: true });
+	expect(await updateSystemSettings(db, { modules, values: form }, MANAGER)).toEqual({ ok: true });
 	expect(readValue('QUOTES_VALIDITY_DAYS')).toMatchObject({ value: '15' });
-	expect(before).toHaveLength(6);
+	expect(before).toHaveLength(2);
 	expect(readValidity()).toEqual(before);
 });
 
-test('an event never carries both an id and a key', () => {
-	expect(() =>
-		database.exec(
-			"insert into events (entity_type, entity_id, entity_key, action, actor_username, actor_kind, created_at) values ('SETTINGS', 1, 'COMPANY_NAME', 'EDITED', 'gerente', 'user', 0)"
-		)
-	).toThrow(/CHECK constraint failed/);
-});
-
-// A settlement as far as the freeze line cares: which week, and whether it's paid. Each one its
-// own employee: a week holds one settlement per employee.
-function settle(periodStart: string, status: 'DRAFT' | 'PAID') {
-	const { lastInsertRowid: contactId } = database
-		.prepare(
-			`insert into contacts (phone, full_name, document_id, created_at, created_by, updated_at, updated_by)
-			values ('573104428890', 'Ana Pérez', ?, 0, 'gerente', 0, 'gerente')`
-		)
-		.run(periodStart);
-	const { lastInsertRowid: employeeId } = database
-		.prepare(
-			`insert into employees (contact_id, created_at, created_by, updated_at, updated_by)
-			values (?, 0, 'gerente', 0, 'gerente')`
-		)
-		.run(contactId);
-	database
-		.prepare(
-			`insert into payroll_runs (employee_id, status, week_number, period_start, period_end,
-			payment_date, employee_snapshot, prepared_by, earnings, deductions,
-			settings_snapshot, total_earnings, total_deductions, net_pay,
-			created_at, created_by, updated_at, updated_by)
-			values (?, ?, 1, ?, '', '', '{}', 'gerente', '[]', '[]', '{}', 0, 0, 0, 0, 'gerente', 0, 'gerente')`
-		)
-		.run(employeeId, status, periodStart);
+// A week settled for an employee of its own (a week holds one settlement per employee) through
+// Nómina, as the screen proposes it: saved as a draft, or paid.
+async function settle(periodStart: string, status: 'DRAFT' | 'PAID') {
+	const { employeeId } = await fixture.employee({ roles: ['WAREHOUSE'] });
+	const { draft } = await openWeek(db, { employeeId, week: periodStart }, MANAGER);
+	if (null === draft) {
+		throw new Error(`No draft for ${periodStart}`);
+	}
+	const quantities = draft.earnings.flatMap(({ concept, qty }) =>
+		null === qty ? [] : [[concept, String(qty)]]
+	);
+	const form = {
+		employee_id: String(employeeId),
+		period_start: periodStart,
+		week_number: String(draft.weekNumber),
+		payment_date: draft.paymentDate,
+		...Object.fromEntries(quantities),
+		NON_SALARY_BONUS: '0',
+		LOANS: '0',
+		OTHER: '0'
+	};
+	const result =
+		'PAID' === status
+			? await recordPayment(db, { ...form, payment_method: 'CASH' }, MANAGER)
+			: await saveDraft(db, form, MANAGER);
+	if (!result.ok) {
+		throw new Error(result.message);
+	}
 }
 
 function readHolidays(): Holiday[] {
@@ -230,25 +203,25 @@ function postOpen(holidays: Holiday[], freezeLine: string) {
 }
 
 test('the freeze line is the Friday ending the latest PAID settlement extra hours; drafts move nothing', async () => {
-	expect((await getHolidays(db, manager)).freezeLine).toBeNull();
-	settle('2026-08-31', 'PAID');
-	settle('2026-10-05', 'PAID');
-	settle('2026-10-12', 'DRAFT');
-	const editor = await getHolidays(db, manager);
+	expect((await getHolidays(db, MANAGER)).freezeLine).toBeNull();
+	await settle('2026-08-31', 'PAID');
+	await settle('2026-10-05', 'PAID');
+	await settle('2026-10-12', 'DRAFT');
+	const editor = await getHolidays(db, MANAGER);
 	expect(editor.freezeLine).toBe('2026-10-09');
 	expect(editor.canOverrideFreeze).toBe(false);
-	expect((await getHolidays(db, admin)).canOverrideFreeze).toBe(true);
-	const refusal = await getHolidays(db, sales).catch((caught: unknown) => caught);
+	expect((await getHolidays(db, ADMIN)).canOverrideFreeze).toBe(true);
+	const refusal = await getHolidays(db, SALES).catch((caught: unknown) => caught);
 	expect(isHttpError(refusal, 403)).toBe(true);
 });
 
 test('saving the holidays keeps the closed ones and logs a SETTINGS event by key', async () => {
-	settle('2026-10-05', 'PAID');
+	await settle('2026-10-05', 'PAID');
 	const before = readHolidays();
 	const added = { date: '2027-02-15', label: 'Festivo local' };
 	const open = before.filter(({ date }) => date > '2026-10-09' && '2026-11-02' !== date);
 	const input = { holidays: JSON.stringify([added, ...open]) };
-	expect(await updateHolidays(db, input, manager)).toEqual({ ok: true });
+	expect(await updateHolidays(db, input, MANAGER)).toEqual({ ok: true });
 	const after = readHolidays();
 	expect(after).toContainEqual(added);
 	expect(after).not.toContainEqual(expect.objectContaining({ date: '2026-11-02' }));
@@ -266,18 +239,18 @@ test('saving the holidays keeps the closed ones and logs a SETTINGS event by key
 });
 
 test('saving the holidays unchanged writes nothing', async () => {
-	settle('2026-10-05', 'PAID');
-	expect(await updateHolidays(db, postOpen(readHolidays(), '2026-10-09'), manager)).toEqual({
+	await settle('2026-10-05', 'PAID');
+	expect(await updateHolidays(db, postOpen(readHolidays(), '2026-10-09'), MANAGER)).toEqual({
 		ok: true
 	});
 	expect(readEvents()).toEqual([]);
 });
 
 test('the editor refuses a date on or before the freeze line, for ADMIN too', async () => {
-	settle('2026-10-05', 'PAID');
+	await settle('2026-10-05', 'PAID');
 	const open = JSON.parse(postOpen(readHolidays(), '2026-10-09').holidays);
 	const input = { holidays: JSON.stringify([{ date: '2026-10-09', label: 'Puente' }, ...open]) };
-	for (const actor of [manager, admin]) {
+	for (const actor of [MANAGER, ADMIN]) {
 		expect(await updateHolidays(db, input, actor)).toEqual({
 			ok: false,
 			message: 'El vie 9 oct 2026 está en una nómina pagada: no se puede agregar ni cambiar'
@@ -289,55 +262,57 @@ test('the editor refuses a date on or before the freeze line, for ADMIN too', as
 test('the editor refuses a repeated date or a holiday without a name', async () => {
 	const holidays = readHolidays();
 	const repeated = { holidays: JSON.stringify([...holidays, holidays[0]]) };
-	expect(await updateHolidays(db, repeated, manager)).toEqual({
+	expect(await updateHolidays(db, repeated, MANAGER)).toEqual({
 		ok: false,
 		message: 'Esa fecha ya está en la lista'
 	});
 	const unnamed = { holidays: JSON.stringify([{ date: '2027-03-22', label: ' ' }]) };
-	expect(await updateHolidays(db, unnamed, manager)).toEqual({
+	expect(await updateHolidays(db, unnamed, MANAGER)).toEqual({
 		ok: false,
 		message: 'Escribe el nombre del festivo'
 	});
 });
 
 test('only ADMIN changes a closed holiday, and only with a reason, kept on the event', async () => {
-	settle('2026-10-05', 'PAID');
+	await settle('2026-10-05', 'PAID');
 	const input = { original: '2026-05-18', date: '2026-05-19', label: 'Ascensión del Señor' };
-	const refusal = await overrideFrozenHoliday(db, { ...input, reason: 'x' }, manager).catch(
+	const refusal = await overrideFrozenHoliday(db, { ...input, reason: 'x' }, MANAGER).catch(
 		(caught: unknown) => caught
 	);
 	expect(isHttpError(refusal, 403)).toBe(true);
-	expect(await overrideFrozenHoliday(db, { ...input, reason: ' ' }, admin)).toEqual({
+	expect(await overrideFrozenHoliday(db, { ...input, reason: ' ' }, ADMIN)).toEqual({
 		ok: false,
 		message: 'Escribe el motivo del cambio'
 	});
 	expect(readEvents()).toEqual([]);
 
 	const reason = 'El festivo se trasladó por decreto';
-	expect(await overrideFrozenHoliday(db, { ...input, reason }, admin)).toEqual({ ok: true });
+	expect(await overrideFrozenHoliday(db, { ...input, reason }, ADMIN)).toEqual({ ok: true });
 	const holidays = readHolidays();
 	expect(holidays).toContainEqual({ date: '2026-05-19', label: 'Ascensión del Señor' });
 	expect(holidays).not.toContainEqual(expect.objectContaining({ date: '2026-05-18' }));
 	expect(JSON.stringify(holidays)).not.toContain(reason);
-	const event = database.prepare('select entity_key, action, reason from events').get();
+	const event = database
+		.prepare("select entity_key, action, reason from events where entity_type = 'SETTINGS'")
+		.get();
 	expect(event).toEqual({ entity_key: 'PAYROLL_HOLIDAYS', action: 'EDITED', reason });
 });
 
 test('ADMIN removes a closed holiday with a reason; an open date is not an override', async () => {
-	settle('2026-10-05', 'PAID');
+	await settle('2026-10-05', 'PAID');
 	const ascension = { date: '2026-05-18', label: 'Ascensión del Señor' };
 	const removal = { original: '2026-05-18', ...ascension, remove: 'true', reason: 'No aplica' };
-	expect(await overrideFrozenHoliday(db, removal, admin)).toEqual({ ok: true });
+	expect(await overrideFrozenHoliday(db, removal, ADMIN)).toEqual({ ok: true });
 	expect(readHolidays()).not.toContainEqual(expect.objectContaining({ date: '2026-05-18' }));
 	const open = { ...removal, original: '2026-11-02' };
-	expect(await overrideFrozenHoliday(db, open, admin)).toEqual({
+	expect(await overrideFrozenHoliday(db, open, ADMIN)).toEqual({
 		ok: false,
 		message: 'Esa fecha no está en una nómina pagada'
 	});
 });
 
 test('every login reads the help; with no session it is a 401', async () => {
-	for (const actor of [warehouse, driver, sales]) {
+	for (const actor of [WAREHOUSE, DRIVER, SALES]) {
 		const help = await getHelp(db, actor);
 		expect(help.text).toMatch(/^Bienvenido/);
 		// The default isn't a save in the app: no «Actualizado» line yet.
@@ -347,8 +322,8 @@ test('every login reads the help; with no session it is a 401', async () => {
 });
 
 test('only ADMIN and MANAGER save the help; anyone else gets a 403 and changes nothing', async () => {
-	const { text } = await getHelp(db, manager);
-	for (const actor of [sales, warehouse, driver]) {
+	const { text } = await getHelp(db, MANAGER);
+	for (const actor of [SALES, WAREHOUSE, DRIVER]) {
 		const refusal = await updateHelp(db, { text: '## Otra' }, actor).catch((caught) => caught);
 		expect(isHttpError(refusal, 403)).toBe(true);
 	}
@@ -357,13 +332,13 @@ test('only ADMIN and MANAGER save the help; anyone else gets a 403 and changes n
 });
 
 test('saving the help writes the text and its EDITED event, which dates «Actualizado»', async () => {
-	const { text } = await getHelp(db, manager);
-	expect(await updateHelp(db, { text: '## ¿Qué hago al llegar?\n\nMarca.' }, manager)).toEqual({
+	const { text } = await getHelp(db, MANAGER);
+	expect(await updateHelp(db, { text: '## ¿Qué hago al llegar?\n\nMarca.' }, MANAGER)).toEqual({
 		ok: true
 	});
 	expect(readValue('HELP_FAQ')).toEqual({
 		value: '## ¿Qué hago al llegar?\n\nMarca.',
-		updated_by: 'gerente'
+		updated_by: 'manager'
 	});
 	expect(readEvents()).toEqual([
 		{
@@ -375,25 +350,25 @@ test('saving the help writes the text and its EDITED event, which dates «Actual
 			after: JSON.stringify({ value: '## ¿Qué hago al llegar?\n\nMarca.' })
 		}
 	]);
-	expect((await getHelp(db, warehouse)).updatedAt).toEqual(expect.any(Number));
+	expect((await getHelp(db, WAREHOUSE)).updatedAt).toEqual(expect.any(Number));
 });
 
 test('saving the help unchanged writes nothing', async () => {
-	const { text } = await getHelp(db, admin);
-	expect(await updateHelp(db, { text }, admin)).toEqual({ ok: true });
+	const { text } = await getHelp(db, ADMIN);
+	expect(await updateHelp(db, { text }, ADMIN)).toEqual({ ok: true });
 	// As the textarea posts it.
-	expect(await updateHelp(db, { text: text.replaceAll('\n', '\r\n') }, admin)).toEqual({
+	expect(await updateHelp(db, { text: text.replaceAll('\n', '\r\n') }, ADMIN)).toEqual({
 		ok: true
 	});
 	expect(readEvents()).toEqual([]);
 });
 
 test('an empty or too-long help saves nothing and comes back with its message', async () => {
-	expect(await updateHelp(db, { text: '  \n ' }, manager)).toEqual({
+	expect(await updateHelp(db, { text: '  \n ' }, MANAGER)).toEqual({
 		ok: false,
 		message: 'Escribe el texto de la ayuda'
 	});
-	expect(await updateHelp(db, { text: 'a'.repeat(50_001) }, manager)).toEqual({
+	expect(await updateHelp(db, { text: 'a'.repeat(50_001) }, MANAGER)).toEqual({
 		ok: false,
 		message: 'La ayuda no puede pasar de 50.000 caracteres'
 	});
@@ -401,18 +376,18 @@ test('an empty or too-long help saves nothing and comes back with its message', 
 });
 
 test('the generic settings leave the help out and ignore a HELP_FAQ field', async () => {
-	const values = await getSystemSettings(db, modules, manager);
+	const values = await getSystemSettings(db, modules, MANAGER);
 	expect(values).not.toHaveProperty('HELP_FAQ');
-	const { text } = await getHelp(db, manager);
+	const { text } = await getHelp(db, MANAGER);
 	const form = { ...toForm(values), HELP_FAQ: '## Otra' };
-	expect(await updateSystemSettings(db, { modules, values: form }, manager)).toEqual({ ok: true });
+	expect(await updateSystemSettings(db, { modules, values: form }, MANAGER)).toEqual({ ok: true });
 	expect(readValue('HELP_FAQ')).toMatchObject({ value: text });
 	expect(readEvents()).toEqual([]);
 });
 
 test('the terms start empty; only ADMIN and MANAGER read or save them', async () => {
-	expect(await getTerms(db, manager)).toBe('');
-	for (const actor of [sales, warehouse, driver]) {
+	expect(await getTerms(db, MANAGER)).toBe('');
+	for (const actor of [SALES, WAREHOUSE, DRIVER]) {
 		expect(isHttpError(await getTerms(db, actor).catch((caught) => caught), 403)).toBe(true);
 		const refusal = await updateTerms(db, { text: '## Depósito' }, actor).catch((caught) => caught);
 		expect(isHttpError(refusal, 403)).toBe(true);
@@ -422,14 +397,14 @@ test('the terms start empty; only ADMIN and MANAGER read or save them', async ()
 });
 
 test('saving the terms writes the text and its EDITED event; emptying them is a save too', async () => {
-	expect(await updateTerms(db, { text: '## Depósito\r\n\r\nSe devuelve.' }, admin)).toEqual({
+	expect(await updateTerms(db, { text: '## Depósito\r\n\r\nSe devuelve.' }, ADMIN)).toEqual({
 		ok: true
 	});
 	expect(readValue('TERMS_CONDITIONS')).toEqual({
 		value: '## Depósito\n\nSe devuelve.',
 		updated_by: 'admin'
 	});
-	expect(await updateTerms(db, { text: '  \n ' }, admin)).toEqual({ ok: true });
+	expect(await updateTerms(db, { text: '  \n ' }, ADMIN)).toEqual({ ok: true });
 	expect(readValue('TERMS_CONDITIONS')).toMatchObject({ value: '' });
 	expect(readEvents()).toEqual([
 		expect.objectContaining({
@@ -447,14 +422,14 @@ test('saving the terms writes the text and its EDITED event; emptying them is a 
 });
 
 test('too-long terms save nothing; the generic settings ignore a TERMS_CONDITIONS field', async () => {
-	expect(await updateTerms(db, { text: 'a'.repeat(10_001) }, manager)).toEqual({
+	expect(await updateTerms(db, { text: 'a'.repeat(10_001) }, MANAGER)).toEqual({
 		ok: false,
 		message: 'Los términos no pueden pasar de 10.000 caracteres'
 	});
-	const values = await getSystemSettings(db, modules, manager);
+	const values = await getSystemSettings(db, modules, MANAGER);
 	expect(values).not.toHaveProperty('TERMS_CONDITIONS');
 	const form = { ...toForm(values), TERMS_CONDITIONS: '## Otra' };
-	expect(await updateSystemSettings(db, { modules, values: form }, manager)).toEqual({ ok: true });
+	expect(await updateSystemSettings(db, { modules, values: form }, MANAGER)).toEqual({ ok: true });
 	expect(readValue('TERMS_CONDITIONS')).toMatchObject({ value: '' });
 	expect(readEvents()).toEqual([]);
 });

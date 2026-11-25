@@ -1,9 +1,9 @@
 import { isHttpError } from '@sveltejs/kit';
 import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
-import type { Actor, Role } from '../actor';
-import { createMemoryD1 } from '../db/memory-d1';
-import { createContact, generateDocumentId, newClientStatements } from './contacts';
+import type { Role } from '../actor';
+import { actorWith, createFixture, MANAGER } from '../db/fixture';
+import { generateDocumentId, newClientStatements } from './contacts';
 import {
 	createEmployee,
 	employmentSchema,
@@ -15,13 +15,13 @@ import {
 	updateEmployee
 } from './employees';
 
-const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
-
+let fixture: ReturnType<typeof createFixture>;
 let db: D1Database;
 let database: DatabaseSync;
 
 beforeEach(() => {
-	({ db, database } = createMemoryD1());
+	fixture = createFixture();
+	({ db, database } = fixture);
 });
 
 const carlos = {
@@ -34,7 +34,7 @@ const carlos = {
 };
 
 async function hire(input: Record<string, string> = carlos): Promise<number> {
-	const result = await createEmployee(db, input, manager);
+	const result = await createEmployee(db, input, MANAGER);
 	if (!result.ok) {
 		throw new Error(result.message);
 	}
@@ -61,12 +61,12 @@ async function newClient(): Promise<void> {
 		fullName: 'Jorge Betancur',
 		documentId: generateDocumentId()
 	};
-	await db.batch(newClientStatements(db, manager, client));
+	await db.batch(newClientStatements(db, MANAGER, client));
 }
 
 test('without a picked contact, the contact and the employee in one batch, each with its CREATED event', async () => {
 	const id = await hire();
-	expect(await getEmployee(db, id, manager)).toEqual({
+	expect(await getEmployee(db, id, MANAGER)).toEqual({
 		id,
 		contactId: 1,
 		phone: '573152847710',
@@ -89,23 +89,27 @@ test('without a picked contact, the contact and the employee in one batch, each 
 });
 
 test('a contact picked from the search is reused, its phone, name and ID number as typed', async () => {
-	await newClient();
-	database.prepare(`update contacts set attributes = '{"email":"jorge@b.co"}'`).run();
+	await fixture.contact({
+		full_name: 'Jorge Betancur',
+		phone: '300 771 2043',
+		document_id: '71234560',
+		email: 'jorge@b.co'
+	});
 	const candidate = {
 		id: 1,
 		fullName: 'Jorge Betancur',
 		phone: '573007712043',
 		whatsapp: null,
-		documentId: null,
+		documentId: '71234560',
 		isEmployee: false
 	};
 	for (const search of ['3007712043', 'betan', 'jorge@b']) {
-		expect(await searchContactCandidates(db, search, manager)).toEqual([candidate]);
+		expect(await searchContactCandidates(db, search, MANAGER)).toEqual([candidate]);
 	}
 
 	const id = await hire({ ...carlos, ...jorge, contact_id: '1' });
 	expect(count('contacts')).toBe(1);
-	expect(await getEmployee(db, id, manager)).toMatchObject({
+	expect(await getEmployee(db, id, MANAGER)).toMatchObject({
 		fullName: 'Jorge Iván Betancur',
 		idNumber: '71234567'
 	});
@@ -115,31 +119,36 @@ test('a contact picked from the search is reused, its phone, name and ID number 
 		full_name: 'Jorge Iván Betancur',
 		document_id: '71234567'
 	});
-	expect(await searchContactCandidates(db, '71.234', manager)).toMatchObject([
+	expect(await searchContactCandidates(db, '71.234', MANAGER)).toMatchObject([
 		{ isEmployee: true }
 	]);
 });
 
 test('a new contact gets its name capitalized; a picked one keeps the name as typed', async () => {
 	const created = await hire({ ...carlos, full_name: 'carlos vélez' });
-	expect((await getEmployee(db, created, manager))?.fullName).toBe('Carlos Vélez');
+	expect((await getEmployee(db, created, MANAGER))?.fullName).toBe('Carlos Vélez');
 	await newClient();
-	const picked = await hire({ ...carlos, ...jorge, full_name: 'jorge iván betancur', contact_id: '2' });
-	expect((await getEmployee(db, picked, manager))?.fullName).toBe('jorge iván betancur');
+	const picked = await hire({
+		...carlos,
+		...jorge,
+		full_name: 'jorge iván betancur',
+		contact_id: '2'
+	});
+	expect((await getEmployee(db, picked, MANAGER))?.fullName).toBe('jorge iván betancur');
 });
 
 test("a contact that's already another employee's is refused naming them", async () => {
 	await hire();
 	const refusal = { ok: false, message: 'Carlos Vélez ya está en Personal' };
 	expect(
-		await createEmployee(db, { ...carlos, document_id: '1', contact_id: '1' }, manager)
+		await createEmployee(db, { ...carlos, document_id: '1', contact_id: '1' }, MANAGER)
 	).toEqual(refusal);
 	expect(count('employees')).toBe(1);
 });
 
 test('without a pick, a shared phone gets a contact of its own', async () => {
 	const bodega = { phone: carlos.phone, full_name: 'Bodega Central', document_id: '900111222' };
-	await createContact(db, bodega, manager);
+	await fixture.contact(bodega);
 	await hire();
 	expect(count('contacts')).toBe(2);
 	expect(database.prepare('select contact_id from employees').get()?.contact_id).toBe(2);
@@ -147,26 +156,26 @@ test('without a pick, a shared phone gets a contact of its own', async () => {
 
 test('letters also find the username, without the @ and ignoring case', async () => {
 	const luz = { full_name: 'Mayra Castaño', document_id: '1040338912', whatsapp: 'LuzMarinaR' };
-	await createContact(db, luz, manager);
+	await fixture.contact(luz);
 	for (const search of ['luzma', '@LUZMA']) {
-		expect(await searchContactCandidates(db, search, manager)).toMatchObject([
+		expect(await searchContactCandidates(db, search, MANAGER)).toMatchObject([
 			{ fullName: 'Mayra Castaño', whatsapp: 'LuzMarinaR' }
 		]);
 	}
-	expect(await searchContactCandidates(db, '@luz.ma', manager)).toEqual([]);
+	expect(await searchContactCandidates(db, '@luz.ma', MANAGER)).toEqual([]);
 });
 
 test('the search needs three characters and never matches an automatic document', async () => {
 	await newClient();
 	const automatic = String(database.prepare('select document_id from contacts').get()?.document_id);
-	expect(await searchContactCandidates(db, 'jo', manager)).toEqual([]);
-	expect(await searchContactCandidates(db, null, manager)).toEqual([]);
-	expect(await searchContactCandidates(db, '- -', manager)).toEqual([]);
-	expect(await searchContactCandidates(db, automatic.slice(1), manager)).toEqual([]);
+	expect(await searchContactCandidates(db, 'jo', MANAGER)).toEqual([]);
+	expect(await searchContactCandidates(db, null, MANAGER)).toEqual([]);
+	expect(await searchContactCandidates(db, '- -', MANAGER)).toEqual([]);
+	expect(await searchContactCandidates(db, automatic.slice(1), MANAGER)).toEqual([]);
 });
 
 test("an automatic document is not an employee's cédula", async () => {
-	const result = await createEmployee(db, { ...carlos, document_id: '@ABCDEFGH' }, manager);
+	const result = await createEmployee(db, { ...carlos, document_id: '@ABCDEFGH' }, MANAGER);
 	expect(result).toMatchObject({ ok: false, errors: { document_id: 'Escribe la cédula real' } });
 });
 
@@ -175,7 +184,7 @@ test('an ID number another contact has is refused naming that contact', async ()
 	const result = await createEmployee(
 		db,
 		{ ...carlos, ...jorge, document_id: '71384902' },
-		manager
+		MANAGER
 	);
 	expect(result).toMatchObject({
 		ok: false,
@@ -188,7 +197,7 @@ test('name and ID number are required; the phone and the username are not', asyn
 	const result = await createEmployee(
 		db,
 		{ ...carlos, phone: '', full_name: ' ', document_id: '' },
-		manager
+		MANAGER
 	);
 	expect(result).toEqual({
 		ok: false,
@@ -199,14 +208,14 @@ test('name and ID number are required; the phone and the username are not', asyn
 		}
 	});
 	const id = await hire({ ...carlos, phone: '', whatsapp: '' });
-	expect(await getEmployee(db, id, manager)).toMatchObject({ phone: null, whatsapp: null });
+	expect(await getEmployee(db, id, MANAGER)).toMatchObject({ phone: null, whatsapp: null });
 });
 
 test("the username is saved on the employee's contact, its change logged with before and after", async () => {
 	const id = await hire({ ...carlos, whatsapp: '@CarlosVelez' });
-	expect(await getEmployee(db, id, manager)).toMatchObject({ whatsapp: 'CarlosVelez' });
-	await updateEmployee(db, { ...carlos, id, whatsapp: 'wa.me/CVelez_' }, manager);
-	expect(await getEmployee(db, id, manager)).toMatchObject({ whatsapp: 'CVelez_' });
+	expect(await getEmployee(db, id, MANAGER)).toMatchObject({ whatsapp: 'CarlosVelez' });
+	await updateEmployee(db, { ...carlos, id, whatsapp: 'wa.me/CVelez_' }, MANAGER);
+	expect(await getEmployee(db, id, MANAGER)).toMatchObject({ whatsapp: 'CVelez_' });
 	const edited = events().at(-1)!;
 	expect(edited).toMatchObject({ entity_type: 'CONTACT', action: 'EDITED' });
 	expect(JSON.parse(String(edited.before))).toEqual({ whatsapp: 'CarlosVelez' });
@@ -214,7 +223,7 @@ test("the username is saved on the employee's contact, its change logged with be
 });
 
 test('an invalid username is a field error on the employee form', async () => {
-	const result = await createEmployee(db, { ...carlos, whatsapp: 'may..c' }, manager);
+	const result = await createEmployee(db, { ...carlos, whatsapp: 'may..c' }, MANAGER);
 	expect(result).toMatchObject({
 		ok: false,
 		errors: { whatsapp: 'Escriba el usuario como aparece en WhatsApp, por ejemplo @mayc47.' }
@@ -222,12 +231,13 @@ test('an invalid username is a field error on the employee form', async () => {
 });
 
 test('picking a contact fills in its username', async () => {
-	await createContact(
-		db,
-		{ full_name: 'Jorge Betancur', whatsapp: '@JorgeB', document_id: '71234567' },
-		manager
-	);
-	expect(await searchContactCandidates(db, 'betan', manager)).toMatchObject([
+	await fixture.contact({
+		full_name: 'Jorge Betancur',
+		phone: '',
+		whatsapp: '@JorgeB',
+		document_id: '71234567'
+	});
+	expect(await searchContactCandidates(db, 'betan', MANAGER)).toMatchObject([
 		{ phone: null, whatsapp: 'JorgeB' }
 	]);
 });
@@ -237,7 +247,7 @@ test('editing name, phone or ID number changes the contact, logged as CONTACT ED
 	await updateEmployee(
 		db,
 		{ ...carlos, id, full_name: 'Carlos A. Vélez', phone: '315 284 7711' },
-		manager
+		MANAGER
 	);
 	const edited = events()[2];
 	expect(edited).toMatchObject({ entity_type: 'CONTACT', entity_id: 1, action: 'EDITED' });
@@ -254,10 +264,10 @@ test('editing name, phone or ID number changes the contact, logged as CONTACT ED
 
 test("changing the phone to another contact's shares it, and the employee keeps its contact", async () => {
 	const id = await hire();
-	await createContact(db, jorge, manager);
-	const result = await updateEmployee(db, { ...carlos, id, phone: jorge.phone }, manager);
+	await fixture.contact(jorge);
+	const result = await updateEmployee(db, { ...carlos, id, phone: jorge.phone }, MANAGER);
 	expect(result).toEqual({ ok: true, id });
-	expect(await getEmployee(db, id, manager)).toMatchObject({
+	expect(await getEmployee(db, id, MANAGER)).toMatchObject({
 		phone: '573007712043',
 		fullName: 'Carlos Vélez'
 	});
@@ -268,8 +278,8 @@ test('the payroll account is optional, kept across employment changes and cleare
 		...carlos,
 		salary_bank_account: '  Bancolombia ahorros 123-456789-01 '
 	});
-	await endEmployment(db, { id, end: '2025-06-30' }, manager);
-	expect((await getEmployee(db, id, manager))?.salaryBankAccount).toBe(
+	await endEmployment(db, { id, end: '2025-06-30' }, MANAGER);
+	expect((await getEmployee(db, id, MANAGER))?.salaryBankAccount).toBe(
 		'Bancolombia ahorros 123-456789-01'
 	);
 	const attributes = () =>
@@ -277,24 +287,24 @@ test('the payroll account is optional, kept across employment changes and cleare
 	expect(attributes()).toHaveProperty('salary_bank_account');
 	expect(attributes()).not.toHaveProperty('bank_account');
 
-	await updateEmployee(db, { ...carlos, id, salary_bank_account: '' }, manager);
-	expect((await getEmployee(db, id, manager))?.salaryBankAccount).toBeNull();
+	await updateEmployee(db, { ...carlos, id, salary_bank_account: '' }, MANAGER);
+	expect((await getEmployee(db, id, MANAGER))?.salaryBankAccount).toBeNull();
 	expect(attributes()).not.toHaveProperty('salary_bank_account');
 });
 
 test('ending sets the last period end; rehiring appends a period to the same row', async () => {
 	const id = await hire();
-	expect((await endEmployment(db, { id, end: '2025-06-30' }, manager)).ok).toBe(true);
-	expect((await getEmployee(db, id, manager))?.isEmployed).toBe(false);
+	expect((await endEmployment(db, { id, end: '2025-06-30' }, MANAGER)).ok).toBe(true);
+	expect((await getEmployee(db, id, MANAGER))?.isEmployed).toBe(false);
 
-	const early = await rehire(db, { id, start: '2025-06-30' }, manager);
+	const early = await rehire(db, { id, start: '2025-06-30' }, MANAGER);
 	expect(early).toEqual({
 		ok: false,
 		message: 'La fecha de ingreso debe ser posterior al último retiro'
 	});
-	expect((await rehire(db, { id, start: '2026-01-13' }, manager)).ok).toBe(true);
+	expect((await rehire(db, { id, start: '2026-01-13' }, MANAGER)).ok).toBe(true);
 
-	expect((await getEmployee(db, id, manager))?.employment).toEqual([
+	expect((await getEmployee(db, id, MANAGER))?.employment).toEqual([
 		{ start: '2024-07-15', end: '2025-06-30' },
 		{ start: '2026-01-13', end: null }
 	]);
@@ -304,7 +314,7 @@ test('ending sets the last period end; rehiring appends a period to the same row
 
 test('an employment cannot end before it started', async () => {
 	const id = await hire();
-	const result = await endEmployment(db, { id, end: '2024-07-14' }, manager);
+	const result = await endEmployment(db, { id, end: '2024-07-14' }, MANAGER);
 	expect(result).toEqual({
 		ok: false,
 		message: 'La fecha de retiro no puede ser anterior al ingreso'
@@ -314,17 +324,18 @@ test('an employment cannot end before it started', async () => {
 test('the list puts the currently employed first, by name', async () => {
 	const salamanca = { phone: '3001112233', full_name: 'Jorge Salamanca', document_id: '98552017' };
 	const gone = await hire({ ...carlos, ...salamanca });
-	await endEmployment(db, { id: gone, end: '2026-03-31' }, manager);
+	await endEmployment(db, { id: gone, end: '2026-03-31' }, MANAGER);
 	await hire();
 	await hire({ ...carlos, phone: '3104428890', full_name: 'Ana Pérez', document_id: '1036452118' });
-	const names = (await listEmployees(db, manager)).map((employee) => employee.fullName);
+	const names = (await listEmployees(db, MANAGER)).map((employee) => employee.fullName);
 	expect(names).toEqual(['Ana Pérez', 'Carlos Vélez', 'Jorge Salamanca']);
 });
 
 test('SALES, WAREHOUSE and DRIVER get a 403', async () => {
 	for (const role of ['SALES', 'WAREHOUSE', 'DRIVER'] satisfies Role[]) {
-		const actor: Actor = { ...manager, roles: [role] };
-		await expect(listEmployees(db, actor)).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
+		await expect(listEmployees(db, actorWith(role))).rejects.toSatisfy((thrown) =>
+			isHttpError(thrown, 403)
+		);
 	}
 });
 

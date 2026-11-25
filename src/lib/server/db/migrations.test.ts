@@ -1,6 +1,14 @@
+import { timingSafeEqual } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
+import { hashPassword, PASSWORD_ITERATIONS } from '../password';
+import { logIn } from '../services/auth';
+import { getSystemSettings, updateSystemSettings } from '../services/settings';
+import { createFixture, MANAGER, TEST_PASSWORD, TEST_PEPPER } from './fixture';
+
+// Workers adds timingSafeEqual to crypto.subtle; Node doesn't, so the tests lend it node:crypto's.
+Object.assign(crypto.subtle, { timingSafeEqual });
 
 let database: DatabaseSync;
 
@@ -473,6 +481,24 @@ test('events rejects UPDATE and DELETE', () => {
 	expect(() => database.exec('delete from events')).toThrow(/append-only/);
 });
 
+test('events: an event never carries both an id and a key', () => {
+	expect(() =>
+		database.exec(
+			"insert into events (entity_type, entity_id, entity_key, action, actor_username, actor_kind, created_at) values ('SETTINGS', 1, 'COMPANY_NAME', 'EDITED', 'admin', 'user', 0)"
+		)
+	).toThrow(/CHECK constraint failed/);
+});
+
+test('contacts: document_id is required and unique', () => {
+	insertContact('1036452118');
+	expect(() => insertContact('1036452118')).toThrow(/UNIQUE/);
+	expect(() =>
+		database.exec(
+			`insert into contacts (phone, full_name, created_at, created_by, updated_at, updated_by) values ('13055550142', 'Tourist', ${AUDIT})`
+		)
+	).toThrow(/NOT NULL/);
+});
+
 test('events rejects an unknown actor_kind', () => {
 	expect(() =>
 		database.exec(
@@ -529,4 +555,51 @@ test('cash_movements: the three new expense concepts go out on no link, like OTH
 		expect(() => insertMovement({ concept, amount: 100 })).toThrow(/CHECK/);
 		expect(() => insertMovement({ concept, amount: -100, entityType: 'ORDER' })).toThrow(/CHECK/);
 	}
+});
+
+// Rows only an older version of the app left behind: no service writes them anymore.
+
+test('a successful login re-hashes a password stored with a lower iteration count', async () => {
+	const fixture = createFixture();
+	await fixture.employee({ roles: ['MANAGER'], username: 'gerente' });
+	const older = await hashPassword(TEST_PASSWORD, TEST_PEPPER, 1000);
+	fixture.database
+		.prepare(
+			"update users set password_hash = ?, password_salt = ?, password_iterations = ? where username = 'gerente'"
+		)
+		.run(older.hash, older.salt, older.iterations);
+	const attempt = () =>
+		logIn(
+			fixture.db,
+			{ username: 'gerente', password: TEST_PASSWORD },
+			{
+				secrets: { pepper: TEST_PEPPER, adminPassword: 'clave-admin' },
+				request: { ip: '203.0.113.7', userAgent: 'Prueba/1.0' }
+			}
+		);
+	expect(await attempt()).not.toBeNull();
+	const row = fixture.database
+		.prepare("select password_iterations from users where username = 'gerente'")
+		.get();
+	expect(row?.password_iterations).toBe(PASSWORD_ITERATIONS);
+	expect(await attempt()).not.toBeNull();
+});
+
+test('General loads and saves with the retired ORDERS_SUGGESTED_ADVANCE_PCT row still stored', async () => {
+	const { db, database: stored } = createFixture();
+	stored.exec(
+		"insert into settings (key, value, created_at, created_by, updated_at, updated_by) values ('ORDERS_SUGGESTED_ADVANCE_PCT', '50', 0, 'system', 0, 'system')"
+	);
+	const readValue = (key: string) =>
+		stored.prepare('select value, updated_by from settings where key = ?').get(key);
+	const modules = ['COMPANY', 'QUOTES'] as const;
+	const values = await getSystemSettings(db, [...modules], MANAGER);
+	expect(values).not.toHaveProperty('ORDERS_SUGGESTED_ADVANCE_PCT');
+	// General has no clock times: the form posts each value as it was read.
+	const form = { ...values, COMPANY_NAME: 'Banquetes C' };
+	expect(await updateSystemSettings(db, { modules: [...modules], values: form }, MANAGER)).toEqual({
+		ok: true
+	});
+	expect(readValue('COMPANY_NAME')).toMatchObject({ value: 'Banquetes C' });
+	expect(readValue('ORDERS_SUGGESTED_ADVANCE_PCT')).toEqual({ value: '50', updated_by: 'system' });
 });
