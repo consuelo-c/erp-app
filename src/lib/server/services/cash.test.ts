@@ -1,9 +1,9 @@
 import { isHttpError } from '@sveltejs/kit';
-import { readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import type { Actor } from '../actor';
-import { createMemoryD1 } from '../db/memory-d1';
+import { actorWith, createFixture, MANAGER, SALES } from '../db/fixture';
+import { updateEmployee } from './employees';
+import { openWeek, recordPayment } from './payroll';
 import {
 	getCashBook,
 	getMovement,
@@ -16,15 +16,15 @@ import {
 	type Movement
 } from './cash';
 
-const manager: Actor = { username: 'gerente', employeeId: null, roles: ['MANAGER'], kind: 'user' };
-
 let db: D1Database;
 let database: DatabaseSync;
+let fixture: ReturnType<typeof createFixture>;
 
 beforeEach(() => {
 	vi.useFakeTimers({ toFake: ['Date'] });
 	vi.setSystemTime(new Date('2026-10-17T17:00:00Z')); // noon in Bogotá
-	({ db, database } = createMemoryD1());
+	fixture = createFixture();
+	({ db, database } = fixture);
 });
 
 afterEach(() => {
@@ -49,7 +49,7 @@ const income: Movement = {
 };
 
 async function record(movement: Movement): Promise<void> {
-	await db.batch(movementStatements(db, manager, movement));
+	await db.batch(movementStatements(db, MANAGER, movement));
 }
 
 function receiptNumbers() {
@@ -110,57 +110,55 @@ test('a standalone movement needs a description; a PAYROLL one does without', ()
 	expect(movementSchema.safeParse({ ...payroll, attributes: {} }).success).toBe(true);
 });
 
-const AUDIT = "0, 'gerente', 0, 'gerente'";
+type Settlement = { employeeId: number; runId: number };
 
-// A paid settlement to link a PAYROLL movement to: only what the cash book reads off it.
-function insertRun({ employee, week }: { employee: string; week: number }): number {
-	database.exec(
-		`insert or ignore into contacts (phone, full_name, document_id, created_at, created_by, updated_at, updated_by) values ('${employee}', '${employee}', '${employee}', ${AUDIT})`
+// Week 42 (12 to 18 October) settled and paid by transfer on the 17th: a non-salary bonus alone,
+// no days worked, so its PAYROLL movement is exactly `netPay`.
+async function paidSettlement(fields: Record<string, string>, netPay: string): Promise<Settlement> {
+	const { employeeId } = await fixture.employee({ roles: ['WAREHOUSE'], ...fields });
+	const { draft } = await openWeek(db, { employeeId, week: '2026-10-12' }, MANAGER);
+	if (null === draft) {
+		throw new Error('No draft for week 42');
+	}
+	const noHours = draft.earnings.flatMap(({ concept, qty }) =>
+		null === qty ? [] : [[concept, '0']]
 	);
-	database.exec(
-		`insert or ignore into employees (contact_id, created_at, created_by, updated_at, updated_by) values ((select id from contacts where phone = '${employee}'), ${AUDIT})`
-	);
-	const { id } = database
-		.prepare(
-			'select employees.id from employees join contacts on contacts.id = employees.contact_id where phone = ?'
-		)
-		.get(employee)!;
-	const { lastInsertRowid } = database
-		.prepare(
-			`insert into payroll_runs (employee_id, status, week_number, period_start, period_end, payment_date, employee_snapshot, prepared_by, earnings, deductions, settings_snapshot, total_earnings, total_deductions, net_pay, created_at, created_by, updated_at, updated_by) values (?, 'PAID', ?, ?, '2026-10-17', '2026-10-17', ?, 'gerente', '{}', '{}', '{}', 0, 0, 0, ${AUDIT})`
-		)
-		.run(id, week, `2026-W${week}`, JSON.stringify({ full_name: employee }));
-	return Number(lastInsertRowid);
-}
-
-function payroll(runId: number, amount: number): Movement {
-	return {
-		concept: 'PAYROLL',
+	const form = {
+		employee_id: String(employeeId),
+		period_start: '2026-10-12',
+		week_number: '42',
+		payment_date: '2026-10-17',
+		...Object.fromEntries(noHours),
+		NON_SALARY_BONUS: netPay,
+		LOANS: '0',
+		OTHER: '0',
 		payment_method: 'TRANSFER',
-		amount,
-		movement_date: '2026-10-17',
-		entity_type: 'PAYROLL_RUN',
-		entity_id: runId,
-		attributes: { bank_account: 'Bancolombia 123' }
+		bank_account: 'Bancolombia 123'
 	};
+	const result = await recordPayment(db, form, MANAGER);
+	if (!result.ok) {
+		throw new Error(result.message);
+	}
+	const run = database.prepare('select id from payroll_runs where employee_id = ?').get(employeeId);
+	return { employeeId: Number(employeeId), runId: Number(run?.id) };
 }
 
 async function seedBook(): Promise<void> {
 	await record({ ...expense, payee: 'Almacén La Gloria', movement_date: '2026-10-03' });
 	await record({ ...income, payee: 'Silvia Ruiz', movement_date: '2026-09-30' });
-	await record(payroll(insertRun({ employee: 'Ana Pérez', week: 42 }), -480000));
-	await record(payroll(insertRun({ employee: 'Jorge Salamanca', week: 42 }), -390000));
+	await paidSettlement({ full_name: 'Ana Pérez' }, '480.000');
+	await paidSettlement({ full_name: 'Jorge Salamanca' }, '390.000');
 	const notes = { description: 'Venta de sillas dadas de baja', notes: 'Pagó con jabón de regalo' };
 	await record({ ...income, movement_date: '2026-10-10', attributes: notes });
 }
 
 async function bookIds(filters: Record<string, string> = {}): Promise<number[]> {
-	return (await getCashBook(db, filters, manager)).entries.map((entry) => entry.id);
+	return (await getCashBook(db, filters, MANAGER)).entries.map((entry) => entry.id);
 }
 
 test("by default the book shows this month's movements, newest first, with link and who recorded them", async () => {
 	await seedBook();
-	const book = await getCashBook(db, {}, manager);
+	const book = await getCashBook(db, {}, MANAGER);
 	expect(book.filters).toMatchObject({ from: '2026-10-01', to: '2026-10-31' });
 	expect(book.entries.map((entry) => entry.id)).toEqual([4, 3, 5, 1]);
 	expect(book.entries[1]).toEqual({
@@ -175,7 +173,7 @@ test("by default the book shows this month's movements, newest first, with link 
 		employeeName: 'Ana Pérez',
 		payee: null,
 		description: null,
-		recordedBy: 'gerente',
+		recordedBy: 'manager',
 		recordedAt: expect.any(Number),
 		receiptNumber: 2
 	});
@@ -202,38 +200,32 @@ test('each filter narrows the book on its own', async () => {
 	expect(await bookIds({ text: '%' })).toEqual([]);
 });
 
-// An order movement needs no order row: the link has no foreign key.
-const installment: Movement = {
-	concept: 'INSTALLMENT',
-	payment_method: 'TRANSFER',
-	amount: 500000,
-	movement_date: '2026-10-17',
-	entity_type: 'ORDER',
-	entity_id: 1043,
-	payee: 'Luz Marina Restrepo',
-	attributes: {}
-};
+// A «Pago» by transfer through the order's payment entry.
+async function installment(orderId: number, amount = '500.000'): Promise<void> {
+	await fixture.payment(orderId, { payment_method: 'TRANSFER', amount });
+}
 
 test('an order movement links to its order, which narrows the book and its totals', async () => {
+	const orderId = await fixture.order();
 	await record(income);
-	await record(installment);
-	await record({ ...installment, entity_id: 1051, amount: 300000 });
-	const book = await getCashBook(db, { order: '#1043' }, manager);
-	expect(book.entries).toMatchObject([{ id: 2, orderId: 1043, weekNumber: null }]);
+	await installment(orderId);
+	await installment(await fixture.order(), '300.000');
+	const book = await getCashBook(db, { order: `#${orderId}` }, MANAGER);
+	expect(book.entries).toMatchObject([{ id: 2, orderId, weekNumber: null }]);
 	expect(book.totals).toEqual({ inflow: 500000, outflow: 0, net: 500000 });
-	expect((await getMovement(db, 1, manager))?.orderId).toBeNull();
+	expect((await getMovement(db, 1, MANAGER))?.orderId).toBeNull();
 	expect(await bookIds({ order: 'nada' })).toEqual([3, 2, 1]);
 });
 
 test("SALES prints an order movement's receipt, never a standalone one's", async () => {
-	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
+	const orderId = await fixture.order();
 	await record(income);
-	await record(installment);
-	const actor: Actor = { ...manager, roles: ['SALES'] };
-	expect(await getReceipt(db, 2, actor)).toMatchObject({ movement: { id: 2, orderId: 1043 } });
+	await installment(orderId);
+	const actor = SALES;
+	expect(await getReceipt(db, 2, actor)).toMatchObject({ movement: { id: 2, orderId } });
 	await expect(getReceipt(db, 1, actor)).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
 	for (const role of ['WAREHOUSE', 'DRIVER'] as const) {
-		await expect(getReceipt(db, 2, { ...manager, roles: [role] })).rejects.toSatisfy((thrown) =>
+		await expect(getReceipt(db, 2, actorWith(role))).rejects.toSatisfy((thrown) =>
 			isHttpError(thrown, 403)
 		);
 	}
@@ -246,17 +238,17 @@ test('a tampered filter is ignored, not an error', async () => {
 
 test('the three totals follow the filters, and net is in minus out', async () => {
 	await seedBook();
-	expect((await getCashBook(db, {}, manager)).totals).toEqual({
+	expect((await getCashBook(db, {}, MANAGER)).totals).toEqual({
 		inflow: 120000,
 		outflow: 915000,
 		net: -795000
 	});
-	expect((await getCashBook(db, { concepts: 'PAYROLL' }, manager)).totals).toEqual({
+	expect((await getCashBook(db, { concepts: 'PAYROLL' }, MANAGER)).totals).toEqual({
 		inflow: 0,
 		outflow: 870000,
 		net: -870000
 	});
-	expect((await getCashBook(db, { text: 'nada así' }, manager)).totals).toEqual({
+	expect((await getCashBook(db, { text: 'nada así' }, MANAGER)).totals).toEqual({
 		inflow: 0,
 		outflow: 0,
 		net: 0
@@ -265,7 +257,7 @@ test('the three totals follow the filters, and net is in minus out', async () =>
 
 test('only MANAGER and ADMIN open the cash book', async () => {
 	for (const role of ['SALES', 'WAREHOUSE', 'DRIVER'] as const) {
-		const actor: Actor = { ...manager, roles: [role] };
+		const actor = actorWith(role);
 		await expect(getCashBook(db, {}, actor)).rejects.toSatisfy((thrown) =>
 			isHttpError(thrown, 403)
 		);
@@ -279,7 +271,7 @@ test("a movement's detail has what its receipt prints, plus who recorded it and 
 		notes: 'Con IVA'
 	};
 	await record({ ...expense, payee: 'Almacén La Gloria', payment_method: 'TRANSFER', attributes });
-	expect(await getMovement(db, 1, manager)).toEqual({
+	expect(await getMovement(db, 1, MANAGER)).toEqual({
 		id: 1,
 		movementDate: '2026-10-17',
 		concept: 'OTHER_EXPENSE',
@@ -294,26 +286,31 @@ test("a movement's detail has what its receipt prints, plus who recorded it and 
 		description: 'Compra de jabón',
 		bankAccount: 'Nequi 300',
 		notes: 'Con IVA',
-		recordedBy: 'gerente',
+		recordedBy: 'manager',
 		recordedAt: expect.any(Number),
 		receiptNumber: 1,
 		reverses: null,
 		reversedBy: null,
 		settlement: null
 	});
-	expect(await getMovement(db, '1', manager)).toMatchObject({ id: 1 });
-	expect(await getMovement(db, 2, manager)).toBeNull();
-	expect(await getMovement(db, 'uno', manager)).toBeNull();
+	expect(await getMovement(db, '1', MANAGER)).toMatchObject({ id: 1 });
+	expect(await getMovement(db, 2, MANAGER)).toBeNull();
+	expect(await getMovement(db, 'uno', MANAGER)).toBeNull();
 });
 
 test("a PAYROLL movement's detail names the week and the employee the settlement kept", async () => {
-	await record(payroll(insertRun({ employee: 'Ana Pérez', week: 42 }), -480000));
-	database.exec("update contacts set full_name = 'Ana Pérez Gómez'");
-	expect(await getMovement(db, 1, manager)).toMatchObject({
+	const ana = { full_name: 'Ana Pérez', phone: '3106452118', document_id: '1036452118' };
+	const { employeeId } = await paidSettlement(ana, '480.000');
+	const renamed = { ...ana, id: String(employeeId), full_name: 'Ana Pérez Gómez' };
+	const employment = { monthly_salary: '1.750.905', position: 'Bodega' };
+	expect(await updateEmployee(db, { ...renamed, ...employment }, MANAGER)).toMatchObject({
+		ok: true
+	});
+	expect(await getMovement(db, 1, MANAGER)).toMatchObject({
 		weekNumber: 42,
 		employeeName: 'Ana Pérez',
 		payee: null,
-		settlement: { employeeId: 1, periodStart: '2026-W42' }
+		settlement: { employeeId, periodStart: '2026-10-12' }
 	});
 });
 
@@ -321,32 +318,31 @@ test('an offsetting movement names the one it corrects, and the corrected one na
 	await record(income);
 	await record(expense);
 	await record({ ...expense, amount: 45000, reverses_id: 2 });
-	expect(await getMovement(db, 2, manager)).toMatchObject({
+	expect(await getMovement(db, 2, MANAGER)).toMatchObject({
 		reverses: null,
 		reversedBy: { amount: 45000, receiptNumber: 2 }
 	});
-	expect(await getMovement(db, 3, manager)).toMatchObject({
+	expect(await getMovement(db, 3, MANAGER)).toMatchObject({
 		reverses: { amount: -45000, receiptNumber: 1 },
 		reversedBy: null
 	});
-	expect(await getMovement(db, 1, manager)).toMatchObject({ reverses: null, reversedBy: null });
+	expect(await getMovement(db, 1, MANAGER)).toMatchObject({ reverses: null, reversedBy: null });
 });
 
 test("only MANAGER and ADMIN open a movement's detail", async () => {
 	await record(expense);
-	const actor: Actor = { ...manager, roles: ['SALES'] };
+	const actor = SALES;
 	await expect(getMovement(db, 1, actor)).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
 });
 
 test("a movement's receipt carries the company's header from settings", async () => {
-	database.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
 	await record(expense);
-	expect(await getReceipt(db, 1, manager)).toMatchObject({
+	expect(await getReceipt(db, 1, MANAGER)).toMatchObject({
 		movement: { id: 1, receiptNumber: 1 },
 		company: { COMPANY_NAME: 'Banquetes Consuelo C' }
 	});
-	await expect(getReceipt(db, 2, manager)).rejects.toSatisfy((thrown) => isHttpError(thrown, 404));
-	const actor: Actor = { ...manager, roles: ['SALES'] };
+	await expect(getReceipt(db, 2, MANAGER)).rejects.toSatisfy((thrown) => isHttpError(thrown, 404));
+	const actor = SALES;
 	await expect(getReceipt(db, 1, actor)).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
 });
 
@@ -366,7 +362,7 @@ function storedMovement(id: number) {
 }
 
 test('«Salida» saves an OTHER_EXPENSE with a negative amount, and «Entrada» an OTHER_INCOME', async () => {
-	expect(await recordMovement(db, typedExpense, manager)).toEqual({ ok: true, id: 1 });
+	expect(await recordMovement(db, typedExpense, MANAGER)).toEqual({ ok: true, id: 1 });
 	expect(storedMovement(1)).toMatchObject({
 		concept: 'OTHER_EXPENSE',
 		amount: -48500,
@@ -375,15 +371,15 @@ test('«Salida» saves an OTHER_EXPENSE with a negative amount, and «Entrada» 
 		payee: 'Almacén Éxito Laureles',
 		entity_type: null,
 		attributes: '{"description":"Compra de jabón y desinfectante"}',
-		created_by: 'gerente'
+		created_by: 'manager'
 	});
-	await recordMovement(db, { ...typedExpense, direction: 'IN', amount: '120000' }, manager);
+	await recordMovement(db, { ...typedExpense, direction: 'IN', amount: '120000' }, MANAGER);
 	expect(storedMovement(2)).toMatchObject({ concept: 'OTHER_INCOME', amount: 120000 });
 });
 
 test('saving fails without a description, a payee or a value greater than zero', async () => {
 	const missing = { ...typedExpense, description: ' ', payee: '', amount: '0' };
-	expect(await recordMovement(db, missing, manager)).toMatchObject({
+	expect(await recordMovement(db, missing, MANAGER)).toMatchObject({
 		ok: false,
 		errors: {
 			description: 'Escribe la descripción',
@@ -396,25 +392,25 @@ test('saving fails without a description, a payee or a value greater than zero',
 
 test('«Otro» needs which method, kept in attributes.other_method', async () => {
 	const other = { ...typedExpense, payment_method: 'OTHER' };
-	expect(await recordMovement(db, other, manager)).toMatchObject({
+	expect(await recordMovement(db, other, MANAGER)).toMatchObject({
 		ok: false,
 		errors: { other_method: 'Escribe el medio de pago' }
 	});
-	await recordMovement(db, { ...other, other_method: 'Nequi' }, manager);
+	await recordMovement(db, { ...other, other_method: 'Nequi' }, MANAGER);
 	expect(JSON.parse(String(storedMovement(1).attributes))).toMatchObject({ other_method: 'Nequi' });
 });
 
 test('a transfer out needs its account, a transfer in may name its bank, and both keep it', async () => {
 	const transfer = { ...typedExpense, payment_method: 'TRANSFER' };
-	expect(await recordMovement(db, transfer, manager)).toMatchObject({
+	expect(await recordMovement(db, transfer, MANAGER)).toMatchObject({
 		ok: false,
 		errors: { bank_account: 'Escribe la cuenta de destino' }
 	});
 	const account = 'Bancolombia ahorros 123-456789-01';
-	await recordMovement(db, { ...transfer, bank_account: account }, manager);
-	await recordMovement(db, { ...transfer, direction: 'IN', bank_account: 'Davivienda' }, manager);
-	await recordMovement(db, { ...typedExpense, bank_account: account }, manager);
-	expect(await recordMovement(db, { ...transfer, direction: 'IN' }, manager)).toMatchObject({
+	await recordMovement(db, { ...transfer, bank_account: account }, MANAGER);
+	await recordMovement(db, { ...transfer, direction: 'IN', bank_account: 'Davivienda' }, MANAGER);
+	await recordMovement(db, { ...typedExpense, bank_account: account }, MANAGER);
+	expect(await recordMovement(db, { ...transfer, direction: 'IN' }, MANAGER)).toMatchObject({
 		ok: true
 	});
 	expect(JSON.parse(String(storedMovement(4).attributes))).not.toHaveProperty('bank_account');
@@ -427,7 +423,7 @@ test('a transfer out needs its account, a transfer in may name its bank, and bot
 
 test('only MANAGER and ADMIN record a movement, even calling the service directly', async () => {
 	for (const role of ['SALES', 'WAREHOUSE', 'DRIVER'] as const) {
-		const actor: Actor = { ...manager, roles: [role] };
+		const actor = actorWith(role);
 		await expect(recordMovement(db, typedExpense, actor)).rejects.toSatisfy((thrown) =>
 			isHttpError(thrown, 403)
 		);
@@ -446,10 +442,10 @@ const typedCorrection = {
 };
 
 test('an offset keeps the concept and link, flips the amount and points at the original', async () => {
-	await recordMovement(db, typedExpense, manager);
+	await recordMovement(db, typedExpense, MANAGER);
 	// Tipo and Valor aren't the form's to set: a tampered one changes nothing.
 	const tampered = { ...typedCorrection, direction: 'OUT', amount: '1' };
-	expect(await recordOffset(db, tampered, manager)).toEqual({ ok: true, id: 2 });
+	expect(await recordOffset(db, tampered, MANAGER)).toEqual({ ok: true, id: 2 });
 	expect(storedMovement(2)).toMatchObject({
 		concept: 'OTHER_EXPENSE',
 		amount: 48500,
@@ -465,38 +461,37 @@ test('an offset keeps the concept and link, flips the amount and points at the o
 });
 
 test('a movement is offset once, and a correction never', async () => {
-	await recordMovement(db, typedExpense, manager);
-	await recordOffset(db, typedCorrection, manager);
-	expect(await recordOffset(db, typedCorrection, manager)).toMatchObject({
+	await recordMovement(db, typedExpense, MANAGER);
+	await recordOffset(db, typedCorrection, MANAGER);
+	expect(await recordOffset(db, typedCorrection, MANAGER)).toMatchObject({
 		ok: false,
 		message: 'Ese movimiento ya tiene su movimiento contrario.'
 	});
-	expect(await recordOffset(db, { ...typedCorrection, reverses_id: '2' }, manager)).toMatchObject({
+	expect(await recordOffset(db, { ...typedCorrection, reverses_id: '2' }, MANAGER)).toMatchObject({
 		ok: false
 	});
-	expect(await recordOffset(db, { ...typedCorrection, reverses_id: '9' }, manager)).toMatchObject({
+	expect(await recordOffset(db, { ...typedCorrection, reverses_id: '9' }, MANAGER)).toMatchObject({
 		ok: false,
 		message: 'Ese movimiento no existe.'
 	});
 	expect(receiptNumbers()).toHaveLength(2);
-	await expect(getOffsetOriginal(db, 1, manager)).rejects.toSatisfy((thrown) =>
+	await expect(getOffsetOriginal(db, 1, MANAGER)).rejects.toSatisfy((thrown) =>
 		isHttpError(thrown, 400)
 	);
-	await expect(getOffsetOriginal(db, 2, manager)).rejects.toSatisfy((thrown) =>
+	await expect(getOffsetOriginal(db, 2, MANAGER)).rejects.toSatisfy((thrown) =>
 		isHttpError(thrown, 400)
 	);
 });
 
 test("a PAYROLL movement's offset keeps its link; the settlement stays PAID", async () => {
-	const runId = insertRun({ employee: 'Ana Pérez', week: 42 });
-	await record(payroll(runId, -480000));
+	const { runId } = await paidSettlement({ full_name: 'Ana Pérez' }, '480.000');
 	const correction = {
 		reverses_id: '1',
 		payment_method: 'TRANSFER',
 		bank_account: 'Bancolombia',
 		movement_date: '2026-10-21'
 	};
-	expect(await recordOffset(db, correction, manager)).toEqual({ ok: true, id: 2 });
+	expect(await recordOffset(db, correction, MANAGER)).toEqual({ ok: true, id: 2 });
 	expect(storedMovement(2)).toMatchObject({
 		concept: 'PAYROLL',
 		amount: 480000,
@@ -510,17 +505,17 @@ test("a PAYROLL movement's offset keeps its link; the settlement stays PAID", as
 });
 
 test('an original and its correction net to zero, both under their concept', async () => {
-	await recordMovement(db, typedExpense, manager);
-	await recordOffset(db, typedCorrection, manager);
+	await recordMovement(db, typedExpense, MANAGER);
+	await recordOffset(db, typedCorrection, MANAGER);
 	const filters = { from: '2026-10-01', to: '2026-10-31', concepts: ['OTHER_EXPENSE'] };
-	const { entries, totals } = await getCashBook(db, filters, manager);
+	const { entries, totals } = await getCashBook(db, filters, MANAGER);
 	expect(entries).toHaveLength(2);
 	expect(totals).toEqual({ inflow: 48500, outflow: 48500, net: 0 });
 });
 
 test('only MANAGER and ADMIN record an offsetting movement', async () => {
-	await recordMovement(db, typedExpense, manager);
-	const actor: Actor = { ...manager, roles: ['SALES'] };
+	await recordMovement(db, typedExpense, MANAGER);
+	const actor = SALES;
 	await expect(recordOffset(db, typedCorrection, actor)).rejects.toSatisfy((thrown) =>
 		isHttpError(thrown, 403)
 	);
@@ -535,7 +530,7 @@ const EXPENSE_CONCEPTS = [
 
 test('«Salida» saves the expense concept it picks, each with its description', async () => {
 	for (const [index, concept] of EXPENSE_CONCEPTS.entries()) {
-		expect(await recordMovement(db, { ...typedExpense, concept }, manager)).toEqual({
+		expect(await recordMovement(db, { ...typedExpense, concept }, MANAGER)).toEqual({
 			ok: true,
 			id: index + 1
 		});
@@ -550,7 +545,7 @@ test('«Salida» saves the expense concept it picks, each with its description',
 test('every expense concept refuses a «Salida» without a description', async () => {
 	for (const concept of EXPENSE_CONCEPTS) {
 		expect(
-			await recordMovement(db, { ...typedExpense, concept, description: '' }, manager)
+			await recordMovement(db, { ...typedExpense, concept, description: '' }, MANAGER)
 		).toMatchObject({ ok: false, errors: { description: 'Escribe la descripción' } });
 		expect(movementSchema.safeParse({ ...expense, concept, attributes: {} }).success).toBe(false);
 	}
@@ -560,29 +555,33 @@ test('every expense concept refuses a «Salida» without a description', async (
 test('«Entrada» stays an OTHER_INCOME and never takes an expense concept', async () => {
 	const entry = { ...typedExpense, direction: 'IN' };
 	for (const concept of ['RENT', 'SUPPLIES_EXPENSE', 'DAMAGE_CHARGE', 'OTHER_EXPENSE']) {
-		expect(await recordMovement(db, { ...entry, concept }, manager)).toMatchObject({
+		expect(await recordMovement(db, { ...entry, concept }, MANAGER)).toMatchObject({
 			ok: false,
 			errors: { concept: expect.any(String) }
 		});
 	}
 	expect(
-		await recordMovement(db, { ...typedExpense, concept: 'INSTALLMENT' }, manager)
+		await recordMovement(db, { ...typedExpense, concept: 'INSTALLMENT' }, MANAGER)
 	).toMatchObject({ ok: false, errors: { concept: expect.any(String) } });
 	expect(storedMovement(1)).toEqual({});
-	await recordMovement(db, { ...entry, concept: 'OTHER_INCOME' }, manager);
+	await recordMovement(db, { ...entry, concept: 'OTHER_INCOME' }, MANAGER);
 	expect(storedMovement(1)).toMatchObject({ concept: 'OTHER_INCOME', amount: 48500 });
 });
 
 test('a new expense concept is offset like OTHER_EXPENSE: same concept, its sign flipped', async () => {
-	await recordMovement(db, { ...typedExpense, concept: 'RENT' }, manager);
-	expect(await recordOffset(db, typedCorrection, manager)).toMatchObject({ ok: true });
+	await recordMovement(db, { ...typedExpense, concept: 'RENT' }, MANAGER);
+	expect(await recordOffset(db, typedCorrection, MANAGER)).toMatchObject({ ok: true });
 	expect(storedMovement(2)).toMatchObject({ concept: 'RENT', amount: 48500, reverses_id: 1 });
 });
 
 test('a DAMAGE_CHARGE needs an order and is money in, unless it offsets one', async () => {
 	const charge: Movement = {
-		...installment,
 		concept: 'DAMAGE_CHARGE',
+		payment_method: 'TRANSFER',
+		amount: 500000,
+		movement_date: '2026-10-17',
+		entity_type: 'ORDER',
+		entity_id: await fixture.order(),
 		attributes: { description: 'Dos copas rotas' }
 	};
 	await record(charge);
@@ -599,44 +598,35 @@ test('a DAMAGE_CHARGE needs an order and is money in, unless it offsets one', as
 });
 
 test('the concept filter takes several concepts at once', async () => {
-	await recordMovement(db, { ...typedExpense, concept: 'RENT' }, manager);
-	await recordMovement(db, { ...typedExpense, concept: 'SUPPLIES_EXPENSE' }, manager);
-	await recordMovement(db, { ...typedExpense, concept: 'TRANSPORT_EXPENSE' }, manager);
+	await recordMovement(db, { ...typedExpense, concept: 'RENT' }, MANAGER);
+	await recordMovement(db, { ...typedExpense, concept: 'SUPPLIES_EXPENSE' }, MANAGER);
+	await recordMovement(db, { ...typedExpense, concept: 'TRANSPORT_EXPENSE' }, MANAGER);
 	await record({ ...expense, movement_date: '2026-10-20' });
 	const filters = { from: '2026-10-01', to: '2026-10-31' };
 	const book = await getCashBook(
 		db,
 		{ ...filters, concepts: ['RENT', 'TRANSPORT_EXPENSE', 'BOGUS'] },
-		manager
+		MANAGER
 	);
 	expect(book.filters.concepts).toEqual(['TRANSPORT_EXPENSE', 'RENT']);
 	expect(book.entries.map((entry) => entry.id)).toEqual([3, 1]);
 	expect(book.totals).toEqual({ inflow: 0, outflow: 97000, net: -97000 });
-	const one = await getCashBook(db, { ...filters, concepts: 'OTHER_EXPENSE' }, manager);
+	const one = await getCashBook(db, { ...filters, concepts: 'OTHER_EXPENSE' }, MANAGER);
 	expect(one.entries.map((entry) => entry.id)).toEqual([4]);
-	const none = await getCashBook(db, { ...filters, concepts: [] }, manager);
+	const none = await getCashBook(db, { ...filters, concepts: [] }, MANAGER);
 	expect(none.filters.concepts).toEqual([]);
 	expect(none.entries).toHaveLength(4);
 });
 
-function addLogin(username: string, roles: string[]): void {
-	database
-		.prepare(
-			`insert into users (username, roles, password_hash, password_salt, password_iterations, active,
-				created_at, created_by, updated_at, updated_by) values (?, ?, 'hash', 'salt', 1, 1, 0, 'admin', 0, 'admin')`
-		)
-		.run(username, JSON.stringify(roles));
-}
-
 test('«Pagado por» keeps the login that paid a cash «Salida» out of their Efectivo por entregar', async () => {
-	addLogin('conductor', ['DRIVER']);
-	const paid = { ...typedExpense, concept: 'SUPPLIES_EXPENSE', paid_by: 'conductor' };
-	expect(await recordMovement(db, paid, manager)).toEqual({ ok: true, id: 1 });
+	const driver = await fixture.employee({ roles: ['DRIVER'] });
+	const paid = { ...typedExpense, concept: 'SUPPLIES_EXPENSE', paid_by: driver.username };
+	expect(await recordMovement(db, paid, MANAGER)).toEqual({ ok: true, id: 1 });
 	expect(JSON.parse(String(storedMovement(1).attributes))).toEqual({
 		description: 'Compra de jabón y desinfectante',
-		paid_by: 'conductor'
+		paid_by: driver.username
 	});
-	expect(await recordMovement(db, { ...typedExpense, paid_by: '' }, manager)).toEqual({
+	expect(await recordMovement(db, { ...typedExpense, paid_by: '' }, MANAGER)).toEqual({
 		ok: true,
 		id: 2
 	});
@@ -644,20 +634,20 @@ test('«Pagado por» keeps the login that paid a cash «Salida» out of their Ef
 });
 
 test('«Pagado por» is refused on a transfer or an «Entrada», for the drawer and for an unknown login', async () => {
-	addLogin('conductor', ['DRIVER']);
-	addLogin('gerente', ['MANAGER']);
-	addLogin('bodega', ['WAREHOUSE']);
+	const { username: driver } = await fixture.employee({ roles: ['DRIVER'] });
+	const { username: manager } = await fixture.employee({ roles: ['MANAGER'] });
+	const { username: warehouse } = await fixture.employee({ roles: ['WAREHOUSE'] });
 	const account = 'Bancolombia ahorros 123-456789-01';
 	const refused = [
-		{ ...typedExpense, paid_by: 'conductor', payment_method: 'TRANSFER', bank_account: account },
-		{ ...typedExpense, paid_by: 'conductor', payment_method: 'OTHER', other_method: 'Nequi' },
-		{ ...typedExpense, paid_by: 'conductor', direction: 'IN' },
-		{ ...typedExpense, paid_by: 'gerente' },
-		{ ...typedExpense, paid_by: 'bodega' },
+		{ ...typedExpense, paid_by: driver, payment_method: 'TRANSFER', bank_account: account },
+		{ ...typedExpense, paid_by: driver, payment_method: 'OTHER', other_method: 'Nequi' },
+		{ ...typedExpense, paid_by: driver, direction: 'IN' },
+		{ ...typedExpense, paid_by: manager },
+		{ ...typedExpense, paid_by: warehouse },
 		{ ...typedExpense, paid_by: 'nadie' }
 	];
 	for (const input of refused) {
-		expect(await recordMovement(db, input, manager)).toMatchObject({
+		expect(await recordMovement(db, input, MANAGER)).toMatchObject({
 			ok: false,
 			errors: { paid_by: expect.any(String) }
 		});

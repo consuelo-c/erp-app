@@ -8,6 +8,8 @@ import { correctIncident, reportIncident, reverseIncident } from '../services/in
 import { reverseCount, submitAndApproveCount } from '../services/inventory';
 import { getProduct } from '../services/products';
 import { getQuote } from '../services/quotes';
+import { issueReceivable } from '../services/receivables';
+import { getAuditLog } from '../services/reports';
 import { getSystemSettings, updateSystemSettings } from '../services/settings';
 import { createFixture, DRIVER, MANAGER, SALES, TEST_PASSWORD, TEST_PEPPER } from './fixture';
 
@@ -715,4 +717,27 @@ test("an incident's reversal that lands after a count's approval blocks reversin
 		ok: false,
 		message: 'Silla Tiffany dorada ya tuvo otro movimiento de inventario después de este conteo'
 	});
+});
+
+test('the cuenta de cobro number continues a sequence set by hand, and its orders find it', async () => {
+	const fixture = createFixture();
+	const orderId = await fixture.order();
+	// Production's numbering was set straight in sqlite_sequence to follow the paper cuentas.
+	fixture.database.exec("insert into sqlite_sequence (name, seq) values ('receivables', 4793)");
+	const issued = { orders: [orderId], payment_terms: 'Contado' };
+	expect(await issueReceivable(fixture.db, issued, MANAGER)).toEqual({ ok: true, id: 4794 });
+	const order = fixture.database
+		.prepare('select receivable_id from orders where id = ?')
+		.get(orderId);
+	expect(order).toEqual({ receivable_id: 4794 });
+});
+
+test("an Event whose record's row is gone still links, under its plain id", async () => {
+	const fixture = createFixture();
+	// Rows are never deleted: only a row lost outside the app leaves an Event pointing nowhere.
+	fixture.database.exec(
+		"insert into events (entity_type, entity_id, action, actor_username, actor_kind, created_at) values ('EMPLOYEE', 99, 'EDITED', 'manager', 'user', 0)"
+	);
+	const [event] = (await getAuditLog(fixture.db, {}, MANAGER)).events;
+	expect(event.link).toEqual({ href: '/personal/99', label: '99' });
 });
