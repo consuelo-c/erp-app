@@ -9,7 +9,8 @@ import { POLICIES } from '$lib/roles';
 import { hasAnyRole, hasCashTab, requireRole, type Actor } from '../actor';
 import { auditedInsert } from '../audit';
 import { invalid, type SaveResult } from '../result';
-import { movementAttributesSchema, optional, type CashConcept, type PaymentMethod } from './cash';
+import { optional } from '../query';
+import { movementAttributesSchema, type CashConcept, type PaymentMethod } from './cash';
 import { SELECT_LOGIN, toLogin, type Login, type LoginRow } from './logins';
 
 // Whose tab a movement is on, the one rule every reader of Efectivo por entregar shares. An

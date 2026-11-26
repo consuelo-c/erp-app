@@ -270,7 +270,7 @@ export function isIncidentReportable(order: {
 }
 
 // Sales records the money in; only the manager pays it out.
-const ORDER_INFLOWS = [
+export const ORDER_INFLOWS = [
 	'INSTALLMENT',
 	'SECURITY_DEPOSIT',
 	'CANCELLATION_FEE',

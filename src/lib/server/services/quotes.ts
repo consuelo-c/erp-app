@@ -24,6 +24,7 @@ import { auditedInsert, auditedUpdate, eventFieldsSchema } from '../audit';
 import { describeQuoteEdit, type OrderChange } from '../order-changes';
 import { createPublicToken } from '../public-token';
 import { invalid, messageRefusal, refusal, type Refusal, type SaveResult } from '../result';
+import { foldedSql, optional, paginate, searchTextSchema } from '../query';
 import {
 	blankable,
 	clientAttributesSchema,
@@ -39,14 +40,12 @@ import {
 	prepareQuotedOrder,
 	resolveClient,
 	resolveItems,
-	searchTextSchema,
 	type Availability,
 	type CatalogProduct,
 	type ClientAttributes,
 	type OrderItem,
 	type ShortageWarning
 } from './orders';
-import { foldedSql, optional } from './cash';
 import {
 	getContact,
 	isAutoDocument,
@@ -523,15 +522,15 @@ export async function listQuotes(
 	const where = clauses.map((clause) => `(${clause.sql})`).join(' and ') || '1';
 	const params = clauses.flatMap((clause) => clause.params);
 	const { total, hasQuotes } = await countQuotes(db, { where, params });
-	const pageCount = Math.max(1, Math.ceil(total / QUOTES_PAGE_SIZE));
-	const filters = { ...parsed, page: Math.min(parsed.page, pageCount) };
+	const { page, pageCount, offset } = paginate(total, parsed.page, QUOTES_PAGE_SIZE);
+	const filters = { ...parsed, page };
 	const { results } = await db
 		.prepare(
 			`select id, json_extract(client_attributes, '$.name') as client_name, event_date,
 			valid_until, order_id, quote_total, transport_cost
 			from quotes where ${where} order by id desc limit ? offset ?`
 		)
-		.bind(...params, QUOTES_PAGE_SIZE, (filters.page - 1) * QUOTES_PAGE_SIZE)
+		.bind(...params, QUOTES_PAGE_SIZE, offset)
 		.all<SummaryRow>();
 	const quotes = results.map((row) => toSummary(row, today));
 	return { quotes, total, pageCount, filters, hasQuotes };

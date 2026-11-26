@@ -3,10 +3,12 @@
 
 import { z } from 'zod';
 import { getMonthRange, getTodaysDate } from '$lib/datetime';
+import { ORDER_INFLOWS } from '$lib/orders';
 import { parsePesos } from '$lib/payroll';
 import { POLICIES } from '$lib/roles';
 import { hasCashTab, requireRole, rolesSchema, type Actor } from '../actor';
 import { auditedInsert } from '../audit';
+import { containing, optional } from '../query';
 import { invalid, messageRefusal, type Refusal, type SaveResult } from '../result';
 import { COMPANY_SETTINGS, readSettings, type CompanySettings } from './settings';
 
@@ -29,13 +31,7 @@ export const CASH_CONCEPTS = [
 export type CashConcept = (typeof CASH_CONCEPTS)[number];
 
 /** The concepts whose money comes in: every other one goes out. An offset flips the sign. */
-const INFLOW_CONCEPTS: readonly CashConcept[] = [
-	'INSTALLMENT',
-	'SECURITY_DEPOSIT',
-	'CANCELLATION_FEE',
-	'DAMAGE_CHARGE',
-	'OTHER_INCOME'
-];
+const INFLOW_CONCEPTS: readonly CashConcept[] = [...ORDER_INFLOWS, 'OTHER_INCOME'];
 
 export const PAYMENT_METHODS = ['CASH', 'TRANSFER', 'OTHER'] as const;
 
@@ -455,13 +451,6 @@ function toOffset(
 	};
 }
 
-/** A filter from the URL: an empty or tampered value is ignored, not an error. */
-export function optional<T extends z.ZodType>(schema: T) {
-	return z
-		.preprocess((value) => ('' === value || null === value ? undefined : value), schema.optional())
-		.catch(undefined);
-}
-
 /** Pesos as people type them, $45.000: only the digits count. */
 export const typedPesosSchema = z
 	.string()
@@ -512,39 +501,6 @@ export type CashBookEntry = {
 export type CashBookTotals = { inflow: number; outflow: number; net: number };
 
 type Clause = { sql: string; params: (string | number)[] };
-
-// A LIKE pattern for typed text: its own % and _ match themselves.
-export function containing(text: string): string {
-	return `%${text.replace(/[\\%_]/g, '\\$&')}%`;
-}
-
-// SQLite's lower() only knows ASCII, so the accented letters and tildes are swapped first, to match
-// what `fold` makes of the typed text. ponytail: these seven letters and their capitals only; a
-// stored folded name if names with other accents (ç, à) turn up.
-const FOLDED_LETTERS = [
-	'áa',
-	'ée',
-	'íi',
-	'óo',
-	'úu',
-	'üu',
-	'ñn',
-	'ÁA',
-	'ÉE',
-	'ÍI',
-	'ÓO',
-	'ÚU',
-	'ÜU',
-	'ÑN'
-];
-
-/** A text column as `fold` would leave it, for a LIKE against folded words. */
-export function foldedSql(column: string): string {
-	return `lower(${FOLDED_LETTERS.reduce(
-		(sql, [letter, plain]) => `replace(${sql}, '${letter}', '${plain}')`,
-		column
-	)})`;
-}
 
 // Free text over who was paid or paid us, the description and the notes.
 function textClause(pattern: string): Clause {
