@@ -115,6 +115,7 @@ test('an invalid field saves nothing and comes back with its message', async () 
 	};
 	expect(await updateSystemSettings(db, { modules, values: form }, MANAGER)).toEqual({
 		ok: false,
+		message: 'Revisa los campos marcados en rojo antes de guardar.',
 		errors: {
 			PAYROLL_HOURS_PER_MONTH: 'Escribe un número entero mayor que cero',
 			PAYROLL_NIGHT_END: 'Escribe la hora, de 1 a 12'
@@ -253,7 +254,8 @@ test('the editor refuses a date on or before the freeze line, for ADMIN too', as
 	for (const actor of [MANAGER, ADMIN]) {
 		expect(await updateHolidays(db, input, actor)).toEqual({
 			ok: false,
-			message: 'El vie 9 oct 2026 está en una nómina pagada: no se puede agregar ni cambiar'
+			message: 'El vie 9 oct 2026 está en una nómina pagada: no se puede agregar ni cambiar',
+			errors: {}
 		});
 	}
 	expect(readEvents()).toEqual([]);
@@ -264,12 +266,14 @@ test('the editor refuses a repeated date or a holiday without a name', async () 
 	const repeated = { holidays: JSON.stringify([...holidays, holidays[0]]) };
 	expect(await updateHolidays(db, repeated, MANAGER)).toEqual({
 		ok: false,
-		message: 'Esa fecha ya está en la lista'
+		message: 'Esa fecha ya está en la lista',
+		errors: {}
 	});
 	const unnamed = { holidays: JSON.stringify([{ date: '2027-03-22', label: ' ' }]) };
 	expect(await updateHolidays(db, unnamed, MANAGER)).toEqual({
 		ok: false,
-		message: 'Escribe el nombre del festivo'
+		message: 'Escribe el nombre del festivo',
+		errors: {}
 	});
 });
 
@@ -282,7 +286,8 @@ test('only ADMIN changes a closed holiday, and only with a reason, kept on the e
 	expect(isHttpError(refusal, 403)).toBe(true);
 	expect(await overrideFrozenHoliday(db, { ...input, reason: ' ' }, ADMIN)).toEqual({
 		ok: false,
-		message: 'Escribe el motivo del cambio'
+		message: 'Escribe el motivo del cambio',
+		errors: {}
 	});
 	expect(readEvents()).toEqual([]);
 
@@ -307,7 +312,8 @@ test('ADMIN removes a closed holiday with a reason; an open date is not an overr
 	const open = { ...removal, original: '2026-11-02' };
 	expect(await overrideFrozenHoliday(db, open, ADMIN)).toEqual({
 		ok: false,
-		message: 'Esa fecha no está en una nómina pagada'
+		message: 'Esa fecha no está en una nómina pagada',
+		errors: {}
 	});
 });
 
@@ -366,11 +372,13 @@ test('saving the help unchanged writes nothing', async () => {
 test('an empty or too-long help saves nothing and comes back with its message', async () => {
 	expect(await updateHelp(db, { text: '  \n ' }, MANAGER)).toEqual({
 		ok: false,
-		message: 'Escribe el texto de la ayuda'
+		message: 'Escribe el texto de la ayuda',
+		errors: {}
 	});
 	expect(await updateHelp(db, { text: 'a'.repeat(50_001) }, MANAGER)).toEqual({
 		ok: false,
-		message: 'La ayuda no puede pasar de 50.000 caracteres'
+		message: 'La ayuda no puede pasar de 50.000 caracteres',
+		errors: {}
 	});
 	expect(readEvents()).toEqual([]);
 });
@@ -424,7 +432,8 @@ test('saving the terms writes the text and its EDITED event; emptying them is a 
 test('too-long terms save nothing; the generic settings ignore a TERMS_CONDITIONS field', async () => {
 	expect(await updateTerms(db, { text: 'a'.repeat(10_001) }, MANAGER)).toEqual({
 		ok: false,
-		message: 'Los términos no pueden pasar de 10.000 caracteres'
+		message: 'Los términos no pueden pasar de 10.000 caracteres',
+		errors: {}
 	});
 	const values = await getSystemSettings(db, modules, MANAGER);
 	expect(values).not.toHaveProperty('TERMS_CONDITIONS');

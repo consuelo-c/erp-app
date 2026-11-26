@@ -9,6 +9,7 @@ import { getExtraHoursRange } from '$lib/payroll';
 import { POLICIES } from '$lib/roles';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
+import { messageRefusal, type SaveResult } from '../result';
 import { countWorkedMinutes, deriveOvertime } from '../overtime';
 import { employmentSchema } from './employees';
 import { readSettings, type SettingValues } from './settings';
@@ -34,7 +35,6 @@ export type TimesheetDay = {
 	isEmployed: boolean;
 };
 
-export type Result = { ok: true } | { ok: false; message: string };
 export type PaidPeriod = { start: string; end: string };
 
 type Period = z.infer<typeof employmentSchema>[number];
@@ -75,11 +75,10 @@ const dateSchema = z.iso.date();
 const employeeIdSchema = z.coerce.number().int().positive();
 const employeeChoiceSchema = z.object({ employee_id: employeeIdSchema });
 
-const NO_EMPLOYEE: Result = { ok: false, message: 'Tu usuario no está vinculado a un empleado' };
-const OUT_OF_ORDER: Result = {
-	ok: false,
-	message: 'Las marcas deben ir en orden: inicio y finalización de la mañana, luego de la tarde'
-};
+const NO_EMPLOYEE = messageRefusal('Tu usuario no está vinculado a un empleado');
+const OUT_OF_ORDER = messageRefusal(
+	'Las marcas deben ir en orden: inicio y finalización de la mañana, luego de la tarde'
+);
 
 async function findEmployee(db: D1Database, id: number | null): Promise<HoursEmployee | null> {
 	if (null === id) {
@@ -288,10 +287,10 @@ function writeStatements(
 	});
 }
 
-async function savePunch(db: D1Database, actor: Actor, change: PunchChange): Promise<Result> {
+async function savePunch(db: D1Database, actor: Actor, change: PunchChange): Promise<SaveResult> {
 	const refusal = await findRefusal(db, change.employee, change.workDate);
 	if (null !== refusal) {
-		return { ok: false, message: refusal };
+		return messageRefusal(refusal);
 	}
 	const [row = null] = await findRows(db, change.employee.id, [change.workDate]);
 	if (
@@ -315,11 +314,11 @@ export async function saveOwnPunch(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<Result> {
+): Promise<SaveResult> {
 	requireRole(actor, POLICIES.anyLogin);
 	const parsed = saveSchema.safeParse(input);
 	if (!parsed.success) {
-		return { ok: false, message: parsed.error.issues[0].message };
+		return messageRefusal(parsed.error.issues[0].message);
 	}
 	const employee = await findEmployee(db, actor.employeeId);
 	if (null === employee) {
@@ -334,16 +333,16 @@ export async function saveEmployeePunch(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<Result> {
+): Promise<SaveResult> {
 	requireRole(actor, POLICIES.everyonesHours);
 	const parsed = saveSchema.safeParse(input);
 	if (!parsed.success) {
-		return { ok: false, message: parsed.error.issues[0].message };
+		return messageRefusal(parsed.error.issues[0].message);
 	}
 	const choice = employeeChoiceSchema.safeParse(input);
 	const employee = choice.success ? await findEmployee(db, choice.data.employee_id) : null;
 	if (null === employee) {
-		return { ok: false, message: 'Escoge el empleado' };
+		return messageRefusal('Escoge el empleado');
 	}
 	const { work_date, punch, time } = parsed.data;
 	return savePunch(db, actor, { employee, workDate: work_date, punch, time });
@@ -355,14 +354,18 @@ type DayChoice = { employee: HoursEmployee; workDate: string };
 
 // A punch on the wrong day is undone by clearing the day: the row stays with its four punches
 // null, and its `CLEARED` event keeps what they were. Same refusals as correcting a punch.
-async function clearDay(db: D1Database, actor: Actor, { employee, workDate }: DayChoice) {
+async function clearDay(
+	db: D1Database,
+	actor: Actor,
+	{ employee, workDate }: DayChoice
+): Promise<SaveResult> {
 	const refusal = await findRefusal(db, employee, workDate);
 	if (null !== refusal) {
-		return { ok: false, message: refusal } as const;
+		return messageRefusal(refusal);
 	}
 	const [row = null] = await findRows(db, employee.id, [workDate]);
 	if (null === row) {
-		return { ok: true } as const;
+		return { ok: true };
 	}
 	const statements = auditedUpdate(db, {
 		table: 'timesheets',
@@ -376,7 +379,7 @@ async function clearDay(db: D1Database, actor: Actor, { employee, workDate }: Da
 	if (0 < statements.length) {
 		await db.batch(statements);
 	}
-	return { ok: true } as const;
+	return { ok: true };
 }
 
 /** Clears the four punches of one of the actor's own days. */
@@ -384,11 +387,11 @@ export async function clearOwnDay(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<Result> {
+): Promise<SaveResult> {
 	requireRole(actor, POLICIES.anyLogin);
 	const parsed = clearSchema.safeParse(input);
 	if (!parsed.success) {
-		return { ok: false, message: parsed.error.issues[0].message };
+		return messageRefusal(parsed.error.issues[0].message);
 	}
 	const employee = await findEmployee(db, actor.employeeId);
 	if (null === employee) {
@@ -402,16 +405,16 @@ export async function clearEmployeeDay(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<Result> {
+): Promise<SaveResult> {
 	requireRole(actor, POLICIES.everyonesHours);
 	const parsed = clearSchema.safeParse(input);
 	if (!parsed.success) {
-		return { ok: false, message: parsed.error.issues[0].message };
+		return messageRefusal(parsed.error.issues[0].message);
 	}
 	const choice = employeeChoiceSchema.safeParse(input);
 	const employee = choice.success ? await findEmployee(db, choice.data.employee_id) : null;
 	if (null === employee) {
-		return { ok: false, message: 'Escoge el empleado' };
+		return messageRefusal('Escoge el empleado');
 	}
 	return clearDay(db, actor, { employee, workDate: parsed.data.work_date });
 }

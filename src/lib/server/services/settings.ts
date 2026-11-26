@@ -15,6 +15,7 @@ import {
 import { POLICIES } from '$lib/roles';
 import { hasAnyRole, requireRole, type Actor } from '../actor';
 import { auditedUpdate } from '../audit';
+import { fieldsRefusal, messageRefusal, type SaveResult } from '../result';
 
 const OWN_EDITOR_KEYS = [
 	'PAYROLL_HOLIDAYS',
@@ -31,9 +32,6 @@ const SYSTEM_SETTING_KEYS = (Object.keys(SETTINGS) as SettingKey[]).filter(
 
 /** Each key's stored text. */
 export type SystemSettings = Record<SystemSettingKey, string>;
-
-export type SaveResult =
-	{ ok: true } | { ok: false; errors: Partial<Record<SystemSettingKey, string>> };
 
 // Every form field arrives as text.
 const formSchema = z.record(z.string(), z.string());
@@ -71,7 +69,7 @@ export async function updateSystemSettings(
 	const fields = keysOf(modules).map((key) => ({ key, parsed: parseField(key, form) }));
 	const errors = collectErrors(fields);
 	if (Object.keys(errors).length > 0) {
-		return { ok: false, errors };
+		return fieldsRefusal(errors);
 	}
 	const current = await findSystemSettings(db);
 	const statements = fields.flatMap(({ key, parsed }) =>
@@ -173,8 +171,6 @@ export type HolidaysEditor = {
 	canOverrideFreeze: boolean;
 };
 
-export type HolidaysResult = { ok: true } | { ok: false; message: string };
-
 const holidayShape = {
 	date: z.iso.date('Escoge la fecha del festivo'),
 	label: z.string().trim().min(1, 'Escribe el nombre del festivo')
@@ -220,16 +216,16 @@ export async function updateHolidays(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<HolidaysResult> {
+): Promise<SaveResult> {
 	requireRole(actor, POLICIES.settings);
 	const parsed = openHolidaysSchema.safeParse(input);
 	if (!parsed.success) {
-		return { ok: false, message: parsed.error.issues[0].message };
+		return messageRefusal(parsed.error.issues[0].message);
 	}
 	const [current, freezeLine] = await Promise.all([findHolidays(db), findFreezeLine(db)]);
 	const closed = parsed.data.holidays.find((holiday) => isFrozen(holiday.date, freezeLine));
 	if (undefined !== closed) {
-		return { ok: false, message: `${frozenMessage(closed)}: no se puede agregar ni cambiar` };
+		return messageRefusal(`${frozenMessage(closed)}: no se puede agregar ni cambiar`);
 	}
 	const kept = current.filter((holiday) => isFrozen(holiday.date, freezeLine));
 	return saveHolidays(db, { current, holidays: [...kept, ...parsed.data.holidays], actor });
@@ -244,16 +240,16 @@ export async function overrideFrozenHoliday(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<HolidaysResult> {
+): Promise<SaveResult> {
 	requireRole(actor, POLICIES.overrideClosedDate);
 	const parsed = overrideSchema.safeParse(input);
 	if (!parsed.success) {
-		return { ok: false, message: parsed.error.issues[0].message };
+		return messageRefusal(parsed.error.issues[0].message);
 	}
 	const { original, reason } = parsed.data;
 	const [current, freezeLine] = await Promise.all([findHolidays(db), findFreezeLine(db)]);
 	if (!current.some((holiday) => original === holiday.date && isFrozen(holiday.date, freezeLine))) {
-		return { ok: false, message: 'Esa fecha no está en una nómina pagada' };
+		return messageRefusal('Esa fecha no está en una nómina pagada');
 	}
 	const others = current.filter((holiday) => original !== holiday.date);
 	const holidays = parsed.data.remove ? others : [...others, toHoliday(parsed.data)];
@@ -275,10 +271,10 @@ function frozenMessage(holiday: Holiday): string {
 type HolidaysWrite = { current: Holiday[]; holidays: Holiday[]; actor: Actor; reason?: string };
 
 // Sorted here, so the key's schema only has duplicates left to reject.
-async function saveHolidays(db: D1Database, write: HolidaysWrite): Promise<HolidaysResult> {
+async function saveHolidays(db: D1Database, write: HolidaysWrite): Promise<SaveResult> {
 	const sorted = write.holidays.toSorted((first, second) => first.date.localeCompare(second.date));
 	if (!holidaysSchema.safeParse(sorted).success) {
-		return { ok: false, message: 'Esa fecha ya está en la lista' };
+		return messageRefusal('Esa fecha ya está en la lista');
 	}
 	const statements = auditedUpdate(db, {
 		table: 'settings',
@@ -313,8 +309,6 @@ export type Help = {
 	// When it was last saved in the app (epoch seconds), or null while it's still the default.
 	updatedAt: number | null;
 };
-
-export type TextResult = { ok: true } | { ok: false; message: string };
 
 // The keys with their own Markdown editor.
 type TextKey = 'HELP_FAQ' | 'TERMS_CONDITIONS';
@@ -352,11 +346,11 @@ async function updateText(
 	db: D1Database,
 	{ key, input }: { key: TextKey; input: unknown },
 	actor: Actor | null
-): Promise<TextResult> {
+): Promise<SaveResult> {
 	requireRole(actor, POLICIES.settings);
 	const parsed = SETTINGS[key].schema.safeParse(textFormSchema.parse(input).text);
 	if (!parsed.success) {
-		return { ok: false, message: parsed.error.issues[0].message };
+		return messageRefusal(parsed.error.issues[0].message);
 	}
 	const { [key]: current } = await readSettings(db, [key]);
 	const statements = auditedUpdate(db, {
@@ -378,7 +372,7 @@ export async function updateHelp(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<TextResult> {
+): Promise<SaveResult> {
 	return updateText(db, { key: 'HELP_FAQ', input }, actor);
 }
 
@@ -386,7 +380,7 @@ export async function updateTerms(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<TextResult> {
+): Promise<SaveResult> {
 	return updateText(db, { key: 'TERMS_CONDITIONS', input }, actor);
 }
 

@@ -10,6 +10,7 @@ import { SETTINGS } from '$lib/settings';
 import { POLICIES } from '$lib/roles';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, type Row } from '../audit';
+import { invalid, messageRefusal, type SaveResult } from '../result';
 import { deriveOvertime, type DayPunches, type OvertimeMinutes } from '../overtime';
 import {
 	calculateSettlement,
@@ -183,9 +184,6 @@ export type PayrollWeek = Period & {
 	employees: { id: number; fullName: string; position: string }[];
 	draft: Draft | null;
 };
-
-export type SaveResult =
-	{ ok: true } | { ok: false; message: string; errors: Record<string, string> };
 
 // What a draft keeps between saves: the quantities, the three typed amounts and their descriptions.
 type Entries = {
@@ -650,17 +648,6 @@ function readForm(form: SaveForm): Entries {
 	};
 }
 
-function invalid(error: z.ZodError): SaveResult {
-	const errors = Object.fromEntries(
-		error.issues.map((issue) => [String(issue.path[0]), issue.message])
-	);
-	return { ok: false, message: 'Revisa los campos marcados en rojo antes de guardar.', errors };
-}
-
-function refuse(message: string): SaveResult {
-	return { ok: false, message, errors: {} };
-}
-
 function toSnapshot(settings: PayrollSettings): string {
 	const texts = Object.fromEntries(
 		Object.entries(settings).map(([key, value]) => [
@@ -754,7 +741,7 @@ function toMovementAttributes(form: PaymentForm): Movement['attributes'] {
 async function writeDraft(db: D1Database, form: SaveForm, actor: Actor): Promise<SaveResult> {
 	const target = await findTarget(db, form, actor);
 	if ('string' === typeof target) {
-		return refuse(target);
+		return messageRefusal(target);
 	}
 	const save = { ...target, form, actor, settings: await readSettings(db, PAYROLL_SETTINGS) };
 	const values = toColumns(save, await settle(db, save));

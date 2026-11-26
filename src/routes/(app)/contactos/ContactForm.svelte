@@ -34,6 +34,11 @@
 	const value = (name: string, saved: string | null | undefined) =>
 		String(form?.values[name] ?? saved ?? '');
 	const errorOf = (name: string): string | undefined => form?.errors[name];
+	// Errors come keyed by their whole path: one etiqueta's (`labels.0`) marks the whole field.
+	const labelsError = $derived(
+		errorOf('labels') ??
+			Object.entries(form?.errors ?? {}).find(([path]) => path.startsWith('labels.'))?.[1]
+	);
 
 	// Shown with its `@`, as every username is; typing overrides it until the next load.
 	let whatsapp = $derived(
@@ -188,7 +193,7 @@
 		label="Etiquetas"
 		id="labels"
 		hint={isManager ? undefined : lockedHint}
-		error={errorOf('labels')}
+		error={labelsError}
 	>
 		{#if isManager}
 			<div
@@ -229,9 +234,7 @@
 </form>
 
 {#snippet lockedHint()}
-	<span class="locked-hint"
-		><Icon name="lock" />Solo Gerente o Administrador lo cambian</span
-	>
+	<span class="locked-hint"><Icon name="lock" />Solo Gerente o Administrador lo cambian</span>
 {/snippet}
 
 <!-- Read in full, only not editable: grey, ink text and a lock, never an empty-looking field. -->

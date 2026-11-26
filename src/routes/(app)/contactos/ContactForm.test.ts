@@ -45,3 +45,9 @@ test('for the manager, one chip per etiqueta in the setting, Vetado in the dange
 	expect(body.match(/name="labels"/g)).toHaveLength(4);
 	expect(body).toMatch(/chip--error[^"]*">(<!--[^>]*-->)*<input[^>]*value="BANNED"/);
 });
+
+test('an etiqueta refused by its whole path is marked on the etiquetas field', () => {
+	const form = { message: 'Revisa', errors: { 'labels.0': 'Esa etiqueta no vale' }, values: {} };
+	const body = render(ContactForm, { props: { contact, isManager: true, labels, form } }).body;
+	expect(body).toContain('Esa etiqueta no vale');
+});

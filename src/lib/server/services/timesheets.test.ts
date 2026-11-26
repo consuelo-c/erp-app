@@ -99,7 +99,11 @@ test('a login with no employee can’t punch and has no hours to show', async ()
 		{ work_date: TODAY, punch: 'morningIn', ...at('07:00') },
 		noEmployee
 	);
-	expect(result).toEqual({ ok: false, message: 'Tu usuario no está vinculado a un empleado' });
+	expect(result).toEqual({
+		ok: false,
+		message: 'Tu usuario no está vinculado a un empleado',
+		errors: {}
+	});
 	expect(await getOwnHours(db, { date: TODAY }, noEmployee)).toBeNull();
 });
 
@@ -109,13 +113,17 @@ test('a day not yet come, or outside the employment, is refused', async () => {
 		{ work_date: '2026-08-01', punch: 'morningIn', ...at('07:00') },
 		ana
 	);
-	expect(future).toEqual({ ok: false, message: 'Ese día todavía no ha llegado' });
+	expect(future).toEqual({ ok: false, message: 'Ese día todavía no ha llegado', errors: {} });
 	const before = await saveOwnPunch(
 		db,
 		{ work_date: '2026-06-30', punch: 'morningIn', ...at('07:00') },
 		ana
 	);
-	expect(before).toEqual({ ok: false, message: 'Ese día no hace parte de ningún período laboral' });
+	expect(before).toEqual({
+		ok: false,
+		message: 'Ese día no hace parte de ningún período laboral',
+		errors: {}
+	});
 });
 
 test('any earlier day of the employment can be corrected: no date window', async () => {
@@ -161,7 +169,11 @@ test('each field out of range is refused with its own message', async () => {
 		[{ period: undefined }, 'Escoge a.m. o p.m.']
 	] as const;
 	for (const [change, message] of cases) {
-		expect(await saveOwnPunch(db, { ...base, ...change }, ana)).toEqual({ ok: false, message });
+		expect(await saveOwnPunch(db, { ...base, ...change }, ana)).toEqual({
+			ok: false,
+			message,
+			errors: {}
+		});
 	}
 });
 
@@ -222,12 +234,14 @@ test('a MANAGER’s punch follows the same rules: no unknown employee, no day ou
 	const base = { work_date: TODAY, punch: 'morningIn', ...at('07:00') };
 	expect(await saveEmployeePunch(db, { ...base, employee_id: '999' }, MANAGER)).toEqual({
 		ok: false,
-		message: 'Escoge el empleado'
+		message: 'Escoge el empleado',
+		errors: {}
 	});
 	const before = { ...base, employee_id: String(ana.employeeId), work_date: '2026-06-30' };
 	expect(await saveEmployeePunch(db, before, MANAGER)).toEqual({
 		ok: false,
-		message: 'Ese día no hace parte de ningún período laboral'
+		message: 'Ese día no hace parte de ningún período laboral',
+		errors: {}
 	});
 });
 
@@ -276,11 +290,13 @@ test('clearing follows the punch rules: own day only, and no day outside the emp
 	expect((await getOwnHours(db, { date: TODAY }, ana))?.day.punches.morningIn).toBeNull();
 	expect(await clearOwnDay(db, { work_date: '2026-06-30' }, ana)).toEqual({
 		ok: false,
-		message: 'Ese día no hace parte de ningún período laboral'
+		message: 'Ese día no hace parte de ningún período laboral',
+		errors: {}
 	});
 	expect(await clearOwnDay(db, { work_date: '2026-08-01' }, ana)).toEqual({
 		ok: false,
-		message: 'Ese día todavía no ha llegado'
+		message: 'Ese día todavía no ha llegado',
+		errors: {}
 	});
 });
 
@@ -292,7 +308,8 @@ test('a MANAGER clears a day of the employee chosen in the selector; no one else
 	expect(hours.day.punches.morningIn).toBeNull();
 	expect(await clearEmployeeDay(db, { ...input, employee_id: '999' }, MANAGER)).toEqual({
 		ok: false,
-		message: 'Escoge el empleado'
+		message: 'Escoge el empleado',
+		errors: {}
 	});
 	const forbidden = await clearEmployeeDay(db, input, ana).catch((caught: unknown) => caught);
 	expect(isHttpError(forbidden, 403)).toBe(true);
@@ -330,7 +347,11 @@ test("a PAID settlement locks the employee's punches in its extra-hours range, f
 	// Monday 27 July: its extra hours run from Saturday 25 to Friday 31, today.
 	await saveOwnPunch(db, { work_date: TODAY, punch: 'morningIn', ...at('07:00') }, ana);
 	await settle(ana.employeeId, '2026-07-27', 'PAID');
-	const locked = { ok: false, message: 'Ese día ya se pagó en la nómina: no se puede cambiar' };
+	const locked = {
+		ok: false,
+		message: 'Ese día ya se pagó en la nómina: no se puede cambiar',
+		errors: {}
+	};
 	const punch = { work_date: TODAY, punch: 'morningOut', ...at('12:00') };
 	expect(await saveOwnPunch(db, punch, ana)).toEqual(locked);
 	expect(await clearOwnDay(db, { work_date: TODAY }, ana)).toEqual(locked);
