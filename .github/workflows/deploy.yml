@@ -19,8 +19,14 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
+      # Same key as verify.yml: a cache saved on main is the one a new PR's first check restores.
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node24-${{ hashFiles('package-lock.json') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: npm ci
       # Any failure here stops the deploy before a wrangler step touches production.
       - run: npx vitest run
       - run: npm run lint
