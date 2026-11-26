@@ -1,19 +1,19 @@
 import type { ComponentProps } from 'svelte';
 import { resolve } from '$app/paths';
 import type Icon from '$lib/components/Icon.svelte';
-import type { Role } from '$lib/server/actor';
+import { POLICIES, type Policy, type Role } from '$lib/roles';
 
 type IconName = ComponentProps<typeof Icon>['name'];
 
 /**
- * A page of the menu tree, with the roles its route lets in; without `roles`, every login. A login
- * holding any of `hiddenFrom` doesn't see it, whatever else it holds.
+ * A page of the menu tree, with the policy its route lets in; without `policy`, every login. A
+ * login holding any role of `hiddenFrom` doesn't see it, whatever else it holds.
  */
 type MenuPage = {
 	label: string;
 	href: string;
-	roles?: readonly Role[];
-	hiddenFrom?: readonly Role[];
+	policy?: Policy;
+	hiddenFrom?: Policy;
 };
 
 /**
@@ -39,103 +39,94 @@ export type MenuEntry = {
 
 type MenuPageLink = { label: string; href: string };
 
-const MANAGERS = ['ADMIN', 'MANAGER'] as const;
-const SELLERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
-
-/** The menu tree, in its order. Each page's `roles` copy its route's `requireRole`. */
+/** The menu tree, in its order. */
 const MENU: MenuParent[] = [
 	{ label: 'Despachos', icon: 'truck', page: { href: resolve('/despachos') }, children: [] },
 	{
 		label: 'Pedidos',
 		icon: 'file',
-		page: { href: resolve('/pedidos'), roles: SELLERS },
-		children: [{ label: 'Cotizaciones', href: resolve('/cotizaciones'), roles: SELLERS }]
+		page: { href: resolve('/pedidos'), policy: 'orders' },
+		children: [{ label: 'Cotizaciones', href: resolve('/cotizaciones'), policy: 'quotes' }]
 	},
 	{
 		label: 'Productos/Inventario',
 		icon: 'package',
-		page: { label: 'Productos', href: resolve('/productos'), roles: SELLERS },
+		page: { label: 'Productos', href: resolve('/productos'), policy: 'products' },
 		children: [
-			{
-				label: 'Nuevo conteo',
-				href: resolve('/inventario'),
-				roles: [...MANAGERS, 'WAREHOUSE', 'DRIVER']
-			},
-			{ label: 'Confirmar conteo', href: resolve('/inventario/revisar'), roles: MANAGERS }
+			{ label: 'Nuevo conteo', href: resolve('/inventario'), policy: 'inventoryCount' },
+			{ label: 'Confirmar conteo', href: resolve('/inventario/revisar'), policy: 'inventoryReview' }
 		]
 	},
 	{
 		label: 'Contactos',
 		icon: 'contact',
-		page: { href: resolve('/contactos'), roles: SELLERS },
+		page: { href: resolve('/contactos'), policy: 'contacts' },
 		children: []
 	},
 	{
 		label: 'Pagos/Efectivo',
 		icon: 'wallet',
 		children: [
-			{ label: 'Cuentas de cobro', href: resolve('/cuentas-de-cobro'), roles: SELLERS },
-			{ label: 'Movimiento', href: resolve('/caja/registrar'), roles: MANAGERS },
-			{ label: 'Entregas de efectivo', href: resolve('/caja/entregas'), roles: MANAGERS }
+			{ label: 'Cuentas de cobro', href: resolve('/cuentas-de-cobro'), policy: 'receivables' },
+			{ label: 'Movimiento', href: resolve('/caja/registrar'), policy: 'managesCash' },
+			{ label: 'Entregas de efectivo', href: resolve('/caja/entregas'), policy: 'managesCash' }
 		]
 	},
 	// The managers are the drawer: they hold no cash for the company.
 	{
 		label: 'Efectivo por entregar',
 		icon: 'wallet',
-		page: { href: resolve('/efectivo'), roles: ['SALES', 'DRIVER'], hiddenFrom: MANAGERS },
+		page: { href: resolve('/efectivo'), policy: 'takesCash', hiddenFrom: 'managesCash' },
 		children: []
 	},
 	{
 		label: 'Nómina',
 		icon: 'users',
-		page: { label: 'Personal', href: resolve('/personal'), roles: MANAGERS },
+		page: { label: 'Personal', href: resolve('/personal'), policy: 'employees' },
 		children: [
-			{ label: 'Nómina', href: resolve('/nomina'), roles: MANAGERS },
+			{ label: 'Nómina', href: resolve('/nomina'), policy: 'payroll' },
 			{ label: 'Horas', href: resolve('/horas') },
-			{ label: 'Logins', href: resolve('/logins'), roles: ['ADMIN'] }
+			{ label: 'Logins', href: resolve('/logins'), policy: 'logins' }
 		]
 	},
 	{
 		label: 'Reportes',
 		icon: 'chart',
 		children: [
-			{ label: 'Planilla horas', href: resolve('/horas/equipo'), roles: MANAGERS },
-			{ label: 'Movimientos caja', href: resolve('/caja'), roles: MANAGERS },
+			{ label: 'Planilla horas', href: resolve('/horas/equipo'), policy: 'everyonesHours' },
+			{ label: 'Movimientos caja', href: resolve('/caja'), policy: 'reports' },
 			{
 				label: 'Pérdidas y ganancias',
 				href: resolve('/reportes/perdidas-y-ganancias'),
-				roles: MANAGERS
+				policy: 'reports'
 			},
 			{
 				label: 'Subalquiler',
 				href: resolve('/reportes/subalquiler'),
-				roles: ['ADMIN', 'MANAGER', 'SALES']
+				policy: 'subrental'
 			},
-			{ label: 'Auditoría', href: resolve('/reportes/auditoria'), roles: MANAGERS }
+			{ label: 'Auditoría', href: resolve('/reportes/auditoria'), policy: 'reports' }
 		]
 	},
 	{
 		label: 'Configuración',
 		icon: 'settings',
-		page: { href: resolve('/configuracion'), roles: MANAGERS },
+		page: { href: resolve('/configuracion'), policy: 'settings' },
 		children: [
-			{ label: 'Nómina', href: resolve('/configuracion/nomina'), roles: MANAGERS },
-			{ label: 'Festivos', href: resolve('/configuracion/festivos'), roles: MANAGERS },
-			{ label: 'Ayuda', href: resolve('/configuracion/ayuda'), roles: MANAGERS },
-			{ label: 'Términos', href: resolve('/configuracion/terminos'), roles: MANAGERS },
-			{ label: 'Etiquetas', href: resolve('/configuracion/etiquetas'), roles: MANAGERS }
+			{ label: 'Nómina', href: resolve('/configuracion/nomina'), policy: 'settings' },
+			{ label: 'Festivos', href: resolve('/configuracion/festivos'), policy: 'settings' },
+			{ label: 'Ayuda', href: resolve('/configuracion/ayuda'), policy: 'settings' },
+			{ label: 'Términos', href: resolve('/configuracion/terminos'), policy: 'settings' },
+			{ label: 'Etiquetas', href: resolve('/configuracion/etiquetas'), policy: 'settings' }
 		]
 	},
 	{ label: 'Ayuda', icon: 'help', page: { href: resolve('/ayuda') }, children: [] }
 ];
 
-function canOpen(
-	page: { roles?: readonly Role[]; hiddenFrom?: readonly Role[] },
-	roles: readonly Role[]
-): boolean {
-	const isLetIn = undefined === page.roles || page.roles.some((role) => roles.includes(role));
-	const isHidden = (page.hiddenFrom ?? []).some((role) => roles.includes(role));
+function canOpen(page: Pick<MenuPage, 'policy' | 'hiddenFrom'>, roles: readonly Role[]): boolean {
+	const holdsAny = (policy: Policy) => POLICIES[policy].some((role) => roles.includes(role));
+	const isLetIn = undefined === page.policy || holdsAny(page.policy);
+	const isHidden = undefined !== page.hiddenFrom && holdsAny(page.hiddenFrom);
 	return isLetIn && !isHidden;
 }
 
