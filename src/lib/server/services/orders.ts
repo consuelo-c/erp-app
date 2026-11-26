@@ -31,10 +31,9 @@ import { auditedInsert, auditedUpdate, eventFieldsSchema, type Row } from '../au
 import { describeOrderEdit, type OrderChange } from '../order-changes';
 import { createPublicToken } from '../public-token';
 import { invalid, messageRefusal, refusal, type Refusal, type SaveResult } from '../result';
+import { foldedSql, optional, paginate, searchTextSchema } from '../query';
 import { filterTimelineForActor } from '../timeline';
 import {
-	foldedSql,
-	optional,
 	PAYMENT_METHODS,
 	recordLinkedMovement,
 	type CashConcept,
@@ -1220,12 +1219,6 @@ export const DELIVERY_PERIODS = ['TODAY', 'THIS_WEEK', 'NEXT_WEEK', 'ALL'] as co
 
 export type DeliveryPeriod = (typeof DELIVERY_PERIODS)[number];
 
-// The text as typed, its runs of spaces collapsed: «ivan     betancur» is two words.
-export const searchTextSchema = z
-	.string()
-	.transform((typed) => typed.trim().replace(/\s+/g, ' '))
-	.pipe(z.string().min(1));
-
 // `page` past the last one shows the last: a typed URL is tolerated like any other filter.
 const listSchema = z.object({
 	text: optional(searchTextSchema),
@@ -1368,8 +1361,8 @@ export async function listOrders(
 		.bind(...params)
 		.first<{ total: number }>();
 	const total = count?.total ?? 0;
-	const pageCount = Math.max(1, Math.ceil(total / ORDERS_PAGE_SIZE));
-	const filters = { ...parsed, page: Math.min(parsed.page, pageCount) };
+	const { page, pageCount, offset } = paginate(total, parsed.page, ORDERS_PAGE_SIZE);
+	const filters = { ...parsed, page };
 	const { results } = await db
 		.prepare(
 			`select id, json_extract(client_attributes, '$.name') as client_name, event_date, status,
@@ -1377,7 +1370,7 @@ export async function listOrders(
 			order_total, ${BALANCE_DUE_SQL} as balance_due, receivable_id
 			from orders where ${where} order by event_date desc, id desc limit ? offset ?`
 		)
-		.bind(...params, ORDERS_PAGE_SIZE, (filters.page - 1) * ORDERS_PAGE_SIZE)
+		.bind(...params, ORDERS_PAGE_SIZE, offset)
 		.all<SummaryRow>();
 	return { orders: results.map(toSummary), total, pageCount, filters };
 }

@@ -20,7 +20,7 @@ import { POLICIES } from '$lib/roles';
 import { hasAnyRole, requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
 import { invalid, messageRefusal, refusal, type Refusal, type SaveResult } from '../result';
-import { containing, foldedSql } from './cash';
+import { containing, foldedSql, paginate } from '../query';
 import { readSettings } from './settings';
 
 const optionalText = z.string().min(1).optional();
@@ -597,8 +597,8 @@ export async function listContacts(
 		.bind(...params)
 		.first<{ total: number }>();
 	const total = count?.total ?? 0;
-	const pageCount = Math.max(1, Math.ceil(total / CONTACTS_PAGE_SIZE));
-	const filters = { ...parsed, page: Math.min(parsed.page, pageCount) };
+	const { page, pageCount, offset } = paginate(total, parsed.page, CONTACTS_PAGE_SIZE);
+	const filters = { ...parsed, page };
 	// ponytail: nocase folds ASCII only, so «Ángela» sorts after Z; a sort key column if it bothers.
 	const { results } = await db
 		.prepare(
@@ -606,7 +606,7 @@ export async function listContacts(
 			${from} where ${where}
 			order by full_name collate nocase, contacts.id limit ? offset ?`
 		)
-		.bind(...params, CONTACTS_PAGE_SIZE, (filters.page - 1) * CONTACTS_PAGE_SIZE)
+		.bind(...params, CONTACTS_PAGE_SIZE, offset)
 		.all<SummaryRow>();
 	return { contacts: results.map(toSummary), total, pageCount, filters, labels };
 }

@@ -7,7 +7,8 @@ import { addDays, getDayStartInstant, getMonthRange, getTodaysDate } from '$lib/
 import { POLICIES } from '$lib/roles';
 import { requireRole, type Actor } from '../actor';
 import { eventFieldsSchema } from '../audit';
-import { optional, type CashConcept } from './cash';
+import { optional, paginate } from '../query';
+import { type CashConcept } from './cash';
 import { DAMAGE_CHARGED_SQL, HELD_LINES_SQL } from './orders';
 
 /** Every `events.entity_type` the app writes: Auditoría's «Registro». */
@@ -227,15 +228,15 @@ export async function getAuditLog(
 	const where = clauses.map((clause) => `(${clause.sql})`).join(' and ') || '1';
 	const params = clauses.flatMap((clause) => clause.params);
 	const [total, usernames] = await Promise.all([countEvents(db, where, params), listUsernames(db)]);
-	const pageCount = Math.max(1, Math.ceil(total / AUDIT_LOG_PAGE_SIZE));
-	const filters = { ...parsed, page: Math.min(parsed.page, pageCount) };
+	const { page, pageCount, offset } = paginate(total, parsed.page, AUDIT_LOG_PAGE_SIZE);
+	const filters = { ...parsed, page };
 	const { results } = await db
 		.prepare(
 			`select id, created_at, actor_username, entity_type, entity_id, entity_key, action, before,
 			after, reason, ip, user_agent, ${RECORD_NAME_SQL} as record_name
 			from events where ${where} order by created_at desc, id desc limit ? offset ?`
 		)
-		.bind(...params, AUDIT_LOG_PAGE_SIZE, (filters.page - 1) * AUDIT_LOG_PAGE_SIZE)
+		.bind(...params, AUDIT_LOG_PAGE_SIZE, offset)
 		.all<EventRow>();
 	return {
 		events: results.map(toAuditEvent),

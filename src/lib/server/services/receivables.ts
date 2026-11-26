@@ -11,7 +11,8 @@ import { POLICIES } from '$lib/roles';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, type Diff } from '../audit';
 import { invalid, messageRefusal, type Refusal, type SaveResult } from '../result';
-import { optional, recordLinkedMovement } from './cash';
+import { optional, paginate, searchTextSchema } from '../query';
+import { recordLinkedMovement } from './cash';
 import { contactAttributesSchema, isAutoDocument, searchClause } from './contacts';
 import {
 	orderItemsSchema,
@@ -19,7 +20,6 @@ import {
 	RECEIVABLE_PAID_MOVEMENT_SQL,
 	RECEIVABLE_PAID_SQL,
 	RECEIVABLE_TOTAL_SQL,
-	searchTextSchema,
 	toPayment,
 	type OrderItem,
 	type OrderPayment,
@@ -712,8 +712,8 @@ export async function listReceivables(
 		.bind(...params)
 		.first<{ total: number }>();
 	const total = count?.total ?? 0;
-	const pageCount = Math.max(1, Math.ceil(total / RECEIVABLES_PAGE_SIZE));
-	const filters = { ...parsed, page: Math.min(parsed.page, pageCount) };
+	const { page, pageCount, offset } = paginate(total, parsed.page, RECEIVABLES_PAGE_SIZE);
+	const filters = { ...parsed, page };
 	const { results } = await db
 		.prepare(
 			`select receivables.id, full_name as clientName, issue_date as issueDate,
@@ -721,7 +721,7 @@ export async function listReceivables(
 			${RECEIVABLE_VOID_SQL} as isVoid
 			${source} order by receivables.id desc limit ? offset ?`
 		)
-		.bind(...params, RECEIVABLES_PAGE_SIZE, (filters.page - 1) * RECEIVABLES_PAGE_SIZE)
+		.bind(...params, RECEIVABLES_PAGE_SIZE, offset)
 		.all<Omit<ReceivableSummary, 'isVoid'> & { isVoid: number }>();
 	return { receivables: results.map(toSummary), total, pageCount, filters };
 }
