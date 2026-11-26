@@ -5,7 +5,7 @@ import { requireRole } from '$lib/server/actor';
 import { getDb } from '$lib/server/platform';
 import { getOrderFormOptions } from '$lib/server/services/orders';
 import { convertQuote, getQuoteConversion } from '$lib/server/services/quotes';
-import { readPostedJson } from '../order-form';
+import { readPostedJson } from '$lib/server/posted-json';
 import type { Actions, PageServerLoad } from './$types';
 
 // An order is born only from a quote: `?cotizacion=12` is «Convertir en pedido», the form filled

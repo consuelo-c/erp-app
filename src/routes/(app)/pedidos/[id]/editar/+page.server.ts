@@ -11,7 +11,7 @@ import {
 	getOrderFormOptions,
 	updateOrder
 } from '$lib/server/services/orders';
-import { readPostedJson } from '../../order-form';
+import { readPostedJson } from '$lib/server/posted-json';
 import type { Actions, PageServerLoad } from './$types';
 
 // Once the products are on their way back the order is read-only: its detail, not the form.
