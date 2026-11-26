@@ -69,7 +69,7 @@ Where things live and which helper to reuse. What a screen or service does is re
 - `src/lib/server/db/` — `schema.ts`, Drizzle, source of `migrations/`; `memory-d1.ts`, the tests' D1 over `node:sqlite`
 - `src/service-worker.ts` — the PWA shell cache, never a data response (hence `paths.relative: false`)
 - `migrations/` — generated SQL, append-only
-- `scripts/` — `settings-defaults.sql`, `catalog.sql`, `sample-data.sql`, `wipe-d1-if-squashed.js` (the deploy's guard: fails it on migration drift)
+- `scripts/` — `settings-defaults.sql`, `catalog.sql`, `sample-data.sql`
 - `.github/workflows/` — `verify.yml` (PRs), `deploy.yml` (merge to `main`); `.husky/` — `pre-commit`, `commit-msg`; `.claude/` — the allow and deny lists and the hooks; `docs/agents/` — the issue tracker, triage labels and domain docs the Agent skills read
 
 ## Agent skills

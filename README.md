@@ -162,13 +162,12 @@ Every run, the workflow does these steps in order:
 
 1. Installs the dependencies with `npm ci`.
 1. Runs the tests. If one fails, it stops there, before touching the database.
-1. Compares the migrations applied in D1 with those in `migrations/` and, if they no longer match, fails the deploy (see the note below).
 1. Applies the pending migrations to D1.
 1. Loads the default `settings` from `scripts/settings-defaults.sql`.
 1. Builds the app and publishes it with `wrangler deploy`.
 
 > [!NOTE]
-> Before the November 23, 2026 launch, migrations were squashed freely, and a deploy with squashed migrations dropped every production table while `orders` was empty. Since launch, `migrations/` is append-only and `orders` has rows: if the applied migrations ever stop matching `migrations/`, the deploy fails and deletes nothing. The drift is fixed in `migrations/`.
+> Since the November 23, 2026 launch, `migrations/` is append-only. The deploy never drops a table: if a migration already applied were edited, `wrangler d1 migrations apply` fails and the deploy stops before publishing.
 
 ### Environment variables and secrets
 
@@ -407,7 +406,7 @@ This section is a recipe: **none of it is built**. Until someone follows it, the
 
 Staging is deployed from the terminal, not from GitHub Actions: `npm run deploy:staging`, run from the branch to show, runs the tests, builds and deploys with `--env staging`.
 
-**Every deploy starts from a fresh copy of production's D1.** The script exports the production database, empties staging's, imports the export, applies the branch's migrations and then deploys. Everything done in staging is lost on the next deploy. The step reads production and never writes to it, and the only thing it empties is staging's database. `scripts/wipe-d1-if-squashed.js` isn't used in staging, because the copy already replaces the whole database.
+**Every deploy starts from a fresh copy of production's D1.** The script exports the production database, empties staging's, imports the export, applies the branch's migrations and then deploys. Everything done in staging is lost on the next deploy. The step reads production and never writes to it, and the only thing it empties is staging's database.
 
 > [!WARNING]
 > Risks of deploying from the terminal:
