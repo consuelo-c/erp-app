@@ -2,6 +2,7 @@ import { error } from '@sveltejs/kit';
 import { POLICIES } from '$lib/roles';
 import { requireRole, type Actor } from '$lib/server/actor';
 import { rememberFilters } from '$lib/server/list-filters';
+import { getDb } from '$lib/server/platform';
 import { getCashBook, getMovement } from '$lib/server/services/cash';
 import type { PageServerLoad } from './$types';
 
@@ -12,9 +13,7 @@ import type { PageServerLoad } from './$types';
 export const load: PageServerLoad = async ({ cookies, locals, platform, url }) => {
 	requireRole(locals.user, POLICIES.managesCash);
 	rememberFilters('caja', url, cookies);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
+	const db = getDb(platform);
 	const params = url.searchParams;
 	const input = {
 		from: params.get('desde'),
@@ -28,7 +27,6 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 		max: params.get('maximo'),
 		text: params.get('texto')
 	};
-	const db = platform.env.DB;
 	const [book, movement] = await Promise.all([
 		getCashBook(db, input, locals.user),
 		params.has('movimiento') ? findMovement(db, params.get('movimiento'), locals.user) : null

@@ -1,7 +1,7 @@
-import { error } from '@sveltejs/kit';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { rememberFilters } from '$lib/server/list-filters';
+import { getDb } from '$lib/server/platform';
 import { listOrders } from '$lib/server/services/orders';
 import type { PageServerLoad } from './$types';
 
@@ -11,9 +11,7 @@ import type { PageServerLoad } from './$types';
 export const load: PageServerLoad = async ({ cookies, locals, platform, url }) => {
 	requireRole(locals.user, POLICIES.orders);
 	rememberFilters('pedidos', url, cookies);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
+	const db = getDb(platform);
 	const params = url.searchParams;
 	const input = {
 		text: params.get('texto'),
@@ -24,5 +22,5 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 		hasIncident: params.get('novedad'),
 		page: params.get('pagina') ?? undefined
 	};
-	return listOrders(platform.env.DB, input, locals.user);
+	return listOrders(db, input, locals.user);
 };

@@ -1,6 +1,7 @@
 import { error, fail } from '@sveltejs/kit';
 import { POLICIES } from '$lib/roles';
 import { requireRole, type Actor } from '$lib/server/actor';
+import { getDb } from '$lib/server/platform';
 import {
 	listIncidents,
 	reverseIncident,
@@ -30,10 +31,7 @@ async function getPaymentActions(db: D1Database, order: OrderDetail, actor: Acto
 // The quote it was converted from, if any, for «Desde la cotización #N».
 export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	requireRole(locals.user, POLICIES.orders);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
-	const db = platform.env.DB;
+	const db = getDb(platform);
 	const order = await getOrderDetail(db, params.id, locals.user);
 	if (null === order) {
 		error(404, 'Ese pedido no existe');
@@ -48,12 +46,10 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 export const actions: Actions = {
 	cancelar: async ({ locals, params, platform, request }) => {
 		requireRole(locals.user, POLICIES.orders);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
+		const db = getDb(platform);
 		const { reason } = Object.fromEntries(await request.formData());
 		const input = { id: params.id, reason };
-		const result = await cancelOrder(platform.env.DB, input, locals.user);
+		const result = await cancelOrder(db, input, locals.user);
 		if (result.ok) {
 			return { cancelled: true };
 		}
@@ -62,11 +58,9 @@ export const actions: Actions = {
 	// Its reporter until it's frozen, the manager on any: the service decides.
 	revertir: async ({ locals, platform, request }) => {
 		requireRole(locals.user, POLICIES.orders);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
+		const db = getDb(platform);
 		const { id, reason } = Object.fromEntries(await request.formData());
-		const result = await reverseIncident(platform.env.DB, { id, reason }, locals.user);
+		const result = await reverseIncident(db, { id, reason }, locals.user);
 		if (result.ok) {
 			return { reversed: true };
 		}
@@ -74,12 +68,10 @@ export const actions: Actions = {
 	},
 	responsable: async ({ locals, platform, request }) => {
 		requireRole(locals.user, POLICIES.incidents);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
+		const db = getDb(platform);
 		const { id, responsible_party } = Object.fromEntries(await request.formData());
 		const input = { id, responsible_party };
-		const result = await setResponsibleParty(platform.env.DB, input, locals.user);
+		const result = await setResponsibleParty(db, input, locals.user);
 		return result.ok ? { assigned: true } : fail(400, { assignMessage: result.message });
 	}
 };

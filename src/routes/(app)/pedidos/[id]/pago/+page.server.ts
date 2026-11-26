@@ -3,6 +3,7 @@ import { resolve } from '$app/paths';
 import { getTodaysDate } from '$lib/datetime';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
+import { getDb } from '$lib/server/platform';
 import {
 	getOrderDetail,
 	getPaymentOptions,
@@ -16,10 +17,7 @@ import type { Actions, PageServerLoad } from './$types';
 // destino is pre-filled from, and its concepts. With none to offer, back to the order.
 export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	requireRole(locals.user, POLICIES.orders);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
-	const db = platform.env.DB;
+	const db = getDb(platform);
 	const order = await getOrderDetail(db, params.id, locals.user);
 	if (null === order) {
 		error(404, 'Ese pedido no existe');
@@ -41,11 +39,9 @@ export const actions: Actions = {
 	// Saved, the order shows the new payment and offers its receipt.
 	default: async ({ locals, params, platform, request }) => {
 		requireRole(locals.user, POLICIES.orders);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
+		const db = getDb(platform);
 		const values = { ...Object.fromEntries(await request.formData()), order_id: params.id };
-		const result = await recordOrderPayment(platform.env.DB, values, locals.user);
+		const result = await recordOrderPayment(db, values, locals.user);
 		if (!result.ok) {
 			return fail(400, { message: result.message, errors: result.errors });
 		}

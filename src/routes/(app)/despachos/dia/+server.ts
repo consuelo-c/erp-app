@@ -1,7 +1,8 @@
-import { error, json } from '@sveltejs/kit';
+import { json } from '@sveltejs/kit';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { rememberDispatchDay } from '$lib/server/list-filters';
+import { getDb } from '$lib/server/platform';
 import { getDispatchDay } from '$lib/server/services/dispatch';
 import { getOrderDetail } from '$lib/server/services/orders';
 import type { RequestHandler } from './$types';
@@ -12,10 +13,7 @@ import type { RequestHandler } from './$types';
 // holds more than a few dozen orders.
 export const GET: RequestHandler = async ({ cookies, locals, platform, url }) => {
 	requireRole(locals.user, POLICIES.anyLogin);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
-	const db = platform.env.DB;
+	const db = getDb(platform);
 	const day = await getDispatchDay(db, rememberDispatchDay(url, cookies), locals.user);
 	if (day.date !== day.today) {
 		return json({ day, details: null });

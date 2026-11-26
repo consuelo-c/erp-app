@@ -1,6 +1,6 @@
-import { error } from '@sveltejs/kit';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
+import { getDb } from '$lib/server/platform';
 import { getCashStatement, listPeopleWithTab } from '$lib/server/services/cash-handovers';
 import type { PageServerLoad } from './$types';
 
@@ -8,10 +8,8 @@ import type { PageServerLoad } from './$types';
 // `?desde=` and `?hasta=`: the first person and today by default.
 export const load: PageServerLoad = async ({ locals, platform, url }) => {
 	requireRole(locals.user, POLICIES.managesCash);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
-	const people = await listPeopleWithTab(platform.env.DB, locals.user);
+	const db = getDb(platform);
+	const people = await listPeopleWithTab(db, locals.user);
 	const chosen = url.searchParams.get('persona');
 	const person = people.find(({ username }) => username === chosen) ?? people[0];
 	if (undefined === person) {
@@ -22,5 +20,5 @@ export const load: PageServerLoad = async ({ locals, platform, url }) => {
 		from: url.searchParams.get('desde'),
 		to: url.searchParams.get('hasta')
 	};
-	return { people, person, statement: await getCashStatement(platform.env.DB, input, locals.user) };
+	return { people, person, statement: await getCashStatement(db, input, locals.user) };
 };

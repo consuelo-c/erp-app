@@ -1,20 +1,18 @@
-import { error } from '@sveltejs/kit';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { rememberFilters } from '$lib/server/list-filters';
+import { getDb } from '$lib/server/platform';
 import { listContacts } from '$lib/server/services/contacts';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ cookies, locals, platform, url }) => {
 	requireRole(locals.user, POLICIES.contacts);
 	rememberFilters('contactos', url, cookies);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
+	const db = getDb(platform);
 	const input = {
 		search: url.searchParams.get('texto') ?? undefined,
 		label: url.searchParams.get('etiqueta') ?? undefined,
 		page: url.searchParams.get('pagina') ?? undefined
 	};
-	return listContacts(platform.env.DB, input, locals.user);
+	return listContacts(db, input, locals.user);
 };

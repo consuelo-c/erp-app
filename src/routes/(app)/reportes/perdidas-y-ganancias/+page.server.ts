@@ -1,6 +1,6 @@
-import { error } from '@sveltejs/kit';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
+import { getDb } from '$lib/server/platform';
 import { getProfitAndLoss } from '$lib/server/services/reports';
 import type { PageServerLoad } from './$types';
 
@@ -8,9 +8,7 @@ import type { PageServerLoad } from './$types';
 // dates, both inclusive), the current month by default.
 export const load: PageServerLoad = async ({ locals, platform, url }) => {
 	requireRole(locals.user, POLICIES.reports);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
+	const db = getDb(platform);
 	const input = { from: url.searchParams.get('desde'), to: url.searchParams.get('hasta') };
-	return { report: await getProfitAndLoss(platform.env.DB, input, locals.user) };
+	return { report: await getProfitAndLoss(db, input, locals.user) };
 };

@@ -1,7 +1,7 @@
-import { error } from '@sveltejs/kit';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { rememberFilters } from '$lib/server/list-filters';
+import { getDb } from '$lib/server/platform';
 import { listReceivables } from '$lib/server/services/receivables';
 import type { PageServerLoad } from './$types';
 
@@ -10,14 +10,12 @@ import type { PageServerLoad } from './$types';
 export const load: PageServerLoad = async ({ cookies, locals, platform, url }) => {
 	requireRole(locals.user, POLICIES.receivables);
 	rememberFilters('cuentas-de-cobro', url, cookies);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
+	const db = getDb(platform);
 	const params = url.searchParams;
 	const input = {
 		text: params.get('texto'),
 		hasBalance: params.get('pendiente'),
 		page: params.get('pagina') ?? undefined
 	};
-	return listReceivables(platform.env.DB, input, locals.user);
+	return listReceivables(db, input, locals.user);
 };

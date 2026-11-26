@@ -3,6 +3,7 @@ import { resolve } from '$app/paths';
 import { POLICIES } from '$lib/roles';
 import { hasAnyRole } from '$lib/server/actor';
 import { renderTerms } from '$lib/server/markdown';
+import { getDb } from '$lib/server/platform';
 import {
 	findConvertedOrderToken,
 	findQuoteIdByToken,
@@ -17,10 +18,7 @@ import type { PageServerLoad } from './$types';
 // converted quote's link to its order's page, and gets the client's page otherwise. The session is
 // only read.
 export const load: PageServerLoad = async ({ locals, params, platform, url }) => {
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
-	const db = platform.env.DB;
+	const db = getDb(platform);
 	if (null !== locals.user && hasAnyRole(locals.user, POLICIES.quotes)) {
 		const id = await findQuoteIdByToken(db, params.token);
 		if (null !== id) {

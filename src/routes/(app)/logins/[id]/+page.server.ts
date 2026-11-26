@@ -1,7 +1,8 @@
-import { error, fail, redirect } from '@sveltejs/kit';
+import { fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
+import { getDb } from '$lib/server/platform';
 import { deactivateLogin, reactivateLogin, updateRoles } from '$lib/server/services/logins';
 import type { Actions } from './$types';
 
@@ -9,11 +10,9 @@ import type { Actions } from './$types';
 export const actions: Actions = {
 	roles: async ({ locals, platform, request, params }) => {
 		requireRole(locals.user, POLICIES.logins);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
+		const db = getDb(platform);
 		const roles = (await request.formData()).getAll('roles').map(String);
-		const result = await updateRoles(platform.env.DB, { id: params.id, roles }, locals.user);
+		const result = await updateRoles(db, { id: params.id, roles }, locals.user);
 		if (!result.ok) {
 			return fail(400, { message: result.message, roles });
 		}
@@ -21,10 +20,8 @@ export const actions: Actions = {
 	},
 	deactivate: async ({ locals, platform, params }) => {
 		requireRole(locals.user, POLICIES.logins);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
-		const result = await deactivateLogin(platform.env.DB, { id: params.id }, locals.user);
+		const db = getDb(platform);
+		const result = await deactivateLogin(db, { id: params.id }, locals.user);
 		if (!result.ok) {
 			return fail(400, { message: result.message });
 		}
@@ -32,10 +29,8 @@ export const actions: Actions = {
 	},
 	reactivate: async ({ locals, platform, params }) => {
 		requireRole(locals.user, POLICIES.logins);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
-		const result = await reactivateLogin(platform.env.DB, { id: params.id }, locals.user);
+		const db = getDb(platform);
+		const result = await reactivateLogin(db, { id: params.id }, locals.user);
 		if (!result.ok) {
 			return fail(400, { message: result.message });
 		}

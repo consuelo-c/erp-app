@@ -1,6 +1,6 @@
-import { error } from '@sveltejs/kit';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
+import { getDb } from '$lib/server/platform';
 import { getSubLending } from '$lib/server/services/reports';
 import type { PageServerLoad } from './$types';
 
@@ -8,9 +8,7 @@ import type { PageServerLoad } from './$types';
 // dates, both inclusive), today only by default.
 export const load: PageServerLoad = async ({ locals, platform, url }) => {
 	requireRole(locals.user, POLICIES.subrental);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
+	const db = getDb(platform);
 	const input = { from: url.searchParams.get('desde'), to: url.searchParams.get('hasta') };
-	return { report: await getSubLending(platform.env.DB, input, locals.user) };
+	return { report: await getSubLending(db, input, locals.user) };
 };

@@ -3,6 +3,7 @@ import { resolve } from '$app/paths';
 import { isEditableStatus } from '$lib/orders';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
+import { getDb } from '$lib/server/platform';
 import { isBannedClient } from '$lib/server/services/contacts';
 import {
 	getOrderBilling,
@@ -16,10 +17,7 @@ import type { Actions, PageServerLoad } from './$types';
 // Once the products are on their way back the order is read-only: its detail, not the form.
 export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	requireRole(locals.user, POLICIES.orders);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
-	const db = platform.env.DB;
+	const db = getDb(platform);
 	const [order, options] = await Promise.all([
 		getOrderDetail(db, params.id, locals.user),
 		getOrderFormOptions(db, locals.user)
@@ -40,12 +38,10 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 export const actions: Actions = {
 	default: async ({ locals, params, platform, request }) => {
 		requireRole(locals.user, POLICIES.orders);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
+		const db = getDb(platform);
 		const posted = readPostedJson(await request.formData(), 'order');
 		const order = { ...(posted as object), id: params.id };
-		const result = await updateOrder(platform.env.DB, order, locals.user);
+		const result = await updateOrder(db, order, locals.user);
 		if (!result.ok) {
 			return fail(400, result);
 		}

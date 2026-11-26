@@ -2,6 +2,7 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
+import { getDb } from '$lib/server/platform';
 import { isBannedClient } from '$lib/server/services/contacts';
 import { getQuote, getQuoteFormOptions, updateQuote } from '$lib/server/services/quotes';
 import { readPostedJson } from '../../../pedidos/order-form';
@@ -10,10 +11,7 @@ import type { Actions, PageServerLoad } from './$types';
 // A converted quote is read-only: its detail, not the form.
 export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	requireRole(locals.user, POLICIES.quotes);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
-	const db = platform.env.DB;
+	const db = getDb(platform);
 	const [quote, options] = await Promise.all([
 		getQuote(db, params.id, locals.user),
 		getQuoteFormOptions(db, locals.user)
@@ -31,12 +29,10 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 export const actions: Actions = {
 	default: async ({ locals, params, platform, request }) => {
 		requireRole(locals.user, POLICIES.quotes);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
+		const db = getDb(platform);
 		const posted = readPostedJson(await request.formData(), 'quote');
 		const quote = { ...(posted as object), id: params.id };
-		const result = await updateQuote(platform.env.DB, quote, locals.user);
+		const result = await updateQuote(db, quote, locals.user);
 		if (!result.ok) {
 			return fail(400, result);
 		}

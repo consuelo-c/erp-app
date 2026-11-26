@@ -1,8 +1,9 @@
-import { error, redirect } from '@sveltejs/kit';
+import { redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { forgetFilters } from '$lib/server/list-filters';
+import { getDb } from '$lib/server/platform';
 import { logOut } from '$lib/server/services/auth';
 import { deleteSessionCookie, SESSION_COOKIE } from '$lib/server/session-cookie';
 import type { RequestHandler } from './$types';
@@ -16,11 +17,9 @@ export const POST: RequestHandler = async ({
 	getClientAddress
 }) => {
 	requireRole(locals.user, POLICIES.anyLogin);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
+	const db = getDb(platform);
 	// The hook only sets locals.user from a valid cookie, so the token is here.
-	await logOut(platform.env.DB, cookies.get(SESSION_COOKIE) ?? '', {
+	await logOut(db, cookies.get(SESSION_COOKIE) ?? '', {
 		ip: getClientAddress(),
 		userAgent: request.headers.get('user-agent')
 	});

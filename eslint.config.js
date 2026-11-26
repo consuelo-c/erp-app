@@ -50,11 +50,14 @@ export default defineConfig(
 			'id-length': ['error', { min: 2, exceptions: ['i', 'j', '_'] }],
 			'unicorn/name-replacements': [
 				'error',
-				// `Props` is Svelte's convention for a component's props type.
+				// `Props` is Svelte's convention for a component's props type; `getDb` and `getEnv` name the
+				// platform helpers after the `db` and `env` they return.
 				{
 					allowList: {
 						db: true,
 						env: true,
+						getDb: true,
+						getEnv: true,
 						params: true,
 						props: true,
 						Props: true,

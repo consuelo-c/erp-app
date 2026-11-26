@@ -1,17 +1,16 @@
 import { error, json } from '@sveltejs/kit';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
+import { getDb } from '$lib/server/platform';
 import { getQuoteChange } from '$lib/server/services/quotes';
 import type { RequestHandler } from './$types';
 
 // The timeline asks for an edit's changes when its row opens: the list never carries them.
 export const GET: RequestHandler = async ({ locals, params, platform }) => {
 	requireRole(locals.user, POLICIES.quotes);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
+	const db = getDb(platform);
 	const input = { quote: params.id, event: params.evento };
-	const changes = await getQuoteChange(platform.env.DB, input, locals.user);
+	const changes = await getQuoteChange(db, input, locals.user);
 	if (null === changes) {
 		error(404, 'Esa edición no existe');
 	}

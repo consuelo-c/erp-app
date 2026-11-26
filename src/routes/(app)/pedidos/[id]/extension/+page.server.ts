@@ -2,6 +2,7 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
+import { getDb } from '$lib/server/platform';
 import { isBannedClient } from '$lib/server/services/contacts';
 import { createExtension, getOrderDetail, getOrderFormOptions } from '$lib/server/services/orders';
 import { readPostedJson } from '../../order-form';
@@ -10,10 +11,7 @@ import type { Actions, PageServerLoad } from './$types';
 // Only a delivered order is extended: any other goes back to its detail.
 export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	requireRole(locals.user, POLICIES.orders);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
-	const db = platform.env.DB;
+	const db = getDb(platform);
 	const [original, options] = await Promise.all([
 		getOrderDetail(db, params.id, locals.user),
 		getOrderFormOptions(db, locals.user)
@@ -31,12 +29,10 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 export const actions: Actions = {
 	default: async ({ locals, params, platform, request }) => {
 		requireRole(locals.user, POLICIES.orders);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
+		const db = getDb(platform);
 		const posted = readPostedJson(await request.formData(), 'order');
 		const extension = { ...(posted as object), parent_order_id: params.id };
-		const result = await createExtension(platform.env.DB, extension, locals.user);
+		const result = await createExtension(db, extension, locals.user);
 		if (!result.ok) {
 			return fail(400, result);
 		}

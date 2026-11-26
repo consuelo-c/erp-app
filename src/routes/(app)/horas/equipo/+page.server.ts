@@ -1,7 +1,7 @@
-import { error } from '@sveltejs/kit';
 import { getTodaysDate } from '$lib/datetime';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
+import { getDb } from '$lib/server/platform';
 import { getTeamWeek } from '$lib/server/services/timesheets';
 import type { PageServerLoad } from './$types';
 
@@ -9,12 +9,10 @@ import type { PageServerLoad } from './$types';
 // the review before settling payroll. Any other role gets the shared 403.
 export const load: PageServerLoad = async ({ locals, platform, url }) => {
 	requireRole(locals.user, POLICIES.everyonesHours);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
+	const db = getDb(platform);
 	const week = url.searchParams.get('semana');
 	return {
 		today: getTodaysDate(),
-		...(await getTeamWeek(platform.env.DB, { week }, locals.user))
+		...(await getTeamWeek(db, { week }, locals.user))
 	};
 };
