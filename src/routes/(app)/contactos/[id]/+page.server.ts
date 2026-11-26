@@ -14,7 +14,11 @@ export const load: PageServerLoad = async ({ locals, platform, params }) => {
 		error(404, 'Ese contacto no existe');
 	}
 	const labels = await listContactLabels(db, locals.user);
-	return { contact, isManager: hasAnyRole(locals.user, POLICIES.lockedContactFields), labels };
+	return {
+		contact,
+		canEditLockedFields: hasAnyRole(locals.user, POLICIES.lockedContactFields),
+		labels
+	};
 };
 
 export const actions: Actions = {

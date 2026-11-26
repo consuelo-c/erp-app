@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import type { Actor } from '../actor';
 import { ADMIN, createFixture, MANAGER, TEST_PEPPER } from '../db/fixture';
+import { CHECK_FIELDS } from '../result';
 import { logIn } from './auth';
 import { createEmployee, endEmployment } from './employees';
 import {
@@ -18,7 +19,6 @@ import {
 } from './logins';
 
 const pepper = TEST_PEPPER;
-const CHECK_FIELDS = 'Revisa los campos marcados en rojo antes de guardar.';
 
 let db: D1Database;
 let database: DatabaseSync;

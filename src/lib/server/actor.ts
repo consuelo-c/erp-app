@@ -1,6 +1,6 @@
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
-import { POLICIES, ROLES, type Role } from '$lib/roles';
+import { holdsAnyRole, ROLES, type Role } from '$lib/roles';
 
 /** Who performs a write: a logged-in user, the seed, an AI agent or an external integration. */
 export type Actor = {
@@ -22,13 +22,7 @@ export function hasRole(actor: Actor, role: Role): boolean {
 }
 
 export function hasAnyRole(actor: Actor, roles: readonly Role[]): boolean {
-	return roles.some((role) => hasRole(actor, role));
-}
-
-/** Whether a login has an Efectivo por entregar: it takes cash and isn't the drawer. */
-export function hasCashTab(roles: readonly Role[]): boolean {
-	const holds = (role: Role) => roles.includes(role);
-	return POLICIES.takesCash.some(holds) && !POLICIES.managesCash.some(holds);
+	return holdsAnyRole(actor.roles, roles);
 }
 
 /** Throws a 401 without an actor (no session), a 403 unless it holds at least one of `roles`. */

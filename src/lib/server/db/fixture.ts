@@ -6,6 +6,7 @@ import { getTodaysDate } from '$lib/datetime';
 import { nextOperationalStatus, type OperationalStatus } from '$lib/orders';
 import type { Role } from '$lib/roles';
 import type { Actor } from '../actor';
+import type { SaveResult } from '../result';
 import { createContact, getContact, updateContact } from '../services/contacts';
 import { createEmployee } from '../services/employees';
 import { createLogin, getLogin } from '../services/logins';
@@ -66,10 +67,8 @@ export const DRIVER = actorWith('DRIVER');
 /** One fixture's database, and the counter that keeps its phones, ID numbers and names apart. */
 type Context = { db: D1Database; next: () => number };
 
-type Saved = { ok: true; id: number } | { ok: false; message: string };
-
 // A broken default must read as a setup error naming the service's reason, not a later mismatch.
-function savedId(builder: string, result: Saved): number {
+function savedId(builder: string, result: SaveResult<{ id: number }>): number {
 	if (!result.ok) {
 		const { message, ...details } = result;
 		throw new Error(`${builder}() was refused: ${message} ${JSON.stringify(details)}`);

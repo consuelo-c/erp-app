@@ -41,3 +41,13 @@ export const POLICIES = {
 } as const satisfies Record<string, readonly Role[]>;
 
 export type Policy = keyof typeof POLICIES;
+
+/** Whether a login holding `roles` holds at least one of `allowed`, a policy's roles. */
+export function holdsAnyRole(roles: readonly Role[], allowed: readonly Role[]): boolean {
+	return allowed.some((role) => roles.includes(role));
+}
+
+/** Whether a login has an Efectivo por entregar: it takes cash and isn't the drawer. */
+export function hasCashTab(roles: readonly Role[]): boolean {
+	return holdsAnyRole(roles, POLICIES.takesCash) && !holdsAnyRole(roles, POLICIES.managesCash);
+}

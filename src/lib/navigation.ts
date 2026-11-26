@@ -1,19 +1,19 @@
 import type { ComponentProps } from 'svelte';
 import { resolve } from '$app/paths';
 import type Icon from '$lib/components/Icon.svelte';
-import { POLICIES, type Policy, type Role } from '$lib/roles';
+import { hasCashTab, holdsAnyRole, POLICIES, type Policy, type Role } from '$lib/roles';
 
 type IconName = ComponentProps<typeof Icon>['name'];
 
 /**
  * A page of the menu tree, with the policy its route lets in; without `policy`, every login. A
- * login holding any role of `hiddenFrom` doesn't see it, whatever else it holds.
+ * page whose rule isn't one policy names it in `isOpenTo` instead.
  */
 type MenuPage = {
 	label: string;
 	href: string;
 	policy?: Policy;
-	hiddenFrom?: Policy;
+	isOpenTo?: (roles: readonly Role[]) => boolean;
 };
 
 /**
@@ -76,7 +76,7 @@ const MENU: MenuParent[] = [
 	{
 		label: 'Efectivo por entregar',
 		icon: 'wallet',
-		page: { href: resolve('/efectivo'), policy: 'takesCash', hiddenFrom: 'managesCash' },
+		page: { href: resolve('/efectivo'), isOpenTo: hasCashTab },
 		children: []
 	},
 	{
@@ -123,11 +123,11 @@ const MENU: MenuParent[] = [
 	{ label: 'Ayuda', icon: 'help', page: { href: resolve('/ayuda') }, children: [] }
 ];
 
-function canOpen(page: Pick<MenuPage, 'policy' | 'hiddenFrom'>, roles: readonly Role[]): boolean {
-	const holdsAny = (policy: Policy) => POLICIES[policy].some((role) => roles.includes(role));
-	const isLetIn = undefined === page.policy || holdsAny(page.policy);
-	const isHidden = undefined !== page.hiddenFrom && holdsAny(page.hiddenFrom);
-	return isLetIn && !isHidden;
+function canOpen(page: Pick<MenuPage, 'policy' | 'isOpenTo'>, roles: readonly Role[]): boolean {
+	if (undefined !== page.isOpenTo) {
+		return page.isOpenTo(roles);
+	}
+	return undefined === page.policy || holdsAnyRole(roles, POLICIES[page.policy]);
 }
 
 /** A parent's own page as one login sees it: both keys undefined when it has none it can open. */

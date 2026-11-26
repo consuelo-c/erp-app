@@ -5,7 +5,7 @@ export type Refusal = { ok: false; message: string; errors: Record<string, strin
 
 export type SaveResult<Saved extends object = object> = ({ ok: true } & Saved) | Refusal;
 
-const CHECK_FIELDS = 'Revisa los campos marcados en rojo antes de guardar.';
+export const CHECK_FIELDS = 'Revisa los campos marcados en rojo antes de guardar.';
 
 /** One field marked, under the default banner. */
 export function refusal(field: string, message: string): Refusal {
