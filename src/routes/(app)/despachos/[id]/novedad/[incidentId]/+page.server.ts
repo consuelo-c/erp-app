@@ -3,9 +3,9 @@ import { resolve } from '$app/paths';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { getDb } from '$lib/server/platform';
+import { readPostedJson } from '$lib/server/posted-json';
 import { correctIncident, listIncidents } from '$lib/server/services/incidents';
 import { getOrderDetail } from '$lib/server/services/orders';
-import { readPostedItems } from '../posted-items';
 import type { Actions, PageServerLoad } from './$types';
 
 // «Corregir»: the report form, pre-filled with one of the order's incidents the actor may correct.
@@ -36,7 +36,7 @@ export const actions: Actions = {
 		const input = {
 			id: params.incidentId,
 			incident_description: formData.get('incident_description'),
-			items: readPostedItems(formData.get('items'))
+			items: readPostedJson(formData, 'items')
 		};
 		const result = await correctIncident(db, input, locals.user);
 		if (!result.ok) {

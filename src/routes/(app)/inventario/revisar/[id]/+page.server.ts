@@ -2,6 +2,7 @@ import { error, fail } from '@sveltejs/kit';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { getDb } from '$lib/server/platform';
+import { readPostedJson } from '$lib/server/posted-json';
 import { approveCount, getCount, rejectCount, reverseCount } from '$lib/server/services/inventory';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -15,15 +16,6 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 	return { count };
 };
 
-// The reviewer's edits are a list the browser builds, posted as JSON in one field.
-function readPostedEdits(value: FormDataEntryValue | null): unknown {
-	try {
-		return JSON.parse(String(value));
-	} catch {
-		return null;
-	}
-}
-
 export const actions: Actions = {
 	aprobar: async ({ locals, params, platform, request }) => {
 		requireRole(locals.user, POLICIES.inventoryReview);
@@ -32,7 +24,7 @@ export const actions: Actions = {
 		const input = {
 			id: params.id,
 			note: formData.get('note'),
-			edits: readPostedEdits(formData.get('edits'))
+			edits: readPostedJson(formData, 'edits')
 		};
 		const result = await approveCount(db, input, locals.user);
 		return result.ok ? { approved: true } : fail(400, { approveMessage: result.message });

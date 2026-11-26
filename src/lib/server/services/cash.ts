@@ -256,7 +256,7 @@ export async function recordMovement(
 		return invalid(form.error);
 	}
 	if (!(await isPaidByValid(db, form.data.paid_by))) {
-		return { ok: false, message: NO_TAB_MESSAGE, errors: { paid_by: NO_TAB_MESSAGE } };
+		return messageRefusal(NO_TAB_MESSAGE, 'paid_by');
 	}
 	return insertMovement(db, actor, {
 		concept: form.data.concept,
@@ -332,7 +332,7 @@ export async function recordLinkedMovement(
 	}
 	const { retention } = movement;
 	if (undefined !== retention && form.data.amount > retention.available) {
-		return { ok: false, message: retention.message, errors: { amount: retention.message } };
+		return messageRefusal(retention.message, 'amount');
 	}
 	const [refund, statements] = linkedStatements(db, actor, { movement, form: form.data });
 	const results = await db.batch([...refund, ...statements]);

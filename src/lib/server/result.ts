@@ -17,9 +17,9 @@ export function fieldsRefusal(errors: Record<string, string>): Refusal {
 	return { ok: false, message: CHECK_FIELDS, errors };
 }
 
-/** A refusal of the whole entry, with no field to mark. */
-export function messageRefusal(message: string): Refusal {
-	return { ok: false, message, errors: {} };
+/** A refusal of the whole entry under its own message, marking `field`, if given, with the same message. */
+export function messageRefusal(message: string, field?: string): Refusal {
+	return { ok: false, message, errors: undefined === field ? {} : { [field]: message } };
 }
 
 /** Each field's message under its whole path, as `order_items.2.qty` or `delivery_attributes.carrier_id`. */

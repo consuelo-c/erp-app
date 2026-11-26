@@ -3,9 +3,9 @@ import { resolve } from '$app/paths';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { getDb } from '$lib/server/platform';
+import { readPostedJson } from '$lib/server/posted-json';
 import { reportIncident } from '$lib/server/services/incidents';
 import { getOrderDetail } from '$lib/server/services/orders';
-import { readPostedItems } from './posted-items';
 import type { Actions, PageServerLoad } from './$types';
 
 // The incident report: the order's lines to pick from, open to every role.
@@ -28,7 +28,7 @@ export const actions: Actions = {
 		const input = {
 			order_id: params.id,
 			incident_description: formData.get('incident_description'),
-			items: readPostedItems(formData.get('items'))
+			items: readPostedJson(formData, 'items')
 		};
 		const result = await reportIncident(db, input, locals.user);
 		if (!result.ok) {
