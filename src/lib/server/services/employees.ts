@@ -3,6 +3,7 @@
 // and WhatsApp username live there, so they read the same in Contactos.
 
 import { z } from 'zod';
+import { POLICIES } from '$lib/roles';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
 import { containing } from './cash';
@@ -16,9 +17,6 @@ import {
 	whatsappClause,
 	whatsappSchema
 } from './contacts';
-
-// Salaries live here, so only the ones who settle payroll see or touch employees.
-const MANAGES_EMPLOYEES = ['ADMIN', 'MANAGER'] as const;
 
 const periodSchema = z
 	.object({ start: z.iso.date(), end: z.iso.date().nullable() })
@@ -161,7 +159,7 @@ async function findRow(db: D1Database, id: number): Promise<EmployeeRow | null> 
 
 /** Every employee, the currently employed first; a few dozen rows, filtered in JS. */
 export async function listEmployees(db: D1Database, actor: Actor | null): Promise<Employee[]> {
-	requireRole(actor, MANAGES_EMPLOYEES);
+	requireRole(actor, POLICIES.employees);
 	const { results } = await db.prepare(EMPLOYEE_SELECT).all<EmployeeRow>();
 	return results
 		.map(toEmployee)
@@ -177,7 +175,7 @@ export async function getEmployee(
 	id: number,
 	actor: Actor | null
 ): Promise<Employee | null> {
-	requireRole(actor, MANAGES_EMPLOYEES);
+	requireRole(actor, POLICIES.employees);
 	const row = await findRow(db, id);
 	return null === row ? null : toEmployee(row);
 }
@@ -245,7 +243,7 @@ export async function searchContactCandidates(
 	typed: unknown,
 	actor: Actor | null
 ): Promise<ContactCandidate[]> {
-	requireRole(actor, MANAGES_EMPLOYEES);
+	requireRole(actor, POLICIES.employees);
 	const search = z.string().trim().catch('').parse(typed);
 	if (3 > search.length) {
 		return [];
@@ -302,7 +300,7 @@ export async function createEmployee(
 	input: unknown,
 	actor: Actor | null
 ): Promise<Result> {
-	requireRole(actor, MANAGES_EMPLOYEES);
+	requireRole(actor, POLICIES.employees);
 	const parsed = createSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalidForm(parsed.error);
@@ -395,7 +393,7 @@ export async function updateEmployee(
 	input: unknown,
 	actor: Actor | null
 ): Promise<Result> {
-	requireRole(actor, MANAGES_EMPLOYEES);
+	requireRole(actor, POLICIES.employees);
 	const parsed = updateSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalidForm(parsed.error);
@@ -446,7 +444,7 @@ export async function endEmployment(
 	input: unknown,
 	actor: Actor | null
 ): Promise<Result> {
-	requireRole(actor, MANAGES_EMPLOYEES);
+	requireRole(actor, POLICIES.employees);
 	const parsed = endSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalid(parsed.error);
@@ -469,7 +467,7 @@ export async function endEmployment(
 
 /** Appends a new open period to the same row: a rehire is never a second employee. */
 export async function rehire(db: D1Database, input: unknown, actor: Actor | null): Promise<Result> {
-	requireRole(actor, MANAGES_EMPLOYEES);
+	requireRole(actor, POLICIES.employees);
 	const parsed = rehireSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalid(parsed.error);

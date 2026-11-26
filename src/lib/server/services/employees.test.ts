@@ -1,7 +1,7 @@
 import { isHttpError } from '@sveltejs/kit';
 import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
-import type { Role } from '../actor';
+import type { Role } from '$lib/roles';
 import { actorWith, createFixture, MANAGER } from '../db/fixture';
 import { generateDocumentId, newClientStatements } from './contacts';
 import {

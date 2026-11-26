@@ -25,16 +25,8 @@ import {
 	type OrderTotals,
 	type PricedLine
 } from '$lib/orders';
-import {
-	ROLES,
-	hasAnyRole,
-	hasCashTab,
-	hasRole,
-	isAdminOrManager,
-	requireRole,
-	type Actor,
-	type Role
-} from '../actor';
+import { POLICIES, type Role } from '$lib/roles';
+import { hasAnyRole, hasCashTab, requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, eventFieldsSchema, type Row } from '../audit';
 import { describeOrderEdit, type OrderChange } from '../order-changes';
 import { createPublicToken } from '../public-token';
@@ -63,16 +55,6 @@ import {
 	type Transporter
 } from './contacts';
 import { COMPANY_SETTINGS, readSettings, type CompanySettings } from './settings';
-
-// The commercial side: whoever takes orders creates and edits them.
-const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
-
-// Money out of an order, refunds included, is the manager's; the driver's whole-deposit refund is
-// the one written exception (#605).
-const PAYS_OUT = ['ADMIN', 'MANAGER'] as const;
-
-// Whoever records an order's payments: the office, and the driver on the road.
-export const RECORDS_PAYMENTS = [...TAKES_ORDERS, 'DRIVER'] as const;
 
 export const ORDER_STATUSES = [
 	'CONFIRMED',
@@ -614,7 +596,7 @@ export async function getOrder(
 	id: number,
 	actor: Actor | null
 ): Promise<Order | null> {
-	requireRole(actor, TAKES_ORDERS);
+	requireRole(actor, POLICIES.orders);
 	const row = await findRow(db, id);
 	return null === row ? null : toOrder(row);
 }
@@ -705,7 +687,7 @@ export async function prepareQuotedOrder(
 	input: unknown,
 	{ actor, quotedItems, force }: QuotedOrder
 ): Promise<OrderStatements | Refusal | ShortageWarning> {
-	requireRole(actor, TAKES_ORDERS);
+	requireRole(actor, POLICIES.orders);
 	const parsed = quotedOrderInputSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalidOrder(parsed.error);
@@ -757,7 +739,7 @@ export async function getOrderBilling(
 	order: Pick<Order, 'id' | 'receivableId'>,
 	actor: Actor | null
 ): Promise<Billing | null> {
-	requireRole(actor, TAKES_ORDERS);
+	requireRole(actor, POLICIES.orders);
 	return findBilling(db, { id: order.id, receivable_id: order.receivableId });
 }
 
@@ -829,7 +811,7 @@ export async function updateOrder(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, TAKES_ORDERS);
+	requireRole(actor, POLICIES.orders);
 	const parsedId = idInputSchema.safeParse(input);
 	const parsed = orderInputSchema.safeParse(input);
 	if (!parsedId.success) {
@@ -902,7 +884,7 @@ export async function createExtension(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, TAKES_ORDERS);
+	requireRole(actor, POLICIES.orders);
 	const original = await findExtendable(db, input);
 	if ('ok' in original) {
 		return original;
@@ -996,7 +978,7 @@ export async function getAvailability(
 	input: unknown,
 	actor: Actor | null
 ): Promise<Availability[]> {
-	requireRole(actor, TAKES_ORDERS);
+	requireRole(actor, POLICIES.orders);
 	return queryAvailability(db, availabilitySchema.parse(input));
 }
 
@@ -1082,7 +1064,7 @@ export async function getOrderWarnings(
 	input: unknown,
 	actor: Actor | null
 ): Promise<OrderWarnings> {
-	requireRole(actor, TAKES_ORDERS);
+	requireRole(actor, POLICIES.orders);
 	return findWarnings(db, warningsSchema.parse(input));
 }
 
@@ -1109,7 +1091,7 @@ export async function checkOrderSchedule(
 	input: unknown,
 	actor: Actor | null
 ): Promise<OrderSchedule | null> {
-	requireRole(actor, TAKES_ORDERS);
+	requireRole(actor, POLICIES.orders);
 	const parsed = warningsSchema.safeParse(input);
 	if (!parsed.success) {
 		return null;
@@ -1207,7 +1189,7 @@ export async function cancelOrder(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, TAKES_ORDERS);
+	requireRole(actor, POLICIES.orders);
 	const parsed = cancellationSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalidOrder(parsed.error);
@@ -1225,7 +1207,7 @@ export async function advanceOrder(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, ROLES);
+	requireRole(actor, POLICIES.anyLogin);
 	const parsed = advanceSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalidOrder(parsed.error);
@@ -1402,7 +1384,7 @@ export async function listOrders(
 	input: unknown,
 	actor: Actor | null
 ): Promise<OrderPage> {
-	requireRole(actor, TAKES_ORDERS);
+	requireRole(actor, POLICIES.orders);
 	const parsed = listSchema.parse(input ?? {});
 	const clauses = listClauses(parsed);
 	const where = clauses.map((clause) => `(${clause.sql})`).join(' and ') || '1';
@@ -1698,7 +1680,7 @@ export async function getOrderDetail(
 	id: unknown,
 	actor: Actor | null
 ): Promise<OrderDetail | null> {
-	requireRole(actor, ROLES);
+	requireRole(actor, POLICIES.anyLogin);
 	const parsedId = orderIdSchema.safeParse(id);
 	if (!parsedId.success) {
 		return null;
@@ -1731,7 +1713,7 @@ export async function getPublicToken(
 	id: number,
 	actor: Actor | null
 ): Promise<string | null> {
-	requireRole(actor, TAKES_ORDERS);
+	requireRole(actor, POLICIES.orders);
 	const row = await db
 		.prepare('select public_token from orders where id = ?')
 		.bind(id)
@@ -1770,7 +1752,7 @@ export async function getOrderPrintout(
 	id: unknown,
 	actor: Actor | null
 ): Promise<OrderPrintout | null> {
-	requireRole(actor, ROLES);
+	requireRole(actor, POLICIES.anyLogin);
 	const [order, company] = await Promise.all([
 		getOrderDetail(db, id, actor),
 		readSettings(db, COMPANY_SETTINGS)
@@ -1931,7 +1913,7 @@ export async function recordOrderPayment(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, RECORDS_PAYMENTS);
+	requireRole(actor, POLICIES.recordsPayments);
 	const parsed = paymentInputSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalidOrder(parsed.error);
@@ -1939,7 +1921,7 @@ export async function recordOrderPayment(
 	const { concept } = parsed.data;
 	const isOfficeEntry = hasAnyRole(actor, officeRolesFor(concept));
 	if (!isOfficeEntry) {
-		requireRole(actor, DRIVER_CONCEPTS.includes(concept) ? DRIVER_ONLY : officeRolesFor(concept));
+		requireRole(actor, roadRolesFor(concept));
 	}
 	const row = await findRow(db, parsed.data.order_id);
 	if (null === row) {
@@ -1960,10 +1942,13 @@ export async function recordOrderPayment(
 // Sales records the money in; the manager the money out and the fee.
 function officeRolesFor(concept: OrderPaymentConcept): readonly Role[] {
 	const isSalesConcept = isOrderInflow(concept) && 'CANCELLATION_FEE' !== concept;
-	return isSalesConcept ? TAKES_ORDERS : PAYS_OUT;
+	return isSalesConcept ? POLICIES.orders : POLICIES.paysOut;
 }
 
-const DRIVER_ONLY = ['DRIVER'] as const;
+// Off the office's rights, only the driver records, and only what's collected on the road.
+function roadRolesFor(concept: OrderPaymentConcept): readonly Role[] {
+	return DRIVER_CONCEPTS.includes(concept) ? POLICIES.driverPayments : officeRolesFor(concept);
+}
 
 const DRIVER_CONCEPTS: readonly OrderPaymentConcept[] = [
 	'INSTALLMENT',
@@ -2095,8 +2080,8 @@ async function retentionOf(
  * Whoever doesn't take orders, nothing: Despachos has its own entry. Empty, the entry isn't offered.
  */
 export function offeredPaymentConcepts(order: OrderDetail, actor: Actor): OrderPaymentConcept[] {
-	const isOffice = hasAnyRole(actor, TAKES_ORDERS);
-	const canPayOut = isAdminOrManager(actor);
+	const isOffice = hasAnyRole(actor, POLICIES.orders);
+	const canPayOut = hasAnyRole(actor, POLICIES.paysOut);
 	const offered: Record<OrderPaymentConcept, boolean> = {
 		INSTALLMENT: isOffice && null === order.receivableId && 0 < order.balanceDue,
 		SECURITY_DEPOSIT: isOffice && order.depositHeld < order.depositAmount,
@@ -2127,7 +2112,7 @@ const CASH_TAB_HINT =
 
 // The office's rights hold on the road, and a driver adds the driver's: Sales gives nothing back.
 function canRecordOnTheRoad(actor: Actor, concept: OrderPaymentConcept): boolean {
-	return hasAnyRole(actor, officeRolesFor(concept)) || hasRole(actor, 'DRIVER');
+	return hasAnyRole(actor, officeRolesFor(concept)) || hasAnyRole(actor, POLICIES.driverPayments);
 }
 
 /**
@@ -2140,7 +2125,7 @@ export function getDespachosPaymentEntry(order: OrderDetail, actor: Actor): Desp
 	const concepts = DRIVER_CONCEPTS.filter(
 		(concept) => true === onTheRoad[concept] && canRecordOnTheRoad(actor, concept)
 	);
-	const isRefundWhole = !hasAnyRole(actor, PAYS_OUT);
+	const isRefundWhole = !hasAnyRole(actor, POLICIES.paysOut);
 	return {
 		concepts,
 		methods: DRIVER_METHODS,
@@ -2160,7 +2145,7 @@ export async function getPaymentOptions(
 	order: Order,
 	actor: Actor | null
 ): Promise<PaymentOptions> {
-	requireRole(actor, RECORDS_PAYMENTS);
+	requireRole(actor, POLICIES.recordsPayments);
 	const carriers = carriersOf(order);
 	const [clientBankAccount, ...accounts] = await Promise.all(
 		[order.clientId, ...carriers.map((entry) => entry.carrier.id)].map((id) =>
@@ -2205,7 +2190,7 @@ export async function listCatalogProducts(
 	db: D1Database,
 	actor: Actor | null
 ): Promise<CatalogProduct[]> {
-	requireRole(actor, TAKES_ORDERS);
+	requireRole(actor, POLICIES.orders);
 	const catalog = await listProducts(db, {}, actor);
 	return catalog.products
 		.filter((product) => product.isActive)
@@ -2224,7 +2209,7 @@ export async function getOrderFormOptions(
 	db: D1Database,
 	actor: Actor | null
 ): Promise<OrderFormOptions> {
-	requireRole(actor, TAKES_ORDERS);
+	requireRole(actor, POLICIES.orders);
 	const [products, transporters, settings] = await Promise.all([
 		listCatalogProducts(db, actor),
 		listTransporters(db, actor),
@@ -2263,7 +2248,7 @@ export async function getOrderTimeline(
 	id: unknown,
 	actor: Actor | null
 ): Promise<TimelineEntry[] | null> {
-	requireRole(actor, ROLES);
+	requireRole(actor, POLICIES.anyLogin);
 	const parsedId = orderIdSchema.safeParse(id);
 	if (!parsedId.success || null === (await findRow(db, parsedId.data))) {
 		return null;
@@ -2324,7 +2309,7 @@ export async function getOrderChange(
 	input: unknown,
 	actor: Actor | null
 ): Promise<OrderChange[] | null> {
-	requireRole(actor, ROLES);
+	requireRole(actor, POLICIES.anyLogin);
 	const parsed = changeInputSchema.safeParse(input);
 	if (!parsed.success) {
 		return null;

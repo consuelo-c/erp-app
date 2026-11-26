@@ -17,13 +17,11 @@ import {
 import { fold } from '$lib/format';
 import { normalizePhone } from '$lib/phone';
 import { INVALID_WHATSAPP, normalizeWhatsapp } from '$lib/whatsapp';
-import { isAdminOrManager, requireRole, type Actor } from '../actor';
+import { POLICIES } from '$lib/roles';
+import { hasAnyRole, requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
 import { containing, foldedSql } from './cash';
 import { readSettings } from './settings';
-
-// Whoever takes orders adds the clients.
-const EDITS_CONTACTS = ['ADMIN', 'MANAGER', 'SALES'] as const;
 
 const optionalText = z.string().min(1).optional();
 
@@ -149,7 +147,8 @@ function isAcronym(word: string): boolean {
 }
 
 function capitalizeLowercase(word: string): string {
-	const isMixedCase = word !== word.toLocaleLowerCase('es') && word !== word.toLocaleUpperCase('es');
+	const isMixedCase =
+		word !== word.toLocaleLowerCase('es') && word !== word.toLocaleUpperCase('es');
 	if (isMixedCase || word.includes('.') || isAcronym(word)) {
 		return word;
 	}
@@ -274,7 +273,7 @@ function changesLockedField(current: Columns, next: Columns): boolean {
 
 // The screen shows these fields locked to Sales; a save that changes them anyway was forged.
 function requireLockedFieldsKept(actor: Actor, current: Columns, next: Columns): void {
-	if (!isAdminOrManager(actor) && changesLockedField(current, next)) {
+	if (!hasAnyRole(actor, POLICIES.lockedContactFields) && changesLockedField(current, next)) {
 		error(403, 'Solo Gerente o Administrador cambian ese dato');
 	}
 }
@@ -333,7 +332,7 @@ export async function listContactLabels(
 	db: D1Database,
 	actor: Actor | null
 ): Promise<ContactLabel[]> {
-	requireRole(actor, EDITS_CONTACTS);
+	requireRole(actor, POLICIES.contacts);
 	return readContactLabels(db);
 }
 
@@ -365,7 +364,7 @@ export async function getContact(
 	id: number,
 	actor: Actor | null
 ): Promise<Contact | null> {
-	requireRole(actor, EDITS_CONTACTS);
+	requireRole(actor, POLICIES.contacts);
 	const row = await findRow(db, id);
 	return null === row ? null : toContact(row);
 }
@@ -380,7 +379,7 @@ export async function createContact(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, EDITS_CONTACTS);
+	requireRole(actor, POLICIES.contacts);
 	const parsed = formSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalidForm(parsed.error);
@@ -432,7 +431,7 @@ export async function updateContact(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, EDITS_CONTACTS);
+	requireRole(actor, POLICIES.contacts);
 	const parsed = updateSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalidForm(parsed.error);
@@ -459,7 +458,7 @@ export async function findWhatsappOwner(
 	input: { whatsapp: unknown; exceptId: unknown },
 	actor: Actor | null
 ): Promise<string | null> {
-	requireRole(actor, EDITS_CONTACTS);
+	requireRole(actor, POLICIES.contacts);
 	const whatsapp = normalizeWhatsapp(z.string().catch('').parse(input.whatsapp));
 	if (null === whatsapp) {
 		return null;
@@ -599,7 +598,7 @@ export async function listContacts(
 	input: unknown,
 	actor: Actor | null
 ): Promise<ContactPage> {
-	requireRole(actor, EDITS_CONTACTS);
+	requireRole(actor, POLICIES.contacts);
 	const labels = await readContactLabels(db);
 	const parsed = parseFilters(input, labels);
 	const { where, params } = whereOf(parsed);
@@ -703,7 +702,7 @@ export async function searchClients(
 	typed: unknown,
 	actor: Actor | null
 ): Promise<ClientCandidate[]> {
-	requireRole(actor, EDITS_CONTACTS);
+	requireRole(actor, POLICIES.contacts);
 	const clause = searchClause(z.string().trim().catch('').parse(typed), {
 		textSql: CLIENT_TEXT_SQL
 	});
@@ -733,7 +732,7 @@ export async function listTransporters(
 	db: D1Database,
 	actor: Actor | null
 ): Promise<Transporter[]> {
-	requireRole(actor, EDITS_CONTACTS);
+	requireRole(actor, POLICIES.contacts);
 	const { results } = await db
 		.prepare(
 			`select id, full_name as fullName, phone, whatsapp from contacts
@@ -744,10 +743,6 @@ export async function listTransporters(
 		.all<Transporter>();
 	return results;
 }
-
-// Configuración › Etiquetas: the editor of CONTACTS_LABELS. Assigning one is the manager's call, so
-// is keeping the list.
-const EDITS_LABELS = ['ADMIN', 'MANAGER'] as const;
 
 const BUILT_IN_LABELS: readonly string[] = [TRANSPORTER, BANNED];
 
@@ -762,7 +757,7 @@ const UNKNOWN_LABEL: LabelResult = { ok: false, message: 'Esa etiqueta ya no exi
 
 /** Every etiqueta, A–Z, with how many contacts carry it. */
 export async function listLabelRows(db: D1Database, actor: Actor | null): Promise<LabelRow[]> {
-	requireRole(actor, EDITS_LABELS);
+	requireRole(actor, POLICIES.contactLabels);
 	const [labels, { results }] = await Promise.all([
 		readContactLabels(db),
 		db
@@ -785,7 +780,7 @@ export async function createLabel(
 	input: unknown,
 	actor: Actor | null
 ): Promise<LabelResult> {
-	requireRole(actor, EDITS_LABELS);
+	requireRole(actor, POLICIES.contactLabels);
 	const parsed = nameSchema.safeParse(input);
 	if (!parsed.success) {
 		return { ok: false, message: parsed.error.issues[0].message };
@@ -805,7 +800,7 @@ export async function renameLabel(
 	input: unknown,
 	actor: Actor | null
 ): Promise<LabelResult> {
-	requireRole(actor, EDITS_LABELS);
+	requireRole(actor, POLICIES.contactLabels);
 	const parsed = keySchema.extend(nameSchema.shape).safeParse(input);
 	if (!parsed.success) {
 		return { ok: false, message: parsed.error.issues[0].message };
@@ -833,7 +828,7 @@ export async function deleteLabel(
 	input: unknown,
 	actor: Actor | null
 ): Promise<LabelResult> {
-	requireRole(actor, EDITS_LABELS);
+	requireRole(actor, POLICIES.contactLabels);
 	const { key } = keySchema.parse(input);
 	if (BUILT_IN_LABELS.includes(key)) {
 		return { ok: false, message: 'Transportador y Vetado no se eliminan' };

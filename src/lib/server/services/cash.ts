@@ -5,12 +5,10 @@ import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { getMonthRange, getTodaysDate } from '$lib/datetime';
 import { parsePesos } from '$lib/payroll';
-import { hasCashTab, MANAGES_CASH, requireRole, rolesSchema, type Actor } from '../actor';
+import { POLICIES } from '$lib/roles';
+import { hasCashTab, requireRole, rolesSchema, type Actor } from '../actor';
 import { auditedInsert } from '../audit';
 import { COMPANY_SETTINGS, readSettings, type CompanySettings } from './settings';
-
-// Whoever records an order's money in prints its receipt from the order.
-const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
 
 export const CASH_CONCEPTS = [
 	'INSTALLMENT',
@@ -265,7 +263,7 @@ export async function recordMovement(
 	input: unknown,
 	actor: Actor | null
 ): Promise<RecordResult> {
-	requireRole(actor, MANAGES_CASH);
+	requireRole(actor, POLICIES.managesCash);
 	const direction = directionSchema.safeParse(input);
 	if (!direction.success) {
 		return invalid(direction.error);
@@ -433,7 +431,7 @@ export async function recordOffset(
 	input: unknown,
 	actor: Actor | null
 ): Promise<RecordResult> {
-	requireRole(actor, MANAGES_CASH);
+	requireRole(actor, POLICIES.managesCash);
 	const original = await findOriginal(db, (input as { reverses_id?: unknown })?.reverses_id);
 	if (null === original) {
 		return refuse('Ese movimiento no existe.');
@@ -754,7 +752,7 @@ export async function getMovement(
 	input: unknown,
 	actor: Actor | null
 ): Promise<MovementDetail | null> {
-	requireRole(actor, MANAGES_CASH);
+	requireRole(actor, POLICIES.managesCash);
 	return findDetail(db, input);
 }
 
@@ -803,7 +801,7 @@ export async function getReceipt(
 	company: CompanySettings;
 	receivableOrderIds: number[];
 }> {
-	requireRole(actor, TAKES_ORDERS);
+	requireRole(actor, POLICIES.paymentReceipts);
 	const [movement, company] = await Promise.all([
 		findDetail(db, input),
 		readSettings(db, COMPANY_SETTINGS)
@@ -812,7 +810,7 @@ export async function getReceipt(
 		error(404, 'Ese movimiento no existe');
 	}
 	if (null === movement.orderId && null === movement.receivableId) {
-		requireRole(actor, MANAGES_CASH);
+		requireRole(actor, POLICIES.managesCash);
 	}
 	const receivableOrderIds =
 		null === movement.receivableId ? [] : await findReceivableOrderIds(db, movement.receivableId);
@@ -825,7 +823,7 @@ export async function getCashBook(
 	input: unknown,
 	actor: Actor | null
 ): Promise<{ filters: CashBookFilters; entries: CashBookEntry[]; totals: CashBookTotals }> {
-	requireRole(actor, MANAGES_CASH);
+	requireRole(actor, POLICIES.managesCash);
 	const month = getMonthRange(getTodaysDate());
 	const parsed = cashBookFiltersSchema.parse(input ?? {});
 	const filters = { ...parsed, from: parsed.from ?? month.start, to: parsed.to ?? month.end };

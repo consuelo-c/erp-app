@@ -4,15 +4,11 @@
 import { z } from 'zod';
 import { resolve } from '$app/paths';
 import { addDays, getDayStartInstant, getMonthRange, getTodaysDate } from '$lib/datetime';
+import { POLICIES } from '$lib/roles';
 import { requireRole, type Actor } from '../actor';
 import { eventFieldsSchema } from '../audit';
 import { optional, type CashConcept } from './cash';
 import { DAMAGE_CHARGED_SQL, HELD_LINES_SQL } from './orders';
-
-const MANAGERS = ['ADMIN', 'MANAGER'] as const;
-
-// The roles that take orders, and so already see availability.
-const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
 
 /** Every `events.entity_type` the app writes: Auditoría's «Registro». */
 export const EVENT_ENTITY_TYPES = [
@@ -225,7 +221,7 @@ export async function getAuditLog(
 	input: unknown,
 	actor: Actor | null
 ): Promise<AuditLog> {
-	requireRole(actor, MANAGERS);
+	requireRole(actor, POLICIES.reports);
 	const parsed = auditLogSchema.parse(input ?? {});
 	const clauses = auditLogClauses(parsed);
 	const where = clauses.map((clause) => `(${clause.sql})`).join(' and ') || '1';
@@ -351,7 +347,7 @@ export async function getSubLending(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SubLending> {
-	requireRole(actor, TAKES_ORDERS);
+	requireRole(actor, POLICIES.orders);
 	const parsed = subLendingSchema.parse(input ?? {});
 	const today = getTodaysDate();
 	// Hasta typed before Desde still means the days between them.
@@ -610,7 +606,7 @@ export async function getProfitAndLoss(
 	input: unknown,
 	actor: Actor | null
 ): Promise<ProfitAndLoss> {
-	requireRole(actor, MANAGERS);
+	requireRole(actor, POLICIES.reports);
 	const parsed = profitAndLossSchema.parse(input ?? {});
 	const month = getMonthRange(getTodaysDate());
 	const from = parsed.from ?? month.start;

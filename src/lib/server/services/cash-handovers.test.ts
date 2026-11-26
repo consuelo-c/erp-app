@@ -1,7 +1,8 @@
 import { isHttpError } from '@sveltejs/kit';
 import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import type { Actor, Role } from '../actor';
+import type { Role } from '$lib/roles';
+import type { Actor } from '../actor';
 import { ADMIN, createFixture, MANAGER, TEST_PASSWORD, TEST_PEPPER } from '../db/fixture';
 import { recordMovement, recordOffset } from './cash';
 import { getCashStatement, listPeopleWithTab, recordHandover } from './cash-handovers';

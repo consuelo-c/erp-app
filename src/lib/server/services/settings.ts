@@ -12,11 +12,9 @@ import {
 	type SettingKey,
 	type SettingModule
 } from '$lib/settings';
-import { isAdmin, requireRole, ROLES, type Actor } from '../actor';
+import { POLICIES } from '$lib/roles';
+import { hasAnyRole, requireRole, type Actor } from '../actor';
 import { auditedUpdate } from '../audit';
-
-// A mistake here throws off all of payroll: only the ones who settle it edit settings.
-const EDITS_SETTINGS = ['ADMIN', 'MANAGER'] as const;
 
 const OWN_EDITOR_KEYS = [
 	'PAYROLL_HOLIDAYS',
@@ -53,7 +51,7 @@ export async function getSystemSettings(
 	modules: SettingModule[],
 	actor: Actor | null
 ): Promise<Partial<SystemSettings>> {
-	requireRole(actor, EDITS_SETTINGS);
+	requireRole(actor, POLICIES.settings);
 	const current = await findSystemSettings(db);
 	return Object.fromEntries(keysOf(modules).map((key) => [key, current[key]]));
 }
@@ -68,7 +66,7 @@ export async function updateSystemSettings(
 	{ modules, values }: { modules: SettingModule[]; values: unknown },
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, EDITS_SETTINGS);
+	requireRole(actor, POLICIES.settings);
 	const form = formSchema.parse(values);
 	const fields = keysOf(modules).map((key) => ({ key, parsed: parseField(key, form) }));
 	const errors = collectErrors(fields);
@@ -205,9 +203,13 @@ const overrideSchema = z.object({
 });
 
 export async function getHolidays(db: D1Database, actor: Actor | null): Promise<HolidaysEditor> {
-	requireRole(actor, EDITS_SETTINGS);
+	requireRole(actor, POLICIES.settings);
 	const [holidays, freezeLine] = await Promise.all([findHolidays(db), findFreezeLine(db)]);
-	return { holidays, freezeLine, canOverrideFreeze: isAdmin(actor) };
+	return {
+		holidays,
+		freezeLine,
+		canOverrideFreeze: hasAnyRole(actor, POLICIES.overrideClosedDate)
+	};
 }
 
 /**
@@ -219,7 +221,7 @@ export async function updateHolidays(
 	input: unknown,
 	actor: Actor | null
 ): Promise<HolidaysResult> {
-	requireRole(actor, EDITS_SETTINGS);
+	requireRole(actor, POLICIES.settings);
 	const parsed = openHolidaysSchema.safeParse(input);
 	if (!parsed.success) {
 		return { ok: false, message: parsed.error.issues[0].message };
@@ -243,7 +245,7 @@ export async function overrideFrozenHoliday(
 	input: unknown,
 	actor: Actor | null
 ): Promise<HolidaysResult> {
-	requireRole(actor, ['ADMIN']);
+	requireRole(actor, POLICIES.overrideClosedDate);
 	const parsed = overrideSchema.safeParse(input);
 	if (!parsed.success) {
 		return { ok: false, message: parsed.error.issues[0].message };
@@ -325,7 +327,7 @@ const textFormSchema = z.object({
 
 /** The help's Markdown, open to every login. */
 export async function getHelp(db: D1Database, actor: Actor | null): Promise<Help> {
-	requireRole(actor, ROLES);
+	requireRole(actor, POLICIES.anyLogin);
 	const [{ HELP_FAQ: text }, row] = await Promise.all([
 		readSettings(db, ['HELP_FAQ']),
 		db
@@ -340,7 +342,7 @@ export async function getHelp(db: D1Database, actor: Actor | null): Promise<Help
 
 /** The client's terms and conditions as stored, for their editor. */
 export async function getTerms(db: D1Database, actor: Actor | null): Promise<string> {
-	requireRole(actor, EDITS_SETTINGS);
+	requireRole(actor, POLICIES.settings);
 	const { TERMS_CONDITIONS: text } = await readSettings(db, ['TERMS_CONDITIONS']);
 	return text;
 }
@@ -351,7 +353,7 @@ async function updateText(
 	{ key, input }: { key: TextKey; input: unknown },
 	actor: Actor | null
 ): Promise<TextResult> {
-	requireRole(actor, EDITS_SETTINGS);
+	requireRole(actor, POLICIES.settings);
 	const parsed = SETTINGS[key].schema.safeParse(textFormSchema.parse(input).text);
 	if (!parsed.success) {
 		return { ok: false, message: parsed.error.issues[0].message };

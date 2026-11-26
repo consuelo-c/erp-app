@@ -18,6 +18,7 @@ import {
 	type QuoteState,
 	type TransportedBy
 } from '$lib/quotes';
+import { POLICIES } from '$lib/roles';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, eventFieldsSchema } from '../audit';
 import { describeQuoteEdit, type OrderChange } from '../order-changes';
@@ -59,9 +60,6 @@ import {
 	type NewClient
 } from './contacts';
 import { COMPANY_SETTINGS, readSettings, type CompanySettings } from './settings';
-
-// The same three who take orders: converting a quote creates one.
-const TAKES_QUOTES = ['ADMIN', 'MANAGER', 'SALES'] as const;
 
 const textSchema = z.string().min(1);
 
@@ -218,7 +216,7 @@ export async function getQuote(
 	id: unknown,
 	actor: Actor | null
 ): Promise<Quote | null> {
-	requireRole(actor, TAKES_QUOTES);
+	requireRole(actor, POLICIES.quotes);
 	const parsedId = quoteIdSchema.safeParse(id);
 	if (!parsedId.success) {
 		return null;
@@ -239,7 +237,7 @@ export async function getQuoteFormOptions(
 	db: D1Database,
 	actor: Actor | null
 ): Promise<QuoteFormOptions> {
-	requireRole(actor, TAKES_QUOTES);
+	requireRole(actor, POLICIES.quotes);
 	const [products, settings] = await Promise.all([
 		listCatalogProducts(db, actor),
 		readSettings(db, ['QUOTES_VALIDITY_DAYS'])
@@ -260,7 +258,7 @@ export async function getQuoteAvailability(
 	input: unknown,
 	actor: Actor | null
 ): Promise<Availability[] | null> {
-	requireRole(actor, TAKES_QUOTES);
+	requireRole(actor, POLICIES.quotes);
 	const parsed = availabilitySchema.safeParse(input);
 	if (!parsed.success) {
 		return null;
@@ -349,7 +347,7 @@ export async function createQuote(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, TAKES_QUOTES);
+	requireRole(actor, POLICIES.quotes);
 	const parsed = quoteInputSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalidOrder(parsed.error);
@@ -403,7 +401,7 @@ export async function updateQuote(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, TAKES_QUOTES);
+	requireRole(actor, POLICIES.quotes);
 	const parsedId = editInputSchema.safeParse(input);
 	const parsed = quoteInputSchema.safeParse(input);
 	if (!parsedId.success) {
@@ -523,7 +521,7 @@ export async function listQuotes(
 	input: unknown,
 	actor: Actor | null
 ): Promise<QuotePage> {
-	requireRole(actor, TAKES_QUOTES);
+	requireRole(actor, POLICIES.quotes);
 	const today = getTodaysDate();
 	const parsed = listSchema.parse(input ?? {});
 	const clauses = listClauses(parsed, today);
@@ -579,7 +577,7 @@ export async function getQuoteTimeline(
 	id: unknown,
 	actor: Actor | null
 ): Promise<QuoteTimelineEntry[] | null> {
-	requireRole(actor, TAKES_QUOTES);
+	requireRole(actor, POLICIES.quotes);
 	const parsedId = quoteIdSchema.safeParse(id);
 	if (!parsedId.success || null === (await findRow(db, parsedId.data))) {
 		return null;
@@ -623,7 +621,7 @@ export async function getQuoteChange(
 	input: unknown,
 	actor: Actor | null
 ): Promise<OrderChange[] | null> {
-	requireRole(actor, TAKES_QUOTES);
+	requireRole(actor, POLICIES.quotes);
 	const parsed = changeInputSchema.safeParse(input);
 	if (!parsed.success) {
 		return null;
@@ -746,7 +744,7 @@ export async function getOrderRequote(
 	id: unknown,
 	actor: Actor | null
 ): Promise<QuoteDuplicate | null> {
-	requireRole(actor, TAKES_QUOTES);
+	requireRole(actor, POLICIES.quotes);
 	const orderId = quoteIdSchema.safeParse(id);
 	const order = orderId.success ? await getOrder(db, orderId.data, actor) : null;
 	if (null === order) {
@@ -835,7 +833,7 @@ export async function convertQuote(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult | ShortageWarning> {
-	requireRole(actor, TAKES_QUOTES);
+	requireRole(actor, POLICIES.quotes);
 	const parsed = conversionInputSchema.safeParse(input);
 	const row = parsed.success ? await findRow(db, parsed.data.quote) : null;
 	if (!parsed.success || null === row) {
@@ -868,7 +866,7 @@ export async function getQuotePublicToken(
 	id: number,
 	actor: Actor | null
 ): Promise<string | null> {
-	requireRole(actor, TAKES_QUOTES);
+	requireRole(actor, POLICIES.quotes);
 	const row = await db
 		.prepare('select public_token from quotes where id = ?')
 		.bind(id)
@@ -882,7 +880,7 @@ export async function getSourceQuoteId(
 	orderId: number,
 	actor: Actor | null
 ): Promise<number | null> {
-	requireRole(actor, TAKES_QUOTES);
+	requireRole(actor, POLICIES.quotes);
 	const row = await db
 		.prepare('select id from quotes where order_id = ?')
 		.bind(orderId)
@@ -901,7 +899,7 @@ export async function getQuotePrintout(
 	id: unknown,
 	actor: Actor | null
 ): Promise<QuotePrintout | null> {
-	requireRole(actor, TAKES_QUOTES);
+	requireRole(actor, POLICIES.quotes);
 	const [quote, company] = await Promise.all([
 		getQuote(db, id, actor),
 		readSettings(db, COMPANY_SETTINGS)

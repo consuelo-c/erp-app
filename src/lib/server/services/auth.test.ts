@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import type { Role } from '../actor';
+import type { Role } from '$lib/roles';
 import { ADMIN, createFixture, TEST_PASSWORD, TEST_PEPPER } from '../db/fixture';
 import { logIn, logOut, SESSION_SECONDS, validateSession } from './auth';
 import { deactivateLogin } from './logins';

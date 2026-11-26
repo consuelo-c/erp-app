@@ -6,14 +6,8 @@ import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { getTodaysDate } from '$lib/datetime';
 import { parsePesos } from '$lib/payroll';
-import {
-	hasAnyRole,
-	hasCashTab,
-	MANAGES_CASH,
-	requireRole,
-	TAKES_CASH,
-	type Actor
-} from '../actor';
+import { POLICIES } from '$lib/roles';
+import { hasAnyRole, hasCashTab, requireRole, type Actor } from '../actor';
 import { auditedInsert } from '../audit';
 import {
 	movementAttributesSchema,
@@ -194,7 +188,7 @@ async function listHandovers(
 
 /** A non-manager reads only their own tab. */
 function canReadTab(actor: Actor, username: string): boolean {
-	return hasAnyRole(actor, MANAGES_CASH) || actor.username === username;
+	return hasAnyRole(actor, POLICIES.managesCash) || actor.username === username;
 }
 
 /** The login `username` names, when it has an Efectivo por entregar; null otherwise. */
@@ -217,7 +211,7 @@ export async function listPeopleWithTab(
 	db: D1Database,
 	actor: Actor | null
 ): Promise<PersonWithTab[]> {
-	requireRole(actor, MANAGES_CASH);
+	requireRole(actor, POLICIES.managesCash);
 	const { results } = await db.prepare(SELECT_LOGIN).all<LoginRow>();
 	const logins = results.map(toLogin).filter(({ roles }) => hasCashTab(roles));
 	const held = await Promise.all(logins.map(({ username }) => sumPending(db, username)));
@@ -238,7 +232,7 @@ export async function getCashStatement(
 	input: unknown,
 	actor: Actor | null
 ): Promise<CashStatement> {
-	requireRole(actor, [...MANAGES_CASH, ...TAKES_CASH]);
+	requireRole(actor, POLICIES.readsCashTab);
 	const typed = statementInputSchema.parse(input);
 	const today = getTodaysDate();
 	const range = { username: typed.username, from: typed.from ?? today, to: typed.to ?? today };
@@ -282,7 +276,7 @@ export async function recordHandover(
 	input: unknown,
 	actor: Actor | null
 ): Promise<RecordResult> {
-	requireRole(actor, MANAGES_CASH);
+	requireRole(actor, POLICIES.managesCash);
 	const form = handoverSchema.safeParse(input);
 	if (!form.success) {
 		return invalidForm(form.error);

@@ -7,6 +7,7 @@ import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { addDays, getTodaysDate, getWeekStart } from '$lib/datetime';
 import { SETTINGS } from '$lib/settings';
+import { POLICIES } from '$lib/roles';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, type Row } from '../audit';
 import { deriveOvertime, type DayPunches, type OvertimeMinutes } from '../overtime';
@@ -36,8 +37,6 @@ import {
 	type CompanySettings,
 	type SettingValues
 } from './settings';
-
-const SETTLES_PAYROLL = ['ADMIN', 'MANAGER'] as const;
 
 // Everything the calculation and the derivation read: `settings_snapshot` keeps exactly these.
 const PAYROLL_SETTINGS = [
@@ -446,7 +445,7 @@ export async function openWeek(
 	input: EmployeeChoice & { week: unknown },
 	actor: Actor | null
 ): Promise<PayrollWeek> {
-	requireRole(actor, SETTLES_PAYROLL);
+	requireRole(actor, POLICIES.payroll);
 	const period = findPeriod(input.week);
 	const employees = (await listEmployees(db, actor)).filter((each) => worksDuring(each, period));
 	const options = employees.map(({ id, fullName, position }) => ({ id, fullName, position }));
@@ -682,7 +681,7 @@ export async function saveDraft(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, SETTLES_PAYROLL);
+	requireRole(actor, POLICIES.payroll);
 	const parsed = saveSchema.safeParse(input);
 	return parsed.success ? writeDraft(db, parsed.data as SaveForm, actor) : invalid(parsed.error);
 }
@@ -696,7 +695,7 @@ export async function recordPayment(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, SETTLES_PAYROLL);
+	requireRole(actor, POLICIES.payroll);
 	const parsed = paymentSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalid(parsed.error);

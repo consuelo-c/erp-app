@@ -38,10 +38,6 @@ export function isAdminOrManager(actor: Actor): boolean {
 	return hasAnyRole(actor, ['ADMIN', 'MANAGER']);
 }
 
-// The cash services' guards until the guards' sweep (#698) names the keys.
-export const MANAGES_CASH: readonly Role[] = POLICIES.managesCash;
-export const TAKES_CASH: readonly Role[] = POLICIES.takesCash;
-
 /** Whether a login has an Efectivo por entregar: it takes cash and isn't the drawer. */
 export function hasCashTab(roles: readonly Role[]): boolean {
 	const holds = (role: Role) => roles.includes(role);

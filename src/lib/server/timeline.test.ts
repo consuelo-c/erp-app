@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
-import type { Actor, Role } from './actor';
+import type { Role } from '$lib/roles';
+import type { Actor } from './actor';
 import { filterTimelineForActor } from './timeline';
 
 function userWith(roles: Role[]): Actor {

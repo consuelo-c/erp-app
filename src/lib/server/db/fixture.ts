@@ -4,7 +4,8 @@
 import { readFileSync } from 'node:fs';
 import { getTodaysDate } from '$lib/datetime';
 import { nextOperationalStatus, type OperationalStatus } from '$lib/orders';
-import type { Actor, Role } from '../actor';
+import type { Role } from '$lib/roles';
+import type { Actor } from '../actor';
 import { createContact, getContact, updateContact } from '../services/contacts';
 import { createEmployee } from '../services/employees';
 import { createLogin, getLogin } from '../services/logins';

@@ -1,12 +1,12 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { getTodaysDate } from '$lib/datetime';
+import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import {
 	getDespachosPaymentEntry,
 	getOrderDetail,
 	getPaymentOptions,
-	RECORDS_PAYMENTS,
 	recordOrderPayment
 } from '$lib/server/services/orders';
 import { listActiveIncidents } from '$lib/server/services/incidents';
@@ -15,7 +15,7 @@ import type { Actions, PageServerLoad } from './$types';
 // Despachos' payment entry: what the order offers this login on the road now, and the client's
 // account a refund by transfer is pre-filled from. With nothing to offer, back to the order.
 export const load: PageServerLoad = async ({ locals, params, platform, url }) => {
-	requireRole(locals.user, RECORDS_PAYMENTS);
+	requireRole(locals.user, POLICIES.recordsPayments);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
@@ -40,7 +40,7 @@ export const load: PageServerLoad = async ({ locals, params, platform, url }) =>
 export const actions: Actions = {
 	// Saved, the order's detail says what was recorded, its receipt number and the new Saldo.
 	default: async ({ locals, params, platform, request, url }) => {
-		requireRole(locals.user, RECORDS_PAYMENTS);
+		requireRole(locals.user, POLICIES.recordsPayments);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}
