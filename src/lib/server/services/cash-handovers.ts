@@ -8,7 +8,7 @@ import { parsePesos } from '$lib/payroll';
 import { POLICIES } from '$lib/roles';
 import { hasAnyRole, hasCashTab, requireRole, type Actor } from '../actor';
 import { auditedInsert } from '../audit';
-import { invalid, type SaveResult } from '../result';
+import { invalid, messageRefusal, type SaveResult } from '../result';
 import { optional } from '../query';
 import { movementAttributesSchema, type CashConcept, type PaymentMethod } from './cash';
 import { SELECT_LOGIN, toLogin, type Login, type LoginRow } from './logins';
@@ -277,8 +277,7 @@ export async function recordHandover(
 	}
 	const login = await findLoginWithTab(db, form.data.username);
 	if (null === login) {
-		const message = 'Esa persona no tiene efectivo por entregar';
-		return { ok: false, message, errors: { username: message } };
+		return messageRefusal('Esa persona no tiene efectivo por entregar', 'username');
 	}
 	const [inserted] = await db.batch(
 		auditedInsert(db, {

@@ -117,7 +117,7 @@ const MENU: MenuParent[] = [
 			{ label: 'Festivos', href: resolve('/configuracion/festivos'), policy: 'settings' },
 			{ label: 'Ayuda', href: resolve('/configuracion/ayuda'), policy: 'settings' },
 			{ label: 'Términos', href: resolve('/configuracion/terminos'), policy: 'settings' },
-			{ label: 'Etiquetas', href: resolve('/configuracion/etiquetas'), policy: 'settings' }
+			{ label: 'Etiquetas', href: resolve('/configuracion/etiquetas'), policy: 'contactLabels' }
 		]
 	},
 	{ label: 'Ayuda', icon: 'help', page: { href: resolve('/ayuda') }, children: [] }

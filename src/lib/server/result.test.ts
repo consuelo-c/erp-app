@@ -48,3 +48,11 @@ test('messageRefusal carries its own message and marks no field', () => {
 		errors: {}
 	});
 });
+
+test('messageRefusal marks the field it names with its own message', () => {
+	expect(messageRefusal('Esa persona no tiene efectivo por entregar', 'username')).toEqual({
+		ok: false,
+		message: 'Esa persona no tiene efectivo por entregar',
+		errors: { username: 'Esa persona no tiene efectivo por entregar' }
+	});
+});

@@ -56,14 +56,10 @@ type ReceivableRow = { id: number; client_id: number; attributes: string };
 
 const NOT_FOUND: Refusal = messageRefusal('Esa cuenta de cobro no existe');
 
-const NOT_ELIGIBLE_MESSAGE =
-	'Solo se incluyen pedidos de este cliente que no estén cancelados ni en otra cuenta de cobro';
-
-const NOT_ELIGIBLE: Refusal = {
-	ok: false,
-	message: NOT_ELIGIBLE_MESSAGE,
-	errors: { orders: NOT_ELIGIBLE_MESSAGE }
-};
+const NOT_ELIGIBLE: Refusal = messageRefusal(
+	'Solo se incluyen pedidos de este cliente que no estén cancelados ni en otra cuenta de cobro',
+	'orders'
+);
 
 /**
  * The client's orders a cuenta de cobro can bill: the ones `canJoin` lets in, and those already in

@@ -14,6 +14,7 @@ import { createProduct } from './products';
 import { issueReceivable, recordReceivablePayment } from './receivables';
 import { getAuditLog, getProfitAndLoss, getSubLending, type SubLending } from './reports';
 import { updateHelp } from './settings';
+import type { SaveResult } from '../result';
 import { saveEmployeePunch } from './timesheets';
 
 let db: D1Database;
@@ -687,9 +688,7 @@ describe('getProfitAndLoss', () => {
 
 	type Fields = Record<string, unknown>;
 
-	type SavedResult = { ok: true; id: number } | { ok: false; message: string };
-
-	function savedId(result: SavedResult): number {
+	function savedId(result: SaveResult<{ id: number }>): number {
 		if (!result.ok) {
 			throw new Error(JSON.stringify(result));
 		}
