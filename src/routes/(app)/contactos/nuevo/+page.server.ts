@@ -10,7 +10,7 @@ export const load: PageServerLoad = async ({ locals, platform }) => {
 	requireRole(locals.user, POLICIES.contacts);
 	const db = getDb(platform);
 	const labels = await listContactLabels(db, locals.user);
-	return { isManager: hasAnyRole(locals.user, POLICIES.lockedContactFields), labels };
+	return { canEditLockedFields: hasAnyRole(locals.user, POLICIES.lockedContactFields), labels };
 };
 
 export const actions: Actions = {

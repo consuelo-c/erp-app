@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { beforeEach, expect, test } from 'vitest';
 import type { Role } from '$lib/roles';
 import { actorWith, createFixture, MANAGER } from '../db/fixture';
+import { CHECK_FIELDS } from '../result';
 import { generateDocumentId, newClientStatements } from './contacts';
 import {
 	createEmployee,
@@ -203,7 +204,7 @@ test('name and ID number are required; the phone and the username are not', asyn
 	);
 	expect(result).toEqual({
 		ok: false,
-		message: 'Revisa los campos marcados en rojo antes de guardar.',
+		message: CHECK_FIELDS,
 		errors: {
 			full_name: 'Escribe el nombre completo',
 			document_id: 'Escribe la cédula'
@@ -330,13 +331,13 @@ test('a missing end or rehire date is marked on its field under the default bann
 	const id = await hire();
 	expect(await endEmployment(db, { id, end: '' }, MANAGER)).toEqual({
 		ok: false,
-		message: 'Revisa los campos marcados en rojo antes de guardar.',
+		message: CHECK_FIELDS,
 		errors: { end: 'Escoge la fecha de retiro' }
 	});
 	await endEmployment(db, { id, end: '2025-06-30' }, MANAGER);
 	expect(await rehire(db, { id, start: '' }, MANAGER)).toEqual({
 		ok: false,
-		message: 'Revisa los campos marcados en rojo antes de guardar.',
+		message: CHECK_FIELDS,
 		errors: { start: 'Escoge la fecha de ingreso' }
 	});
 });

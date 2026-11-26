@@ -27,27 +27,29 @@ const contact: Contact = {
 	isEmployee: false
 };
 
-function renderForm(props: { contact: Contact | null; isManager: boolean }): string {
+function renderForm(props: { contact: Contact | null; canEditLockedFields: boolean }): string {
 	return render(ContactForm, { props: { ...props, labels, form: null } }).body;
 }
 
 test('for Sales the etiquetas read locked, by name, and still post their keys', () => {
-	const body = renderForm({ contact, isManager: false });
+	const body = renderForm({ contact, canEditLockedFields: false });
 	expect(body).toContain('Chef · Vetado');
 	expect(body).toContain('Solo Gerente o Administrador lo cambian');
 	expect(body).toContain('type="hidden" name="labels" value="BANNED"');
 	expect(body).not.toContain('type="checkbox"');
-	expect(renderForm({ contact: null, isManager: false })).toContain('Ninguna');
+	expect(renderForm({ contact: null, canEditLockedFields: false })).toContain('Ninguna');
 });
 
 test('for the manager, one chip per etiqueta in the setting, Vetado in the danger tone', () => {
-	const body = renderForm({ contact, isManager: true });
+	const body = renderForm({ contact, canEditLockedFields: true });
 	expect(body.match(/name="labels"/g)).toHaveLength(4);
 	expect(body).toMatch(/chip--error[^"]*">(<!--[^>]*-->)*<input[^>]*value="BANNED"/);
 });
 
 test('an etiqueta refused by its whole path is marked on the etiquetas field', () => {
 	const form = { message: 'Revisa', errors: { 'labels.0': 'Esa etiqueta no vale' }, values: {} };
-	const body = render(ContactForm, { props: { contact, isManager: true, labels, form } }).body;
+	const body = render(ContactForm, {
+		props: { contact, canEditLockedFields: true, labels, form }
+	}).body;
 	expect(body).toContain('Esa etiqueta no vale');
 });

@@ -1,8 +1,6 @@
 import { z } from 'zod';
 import { expect, test } from 'vitest';
-import { fieldsRefusal, invalid, messageRefusal, refusal } from './result';
-
-const CHECK_FIELDS = 'Revisa los campos marcados en rojo antes de guardar.';
+import { CHECK_FIELDS, fieldsRefusal, invalid, messageRefusal, refusal } from './result';
 
 function zodErrorOf(schema: z.ZodType, input: unknown): z.ZodError {
 	const parsed = schema.safeParse(input);

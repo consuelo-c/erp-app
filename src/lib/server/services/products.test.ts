@@ -2,6 +2,7 @@ import { isHttpError } from '@sveltejs/kit';
 import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { createFixture, DRIVER, MANAGER, SALES, WAREHOUSE } from '../db/fixture';
+import { CHECK_FIELDS } from '../result';
 import { submitAndApproveCount } from './inventory';
 import {
 	createProduct,
@@ -22,8 +23,6 @@ beforeEach(() => {
 afterEach(() => {
 	vi.useRealTimers();
 });
-
-const CHECK_FIELDS = 'Revisa los campos marcados en rojo antes de guardar.';
 
 const chair = {
 	name: 'Silla Tiffany',

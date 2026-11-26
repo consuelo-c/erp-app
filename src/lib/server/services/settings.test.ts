@@ -4,6 +4,7 @@ import { beforeEach, expect, test } from 'vitest';
 import { toDialTime } from '$lib/datetime';
 import { getSettingInput, type SettingModule } from '$lib/settings';
 import { ADMIN, createFixture, DRIVER, MANAGER, SALES, WAREHOUSE } from '../db/fixture';
+import { CHECK_FIELDS } from '../result';
 import { openWeek, recordPayment, saveDraft } from './payroll';
 import {
 	getHelp,
@@ -115,7 +116,7 @@ test('an invalid field saves nothing and comes back with its message', async () 
 	};
 	expect(await updateSystemSettings(db, { modules, values: form }, MANAGER)).toEqual({
 		ok: false,
-		message: 'Revisa los campos marcados en rojo antes de guardar.',
+		message: CHECK_FIELDS,
 		errors: {
 			PAYROLL_HOURS_PER_MONTH: 'Escribe un número entero mayor que cero',
 			PAYROLL_NIGHT_END: 'Escribe la hora, de 1 a 12'

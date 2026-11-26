@@ -42,12 +42,17 @@
 		return ({ update }) => update({ reset: false });
 	};
 
-	// The dialog closes once the server answers; an error shows above the form.
+	// A refusal marking the date keeps its dialog open with the field in red; any other answer
+	// closes it, and a refusal's message shows above the form.
 	const closeDialogs: SubmitFunction = () => {
-		return async ({ update }) => {
+		return async ({ result, update }) => {
 			await update();
-			endOpen = false;
-			rehireOpen = false;
+			const marksField =
+				'failure' === result.type && 0 < Object.keys(result.data?.errors ?? {}).length;
+			if (!marksField) {
+				endOpen = false;
+				rehireOpen = false;
+			}
 		};
 	};
 </script>

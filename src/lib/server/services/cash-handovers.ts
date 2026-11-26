@@ -5,8 +5,8 @@
 import { z } from 'zod';
 import { getTodaysDate } from '$lib/datetime';
 import { parsePesos } from '$lib/payroll';
-import { POLICIES } from '$lib/roles';
-import { hasAnyRole, hasCashTab, requireRole, type Actor } from '../actor';
+import { hasCashTab, POLICIES } from '$lib/roles';
+import { hasAnyRole, requireRole, type Actor } from '../actor';
 import { auditedInsert } from '../audit';
 import { invalid, messageRefusal, type SaveResult } from '../result';
 import { optional } from '../query';

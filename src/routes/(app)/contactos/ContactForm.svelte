@@ -22,13 +22,13 @@
 	interface Props {
 		/** Null for a new contact. */
 		contact: Contact | null;
-		isManager: boolean;
+		canEditLockedFields: boolean;
 		/** Every etiqueta, A–Z. */
 		labels: ContactLabel[];
 		form: Submitted | null | undefined;
 	}
 
-	let { contact, isManager, labels, form }: Props = $props();
+	let { contact, canEditLockedFields, labels, form }: Props = $props();
 
 	// After a failed save the fields come back with what was typed.
 	const value = (name: string, saved: string | null | undefined) =>
@@ -57,9 +57,9 @@
 	// For Sales, a set account is the manager's to change, and so is a real ID number: it's the
 	// contact's key. A locked field still posts its saved value: the service rejects a save that
 	// changes it.
-	const isAccountLocked = $derived(!isManager && null !== (contact?.bankAccount ?? null));
+	const isAccountLocked = $derived(!canEditLockedFields && null !== (contact?.bankAccount ?? null));
 	const hasRealDocument = $derived(null !== contact && !contact.hasAutoDocument);
-	const isDocumentLocked = $derived(!isManager && hasRealDocument);
+	const isDocumentLocked = $derived(!canEditLockedFields && hasRealDocument);
 
 	// What Sales fills in once stays: the hint says so before it's saved.
 	const ONCE = 'Cuando la guardes, solo Gerente o Administrador la cambian.';
@@ -71,14 +71,14 @@
 		const hint = contact?.hasAutoDocument
 			? `Tiene uno automático, ${contact.documentId}: escribe el real para guardar.`
 			: '';
-		return isManager ? hint || undefined : `${hint} ${ONCE}`.trim();
+		return canEditLockedFields ? hint || undefined : `${hint} ${ONCE}`.trim();
 	});
 	const accountHint = $derived.by(() => {
 		if (isAccountLocked) {
 			return lockedHint;
 		}
 		const hint = 'Para devoluciones al cliente.';
-		return isManager ? hint : `${hint} ${ONCE}`;
+		return canEditLockedFields ? hint : `${hint} ${ONCE}`;
 	});
 
 	// A Colombian number reads «310 442 8890» once typed; anything not valid stays as typed.
@@ -192,10 +192,10 @@
 	<Field
 		label="Etiquetas"
 		id="labels"
-		hint={isManager ? undefined : lockedHint}
+		hint={canEditLockedFields ? undefined : lockedHint}
 		error={labelsError}
 	>
-		{#if isManager}
+		{#if canEditLockedFields}
 			<div
 				class="labels"
 				id="labels"

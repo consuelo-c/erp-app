@@ -25,8 +25,8 @@ import {
 	type OrderTotals,
 	type PricedLine
 } from '$lib/orders';
-import { POLICIES, type Role } from '$lib/roles';
-import { hasAnyRole, hasCashTab, requireRole, type Actor } from '../actor';
+import { hasCashTab, POLICIES, type Role } from '$lib/roles';
+import { hasAnyRole, requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, eventFieldsSchema, type Row } from '../audit';
 import { describeOrderEdit, type OrderChange } from '../order-changes';
 import { createPublicToken } from '../public-token';
