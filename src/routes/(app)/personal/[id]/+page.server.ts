@@ -1,5 +1,6 @@
 import { error, fail } from '@sveltejs/kit';
 import { getTodaysDate } from '$lib/datetime';
+import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import {
 	endEmployment,
@@ -11,7 +12,7 @@ import {
 import type { Actions, PageServerLoad, RequestEvent } from './$types';
 
 export const load: PageServerLoad = async ({ locals, platform, params }) => {
-	requireRole(locals.user, ['ADMIN', 'MANAGER']);
+	requireRole(locals.user, POLICIES.employees);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
@@ -36,15 +37,15 @@ async function submit({ locals, platform, request, params }: RequestEvent, servi
 
 export const actions: Actions = {
 	save: async (event) => {
-		requireRole(event.locals.user, ['ADMIN', 'MANAGER']);
+		requireRole(event.locals.user, POLICIES.employees);
 		return (await submit(event, updateEmployee)) ?? { saved: true };
 	},
 	end: (event) => {
-		requireRole(event.locals.user, ['ADMIN', 'MANAGER']);
+		requireRole(event.locals.user, POLICIES.employees);
 		return submit(event, endEmployment);
 	},
 	rehire: (event) => {
-		requireRole(event.locals.user, ['ADMIN', 'MANAGER']);
+		requireRole(event.locals.user, POLICIES.employees);
 		return submit(event, rehire);
 	}
 };

@@ -1,6 +1,7 @@
 import { isHttpError } from '@sveltejs/kit';
 import { expect, test } from 'vitest';
-import type { Actor, Role } from '$lib/server/actor';
+import type { Role } from '$lib/roles';
+import type { Actor } from '$lib/server/actor';
 import { load } from './+page.server';
 
 test('WAREHOUSE and DRIVER get a 403 on the printout', async () => {

@@ -1,11 +1,12 @@
 import { error, json } from '@sveltejs/kit';
+import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { getQuoteChange } from '$lib/server/services/quotes';
 import type { RequestHandler } from './$types';
 
 // The timeline asks for an edit's changes when its row opens: the list never carries them.
 export const GET: RequestHandler = async ({ locals, params, platform }) => {
-	requireRole(locals.user, ['ADMIN', 'MANAGER', 'SALES']);
+	requireRole(locals.user, POLICIES.quotes);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}

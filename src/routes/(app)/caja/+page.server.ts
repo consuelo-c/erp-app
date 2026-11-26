@@ -1,4 +1,5 @@
 import { error } from '@sveltejs/kit';
+import { POLICIES } from '$lib/roles';
 import { requireRole, type Actor } from '$lib/server/actor';
 import { rememberFilters } from '$lib/server/list-filters';
 import { getCashBook, getMovement } from '$lib/server/services/cash';
@@ -9,7 +10,7 @@ import type { PageServerLoad } from './$types';
 // `?empleado=`, `?minimo=`, `?maximo=` and `?texto=`. `?movimiento=` opens one movement's detail
 // over them: its own view on a phone, a side panel on a desktop.
 export const load: PageServerLoad = async ({ cookies, locals, platform, url }) => {
-	requireRole(locals.user, ['ADMIN', 'MANAGER']);
+	requireRole(locals.user, POLICIES.managesCash);
 	rememberFilters('caja', url, cookies);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');

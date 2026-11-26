@@ -2,9 +2,6 @@ import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { POLICIES, ROLES, type Role } from '$lib/roles';
 
-// Re-exported until the guards' sweep (#698) points every importer at `$lib/roles`.
-export { ROLES, type Role };
-
 /** Who performs a write: a logged-in user, the seed, an AI agent or an external integration. */
 export type Actor = {
 	username: string;
@@ -26,16 +23,6 @@ export function hasRole(actor: Actor, role: Role): boolean {
 
 export function hasAnyRole(actor: Actor, roles: readonly Role[]): boolean {
 	return roles.some((role) => hasRole(actor, role));
-}
-
-/** Managing logins: creating them, assigning roles, reassigning them, setting passwords. */
-export function isAdmin(actor: Actor): boolean {
-	return hasRole(actor, 'ADMIN');
-}
-
-/** Everything else in the admin dashboard. */
-export function isAdminOrManager(actor: Actor): boolean {
-	return hasAnyRole(actor, ['ADMIN', 'MANAGER']);
 }
 
 /** Whether a login has an Efectivo por entregar: it takes cash and isn't the drawer. */

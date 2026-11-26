@@ -1,6 +1,7 @@
 import { isHttpError } from '@sveltejs/kit';
 import { expect, test } from 'vitest';
-import type { Actor, Role } from '$lib/server/actor';
+import type { Role } from '$lib/roles';
+import type { Actor } from '$lib/server/actor';
 import { load as loadList } from './+page.server';
 import { actions as newActions, load as loadNew } from './nueva/+page.server';
 import { load as loadDetail } from './[id]/+page.server';

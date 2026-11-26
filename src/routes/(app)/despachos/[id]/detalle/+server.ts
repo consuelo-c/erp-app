@@ -1,5 +1,6 @@
 import { error, json } from '@sveltejs/kit';
-import { requireRole, ROLES } from '$lib/server/actor';
+import { POLICIES } from '$lib/roles';
+import { requireRole } from '$lib/server/actor';
 import { listIncidents } from '$lib/server/services/incidents';
 import { getDespachosPaymentEntry, getOrderDetail } from '$lib/server/services/orders';
 import type { RequestHandler } from './$types';
@@ -8,7 +9,7 @@ import type { RequestHandler } from './$types';
 // every role, with its «Novedades» and what «Registrar pago» offers this login. Never kept in the
 // offline copy: offline, only the order's «Con novedad» badge shows, and no payment entry.
 export const GET: RequestHandler = async ({ locals, params, platform }) => {
-	requireRole(locals.user, ROLES);
+	requireRole(locals.user, POLICIES.anyLogin);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}

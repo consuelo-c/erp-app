@@ -1,21 +1,22 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
-import { isAdminOrManager, requireRole } from '$lib/server/actor';
+import { POLICIES } from '$lib/roles';
+import { hasAnyRole, requireRole } from '$lib/server/actor';
 import { createContact, listContactLabels } from '$lib/server/services/contacts';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, platform }) => {
-	requireRole(locals.user, ['ADMIN', 'MANAGER', 'SALES']);
+	requireRole(locals.user, POLICIES.contacts);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
 	const labels = await listContactLabels(platform.env.DB, locals.user);
-	return { isManager: isAdminOrManager(locals.user), labels };
+	return { isManager: hasAnyRole(locals.user, POLICIES.lockedContactFields), labels };
 };
 
 export const actions: Actions = {
 	default: async ({ locals, platform, request }) => {
-		requireRole(locals.user, ['ADMIN', 'MANAGER', 'SALES']);
+		requireRole(locals.user, POLICIES.contacts);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}

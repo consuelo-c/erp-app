@@ -1,5 +1,6 @@
 import { error, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
+import { POLICIES } from '$lib/roles';
 import { hasAnyRole } from '$lib/server/actor';
 import { renderTerms } from '$lib/server/markdown';
 import {
@@ -21,7 +22,7 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 		if (null !== id) {
 			redirect(
 				303,
-				hasAnyRole(locals.user, ['ADMIN', 'MANAGER', 'SALES'])
+				hasAnyRole(locals.user, POLICIES.orders)
 					? resolve('/(app)/pedidos/[id]', { id: String(id) })
 					: resolve('/(app)/despachos/[id]', { id: String(id) })
 			);

@@ -1,5 +1,6 @@
 import { error, fail } from '@sveltejs/kit';
 import { getTodaysDate } from '$lib/datetime';
+import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { rememberEmployee } from '$lib/server/chosen-employee';
 import { listEmployees } from '$lib/server/services/employees';
@@ -14,7 +15,7 @@ import type { Actions, PageServerLoad } from './$types';
 // the one picked last, here or in Nómina, then the actor's own, or the first one), then the same
 // day and week as Mis horas.
 export const load: PageServerLoad = async ({ cookies, locals, platform, url }) => {
-	requireRole(locals.user, ['ADMIN', 'MANAGER']);
+	requireRole(locals.user, POLICIES.everyonesHours);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
@@ -47,7 +48,7 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 export const actions: Actions = {
 	// The time dialog: one punch of the employee in the form's `employee_id`.
 	marcar: async ({ locals, platform, request }) => {
-		requireRole(locals.user, ['ADMIN', 'MANAGER']);
+		requireRole(locals.user, POLICIES.everyonesHours);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}
@@ -60,7 +61,7 @@ export const actions: Actions = {
 	},
 	// «Borrar marcas del día»: the four punches of that day back to empty.
 	borrar: async ({ locals, platform, request }) => {
-		requireRole(locals.user, ['ADMIN', 'MANAGER']);
+		requireRole(locals.user, POLICIES.everyonesHours);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}

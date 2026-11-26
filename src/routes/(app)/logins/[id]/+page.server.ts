@@ -1,5 +1,6 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
+import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { deactivateLogin, reactivateLogin, updateRoles } from '$lib/server/services/logins';
 import type { Actions } from './$types';
@@ -7,7 +8,7 @@ import type { Actions } from './$types';
 // The login itself is loaded by +layout.server.ts. `?aviso=` picks the list's success notice.
 export const actions: Actions = {
 	roles: async ({ locals, platform, request, params }) => {
-		requireRole(locals.user, ['ADMIN']);
+		requireRole(locals.user, POLICIES.logins);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}
@@ -19,7 +20,7 @@ export const actions: Actions = {
 		redirect(303, `${resolve('/logins')}?aviso=actualizado`);
 	},
 	deactivate: async ({ locals, platform, params }) => {
-		requireRole(locals.user, ['ADMIN']);
+		requireRole(locals.user, POLICIES.logins);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}
@@ -30,7 +31,7 @@ export const actions: Actions = {
 		redirect(303, `${resolve('/logins')}?aviso=desactivado`);
 	},
 	reactivate: async ({ locals, platform, params }) => {
-		requireRole(locals.user, ['ADMIN']);
+		requireRole(locals.user, POLICIES.logins);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}

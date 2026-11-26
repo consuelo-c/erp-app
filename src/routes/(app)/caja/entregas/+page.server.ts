@@ -1,4 +1,5 @@
 import { error } from '@sveltejs/kit';
+import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { getCashStatement, listPeopleWithTab } from '$lib/server/services/cash-handovers';
 import type { PageServerLoad } from './$types';
@@ -6,7 +7,7 @@ import type { PageServerLoad } from './$types';
 // The manager's side of each tab. The person and the range live in the URL, `?persona=`,
 // `?desde=` and `?hasta=`: the first person and today by default.
 export const load: PageServerLoad = async ({ locals, platform, url }) => {
-	requireRole(locals.user, ['ADMIN', 'MANAGER']);
+	requireRole(locals.user, POLICIES.managesCash);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}

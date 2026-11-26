@@ -1,18 +1,17 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
+import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { getOrderFormOptions } from '$lib/server/services/orders';
 import { convertQuote, getQuoteConversion } from '$lib/server/services/quotes';
 import { readPostedJson } from '../order-form';
 import type { Actions, PageServerLoad } from './$types';
 
-const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
-
 // An order is born only from a quote: `?cotizacion=12` is «Convertir en pedido», the form filled
 // from quote #12, and nothing is written until «Guardar pedido». No quote, an unknown one, or one
 // that's expired or converted shows why, and no form.
 export const load: PageServerLoad = async ({ locals, platform, url }) => {
-	requireRole(locals.user, TAKES_ORDERS);
+	requireRole(locals.user, POLICIES.orders);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
@@ -39,7 +38,7 @@ export const load: PageServerLoad = async ({ locals, platform, url }) => {
 
 export const actions: Actions = {
 	default: async ({ locals, platform, request, url }) => {
-		requireRole(locals.user, TAKES_ORDERS);
+		requireRole(locals.user, POLICIES.orders);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}

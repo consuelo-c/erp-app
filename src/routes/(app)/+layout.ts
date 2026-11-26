@@ -1,6 +1,6 @@
 import { resolve } from '$app/paths';
 import { fetchJson } from '$lib/offline';
-import type { Role } from '$lib/server/actor';
+import type { Role } from '$lib/roles';
 import type { LayoutLoad } from './$types';
 
 // The shell needs a session. Without one the endpoint's 401 throws above the shell, so the error

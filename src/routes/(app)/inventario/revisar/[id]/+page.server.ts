@@ -1,12 +1,11 @@
 import { error, fail } from '@sveltejs/kit';
+import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { approveCount, getCount, rejectCount, reverseCount } from '$lib/server/services/inventory';
 import type { Actions, PageServerLoad } from './$types';
 
-const REVIEWS = ['ADMIN', 'MANAGER'] as const;
-
 export const load: PageServerLoad = async ({ locals, params, platform }) => {
-	requireRole(locals.user, REVIEWS);
+	requireRole(locals.user, POLICIES.inventoryReview);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
@@ -28,7 +27,7 @@ function readPostedEdits(value: FormDataEntryValue | null): unknown {
 
 export const actions: Actions = {
 	aprobar: async ({ locals, params, platform, request }) => {
-		requireRole(locals.user, REVIEWS);
+		requireRole(locals.user, POLICIES.inventoryReview);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}
@@ -42,7 +41,7 @@ export const actions: Actions = {
 		return result.ok ? { approved: true } : fail(400, { approveMessage: result.message });
 	},
 	rechazar: async ({ locals, params, platform, request }) => {
-		requireRole(locals.user, REVIEWS);
+		requireRole(locals.user, POLICIES.inventoryReview);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}
@@ -51,7 +50,7 @@ export const actions: Actions = {
 		return result.ok ? { rejected: true } : fail(400, { rejectMessage: result.message });
 	},
 	revertir: async ({ locals, params, platform, request }) => {
-		requireRole(locals.user, REVIEWS);
+		requireRole(locals.user, POLICIES.inventoryReview);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}

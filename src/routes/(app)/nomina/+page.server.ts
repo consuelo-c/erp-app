@@ -1,5 +1,6 @@
 import { error, fail } from '@sveltejs/kit';
 import { getTodaysDate } from '$lib/datetime';
+import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { rememberEmployee } from '$lib/server/chosen-employee';
 import { openWeek, recordPayment, saveDraft } from '$lib/server/services/payroll';
@@ -9,7 +10,7 @@ import type { Actions, PageServerLoad } from './$types';
 // Horas, if they worked the period; otherwise the first one) and `?semana=`, any date of the week
 // (this one by default).
 export const load: PageServerLoad = async ({ cookies, locals, platform, url }) => {
-	requireRole(locals.user, ['ADMIN', 'MANAGER']);
+	requireRole(locals.user, POLICIES.payroll);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
@@ -29,7 +30,7 @@ type Write = typeof saveDraft;
 // Both buttons post the same form: «Guardar borrador» saves it, «Registrar pago» saves and pays it.
 function action(write: Write, done: Record<string, true>): Actions[string] {
 	return async ({ locals, platform, request }) => {
-		requireRole(locals.user, ['ADMIN', 'MANAGER']);
+		requireRole(locals.user, POLICIES.payroll);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}
