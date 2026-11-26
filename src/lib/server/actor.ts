@@ -1,9 +1,9 @@
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
+import { POLICIES, ROLES, type Role } from '$lib/roles';
 
-export const ROLES = ['ADMIN', 'MANAGER', 'SALES', 'WAREHOUSE', 'DRIVER'] as const;
-
-export type Role = (typeof ROLES)[number];
+// Re-exported until the guards' sweep (#698) points every importer at `$lib/roles`.
+export { ROLES, type Role };
 
 /** Who performs a write: a logged-in user, the seed, an AI agent or an external integration. */
 export type Actor = {
@@ -38,16 +38,14 @@ export function isAdminOrManager(actor: Actor): boolean {
 	return hasAnyRole(actor, ['ADMIN', 'MANAGER']);
 }
 
-// The drawer: their cash is already the company's, so they have no tab.
-export const MANAGES_CASH: readonly Role[] = ['ADMIN', 'MANAGER'];
-
-// The roles that take cash for the company: the warehouse never does.
-export const TAKES_CASH: readonly Role[] = ['SALES', 'DRIVER'];
+// The cash services' guards until the guards' sweep (#698) names the keys.
+export const MANAGES_CASH: readonly Role[] = POLICIES.managesCash;
+export const TAKES_CASH: readonly Role[] = POLICIES.takesCash;
 
 /** Whether a login has an Efectivo por entregar: it takes cash and isn't the drawer. */
 export function hasCashTab(roles: readonly Role[]): boolean {
 	const holds = (role: Role) => roles.includes(role);
-	return TAKES_CASH.some(holds) && !MANAGES_CASH.some(holds);
+	return POLICIES.takesCash.some(holds) && !POLICIES.managesCash.some(holds);
 }
 
 /** Throws a 401 without an actor (no session), a 403 unless it holds at least one of `roles`. */
