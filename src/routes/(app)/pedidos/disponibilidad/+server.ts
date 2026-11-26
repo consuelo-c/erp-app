@@ -1,4 +1,5 @@
 import { error, json } from '@sveltejs/kit';
+import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { checkOrderSchedule } from '$lib/server/services/orders';
 import type { RequestHandler } from './$types';
@@ -6,7 +7,7 @@ import type { RequestHandler } from './$types';
 // The order form asks, as its dates and times change, what's available for them and what to
 // warn about. `?pedido=` is the order being edited: its own lines and trips don't count.
 export const GET: RequestHandler = async ({ locals, platform, url }) => {
-	requireRole(locals.user, ['ADMIN', 'MANAGER', 'SALES']);
+	requireRole(locals.user, POLICIES.orders);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}

@@ -1,5 +1,6 @@
 import { error, fail } from '@sveltejs/kit';
-import { isAdminOrManager, requireRole } from '$lib/server/actor';
+import { POLICIES } from '$lib/roles';
+import { hasAnyRole, requireRole } from '$lib/server/actor';
 import {
 	getSuggestedProducts,
 	getUnitsOnRent,
@@ -9,10 +10,8 @@ import {
 } from '$lib/server/services/inventory';
 import type { Actions, PageServerLoad } from './$types';
 
-const COUNTS = ['ADMIN', 'MANAGER', 'WAREHOUSE', 'DRIVER'] as const;
-
 export const load: PageServerLoad = async ({ locals, platform }) => {
-	requireRole(locals.user, COUNTS);
+	requireRole(locals.user, POLICIES.inventoryCount);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
@@ -22,7 +21,12 @@ export const load: PageServerLoad = async ({ locals, platform }) => {
 		listCountableProducts(db, locals.user),
 		getUnitsOnRent(db, locals.user)
 	]);
-	return { suggested, products, onRent, canReview: isAdminOrManager(locals.user) };
+	return {
+		suggested,
+		products,
+		onRent,
+		canReview: hasAnyRole(locals.user, POLICIES.inventoryReview)
+	};
 };
 
 // The rows with a number are a list the browser builds, posted as JSON in one field.
@@ -36,7 +40,7 @@ function readPostedItems(value: FormDataEntryValue | null): unknown {
 
 export const actions: Actions = {
 	enviar: async ({ locals, platform, request }) => {
-		requireRole(locals.user, COUNTS);
+		requireRole(locals.user, POLICIES.inventoryCount);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}
@@ -45,7 +49,7 @@ export const actions: Actions = {
 		return result.ok ? { sentId: result.id, approved: false } : fail(400, result);
 	},
 	aprobar: async ({ locals, platform, request }) => {
-		requireRole(locals.user, ['ADMIN', 'MANAGER']);
+		requireRole(locals.user, POLICIES.inventoryReview);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}

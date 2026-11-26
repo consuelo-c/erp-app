@@ -1,13 +1,14 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { getTodaysDate } from '$lib/datetime';
+import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { listPeopleWithTab, recordHandover } from '$lib/server/services/cash-handovers';
 import type { Actions, PageServerLoad } from './$types';
 
 // `?persona=` pre-selects «Entregó»: the person whose tab the manager was reading.
 export const load: PageServerLoad = async ({ locals, platform, url }) => {
-	requireRole(locals.user, ['ADMIN', 'MANAGER']);
+	requireRole(locals.user, POLICIES.managesCash);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
@@ -21,7 +22,7 @@ export const load: PageServerLoad = async ({ locals, platform, url }) => {
 export const actions: Actions = {
 	// Saved, the person's tab opens on the handover's day, where it's listed.
 	default: async ({ locals, platform, request }) => {
-		requireRole(locals.user, ['ADMIN', 'MANAGER']);
+		requireRole(locals.user, POLICIES.managesCash);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}

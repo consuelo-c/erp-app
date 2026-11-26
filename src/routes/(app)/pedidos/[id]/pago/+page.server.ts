@@ -1,6 +1,7 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { getTodaysDate } from '$lib/datetime';
+import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import {
 	getOrderDetail,
@@ -11,12 +12,10 @@ import {
 import { listActiveIncidents } from '$lib/server/services/incidents';
 import type { Actions, PageServerLoad } from './$types';
 
-const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
-
 // The payment entry: the order's balances for the confirmation's warnings, the accounts Cuenta de
 // destino is pre-filled from, and its concepts. With none to offer, back to the order.
 export const load: PageServerLoad = async ({ locals, params, platform }) => {
-	requireRole(locals.user, TAKES_ORDERS);
+	requireRole(locals.user, POLICIES.orders);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
@@ -41,7 +40,7 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 export const actions: Actions = {
 	// Saved, the order shows the new payment and offers its receipt.
 	default: async ({ locals, params, platform, request }) => {
-		requireRole(locals.user, TAKES_ORDERS);
+		requireRole(locals.user, POLICIES.orders);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}

@@ -1,10 +1,11 @@
 import { error, fail } from '@sveltejs/kit';
+import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { getHolidays, overrideFrozenHoliday, updateHolidays } from '$lib/server/services/settings';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, platform }) => {
-	requireRole(locals.user, ['ADMIN', 'MANAGER']);
+	requireRole(locals.user, POLICIES.settings);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
@@ -14,7 +15,7 @@ export const load: PageServerLoad = async ({ locals, platform }) => {
 export const actions: Actions = {
 	// «Guardar festivos»: the dates after the freeze line.
 	guardar: async ({ locals, platform, request }) => {
-		requireRole(locals.user, ['ADMIN', 'MANAGER']);
+		requireRole(locals.user, POLICIES.settings);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}
@@ -24,7 +25,7 @@ export const actions: Actions = {
 	},
 	// «Modificar fecha cerrada»: ADMIN's change to one date on or before it, with its reason.
 	modificar: async ({ locals, platform, request }) => {
-		requireRole(locals.user, ['ADMIN']);
+		requireRole(locals.user, POLICIES.overrideClosedDate);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}

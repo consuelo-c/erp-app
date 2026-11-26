@@ -1,5 +1,6 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
+import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { setPassword } from '$lib/server/services/logins';
 import type { Actions } from './$types';
@@ -7,7 +8,7 @@ import type { Actions } from './$types';
 // The login is loaded by ../+layout.server.ts.
 export const actions: Actions = {
 	default: async ({ locals, platform, request, params }) => {
-		requireRole(locals.user, ['ADMIN']);
+		requireRole(locals.user, POLICIES.logins);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}

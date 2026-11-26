@@ -1,16 +1,15 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
+import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { isBannedClient } from '$lib/server/services/contacts';
 import { getQuote, getQuoteFormOptions, updateQuote } from '$lib/server/services/quotes';
 import { readPostedJson } from '../../../pedidos/order-form';
 import type { Actions, PageServerLoad } from './$types';
 
-const TAKES_QUOTES = ['ADMIN', 'MANAGER', 'SALES'] as const;
-
 // A converted quote is read-only: its detail, not the form.
 export const load: PageServerLoad = async ({ locals, params, platform }) => {
-	requireRole(locals.user, TAKES_QUOTES);
+	requireRole(locals.user, POLICIES.quotes);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
@@ -31,7 +30,7 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 
 export const actions: Actions = {
 	default: async ({ locals, params, platform, request }) => {
-		requireRole(locals.user, TAKES_QUOTES);
+		requireRole(locals.user, POLICIES.quotes);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}

@@ -1,18 +1,19 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { getTodaysDate } from '$lib/datetime';
+import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { createEmployee } from '$lib/server/services/employees';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = ({ locals }) => {
-	requireRole(locals.user, ['ADMIN', 'MANAGER']);
+	requireRole(locals.user, POLICIES.employees);
 	return { today: getTodaysDate() };
 };
 
 export const actions: Actions = {
 	default: async ({ locals, platform, request }) => {
-		requireRole(locals.user, ['ADMIN', 'MANAGER']);
+		requireRole(locals.user, POLICIES.employees);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}

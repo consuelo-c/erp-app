@@ -1,6 +1,7 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { isEditableStatus } from '$lib/orders';
+import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { isBannedClient } from '$lib/server/services/contacts';
 import {
@@ -12,11 +13,9 @@ import {
 import { readPostedJson } from '../../order-form';
 import type { Actions, PageServerLoad } from './$types';
 
-const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
-
 // Once the products are on their way back the order is read-only: its detail, not the form.
 export const load: PageServerLoad = async ({ locals, params, platform }) => {
-	requireRole(locals.user, TAKES_ORDERS);
+	requireRole(locals.user, POLICIES.orders);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
@@ -40,7 +39,7 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 
 export const actions: Actions = {
 	default: async ({ locals, params, platform, request }) => {
-		requireRole(locals.user, TAKES_ORDERS);
+		requireRole(locals.user, POLICIES.orders);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}

@@ -1,6 +1,7 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { getTodaysDate } from '$lib/datetime';
+import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { getOffsetOriginal, recordMovement, recordOffset } from '$lib/server/services/cash';
 import { listPeopleWithTab } from '$lib/server/services/cash-handovers';
@@ -8,7 +9,7 @@ import type { Actions, PageServerLoad } from './$types';
 
 // «Pagado por» lists who holds cash, with how much. `?corrige=` opens the tab as that movement's offsetting movement, pre-filled from it.
 export const load: PageServerLoad = async ({ locals, platform, url }) => {
-	requireRole(locals.user, ['ADMIN', 'MANAGER']);
+	requireRole(locals.user, POLICIES.managesCash);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
@@ -26,7 +27,7 @@ export const load: PageServerLoad = async ({ locals, platform, url }) => {
 export const actions: Actions = {
 	// Saved, the new movement's detail opens over the book, its receipt the primary action.
 	default: async ({ locals, platform, request, url }) => {
-		requireRole(locals.user, ['ADMIN', 'MANAGER']);
+		requireRole(locals.user, POLICIES.managesCash);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}

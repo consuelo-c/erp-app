@@ -1,5 +1,6 @@
 import { error, fail } from '@sveltejs/kit';
-import { requireRole, ROLES } from '$lib/server/actor';
+import { POLICIES } from '$lib/roles';
+import { requireRole } from '$lib/server/actor';
 import { reverseIncident } from '$lib/server/services/incidents';
 import { advanceOrder } from '$lib/server/services/orders';
 import type { Actions } from './$types';
@@ -8,7 +9,7 @@ import type { Actions } from './$types';
 export const actions: Actions = {
 	// The status button: the next operational status and the direction's note, open to every role.
 	avanzar: async ({ locals, params, platform, request }) => {
-		requireRole(locals.user, ROLES);
+		requireRole(locals.user, POLICIES.anyLogin);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}
@@ -19,7 +20,7 @@ export const actions: Actions = {
 	},
 	// «Novedades»' reversal: its reporter until it's frozen, the manager on any. The service decides.
 	revertir: async ({ locals, platform, request }) => {
-		requireRole(locals.user, ROLES);
+		requireRole(locals.user, POLICIES.anyLogin);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}

@@ -1,6 +1,6 @@
 // Enum values never reach the screen raw: every one goes through its label map.
 
-import type { Role } from './server/actor';
+import type { Role } from './roles';
 import type { FeeSource } from './orders';
 import type { DeductionConcept, EarningConcept } from './payroll';
 import type { CashConcept, PaymentMethod } from './server/services/cash';

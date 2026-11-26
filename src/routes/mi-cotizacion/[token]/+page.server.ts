@@ -1,5 +1,6 @@
 import { error, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
+import { POLICIES } from '$lib/roles';
 import { hasAnyRole } from '$lib/server/actor';
 import { renderTerms } from '$lib/server/markdown';
 import {
@@ -20,7 +21,7 @@ export const load: PageServerLoad = async ({ locals, params, platform, url }) =>
 		error(500, 'Sin acceso a la base de datos');
 	}
 	const db = platform.env.DB;
-	if (null !== locals.user && hasAnyRole(locals.user, ['ADMIN', 'MANAGER', 'SALES'])) {
+	if (null !== locals.user && hasAnyRole(locals.user, POLICIES.quotes)) {
 		const id = await findQuoteIdByToken(db, params.token);
 		if (null !== id) {
 			redirect(303, resolve('/(app)/cotizaciones/[id]', { id: String(id) }));

@@ -1,5 +1,6 @@
 import { error, json } from '@sveltejs/kit';
-import { requireRole, ROLES } from '$lib/server/actor';
+import { POLICIES } from '$lib/roles';
+import { requireRole } from '$lib/server/actor';
 import { rememberDispatchDay } from '$lib/server/list-filters';
 import { getDispatchDay } from '$lib/server/services/dispatch';
 import { getOrderDetail } from '$lib/server/services/orders';
@@ -10,7 +11,7 @@ import type { RequestHandler } from './$types';
 // ponytail: one getOrderDetail per order, a handful of queries each; a joined query if a day ever
 // holds more than a few dozen orders.
 export const GET: RequestHandler = async ({ cookies, locals, platform, url }) => {
-	requireRole(locals.user, ROLES);
+	requireRole(locals.user, POLICIES.anyLogin);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}

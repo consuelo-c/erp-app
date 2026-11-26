@@ -1,4 +1,5 @@
 import { error, fail, type RequestEvent } from '@sveltejs/kit';
+import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import {
 	createLabel,
@@ -10,7 +11,7 @@ import {
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, platform }) => {
-	requireRole(locals.user, ['ADMIN', 'MANAGER']);
+	requireRole(locals.user, POLICIES.contactLabels);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
@@ -22,7 +23,7 @@ type LabelWrite = typeof createLabel;
 // Each action posts its form to its service; a refusal comes back under the field it was typed in.
 function labelAction(action: string, write: LabelWrite) {
 	return async ({ locals, platform, request }: RequestEvent) => {
-		requireRole(locals.user, ['ADMIN', 'MANAGER']);
+		requireRole(locals.user, POLICIES.contactLabels);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}

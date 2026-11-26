@@ -1,4 +1,5 @@
 import { error, fail } from '@sveltejs/kit';
+import { POLICIES } from '$lib/roles';
 import { requireRole, type Actor } from '$lib/server/actor';
 import {
 	listIncidents,
@@ -16,9 +17,6 @@ import { getSourceQuoteId } from '$lib/server/services/quotes';
 import { getReceivableIssueForm } from '$lib/server/services/receivables';
 import type { Actions, PageServerLoad } from './$types';
 
-const TAKES_ORDERS = ['ADMIN', 'MANAGER', 'SALES'] as const;
-const MANAGES_INCIDENTS = ['ADMIN', 'MANAGER'] as const;
-
 // What the order offers for its money: the payment entry's concepts, which hide «Registrar pago»
 // when empty, and whether the order can start a cuenta de cobro. Everyone who opens an order also
 // works cuentas de cobro, so its cuenta is always a link.
@@ -31,7 +29,7 @@ async function getPaymentActions(db: D1Database, order: OrderDetail, actor: Acto
 // «Novedades» for everyone who opens the order, each with what the actor may do with it.
 // The quote it was converted from, if any, for «Desde la cotización #N».
 export const load: PageServerLoad = async ({ locals, params, platform }) => {
-	requireRole(locals.user, TAKES_ORDERS);
+	requireRole(locals.user, POLICIES.orders);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
@@ -49,7 +47,7 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 
 export const actions: Actions = {
 	cancelar: async ({ locals, params, platform, request }) => {
-		requireRole(locals.user, TAKES_ORDERS);
+		requireRole(locals.user, POLICIES.orders);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}
@@ -63,7 +61,7 @@ export const actions: Actions = {
 	},
 	// Its reporter until it's frozen, the manager on any: the service decides.
 	revertir: async ({ locals, platform, request }) => {
-		requireRole(locals.user, TAKES_ORDERS);
+		requireRole(locals.user, POLICIES.orders);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}
@@ -75,7 +73,7 @@ export const actions: Actions = {
 		return fail(400, { reverseMessage: result.errors.reason ?? result.message });
 	},
 	responsable: async ({ locals, platform, request }) => {
-		requireRole(locals.user, MANAGES_INCIDENTS);
+		requireRole(locals.user, POLICIES.incidents);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}

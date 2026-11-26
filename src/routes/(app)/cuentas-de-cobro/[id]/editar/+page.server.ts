@@ -1,13 +1,12 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
+import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { getReceivableEditForm, updateReceivable } from '$lib/server/services/receivables';
 import type { Actions, PageServerLoad } from './$types';
 
-const MANAGES_RECEIVABLES = ['ADMIN', 'MANAGER', 'SALES'] as const;
-
 export const load: PageServerLoad = async ({ locals, params, platform }) => {
-	requireRole(locals.user, MANAGES_RECEIVABLES);
+	requireRole(locals.user, POLICIES.receivables);
 	if (undefined === platform) {
 		error(500, 'Sin acceso a la base de datos');
 	}
@@ -20,7 +19,7 @@ export const load: PageServerLoad = async ({ locals, params, platform }) => {
 
 export const actions: Actions = {
 	default: async ({ locals, params, platform, request }) => {
-		requireRole(locals.user, MANAGES_RECEIVABLES);
+		requireRole(locals.user, POLICIES.receivables);
 		if (undefined === platform) {
 			error(500, 'Sin acceso a la base de datos');
 		}
