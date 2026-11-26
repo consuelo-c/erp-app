@@ -2,7 +2,6 @@
 // punches always go to the actor's employee, never one sent by the client; only ADMIN and MANAGER
 // pick the employee, through the selector.
 
-import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { addDays, dialTimeShape, getTodaysDate, getWeekStart, toClockTime } from '$lib/datetime';
 import { getExtraHoursRange } from '$lib/payroll';
@@ -180,43 +179,43 @@ function pickPunches(row: TimesheetRow | undefined): Partial<Punches> {
 
 type HoursInput = { date: string; week?: string | null };
 
+/** The day asked for is malformed or in the future. */
+export type MissingDay = { missing: 'day' };
+
 /**
  * The actor's own day and the week shown under it (the day's week unless `week` names another).
- * Null when the login has no employee: it can't punch. A future or malformed day is a 404.
+ * Null when the login has no employee: it can't punch.
  */
 export async function getOwnHours(
 	db: D1Database,
 	input: HoursInput,
 	actor: Actor | null
-): Promise<Hours | null> {
+): Promise<Hours | MissingDay | null> {
 	requireRole(actor, POLICIES.anyLogin);
 	const employee = await findEmployee(db, actor.employeeId);
 	return null === employee ? null : buildHours(db, employee, input);
 }
 
-/** Any employee's day and week, for ADMIN and MANAGER. An unknown employee is a 404. */
+/** Any employee's day and week, for ADMIN and MANAGER. Null for an unknown employee. */
 export async function getEmployeeHours(
 	db: D1Database,
 	input: HoursInput & { employeeId: unknown },
 	actor: Actor | null
-): Promise<Hours> {
+): Promise<Hours | MissingDay | null> {
 	requireRole(actor, POLICIES.everyonesHours);
 	const id = employeeIdSchema.safeParse(input.employeeId);
 	const employee = id.success ? await findEmployee(db, id.data) : null;
-	if (null === employee) {
-		error(404, 'Ese empleado no existe');
-	}
-	return buildHours(db, employee, input);
+	return null === employee ? null : buildHours(db, employee, input);
 }
 
 async function buildHours(
 	db: D1Database,
 	employee: HoursEmployee,
 	input: HoursInput
-): Promise<Hours> {
+): Promise<Hours | MissingDay> {
 	const date = dateSchema.safeParse(input.date);
 	if (!date.success || date.data > getTodaysDate()) {
-		error(404, 'Ese día no existe');
+		return { missing: 'day' };
 	}
 	const weekStart = getWeekStart(dateSchema.catch(date.data).parse(input.week ?? date.data));
 	const weekDates = Array.from({ length: DAYS_PER_WEEK }, (_, offset) =>

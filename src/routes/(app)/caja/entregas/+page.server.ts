@@ -1,3 +1,4 @@
+import { error } from '@sveltejs/kit';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { getDb } from '$lib/server/platform';
@@ -20,5 +21,9 @@ export const load: PageServerLoad = async ({ locals, platform, url }) => {
 		from: url.searchParams.get('desde'),
 		to: url.searchParams.get('hasta')
 	};
-	return { people, person, statement: await getCashStatement(db, input, locals.user) };
+	const statement = await getCashStatement(db, input, locals.user);
+	if (null === statement) {
+		error(404, 'Esa persona no tiene efectivo por entregar');
+	}
+	return { people, person, statement };
 };

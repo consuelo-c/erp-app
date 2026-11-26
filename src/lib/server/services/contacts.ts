@@ -2,7 +2,6 @@
 // or a WhatsApp username may be shared, and either may be missing. Never deleted: orders and
 // employees point to them.
 
-import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import {
 	BANNED,
@@ -267,11 +266,13 @@ function changesLockedField(current: Columns, next: Columns): boolean {
 	);
 }
 
+const LOCKED_FIELD = messageRefusal('Solo Gerente o Administrador cambian ese dato');
+
 // The screen shows these fields locked to Sales; a save that changes them anyway was forged.
-function requireLockedFieldsKept(actor: Actor, current: Columns, next: Columns): void {
-	if (!hasAnyRole(actor, POLICIES.lockedContactFields) && changesLockedField(current, next)) {
-		error(403, 'Solo Gerente o Administrador cambian ese dato');
-	}
+function lockedFieldRefusal(actor: Actor, current: Columns, next: Columns): Refusal | null {
+	const isChangeAllowed =
+		hasAnyRole(actor, POLICIES.lockedContactFields) || !changesLockedField(current, next);
+	return isChangeAllowed ? null : LOCKED_FIELD;
 }
 
 function documentRefusal(message: string): Refusal {
@@ -373,8 +374,8 @@ export async function createContact(
 		return invalid(parsed.error);
 	}
 	const columns = toColumns({ ...parsed.data, full_name: capitalizeName(parsed.data.full_name) });
-	requireLockedFieldsKept(actor, NEW_CONTACT, columns);
 	const refusal =
+		lockedFieldRefusal(actor, NEW_CONTACT, columns) ??
 		(await unknownLabelRefusal(db, parsed.data.labels)) ??
 		(await documentRefusalOf(db, parsed.data.document_id, 0));
 	if (null !== refusal) {
@@ -430,8 +431,8 @@ export async function updateContact(
 		return NOT_FOUND;
 	}
 	const columns = toColumns(form);
-	requireLockedFieldsKept(actor, row, columns);
 	const refusal =
+		lockedFieldRefusal(actor, row, columns) ??
 		(await unknownLabelRefusal(db, form.labels)) ??
 		(await documentRefusalOf(db, form.document_id, id));
 	return refusal ?? applyEdit(db, actor, { row, columns });

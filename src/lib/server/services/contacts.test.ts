@@ -33,6 +33,9 @@ beforeEach(() => {
 
 const luzMarina = { phone: '310 442 8890', full_name: 'Luz Marina Restrepo' };
 
+// A field the form shows locked to Sales, changed anyway: only a forged request gets here.
+const LOCKED = { ok: false, message: 'Solo Gerente o Administrador cambian ese dato', errors: {} };
+
 async function rejection(promise: Promise<unknown>): Promise<number | null> {
 	try {
 		await promise;
@@ -260,13 +263,11 @@ test('Sales types the real document over an automatic one, and on a new contact'
 	expect(created).toMatchObject({ ok: true });
 });
 
-test('once real, only Manager and Admin change the document: Sales gets a 403', async () => {
+test('once real, only Manager and Admin change the document: Sales is refused', async () => {
 	const id = await fixture.contact({ ...luzMarina, document_id: '1036452118' });
 	const kept = { ...luzMarina, document_id: '1.036.452.118', bank_account: 'Nequi 310 442 8890' };
 	expect(await updateContact(db, { ...kept, id }, SALES)).toEqual({ ok: true, id });
-	expect(await rejection(updateContact(db, { ...kept, document_id: '71384902', id }, SALES))).toBe(
-		403
-	);
+	expect(await updateContact(db, { ...kept, document_id: '71384902', id }, SALES)).toEqual(LOCKED);
 	for (const [actor, documentId] of [
 		[MANAGER, '71384902'],
 		[actorWith('ADMIN'), '900.312.554-1']
@@ -327,11 +328,9 @@ test('Sales is rejected changing etiquetas, a set bank account or the document',
 		{ bank_account: '' },
 		{ document_id: '71384902' }
 	]) {
-		expect(await rejection(updateContact(db, { ...withAccount, ...change, id }, SALES))).toBe(403);
+		expect(await updateContact(db, { ...withAccount, ...change, id }, SALES)).toEqual(LOCKED);
 	}
-	expect(await rejection(createContact(db, { ...withAccount, phone: '3007712043' }, SALES))).toBe(
-		403
-	);
+	expect(await createContact(db, { ...withAccount, phone: '3007712043' }, SALES)).toEqual(LOCKED);
 });
 
 test("an employee's document is Manager's and Admin's, and never left empty", async () => {
@@ -344,7 +343,7 @@ test("an employee's document is Manager's and Admin's, and never left empty", as
 	expect((await listContacts(db, { label: 'EMPLOYEE' }, SALES)).contacts).toMatchObject([
 		{ fullName: 'Ana Pérez' }
 	]);
-	expect(await rejection(updateContact(db, { ...ana, document_id: '1', id }, SALES))).toBe(403);
+	expect(await updateContact(db, { ...ana, document_id: '1', id }, SALES)).toEqual(LOCKED);
 	expect(await updateContact(db, { ...ana, full_name: 'Ana P.', id }, SALES)).toEqual({
 		ok: true,
 		id

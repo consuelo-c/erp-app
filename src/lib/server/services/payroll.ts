@@ -3,7 +3,6 @@
 // settings and salary. Opening only shows it; saving writes it with the snapshots of that moment,
 // final once the payment is recorded (PAID).
 
-import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { addDays, getTodaysDate, getWeekStart } from '$lib/datetime';
 import { SETTINGS } from '$lib/settings';
@@ -393,17 +392,13 @@ function findById(employees: Employee[], employeeId: unknown): Employee | undefi
 	return employees.find((candidate) => id.success && id.data === candidate.id);
 }
 
-// The employee asked for must have worked the period: showing someone else instead is how the
-// wrong person gets paid. The one preferred, picked earlier, is only kept if they did.
-function pickEmployee(employees: Employee[], input: EmployeeChoice): Employee {
+// The employee asked for must have worked the period, or none is: showing someone else instead is
+// how the wrong person gets paid. The one preferred, picked earlier, is only kept if they did.
+function pickEmployee(employees: Employee[], input: EmployeeChoice): Employee | undefined {
 	if (null === input.employeeId || undefined === input.employeeId) {
 		return findById(employees, input.preferredEmployeeId) ?? employees[0];
 	}
-	const employee = findById(employees, input.employeeId);
-	if (undefined === employee) {
-		error(404, 'Ese empleado no trabajó en este periodo');
-	}
-	return employee;
+	return findById(employees, input.employeeId);
 }
 
 function toDraft(
@@ -436,13 +431,13 @@ type EmployeeChoice = { employeeId: unknown; preferredEmployeeId?: unknown };
 /**
  * The week's employees and one of them's settlement (`employeeId`; otherwise `preferredEmployeeId`
  * if they worked the period, or the first one): the saved draft recalculated, or a new one proposed
- * from the hours log. Opening writes nothing.
+ * from the hours log. Null when `employeeId` didn't work the period. Opening writes nothing.
  */
 export async function openWeek(
 	db: D1Database,
 	input: EmployeeChoice & { week: unknown },
 	actor: Actor | null
-): Promise<PayrollWeek> {
+): Promise<PayrollWeek | null> {
 	requireRole(actor, POLICIES.payroll);
 	const period = findPeriod(input.week);
 	const employees = (await listEmployees(db, actor)).filter((each) => worksDuring(each, period));
@@ -451,6 +446,9 @@ export async function openWeek(
 		return { ...period, employees: options, draft: null };
 	}
 	const employee = pickEmployee(employees, input);
+	if (undefined === employee) {
+		return null;
+	}
 	return { ...period, employees: options, draft: await buildDraft(db, employee, period) };
 }
 
@@ -460,6 +458,9 @@ export type Receipt = Period & {
 	company: CompanySettings;
 };
 
+/** Why there's no receipt: the employee didn't work the period, or the settlement isn't paid. */
+export type MissingReceipt = { missing: 'employee' | 'payment' };
+
 /**
  * The printed receipt of one employee's settlement for one week (`week` is any date of it): only
  * once it's paid, since the worker signs it when the money is handed over.
@@ -468,15 +469,19 @@ export async function getReceipt(
 	db: D1Database,
 	input: { employeeId: unknown; week: unknown },
 	actor: Actor | null
-): Promise<Receipt> {
-	const [{ draft, ...week }, company] = await Promise.all([
+): Promise<Receipt | MissingReceipt> {
+	const [opened, company] = await Promise.all([
 		openWeek(db, input, actor),
 		readSettings(db, COMPANY_SETTINGS)
 	]);
+	if (null === opened) {
+		return { missing: 'employee' };
+	}
+	const { draft, ...week } = opened;
 	// openWeek falls back to another employee: the receipt is only ever the one asked for.
 	const isAsked = String(draft?.employeeId) === String(input.employeeId);
 	if (null === draft || null === draft.payment || !isAsked) {
-		error(404, 'Esa liquidación todavía no está pagada');
+		return { missing: 'payment' };
 	}
 	const { periodStart, periodEnd, extraHours } = week;
 	return { periodStart, periodEnd, extraHours, draft, payment: draft.payment, company };

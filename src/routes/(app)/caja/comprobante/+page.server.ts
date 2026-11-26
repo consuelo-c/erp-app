@@ -1,3 +1,4 @@
+import { error } from '@sveltejs/kit';
 import { POLICIES } from '$lib/roles';
 import { hasAnyRole, requireRole } from '$lib/server/actor';
 import { getDb } from '$lib/server/platform';
@@ -9,8 +10,12 @@ import type { PageServerLoad } from './$types';
 export const load: PageServerLoad = async ({ locals, platform, url }) => {
 	requireRole(locals.user, POLICIES.paymentReceipts);
 	const db = getDb(platform);
+	const receipt = await getReceipt(db, url.searchParams.get('movimiento'), locals.user);
+	if (null === receipt) {
+		error(404, 'Ese movimiento no existe');
+	}
 	return {
-		receipt: await getReceipt(db, url.searchParams.get('movimiento'), locals.user),
+		receipt,
 		opensCashBook: hasAnyRole(locals.user, POLICIES.cashBookLink)
 	};
 };

@@ -2,7 +2,6 @@
 // holds for the company. A handover isn't a cash movement: it moves the company's own cash from a
 // pocket to the drawer, so it takes no receipt number and never touches Caja.
 
-import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { getTodaysDate } from '$lib/datetime';
 import { parsePesos } from '$lib/payroll';
@@ -220,21 +219,21 @@ export async function listPeopleWithTab(
 		.sort((first, second) => first.name.localeCompare(second.name, 'es'));
 }
 
-/** A person's tab: what they hold now, and their movements and handovers in the range. */
+/**
+ * A person's tab: what they hold now, and their movements and handovers in the range. Null when
+ * they have none, or it isn't the actor's to read.
+ */
 export async function getCashStatement(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<CashStatement> {
+): Promise<CashStatement | null> {
 	requireRole(actor, POLICIES.readsCashTab);
 	const typed = statementInputSchema.parse(input);
 	const today = getTodaysDate();
 	const range = { username: typed.username, from: typed.from ?? today, to: typed.to ?? today };
-	if (!canReadTab(actor, range.username)) {
-		error(403, 'No tienes permiso para esta acción');
-	}
-	if (null === (await findLoginWithTab(db, range.username))) {
-		error(404, 'Esa persona no tiene efectivo por entregar');
+	if (!canReadTab(actor, range.username) || null === (await findLoginWithTab(db, range.username))) {
+		return null;
 	}
 	const [pending, groups, handovers] = await Promise.all([
 		sumPending(db, range.username),

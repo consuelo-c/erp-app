@@ -1,4 +1,4 @@
-import { fail, redirect } from '@sveltejs/kit';
+import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { getTodaysDate } from '$lib/datetime';
 import { POLICIES } from '$lib/roles';
@@ -21,7 +21,11 @@ export const load: PageServerLoad = async ({ locals, platform, url }) => {
 		date: url.searchParams.get('dia') ?? today,
 		week: url.searchParams.get('semana')
 	};
-	return { today, hours: await getOwnHours(db, input, locals.user) };
+	const hours = await getOwnHours(db, input, locals.user);
+	if (null !== hours && 'missing' in hours) {
+		error(404, 'Ese día no existe');
+	}
+	return { today, hours };
 };
 
 export const actions: Actions = {
