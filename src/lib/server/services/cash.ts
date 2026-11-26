@@ -1,14 +1,13 @@
 // Caja: every peso in or out. Movements are never edited or deleted: a mistake is offset by
 // another movement with the same concept and link, the opposite sign and `reverses_id`.
 
-import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { getMonthRange, getTodaysDate } from '$lib/datetime';
 import { parsePesos } from '$lib/payroll';
 import { POLICIES } from '$lib/roles';
 import { hasCashTab, requireRole, rolesSchema, type Actor } from '../actor';
 import { auditedInsert } from '../audit';
-import { invalid, messageRefusal, type SaveResult } from '../result';
+import { invalid, messageRefusal, type Refusal, type SaveResult } from '../result';
 import { COMPANY_SETTINGS, readSettings, type CompanySettings } from './settings';
 
 export const CASH_CONCEPTS = [
@@ -355,24 +354,24 @@ function offsetRefusal(movement: { isOffset: boolean; isCorrected: boolean }): s
 	return null;
 }
 
-/** The movement `?corrige=` names, to pre-fill its offsetting movement: one that can be offset. */
+/**
+ * The movement `?corrige=` names, to pre-fill its offsetting movement: null when there's none, a
+ * refusal when it can't be offset.
+ */
 export async function getOffsetOriginal(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<MovementDetail> {
+): Promise<MovementDetail | Refusal | null> {
 	const original = await getMovement(db, input, actor);
 	if (null === original) {
-		error(404, 'Ese movimiento no existe');
+		return null;
 	}
 	const refusal = offsetRefusal({
 		isOffset: null !== original.reverses,
 		isCorrected: null !== original.reversedBy
 	});
-	if (null !== refusal) {
-		error(400, refusal);
-	}
-	return original;
+	return null === refusal ? original : messageRefusal(refusal);
 }
 
 type OriginalRow = {
@@ -787,14 +786,14 @@ export async function getReceipt(
 	movement: MovementDetail;
 	company: CompanySettings;
 	receivableOrderIds: number[];
-}> {
+} | null> {
 	requireRole(actor, POLICIES.paymentReceipts);
 	const [movement, company] = await Promise.all([
 		findDetail(db, input),
 		readSettings(db, COMPANY_SETTINGS)
 	]);
 	if (null === movement) {
-		error(404, 'Ese movimiento no existe');
+		return null;
 	}
 	if (null === movement.orderId && null === movement.receivableId) {
 		requireRole(actor, POLICIES.managesCash);

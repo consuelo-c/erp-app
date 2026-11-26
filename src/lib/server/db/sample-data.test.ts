@@ -234,13 +234,14 @@ test("the week of 12 October's settlement fills each of the five overtime rows",
 	memory.exec(readFileSync('scripts/settings-defaults.sql', 'utf8'));
 	memory.exec(catalog);
 	memory.exec(sampleData);
-	const { employees } = await openWeek(db, { employeeId: null, week: '2026-10-12' }, MANAGER);
+	const employees = (await openWeek(db, { employeeId: null, week: '2026-10-12' }, MANAGER))
+		?.employees;
 	expect(employees).toHaveLength(4);
 	const weeks = await Promise.all(
-		employees.map(({ id }) => openWeek(db, { employeeId: id, week: '2026-10-12' }, MANAGER))
+		(employees ?? []).map(({ id }) => openWeek(db, { employeeId: id, week: '2026-10-12' }, MANAGER))
 	);
 	const filled = weeks
-		.flatMap(({ draft }) => draft?.earnings ?? [])
+		.flatMap((week) => week?.draft?.earnings ?? [])
 		.filter((earning) => (earning.derivedQty ?? 0) > 0)
 		.map((earning) => earning.concept);
 	expect([...new Set(filled)].sort()).toEqual([

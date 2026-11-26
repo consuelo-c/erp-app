@@ -1,16 +1,33 @@
-import { fail } from '@sveltejs/kit';
+import { error, fail } from '@sveltejs/kit';
 import { getTodaysDate } from '$lib/datetime';
 import { POLICIES } from '$lib/roles';
-import { requireRole } from '$lib/server/actor';
+import { requireRole, type Actor } from '$lib/server/actor';
 import { rememberEmployee } from '$lib/server/chosen-employee';
 import { getDb } from '$lib/server/platform';
 import { listEmployees } from '$lib/server/services/employees';
 import {
 	clearEmployeeDay,
 	getEmployeeHours,
-	saveEmployeePunch
+	saveEmployeePunch,
+	type Hours
 } from '$lib/server/services/timesheets';
 import type { Actions, PageServerLoad } from './$types';
+
+// The employee's day and week; an unknown employee or day is the error page.
+async function findHours(
+	db: D1Database,
+	input: Parameters<typeof getEmployeeHours>[1],
+	actor: Actor
+): Promise<Hours> {
+	const hours = await getEmployeeHours(db, input, actor);
+	if (null === hours) {
+		error(404, 'Ese empleado no existe');
+	}
+	if ('missing' in hours) {
+		error(404, 'Ese día no existe');
+	}
+	return hours;
+}
 
 // Any employee's punches, for ADMIN and MANAGER: the selector's employee (`?empleado=`; by default
 // the one picked last, here or in Nómina, then the actor's own, or the first one), then the same
@@ -37,11 +54,7 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 		date: url.searchParams.get('dia') ?? today,
 		week: url.searchParams.get('semana')
 	};
-	return {
-		today,
-		employees: options,
-		hours: await getEmployeeHours(db, input, locals.user)
-	};
+	return { today, employees: options, hours: await findHours(db, input, locals.user) };
 };
 
 export const actions: Actions = {

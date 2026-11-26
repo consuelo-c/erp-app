@@ -1,12 +1,33 @@
-import { fail, redirect } from '@sveltejs/kit';
+import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { getTodaysDate } from '$lib/datetime';
 import { POLICIES } from '$lib/roles';
-import { requireRole } from '$lib/server/actor';
+import { requireRole, type Actor } from '$lib/server/actor';
 import { getDb } from '$lib/server/platform';
-import { getOffsetOriginal, recordMovement, recordOffset } from '$lib/server/services/cash';
+import {
+	getOffsetOriginal,
+	recordMovement,
+	recordOffset,
+	type MovementDetail
+} from '$lib/server/services/cash';
 import { listPeopleWithTab } from '$lib/server/services/cash-handovers';
 import type { Actions, PageServerLoad } from './$types';
+
+// The movement `?corrige=` names, if it can be offset; otherwise the error page.
+async function findOriginal(
+	db: D1Database,
+	correctedId: string,
+	actor: Actor
+): Promise<MovementDetail> {
+	const original = await getOffsetOriginal(db, correctedId, actor);
+	if (null === original) {
+		error(404, 'Ese movimiento no existe');
+	}
+	if ('ok' in original) {
+		error(400, original.message);
+	}
+	return original;
+}
 
 // «Pagado por» lists who holds cash, with how much. `?corrige=` opens the tab as that movement's offsetting movement, pre-filled from it.
 export const load: PageServerLoad = async ({ locals, platform, url }) => {
@@ -16,7 +37,7 @@ export const load: PageServerLoad = async ({ locals, platform, url }) => {
 	return {
 		today: getTodaysDate(),
 		people: await listPeopleWithTab(db, locals.user),
-		original: null === correctedId ? null : await getOffsetOriginal(db, correctedId, locals.user)
+		original: null === correctedId ? null : await findOriginal(db, correctedId, locals.user)
 	};
 };
 

@@ -2580,5 +2580,5 @@ test("cash from a damage charge counts on the driver's Efectivo por entregar; on
 	await recordPayment(id, damage('NEW', '40.000'), driver);
 	await recordPayment(id, damage('DEPOSIT', '100.000'), driver);
 	const tab = { username: driver.username, from: '2026-08-01', to: '2026-08-01' };
-	expect((await getCashStatement(db, tab, MANAGER)).pending).toBe(40000);
+	expect((await getCashStatement(db, tab, MANAGER))?.pending).toBe(40000);
 });

@@ -1,4 +1,4 @@
-import { fail } from '@sveltejs/kit';
+import { error, fail } from '@sveltejs/kit';
 import { getTodaysDate } from '$lib/datetime';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
@@ -18,10 +18,11 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 		preferredEmployeeId: rememberEmployee(url, cookies),
 		week: url.searchParams.get('semana')
 	};
-	return {
-		today: getTodaysDate(),
-		week: await openWeek(db, input, locals.user)
-	};
+	const week = await openWeek(db, input, locals.user);
+	if (null === week) {
+		error(404, 'Ese empleado no trabajó en este periodo');
+	}
+	return { today: getTodaysDate(), week };
 };
 
 type Write = typeof saveDraft;

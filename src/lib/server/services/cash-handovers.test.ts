@@ -63,7 +63,7 @@ test('Por entregar is the cash the person collected less the cash they gave back
 	const deposit = { concept: 'SECURITY_DEPOSIT', amount: '300.000' };
 	await collect(driver, await onTheRoad({ deposit_amount: 300000 }), deposit);
 	await collect(driver, await depositToReturn(), { concept: 'DEPOSIT_REFUND', amount: '200.000' });
-	expect((await getCashStatement(db, today(), driver)).pending).toBe(780000);
+	expect((await getCashStatement(db, today(), driver))?.pending).toBe(780000);
 });
 
 test('transfers never count: that money is in the bank', async () => {
@@ -74,7 +74,7 @@ test('transfers never count: that money is in the bank', async () => {
 		payment_method: 'TRANSFER',
 		bank_account: 'Bancolombia 123'
 	});
-	expect((await getCashStatement(db, today(), driver)).pending).toBe(0);
+	expect((await getCashStatement(db, today(), driver))?.pending).toBe(0);
 });
 
 test("the manager's offset of the person's movement comes off their tab, not the manager's own", async () => {
@@ -82,7 +82,7 @@ test("the manager's offset of the person's movement comes off their tab, not the
 	await fixture.payment(await onTheRoad(), { amount: '50.000' });
 	const offset = { reverses_id: String(collected), payment_method: 'CASH' };
 	await recordOffset(db, { ...offset, movement_date: '2026-11-20' }, MANAGER);
-	expect((await getCashStatement(db, today(), driver)).pending).toBe(0);
+	expect((await getCashStatement(db, today(), driver))?.pending).toBe(0);
 });
 
 type HandoverRow = { username: string; amount: number; date: string; note?: string };
@@ -98,7 +98,7 @@ test('Por entregar is all-time, whatever the range, less every handover', async 
 	await collect(driver, orderId, { amount: '120.000' });
 	await addHandover({ username: driver.username, amount: 600000, date: '2026-11-03' });
 	const statement = await getCashStatement(db, today(), driver);
-	expect(statement.pending).toBe(200000);
+	expect(statement?.pending).toBe(200000);
 });
 
 test("the range lists the person's movements grouped by order, transfers marked as not counting", async () => {
@@ -114,7 +114,7 @@ test("the range lists the person's movements grouped by order, transfers marked 
 	await fixture.payment(second, { amount: '10.000' });
 	await collect(driver, first, { movement_date: '2026-11-21' });
 	const statement = await getCashStatement(db, today(), driver);
-	expect(statement.groups).toEqual([
+	expect(statement?.groups).toEqual([
 		{
 			orderId: first,
 			receivableId: null,
@@ -167,7 +167,7 @@ test("the range lists the person's handovers, and only theirs", async () => {
 		{ username: driver.username, from: '2026-11-02', to: '2026-11-20' },
 		driver
 	);
-	expect(statement.handovers).toEqual([
+	expect(statement?.handovers).toEqual([
 		{
 			id: 2,
 			amount: 600000,
@@ -190,7 +190,7 @@ async function statusOf(promise: Promise<unknown>): Promise<number | undefined> 
 test('a non-manager reads only their own tab; the manager reads anyone who has one', async () => {
 	const seller = await fixture.employee({ roles: ['SALES'] });
 	const sellersTab = { ...today(), username: seller.username };
-	expect(await statusOf(getCashStatement(db, sellersTab, driver))).toBe(403);
+	expect(await getCashStatement(db, sellersTab, driver)).toBeNull();
 	expect(await statusOf(getCashStatement(db, sellersTab, seller))).toBeUndefined();
 	expect(await statusOf(getCashStatement(db, sellersTab, MANAGER))).toBeUndefined();
 	expect(await statusOf(getCashStatement(db, sellersTab, null))).toBe(401);
@@ -202,12 +202,10 @@ test('managers and admins have no tab, nor does the warehouse, which takes no ca
 	const manager = await fixture.employee({ roles: ['MANAGER'] });
 	const boss = await fixture.employee({ roles: ['SALES', 'MANAGER'] });
 	const warehouse = await fixture.employee({ roles: ['WAREHOUSE'] });
-	expect(await statusOf(getCashStatement(db, tabOf(manager), manager))).toBe(404);
-	expect(await statusOf(getCashStatement(db, tabOf(boss), boss))).toBe(404);
+	expect(await getCashStatement(db, tabOf(manager), manager)).toBeNull();
+	expect(await getCashStatement(db, tabOf(boss), boss)).toBeNull();
 	expect(await statusOf(getCashStatement(db, tabOf(warehouse), warehouse))).toBe(403);
-	expect(await statusOf(getCashStatement(db, { ...today(), username: 'nadie' }, manager))).toBe(
-		404
-	);
+	expect(await getCashStatement(db, { ...today(), username: 'nadie' }, manager)).toBeNull();
 });
 
 // A login of nobody on payroll: its tab goes by its username.
@@ -252,8 +250,8 @@ test('the range is today unless given; an unreadable end is today too', async ()
 	await collect(driver, yesterdays, { movement_date: '2026-11-19' });
 	await collect(driver, todays);
 	const statement = await getCashStatement(db, { username: driver.username, from: 'ayer' }, driver);
-	expect(statement.range).toEqual({ from: '2026-11-20', to: '2026-11-20' });
-	expect(statement.groups.map(({ orderId }) => orderId)).toEqual([todays]);
+	expect(statement?.range).toEqual({ from: '2026-11-20', to: '2026-11-20' });
+	expect(statement?.groups.map(({ orderId }) => orderId)).toEqual([todays]);
 });
 
 test('a recorded handover lowers the tab by the amount received; a shortfall stays on it', async () => {
@@ -265,8 +263,8 @@ test('a recorded handover lowers the tab by the amount received; a shortfall sta
 	);
 	expect(result).toEqual({ ok: true, id: 1 });
 	const statement = await getCashStatement(db, today(), driver);
-	expect(statement.pending).toBe(80000);
-	expect(statement.handovers).toEqual([
+	expect(statement?.pending).toBe(80000);
+	expect(statement?.handovers).toEqual([
 		{ id: 1, amount: 600000, handoverDate: '2026-11-20', note: 'Faltaron', recordedBy: 'manager' }
 	]);
 });
@@ -289,7 +287,7 @@ test('only a manager or an admin records a handover, and only for someone with a
 		ok: false,
 		errors: { amount: 'Escribe un valor mayor que cero' }
 	});
-	expect((await getCashStatement(db, today(), MANAGER)).pending).toBe(-100000);
+	expect((await getCashStatement(db, today(), MANAGER))?.pending).toBe(-100000);
 });
 
 // «Salida» of supplies in cash, paid out of the driver's tab unless told otherwise.
@@ -311,8 +309,8 @@ test('an expense «Pagado por» the person comes off their tab and shows in thei
 	await collect(driver, await onTheRoad());
 	await recordMovement(db, supplies(), MANAGER);
 	const statement = await getCashStatement(db, today(), driver);
-	expect(statement.pending).toBe(595000);
-	expect(statement.groups[0]).toEqual({
+	expect(statement?.pending).toBe(595000);
+	expect(statement?.groups[0]).toEqual({
 		orderId: null,
 		receivableId: null,
 		movements: [
@@ -349,8 +347,8 @@ test('the offset of an expense «Pagado por» the person lands on their tab and 
 		MANAGER
 	);
 	const statement = await getCashStatement(db, today(), driver);
-	expect(statement.pending).toBe(680000);
-	expect(statement.groups.flatMap(({ movements }) => movements.map(({ id }) => id))).toEqual([
+	expect(statement?.pending).toBe(680000);
+	expect(statement?.groups.flatMap(({ movements }) => movements.map(({ id }) => id))).toEqual([
 		3, 2, 1
 	]);
 });
@@ -359,7 +357,7 @@ test('an expense without «Pagado por» leaves every tab unchanged', async () =>
 	const seller = await fixture.employee({ roles: ['SALES'], full_name: 'Diana Zuluaga' });
 	await collect(driver, await onTheRoad());
 	await recordMovement(db, supplies({ description: 'Jabón', paid_by: '' }), MANAGER);
-	expect((await getCashStatement(db, today(), driver)).pending).toBe(680000);
+	expect((await getCashStatement(db, today(), driver))?.pending).toBe(680000);
 	expect(await listPeopleWithTab(db, MANAGER)).toEqual([
 		{ username: driver.username, name: 'Carlos Ospina', pending: 680000 },
 		{ username: seller.username, name: 'Diana Zuluaga', pending: 0 }

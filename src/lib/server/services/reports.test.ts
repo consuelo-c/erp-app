@@ -883,7 +883,7 @@ describe('getProfitAndLoss', () => {
 			netPay
 		}: { periodStart: string; paymentDate: string; netPay: number }
 	): Promise<number> {
-		const { draft } = await openWeek(db, { employeeId, week: periodStart }, MANAGER);
+		const draft = (await openWeek(db, { employeeId, week: periodStart }, MANAGER))?.draft ?? null;
 		if (null === draft) {
 			throw new Error(`No draft for ${periodStart}`);
 		}

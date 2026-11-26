@@ -168,7 +168,7 @@ test("changing a quote's validity moves no existing quote's «Válida hasta»", 
 // Nómina, as the screen proposes it: saved as a draft, or paid.
 async function settle(periodStart: string, status: 'DRAFT' | 'PAID') {
 	const { employeeId } = await fixture.employee({ roles: ['WAREHOUSE'] });
-	const { draft } = await openWeek(db, { employeeId, week: periodStart }, MANAGER);
+	const draft = (await openWeek(db, { employeeId, week: periodStart }, MANAGER))?.draft ?? null;
 	if (null === draft) {
 		throw new Error(`No draft for ${periodStart}`);
 	}

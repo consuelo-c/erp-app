@@ -116,7 +116,7 @@ type Settlement = { employeeId: number; runId: number };
 // no days worked, so its PAYROLL movement is exactly `netPay`.
 async function paidSettlement(fields: Record<string, string>, netPay: string): Promise<Settlement> {
 	const { employeeId } = await fixture.employee({ roles: ['WAREHOUSE'], ...fields });
-	const { draft } = await openWeek(db, { employeeId, week: '2026-10-12' }, MANAGER);
+	const draft = (await openWeek(db, { employeeId, week: '2026-10-12' }, MANAGER))?.draft ?? null;
 	if (null === draft) {
 		throw new Error('No draft for week 42');
 	}
@@ -341,7 +341,7 @@ test("a movement's receipt carries the company's header from settings", async ()
 		movement: { id: 1, receiptNumber: 1 },
 		company: { COMPANY_NAME: 'Banquetes Consuelo C' }
 	});
-	await expect(getReceipt(db, 2, MANAGER)).rejects.toSatisfy((thrown) => isHttpError(thrown, 404));
+	expect(await getReceipt(db, 2, MANAGER)).toBeNull();
 	const actor = SALES;
 	await expect(getReceipt(db, 1, actor)).rejects.toSatisfy((thrown) => isHttpError(thrown, 403));
 });
@@ -475,12 +475,16 @@ test('a movement is offset once, and a correction never', async () => {
 		message: 'Ese movimiento no existe.'
 	});
 	expect(receiptNumbers()).toHaveLength(2);
-	await expect(getOffsetOriginal(db, 1, MANAGER)).rejects.toSatisfy((thrown) =>
-		isHttpError(thrown, 400)
-	);
-	await expect(getOffsetOriginal(db, 2, MANAGER)).rejects.toSatisfy((thrown) =>
-		isHttpError(thrown, 400)
-	);
+	expect(await getOffsetOriginal(db, 1, MANAGER)).toEqual({
+		ok: false,
+		message: 'Ese movimiento ya tiene su movimiento contrario.',
+		errors: {}
+	});
+	expect(await getOffsetOriginal(db, 2, MANAGER)).toMatchObject({
+		ok: false,
+		message: expect.stringMatching(/^Un movimiento contrario no se corrige/)
+	});
+	expect(await getOffsetOriginal(db, 9, MANAGER)).toBeNull();
 });
 
 test("a PAYROLL movement's offset keeps its link; the settlement stays PAID", async () => {

@@ -84,7 +84,11 @@ afterEach(() => {
 });
 
 async function open(week = WEEK, employeeId: number | null = anaId): Promise<PayrollWeek> {
-	return openWeek(db, { employeeId, week }, MANAGER);
+	const opened = await openWeek(db, { employeeId, week }, MANAGER);
+	if (null === opened) {
+		throw new Error('The employee didn’t work the period');
+	}
+	return opened;
 }
 
 async function openDraft(week = WEEK): Promise<Draft> {
@@ -446,9 +450,9 @@ test('the employee picked earlier is kept if they worked the period, or the firs
 	await endEmployment(db, { id: String(leftId), end: '2026-09-30' }, MANAGER);
 	const opened = (preferredEmployeeId: number) =>
 		openWeek(db, { employeeId: null, preferredEmployeeId, week: WEEK }, MANAGER);
-	expect((await opened(luisId)).draft?.employeeId).toBe(luisId);
+	expect((await opened(luisId))?.draft?.employeeId).toBe(luisId);
 	// Pedro left in September: the first one of the week, never a 404.
-	expect((await opened(leftId)).draft?.employeeId).toBe(anaId);
+	expect((await opened(leftId))?.draft?.employeeId).toBe(anaId);
 });
 
 test('only the employees who worked in the period are offered, and only to ADMIN and MANAGER', async () => {
@@ -457,9 +461,7 @@ test('only the employees who worked in the period are offered, and only to ADMIN
 	const week = await open(WEEK, null);
 	expect(week.employees.map(({ fullName }) => fullName)).toEqual(['Ana Pérez']);
 	expect(week.draft?.employeeId).toBe(anaId);
-	await expect(open(WEEK, leftId)).rejects.toSatisfy(
-		(thrown) => isHttpError(thrown) && 404 === thrown.status
-	);
+	expect(await openWeek(db, { employeeId: leftId, week: WEEK }, MANAGER)).toBeNull();
 	await expect(openWeek(db, { employeeId: anaId, week: WEEK }, ana)).rejects.toSatisfy(
 		(thrown) => isHttpError(thrown) && 403 === thrown.status
 	);
@@ -470,12 +472,14 @@ test('only the employees who worked in the period are offered, and only to ADMIN
 
 test('the receipt prints a paid settlement: its snapshot, who prepared it, and the company header', async () => {
 	const draft = await openDraft();
-	const notPaid = await getReceipt(db, { employeeId: anaId, week: WEEK }, MANAGER).catch(
-		(caught: unknown) => caught
-	);
-	expect(isHttpError(notPaid, 404)).toBe(true);
+	expect(await getReceipt(db, { employeeId: anaId, week: WEEK }, MANAGER)).toEqual({
+		missing: 'payment'
+	});
 	await recordPayment(db, { ...formOf(draft, WEEK), ...CASH }, MANAGER);
 	const receipt = await getReceipt(db, { employeeId: anaId, week: TODAY }, MANAGER);
+	if ('missing' in receipt) {
+		throw new Error('No receipt');
+	}
 	expect(receipt.periodStart).toBe(WEEK);
 	expect(receipt.extraHours).toEqual({ start: '2026-10-10', end: '2026-10-16' });
 	expect(receipt.payment).toMatchObject({
@@ -487,8 +491,7 @@ test('the receipt prints a paid settlement: its snapshot, who prepared it, and t
 	expect(receipt.company.COMPANY_NAME).toBe('Banquetes Consuelo C');
 	// Another employee's id never falls back to Ana's receipt.
 	const otherId = await hire('Luis Gómez', '2026-07-01');
-	const other = await getReceipt(db, { employeeId: otherId, week: WEEK }, MANAGER).catch(
-		(caught: unknown) => caught
-	);
-	expect(isHttpError(other, 404)).toBe(true);
+	expect(await getReceipt(db, { employeeId: otherId, week: WEEK }, MANAGER)).toEqual({
+		missing: 'payment'
+	});
 });
