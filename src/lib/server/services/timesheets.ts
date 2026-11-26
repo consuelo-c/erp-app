@@ -6,7 +6,8 @@ import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { addDays, dialTimeShape, getTodaysDate, getWeekStart, toClockTime } from '$lib/datetime';
 import { getExtraHoursRange } from '$lib/payroll';
-import { requireRole, ROLES, type Actor } from '../actor';
+import { POLICIES } from '$lib/roles';
+import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
 import { countWorkedMinutes, deriveOvertime } from '../overtime';
 import { employmentSchema } from './employees';
@@ -73,9 +74,6 @@ const saveSchema = z
 const dateSchema = z.iso.date();
 const employeeIdSchema = z.coerce.number().int().positive();
 const employeeChoiceSchema = z.object({ employee_id: employeeIdSchema });
-
-// Logging hours for anyone: the selector's employee is trusted only for them.
-const LOGS_EVERYONES_HOURS = ['ADMIN', 'MANAGER'] as const;
 
 const NO_EMPLOYEE: Result = { ok: false, message: 'Tu usuario no está vinculado a un empleado' };
 const OUT_OF_ORDER: Result = {
@@ -192,7 +190,7 @@ export async function getOwnHours(
 	input: HoursInput,
 	actor: Actor | null
 ): Promise<Hours | null> {
-	requireRole(actor, ROLES);
+	requireRole(actor, POLICIES.anyLogin);
 	const employee = await findEmployee(db, actor.employeeId);
 	return null === employee ? null : buildHours(db, employee, input);
 }
@@ -203,7 +201,7 @@ export async function getEmployeeHours(
 	input: HoursInput & { employeeId: unknown },
 	actor: Actor | null
 ): Promise<Hours> {
-	requireRole(actor, LOGS_EVERYONES_HOURS);
+	requireRole(actor, POLICIES.everyonesHours);
 	const id = employeeIdSchema.safeParse(input.employeeId);
 	const employee = id.success ? await findEmployee(db, id.data) : null;
 	if (null === employee) {
@@ -318,7 +316,7 @@ export async function saveOwnPunch(
 	input: unknown,
 	actor: Actor | null
 ): Promise<Result> {
-	requireRole(actor, ROLES);
+	requireRole(actor, POLICIES.anyLogin);
 	const parsed = saveSchema.safeParse(input);
 	if (!parsed.success) {
 		return { ok: false, message: parsed.error.issues[0].message };
@@ -337,7 +335,7 @@ export async function saveEmployeePunch(
 	input: unknown,
 	actor: Actor | null
 ): Promise<Result> {
-	requireRole(actor, LOGS_EVERYONES_HOURS);
+	requireRole(actor, POLICIES.everyonesHours);
 	const parsed = saveSchema.safeParse(input);
 	if (!parsed.success) {
 		return { ok: false, message: parsed.error.issues[0].message };
@@ -387,7 +385,7 @@ export async function clearOwnDay(
 	input: unknown,
 	actor: Actor | null
 ): Promise<Result> {
-	requireRole(actor, ROLES);
+	requireRole(actor, POLICIES.anyLogin);
 	const parsed = clearSchema.safeParse(input);
 	if (!parsed.success) {
 		return { ok: false, message: parsed.error.issues[0].message };
@@ -405,7 +403,7 @@ export async function clearEmployeeDay(
 	input: unknown,
 	actor: Actor | null
 ): Promise<Result> {
-	requireRole(actor, LOGS_EVERYONES_HOURS);
+	requireRole(actor, POLICIES.everyonesHours);
 	const parsed = clearSchema.safeParse(input);
 	if (!parsed.success) {
 		return { ok: false, message: parsed.error.issues[0].message };
@@ -525,7 +523,7 @@ export async function getTeamWeek(
 	input: { week?: string | null },
 	actor: Actor | null
 ): Promise<{ weekStart: string; team: TeamMember[] }> {
-	requireRole(actor, LOGS_EVERYONES_HOURS);
+	requireRole(actor, POLICIES.everyonesHours);
 	const today = getTodaysDate();
 	const weekStart = getWeekStart(dateSchema.catch(today).parse(input.week ?? today));
 	const weekDates = Array.from({ length: DAYS_PER_WEEK }, (_, offset) =>

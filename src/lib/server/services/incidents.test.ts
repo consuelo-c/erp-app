@@ -1,6 +1,7 @@
 import { isHttpError } from '@sveltejs/kit';
 import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
-import type { Actor, Role } from '../actor';
+import type { Role } from '$lib/roles';
+import type { Actor } from '../actor';
 import { actorWith, createFixture, DRIVER, MANAGER, SALES, WAREHOUSE } from '../db/fixture';
 import {
 	correctIncident,

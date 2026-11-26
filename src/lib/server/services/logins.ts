@@ -2,12 +2,11 @@
 // impersonation. A login isn't a person, so its employee is optional.
 
 import { z } from 'zod';
-import { requireRole, ROLES, rolesSchema, type Actor, type Role } from '../actor';
+import { POLICIES, ROLES, type Role } from '$lib/roles';
+import { requireRole, rolesSchema, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, type Row } from '../audit';
 import { hashPassword } from '../password';
 import { listEmployees, type Result } from './employees';
-
-const MANAGES_LOGINS = ['ADMIN'] as const;
 
 /** Hashing a password needs the pepper, which lives only in the Worker's secrets. */
 type Environment = { db: D1Database; pepper: string };
@@ -89,7 +88,7 @@ export function toLogin(row: LoginRow): Login {
 
 /** Every login, the active ones first, by username. Never the hash or the salt. */
 export async function listLogins(db: D1Database, actor: Actor | null): Promise<Login[]> {
-	requireRole(actor, MANAGES_LOGINS);
+	requireRole(actor, POLICIES.logins);
 	const { results } = await db
 		.prepare(`${SELECT_LOGIN} order by users.active desc, users.username`)
 		.all<LoginRow>();
@@ -101,7 +100,7 @@ export async function listEmployeesWithoutLogin(
 	db: D1Database,
 	actor: Actor | null
 ): Promise<{ id: number; fullName: string }[]> {
-	requireRole(actor, MANAGES_LOGINS);
+	requireRole(actor, POLICIES.logins);
 	const [employees, { results }] = await Promise.all([
 		listEmployees(db, actor),
 		db
@@ -156,7 +155,7 @@ export async function createLogin(
 	input: unknown,
 	actor: Actor | null
 ): Promise<Result> {
-	requireRole(actor, MANAGES_LOGINS);
+	requireRole(actor, POLICIES.logins);
 	const parsed = createSchema.safeParse(input);
 	if (!parsed.success) {
 		return { ok: false, message: parsed.error.issues[0].message };
@@ -182,7 +181,7 @@ export async function getLogin(
 	id: number,
 	actor: Actor | null
 ): Promise<Login | null> {
-	requireRole(actor, MANAGES_LOGINS);
+	requireRole(actor, POLICIES.logins);
 	const row = await db.prepare(`${SELECT_LOGIN} where users.id = ?`).bind(id).first<LoginRow>();
 	return null === row ? null : toLogin(row);
 }
@@ -204,7 +203,7 @@ export async function updateRoles(
 	input: unknown,
 	actor: Actor | null
 ): Promise<Result> {
-	requireRole(actor, MANAGES_LOGINS);
+	requireRole(actor, POLICIES.logins);
 	const parsed = rolesUpdateSchema.safeParse(input);
 	if (!parsed.success) {
 		return { ok: false, message: parsed.error.issues[0].message };
@@ -262,7 +261,7 @@ export async function setPassword(
 	input: unknown,
 	actor: Actor | null
 ): Promise<Result> {
-	requireRole(actor, MANAGES_LOGINS);
+	requireRole(actor, POLICIES.logins);
 	const parsed = passwordUpdateSchema.safeParse(input);
 	if (!parsed.success) {
 		return { ok: false, message: parsed.error.issues[0].message };
@@ -303,7 +302,7 @@ export async function reassignLogin(
 	input: unknown,
 	actor: Actor | null
 ): Promise<Result> {
-	requireRole(actor, MANAGES_LOGINS);
+	requireRole(actor, POLICIES.logins);
 	const parsed = reassignSchema.safeParse(input);
 	if (!parsed.success) {
 		return { ok: false, message: parsed.error.issues[0].message };
@@ -342,7 +341,7 @@ export async function deactivateLogin(
 	input: unknown,
 	actor: Actor | null
 ): Promise<Result> {
-	requireRole(actor, MANAGES_LOGINS);
+	requireRole(actor, POLICIES.logins);
 	const parsed = loginIdSchema.safeParse(input);
 	if (!parsed.success) {
 		return { ok: false, message: parsed.error.issues[0].message };
@@ -365,7 +364,7 @@ export async function reactivateLogin(
 	input: unknown,
 	actor: Actor | null
 ): Promise<Result> {
-	requireRole(actor, MANAGES_LOGINS);
+	requireRole(actor, POLICIES.logins);
 	const parsed = loginIdSchema.safeParse(input);
 	if (!parsed.success) {
 		return { ok: false, message: parsed.error.issues[0].message };

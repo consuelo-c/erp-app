@@ -2,7 +2,8 @@
 // only when `ADMIN` or `MANAGER` approves it. Sending touches no product.
 
 import { z } from 'zod';
-import { requireRole, type Actor, type Role } from '../actor';
+import { POLICIES } from '$lib/roles';
+import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, nowInSeconds } from '../audit';
 import type { SaveResult } from './orders';
 
@@ -14,12 +15,6 @@ export const INVENTORY_COUNT_STATUSES = [
 ] as const;
 
 export type InventoryCountStatus = (typeof INVENTORY_COUNT_STATUSES)[number];
-
-/** Who counts: everyone but `SALES`. */
-const COUNTS: readonly Role[] = ['ADMIN', 'MANAGER', 'WAREHOUSE', 'DRIVER'];
-
-/** Who reviews: approves, rejects, reverses, and counts and approves in one step. */
-const REVIEWS: readonly Role[] = ['ADMIN', 'MANAGER'];
 
 const idSchema = z.number().int().positive();
 const countedSchema = z
@@ -144,7 +139,7 @@ export async function submitCount(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, COUNTS);
+	requireRole(actor, POLICIES.inventoryCount);
 	const parsed = countSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalid(parsed.error);
@@ -354,7 +349,7 @@ export async function previewApproval(
 	input: unknown,
 	actor: Actor | null
 ): Promise<ApprovalPreview | Refusal> {
-	requireRole(actor, REVIEWS);
+	requireRole(actor, POLICIES.inventoryReview);
 	const byId = z.object({ id: countIdSchema, edits: editsSchema }).safeParse(input);
 	if (byId.success) {
 		const row = await findPending(db, byId.data.id);
@@ -479,7 +474,7 @@ export async function approveCount(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, REVIEWS);
+	requireRole(actor, POLICIES.inventoryReview);
 	const parsed = approvalSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalid(parsed.error);
@@ -495,7 +490,7 @@ export async function rejectCount(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, REVIEWS);
+	requireRole(actor, POLICIES.inventoryReview);
 	const parsed = reviewSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalid(parsed.error);
@@ -518,7 +513,7 @@ export async function submitAndApproveCount(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, REVIEWS);
+	requireRole(actor, POLICIES.inventoryReview);
 	const parsed = z.object({ note: noteSchema }).safeParse(input);
 	if (!parsed.success) {
 		return invalid(parsed.error);
@@ -621,7 +616,7 @@ export async function reverseCount(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, REVIEWS);
+	requireRole(actor, POLICIES.inventoryReview);
 	const parsed = reversalSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalid(parsed.error);
@@ -680,7 +675,7 @@ async function pendingFlags(
 
 /** «Revisar conteo», `ADMIN` and `MANAGER` only: the pending counts first, then the reviewed ones, each newest first. */
 export async function listCounts(db: D1Database, actor: Actor | null): Promise<CountSummary[]> {
-	requireRole(actor, REVIEWS);
+	requireRole(actor, POLICIES.inventoryReview);
 	const { results } = await db
 		.prepare("select * from inventory_counts order by status = 'PENDING_APPROVAL' desc, id desc")
 		.all<CountRow>();
@@ -723,7 +718,7 @@ export async function getCount(
 	input: unknown,
 	actor: Actor | null
 ): Promise<CountDetail | null> {
-	requireRole(actor, REVIEWS);
+	requireRole(actor, POLICIES.inventoryReview);
 	const parsed = countIdSchema.safeParse(input);
 	const row = parsed.success ? await findReversible(db, parsed.data) : null;
 	if (null === row) {
@@ -786,7 +781,7 @@ export async function getSuggestedProducts(
 	db: D1Database,
 	actor: Actor | null
 ): Promise<SuggestedProduct[]> {
-	requireRole(actor, COUNTS);
+	requireRole(actor, POLICIES.inventoryCount);
 	const { results } = await db
 		.prepare(SUGGESTED_SQL)
 		.all<Omit<SuggestedProduct, 'order_ids'> & { order_ids: string }>();
@@ -808,7 +803,7 @@ export async function getUnitsOnRent(
 	db: D1Database,
 	actor: Actor | null
 ): Promise<Record<number, number>> {
-	requireRole(actor, COUNTS);
+	requireRole(actor, POLICIES.inventoryCount);
 	const { results } = await db
 		.prepare(
 			`select json_extract(line.value, '$.product_id') as product_id, sum(json_extract(line.value, '$.qty')) as qty
@@ -830,7 +825,7 @@ export async function listCountableProducts(
 	db: D1Database,
 	actor: Actor | null
 ): Promise<CountableProduct[]> {
-	requireRole(actor, COUNTS);
+	requireRole(actor, POLICIES.inventoryCount);
 	const { results } = await db
 		.prepare(
 			'select id as product_id, name, total_quantity from products where active = 1 order by name collate nocase'

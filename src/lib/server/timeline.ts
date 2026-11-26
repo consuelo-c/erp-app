@@ -1,6 +1,7 @@
 // Order timeline visibility: filter an order's `events` rows down to what each role may see.
 // Money isn't hidden from any role: the printout everyone carries already shows the prices.
 
+import { POLICIES } from '$lib/roles';
 import { hasAnyRole, type Actor } from './actor';
 
 /** An `events` row as read for a timeline; its `before`/`after`, when read, pass through as they are. */
@@ -11,7 +12,7 @@ const STATUS_ACTIONS = ['STATUS_CHANGED', 'CANCELLED'];
 
 /** Who sees edits on an order's timeline. */
 function canSeeOrderEdits(actor: Actor): boolean {
-	return hasAnyRole(actor, ['SALES', 'MANAGER', 'ADMIN']);
+	return hasAnyRole(actor, POLICIES.fullTimeline);
 }
 
 /**

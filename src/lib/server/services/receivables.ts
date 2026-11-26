@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { getTodaysDate } from '$lib/datetime';
 import { formatPesos } from '$lib/format';
 import { parsePesos } from '$lib/payroll';
+import { POLICIES } from '$lib/roles';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, type Diff } from '../audit';
 import { optional, recordLinkedMovement } from './cash';
@@ -27,9 +28,6 @@ import {
 	type SaveResult
 } from './orders';
 import { COMPANY_SETTINGS, readSettings, type CompanySettings } from './settings';
-
-// Sales works cuentas de cobro as the manager does: issues them and records their payments.
-const MANAGES_RECEIVABLES = ['ADMIN', 'MANAGER', 'SALES'] as const;
 
 const paymentTermsSchema = z.string().trim().min(1, 'Escribe la forma de pago');
 
@@ -171,7 +169,7 @@ export async function issueReceivable(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, MANAGES_RECEIVABLES);
+	requireRole(actor, POLICIES.receivables);
 	const parsed = issueInputSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalidOrder(parsed.error);
@@ -271,7 +269,7 @@ export async function updateReceivable(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, MANAGES_RECEIVABLES);
+	requireRole(actor, POLICIES.receivables);
 	const parsed = editInputSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalidOrder(parsed.error);
@@ -331,7 +329,7 @@ export async function recordReceivablePayment(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, MANAGES_RECEIVABLES);
+	requireRole(actor, POLICIES.receivables);
 	const parsed = paymentInputSchema.safeParse(input);
 	if (!parsed.success) {
 		return NOT_FOUND;
@@ -477,7 +475,7 @@ export async function getReceivableDetail(
 	id: unknown,
 	actor: Actor | null
 ): Promise<ReceivableDetail | null> {
-	requireRole(actor, MANAGES_RECEIVABLES);
+	requireRole(actor, POLICIES.receivables);
 	const parsedId = idSchema.safeParse(id);
 	if (!parsedId.success) {
 		return null;
@@ -546,7 +544,7 @@ export async function getReceivablePrintout(
 	id: unknown,
 	actor: Actor | null
 ): Promise<ReceivablePrintout | null> {
-	requireRole(actor, MANAGES_RECEIVABLES);
+	requireRole(actor, POLICIES.receivables);
 	const parsedId = idSchema.safeParse(id);
 	if (!parsedId.success) {
 		return null;
@@ -602,7 +600,7 @@ export async function getReceivableIssueForm(
 	orderId: unknown,
 	actor: Actor | null
 ): Promise<ReceivableForm | null> {
-	requireRole(actor, MANAGES_RECEIVABLES);
+	requireRole(actor, POLICIES.receivables);
 	const parsedId = idSchema.safeParse(orderId);
 	if (!parsedId.success) {
 		return null;
@@ -632,7 +630,7 @@ export async function getReceivableEditForm(
 	id: unknown,
 	actor: Actor | null
 ): Promise<ReceivableForm | null> {
-	requireRole(actor, MANAGES_RECEIVABLES);
+	requireRole(actor, POLICIES.receivables);
 	const parsedId = idSchema.safeParse(id);
 	if (!parsedId.success) {
 		return null;
@@ -704,7 +702,7 @@ export async function listReceivables(
 	input: unknown,
 	actor: Actor | null
 ): Promise<ReceivablePage> {
-	requireRole(actor, MANAGES_RECEIVABLES);
+	requireRole(actor, POLICIES.receivables);
 	const parsed = listSchema.parse(input ?? {});
 	const clauses = listClauses(parsed);
 	const where = clauses.map(({ sql }) => `(${sql})`).join(' and ') || '1';

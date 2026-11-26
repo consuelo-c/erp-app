@@ -2,6 +2,7 @@
 // price and quantity; `variant_group` + `variant_name` only group it on the catalog screen.
 
 import { z } from 'zod';
+import { POLICIES } from '$lib/roles';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
 import { fold } from '$lib/format';
@@ -18,10 +19,6 @@ export const CATEGORIES = [
 ] as const;
 
 export type Category = (typeof CATEGORIES)[number];
-
-// Sales quotes from the catalog; only the ones who run the business change it.
-const VIEWS_PRODUCTS = ['ADMIN', 'MANAGER', 'SALES'] as const;
-const MANAGES_PRODUCTS = ['ADMIN', 'MANAGER'] as const;
 
 export type Product = {
 	id: number;
@@ -287,7 +284,7 @@ export async function listProducts(
 	input: unknown,
 	actor: Actor | null
 ): Promise<ProductList> {
-	requireRole(actor, VIEWS_PRODUCTS);
+	requireRole(actor, POLICIES.products);
 	const filters = listSchema.parse(input ?? {});
 	const search = fold(filters.search);
 	// ponytail: the whole catalog read, narrowed here so accents fold; SQL if it reaches thousands.
@@ -307,7 +304,7 @@ export async function listVariantGroups(
 	db: D1Database,
 	actor: Actor | null
 ): Promise<VariantGroup[]> {
-	requireRole(actor, MANAGES_PRODUCTS);
+	requireRole(actor, POLICIES.manageProducts);
 	// A group's variants share one category; should they differ, any of them pre-fills.
 	const { results } = await db
 		.prepare(
@@ -322,7 +319,7 @@ export async function getProduct(
 	id: number,
 	actor: Actor | null
 ): Promise<Product | null> {
-	requireRole(actor, MANAGES_PRODUCTS);
+	requireRole(actor, POLICIES.manageProducts);
 	const row = await findRow(db, id);
 	return null === row ? null : toProduct(row);
 }
@@ -332,7 +329,7 @@ export async function createProduct(
 	input: unknown,
 	actor: Actor | null
 ): Promise<Result> {
-	requireRole(actor, MANAGES_PRODUCTS);
+	requireRole(actor, POLICIES.manageProducts);
 	const parsed = newProductSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalid(parsed.error);
@@ -383,7 +380,7 @@ export async function updateProduct(
 	input: unknown,
 	actor: Actor | null
 ): Promise<Result> {
-	requireRole(actor, MANAGES_PRODUCTS);
+	requireRole(actor, POLICIES.manageProducts);
 	const parsedId = idSchema.safeParse(input);
 	const parsed = productSchema.safeParse(input);
 	if (!parsedId.success) {

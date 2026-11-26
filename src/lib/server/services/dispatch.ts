@@ -2,7 +2,8 @@
 
 import { z } from 'zod';
 import { addDays, getTodaysDate } from '$lib/datetime';
-import { ROLES, requireRole, type Actor } from '../actor';
+import { POLICIES } from '$lib/roles';
+import { requireRole, type Actor } from '../actor';
 import {
 	clientAttributesSchema,
 	deliveryAttributesSchema,
@@ -147,7 +148,7 @@ export async function getDispatchDay(
 	date: unknown,
 	actor: Actor | null
 ): Promise<DispatchDay> {
-	requireRole(actor, ROLES);
+	requireRole(actor, POLICIES.anyLogin);
 	const today = getTodaysDate();
 	const day = z.iso.date().catch(today).parse(date);
 	const delivery = selectTrips('delivery', windowsOf('delivery', day, today));

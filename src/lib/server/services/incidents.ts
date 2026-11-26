@@ -4,7 +4,8 @@
 
 import { z } from 'zod';
 import { isIncidentReportable } from '$lib/orders';
-import { isAdminOrManager, ROLES, requireRole, type Actor, type Role } from '../actor';
+import { POLICIES } from '$lib/roles';
+import { hasAnyRole, requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, nowInSeconds } from '../audit';
 import { CANCELLED_FROM_SQL, orderItemsSchema, type OrderStatus, type SaveResult } from './orders';
 
@@ -15,9 +16,6 @@ export const INCIDENT_STATUSES = ['ACTIVE', 'REVERSED'] as const;
 export type IncidentOutcome = (typeof INCIDENT_OUTCOMES)[number];
 export type ResponsibleParty = (typeof RESPONSIBLE_PARTIES)[number];
 export type IncidentStatus = (typeof INCIDENT_STATUSES)[number];
-
-/** Who decides whose fault an incident was, and corrects or reverses anyone's. */
-const MANAGES_INCIDENTS: readonly Role[] = ['ADMIN', 'MANAGER'];
 
 /** The outcomes that take the product out of inventory. */
 const SUBTRACTING: readonly IncidentOutcome[] = ['LOST', 'UNRECOVERABLE'];
@@ -182,7 +180,7 @@ export async function reportIncident(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, ROLES);
+	requireRole(actor, POLICIES.anyLogin);
 	const parsed = reportSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalid(parsed.error);
@@ -258,21 +256,21 @@ function isReporter(row: IncidentRow, actor: Actor): boolean {
 
 // Whoever reported it, until frozen; the manager on any. A reversed incident is read-only.
 function mayCorrect(row: IncidentRow, actor: Actor): boolean {
-	const mayTouch = isAdminOrManager(actor) || isReporter(row, actor);
+	const mayTouch = hasAnyRole(actor, POLICIES.incidents) || isReporter(row, actor);
 	return 'ACTIVE' === row.status && !isFrozen(row) && mayTouch;
 }
 
 // Like correcting, except the manager keeps reversing a frozen one.
 function mayReverse(row: IncidentRow, actor: Actor): boolean {
 	const isOwnUnfrozen = isReporter(row, actor) && !isFrozen(row);
-	return 'ACTIVE' === row.status && (isAdminOrManager(actor) || isOwnUnfrozen);
+	return 'ACTIVE' === row.status && (hasAnyRole(actor, POLICIES.incidents) || isOwnUnfrozen);
 }
 
 function rightsOf(row: IncidentRow, actor: Actor): IncidentRights {
 	return {
 		canCorrect: mayCorrect(row, actor),
 		canReverse: mayReverse(row, actor),
-		canSetResponsibleParty: 'ACTIVE' === row.status && isAdminOrManager(actor)
+		canSetResponsibleParty: 'ACTIVE' === row.status && hasAnyRole(actor, POLICIES.incidents)
 	};
 }
 
@@ -310,7 +308,7 @@ export async function listActiveIncidents(
 	orderId: number,
 	actor: Actor | null
 ): Promise<ActiveIncident[]> {
-	requireRole(actor, ROLES);
+	requireRole(actor, POLICIES.anyLogin);
 	const { results } = await db
 		.prepare("select * from incidents where order_id = ? and status = 'ACTIVE' order by id")
 		.bind(orderId)
@@ -330,7 +328,7 @@ export async function listIncidents(
 	orderId: number,
 	actor: Actor | null
 ): Promise<Incident[]> {
-	requireRole(actor, ROLES);
+	requireRole(actor, POLICIES.anyLogin);
 	const { results } = await db
 		.prepare('select * from incidents where order_id = ? order by id desc')
 		.bind(orderId)
@@ -463,7 +461,7 @@ export async function reverseIncident(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, ROLES);
+	requireRole(actor, POLICIES.anyLogin);
 	const parsed = reversalSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalid(parsed.error);
@@ -498,7 +496,7 @@ export async function setResponsibleParty(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, MANAGES_INCIDENTS);
+	requireRole(actor, POLICIES.incidents);
 	const parsed = responsibleSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalid(parsed.error);
@@ -607,7 +605,7 @@ export async function correctIncident(
 	input: unknown,
 	actor: Actor | null
 ): Promise<SaveResult> {
-	requireRole(actor, ROLES);
+	requireRole(actor, POLICIES.anyLogin);
 	const parsed = correctionSchema.safeParse(input);
 	if (!parsed.success) {
 		return invalid(parsed.error);
