@@ -7,7 +7,15 @@ import { isIncidentReportable } from '$lib/orders';
 import { POLICIES } from '$lib/roles';
 import { hasAnyRole, requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, nowInSeconds } from '../audit';
-import { CANCELLED_FROM_SQL, orderItemsSchema, type OrderStatus, type SaveResult } from './orders';
+import {
+	fieldsRefusal,
+	invalid,
+	messageRefusal,
+	refusal,
+	type Refusal,
+	type SaveResult
+} from '../result';
+import { CANCELLED_FROM_SQL, orderItemsSchema, type OrderStatus } from './orders';
 
 export const INCIDENT_OUTCOMES = ['LOST', 'UNRECOVERABLE', 'RECOVERABLE'] as const;
 export const RESPONSIBLE_PARTIES = ['UNDETERMINED', 'CLIENT', 'CARRIER', 'COMPANY'] as const;
@@ -56,18 +64,6 @@ const reportSchema = z.object({
 		.min(1, 'Agrega al menos un producto')
 });
 
-type Refusal = Extract<SaveResult, { ok: false }>;
-
-function refusal(errors: Record<string, string>, message = 'Revisa los campos marcados.'): Refusal {
-	return { ok: false, message, errors };
-}
-
-function invalid(error: z.ZodError): Refusal {
-	return refusal(
-		Object.fromEntries(error.issues.map((issue) => [issue.path.join('.'), issue.message]))
-	);
-}
-
 type ReportInput = z.infer<typeof reportSchema>;
 
 // Each product from the order's own lines, its name the line's, and per product the outcomes
@@ -91,7 +87,7 @@ function resolveItems(
 		}
 		return { ...item, name: line.name };
 	});
-	return 0 < Object.keys(errors).length ? refusal(errors) : resolved;
+	return 0 < Object.keys(errors).length ? fieldsRefusal(errors) : resolved;
 }
 
 // How much each product's inventory moves: its LOST and UNRECOVERABLE quantities together, taken
@@ -153,12 +149,12 @@ async function checkReport(db: D1Database, report: ReportInput): Promise<Inciden
 		.bind(report.order_id)
 		.first<ReportedOrder>();
 	if (null === order) {
-		return refusal({}, 'Ese pedido no existe.');
+		return messageRefusal('Ese pedido no existe.');
 	}
 	const cancellation =
 		null === order.cancelled_from ? null : { cancelledFrom: order.cancelled_from };
 	if (!isIncidentReportable({ status: order.status, cancellation })) {
-		return refusal({}, 'Una novedad se reporta cuando el pedido ya se entregó.');
+		return messageRefusal('Una novedad se reporta cuando el pedido ya se entregó.');
 	}
 	const lines = orderItemsSchema.parse(JSON.parse(order.order_items));
 	const resolved = resolveItems(report.items, lines);
@@ -166,7 +162,7 @@ async function checkReport(db: D1Database, report: ReportInput): Promise<Inciden
 		return resolved;
 	}
 	const items = incidentItemsSchema.safeParse(resolved);
-	return items.success ? items.data : refusal({ items: items.error.issues[0].message });
+	return items.success ? items.data : refusal('items', items.error.issues[0].message);
 }
 
 /**
@@ -179,7 +175,7 @@ export async function reportIncident(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.anyLogin);
 	const parsed = reportSchema.safeParse(input);
 	if (!parsed.success) {
@@ -403,9 +399,9 @@ async function findActive(db: D1Database, id: number): Promise<IncidentRow | Ref
 		.bind(id)
 		.first<IncidentRow>();
 	if (null === row) {
-		return refusal({}, 'Esa novedad no existe.');
+		return messageRefusal('Esa novedad no existe.');
 	}
-	return 'ACTIVE' === row.status ? row : refusal({}, 'Esa novedad ya fue revertida.');
+	return 'ACTIVE' === row.status ? row : messageRefusal('Esa novedad ya fue revertida.');
 }
 
 // Run on an ACTIVE incident only. `reversed_by` apart from `updated_by`: a later write would
@@ -445,8 +441,8 @@ function reversalRefusal(row: IncidentRow, actor: Actor): Refusal | null {
 		return null;
 	}
 	return isReporter(row, actor)
-		? refusal({}, 'El Gerente ya le puso responsable: no se puede revertir.')
-		: refusal({}, 'Solo quien la reportó o el Gerente puede revertirla.');
+		? messageRefusal('El Gerente ya le puso responsable: no se puede revertir.')
+		: messageRefusal('Solo quien la reportó o el Gerente puede revertirla.');
 }
 
 /**
@@ -460,7 +456,7 @@ export async function reverseIncident(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.anyLogin);
 	const parsed = reversalSchema.safeParse(input);
 	if (!parsed.success) {
@@ -477,7 +473,7 @@ export async function reverseIncident(
 	}
 	const block = await reversalBlock(db, row);
 	if (null !== block) {
-		return refusal({}, block);
+		return messageRefusal(block);
 	}
 	await db.batch([
 		...reversalStatements(db, actor, parsed.data),
@@ -495,7 +491,7 @@ export async function setResponsibleParty(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.incidents);
 	const parsed = responsibleSchema.safeParse(input);
 	if (!parsed.success) {
@@ -534,8 +530,8 @@ function correctionRefusal(row: IncidentRow, actor: Actor): Refusal | null {
 		return null;
 	}
 	return isFrozen(row)
-		? refusal({}, 'El Gerente ya le puso responsable: no se puede corregir.')
-		: refusal({}, 'Solo quien la reportó o el Gerente puede corregirla.');
+		? messageRefusal('El Gerente ya le puso responsable: no se puede corregir.')
+		: messageRefusal('Solo quien la reportó o el Gerente puede corregirla.');
 }
 
 // A correction never undoes a count: a product whose lost and unusable total moves is refused
@@ -552,8 +548,7 @@ async function countBlock(
 	if (undefined === name) {
 		return null;
 	}
-	return refusal(
-		{},
+	return messageRefusal(
 		`No se puede cambiar la cantidad perdida o inservible de ${name}: un conteo aprobado ya la fijó. Puedes cambiar la descripción y lo recuperable.`
 	);
 }
@@ -604,7 +599,7 @@ export async function correctIncident(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.anyLogin);
 	const parsed = correctionSchema.safeParse(input);
 	if (!parsed.success) {

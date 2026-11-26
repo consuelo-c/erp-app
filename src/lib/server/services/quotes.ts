@@ -23,6 +23,7 @@ import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, eventFieldsSchema } from '../audit';
 import { describeQuoteEdit, type OrderChange } from '../order-changes';
 import { createPublicToken } from '../public-token';
+import { invalid, messageRefusal, refusal, type Refusal, type SaveResult } from '../result';
 import {
 	blankable,
 	clientAttributesSchema,
@@ -30,14 +31,12 @@ import {
 	clientWrite,
 	getAvailability,
 	getOrder,
-	invalidOrder,
 	jsonColumn,
 	linesInputSchema,
 	listCatalogProducts,
 	orderItemsSchema,
 	pesosInputSchema,
 	prepareQuotedOrder,
-	refusal,
 	resolveClient,
 	resolveItems,
 	searchTextSchema,
@@ -45,8 +44,6 @@ import {
 	type CatalogProduct,
 	type ClientAttributes,
 	type OrderItem,
-	type Refusal,
-	type SaveResult,
 	type ShortageWarning
 } from './orders';
 import { foldedSql, optional } from './cash';
@@ -326,7 +323,7 @@ async function insertQuote(
 	db: D1Database,
 	actor: Actor,
 	resolved: ResolvedQuote
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	const { values, computed, clientStatements } = clientWrite(db, actor, resolved);
 	// The client's page key, set once and never changed: like the order's, it stays out of events.
 	const statements = auditedInsert(db, {
@@ -346,11 +343,11 @@ export async function createQuote(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.quotes);
 	const parsed = quoteInputSchema.safeParse(input);
 	if (!parsed.success) {
-		return invalidOrder(parsed.error);
+		return invalid(parsed.error);
 	}
 	const tooSoon = expiresTooSoon(parsed.data, getTodaysDate());
 	if (null !== tooSoon) {
@@ -360,20 +357,18 @@ export async function createQuote(
 	return 'ok' in resolved ? resolved : insertQuote(db, actor, resolved);
 }
 
-const NOT_FOUND: Refusal = { ok: false, message: 'Esa cotización no existe', errors: {} };
+const NOT_FOUND: Refusal = messageRefusal('Esa cotización no existe');
 
-const NOT_EDITABLE: Refusal = {
-	ok: false,
-	message: 'Esta cotización ya se convirtió en pedido: no se puede editar',
-	errors: {}
-};
+const NOT_EDITABLE: Refusal = messageRefusal(
+	'Esta cotización ya se convirtió en pedido: no se puede editar'
+);
 
 // `quote_items` and each JSON column are logged whole when anything in them changed.
 async function applyEdit(
 	db: D1Database,
 	actor: Actor,
 	{ row, resolved }: { row: QuoteRow; resolved: ResolvedQuote }
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	const { values, computed, clientStatements } = clientWrite(db, actor, resolved);
 	const statements = auditedUpdate(db, {
 		table: 'quotes',
@@ -400,15 +395,15 @@ export async function updateQuote(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.quotes);
 	const parsedId = editInputSchema.safeParse(input);
 	const parsed = quoteInputSchema.safeParse(input);
 	if (!parsedId.success) {
-		return invalidOrder(parsedId.error);
+		return invalid(parsedId.error);
 	}
 	if (!parsed.success) {
-		return invalidOrder(parsed.error);
+		return invalid(parsed.error);
 	}
 	const row = await findRow(db, parsedId.data.id);
 	if (null === row) {
@@ -793,17 +788,11 @@ const conversionInputSchema = z.object({
 	force: z.boolean().default(false)
 });
 
-const ALREADY_CONVERTED: Refusal = {
-	ok: false,
-	message: 'Esta cotización ya se convirtió en pedido',
-	errors: {}
-};
+const ALREADY_CONVERTED: Refusal = messageRefusal('Esta cotización ya se convirtió en pedido');
 
-const EXPIRED: Refusal = {
-	ok: false,
-	message: 'Esta cotización está vencida: edítala con una nueva fecha de vigencia para convertirla',
-	errors: {}
-};
+const EXPIRED: Refusal = messageRefusal(
+	'Esta cotización está vencida: edítala con una nueva fecha de vigencia para convertirla'
+);
 
 type Link = { row: QuoteRow; publicToken: string };
 
@@ -832,7 +821,7 @@ export async function convertQuote(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult | ShortageWarning> {
+): Promise<SaveResult<{ id: number }> | ShortageWarning> {
 	requireRole(actor, POLICIES.quotes);
 	const parsed = conversionInputSchema.safeParse(input);
 	const row = parsed.success ? await findRow(db, parsed.data.quote) : null;

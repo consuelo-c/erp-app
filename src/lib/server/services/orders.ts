@@ -30,6 +30,7 @@ import { hasAnyRole, hasCashTab, requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, eventFieldsSchema, type Row } from '../audit';
 import { describeOrderEdit, type OrderChange } from '../order-changes';
 import { createPublicToken } from '../public-token';
+import { invalid, messageRefusal, refusal, type Refusal, type SaveResult } from '../result';
 import { filterTimelineForActor } from '../timeline';
 import {
 	foldedSql,
@@ -286,11 +287,6 @@ export type Order = {
 	receivableId: number | null;
 };
 
-export type SaveResult =
-	{ ok: true; id: number } | { ok: false; message: string; errors: Record<string, string> };
-
-export type Refusal = Extract<SaveResult, { ok: false }>;
-
 type Columns = {
 	client_id: number | null; // null until «Cliente nuevo»'s contact exists, in the same batch
 	event_date: string;
@@ -322,25 +318,7 @@ const SELECT_ORDER = `select id, status, has_incident, client_id, event_date, de
 	items_total, discount, transport_cost, order_total, deposit_amount, attributes, receivable_id
 	from orders`;
 
-const CHECK_FIELDS = 'Revisa los campos marcados en rojo antes de guardar.';
 const NOT_A_CARRIER = 'Escoge un transportador de la lista';
-
-export function refusal(field: string, message: string): Refusal {
-	return { ok: false, message: CHECK_FIELDS, errors: { [field]: message } };
-}
-
-/** A refusal of the whole entry, with no field to mark. */
-function messageRefusal(message: string): Refusal {
-	return { ok: false, message, errors: {} };
-}
-
-/** Each field's message under its whole path, as `order_items.2.qty` or `delivery_attributes.carrier_id`. */
-export function invalidOrder(zodError: z.ZodError): Refusal {
-	const errors = Object.fromEntries(
-		zodError.issues.map((issue) => [issue.path.join('.'), issue.message])
-	);
-	return { ok: false, message: CHECK_FIELDS, errors };
-}
 
 function toOrder(row: OrderRow): Order {
 	const attributes = orderAttributesSchema.parse(JSON.parse(row.attributes));
@@ -656,7 +634,11 @@ function orderStatements(
 	};
 }
 
-async function insertOrder(db: D1Database, actor: Actor, order: NewOrder): Promise<SaveResult> {
+async function insertOrder(
+	db: D1Database,
+	actor: Actor,
+	order: NewOrder
+): Promise<SaveResult<{ id: number }>> {
 	const { statements, insertAt } = orderStatements(db, actor, order);
 	const results = await db.batch(statements);
 	return { ok: true, id: results[insertAt].meta.last_row_id };
@@ -690,7 +672,7 @@ export async function prepareQuotedOrder(
 	requireRole(actor, POLICIES.orders);
 	const parsed = quotedOrderInputSchema.safeParse(input);
 	if (!parsed.success) {
-		return invalidOrder(parsed.error);
+		return invalid(parsed.error);
 	}
 	const basis = { current: null, frozenItems: quotedItems };
 	const resolved = await resolveColumns(db, parsed.data, basis);
@@ -704,13 +686,11 @@ export async function prepareQuotedOrder(
 	return orderStatements(db, actor, { resolved, status: 'CONFIRMED' });
 }
 
-const NOT_FOUND: Refusal = { ok: false, message: 'Ese pedido no existe', errors: {} };
+const NOT_FOUND: Refusal = messageRefusal('Ese pedido no existe');
 
-const NOT_EDITABLE: Refusal = {
-	ok: false,
-	message: 'Este pedido ya no se puede editar: está en recogida, completado o cancelado',
-	errors: {}
-};
+const NOT_EDITABLE: Refusal = messageRefusal(
+	'Este pedido ya no se puede editar: está en recogida, completado o cancelado'
+);
 
 /** The cuenta de cobro billing an order: its number, its client, and whether it bills other orders. */
 export type Billing = { receivableId: number; clientId: number; hasOtherOrders: boolean };
@@ -783,7 +763,7 @@ async function applyEdit(
 	db: D1Database,
 	actor: Actor,
 	{ row, resolved, billing }: Edit
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	const edit = clientWrite(db, actor, resolved);
 	const statements = auditedUpdate(db, {
 		table: 'orders',
@@ -810,15 +790,15 @@ export async function updateOrder(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.orders);
 	const parsedId = idInputSchema.safeParse(input);
 	const parsed = orderInputSchema.safeParse(input);
 	if (!parsedId.success) {
-		return invalidOrder(parsedId.error);
+		return invalid(parsedId.error);
 	}
 	if (!parsed.success) {
-		return invalidOrder(parsed.error);
+		return invalid(parsed.error);
 	}
 	const row = await findRow(db, parsedId.data.id);
 	if (null === row) {
@@ -838,11 +818,7 @@ export async function updateOrder(
 
 const extensionInputSchema = z.object({ parent_order_id: z.coerce.number().int().positive() });
 
-const NOT_EXTENDABLE: Refusal = {
-	ok: false,
-	message: 'Solo un pedido entregado se puede extender',
-	errors: {}
-};
+const NOT_EXTENDABLE: Refusal = messageRefusal('Solo un pedido entregado se puede extender');
 
 // Only the original's products, each up to the quantity the client has.
 function exceedsOriginal(lines: LineInput[], original: Order): Refusal | null {
@@ -865,7 +841,7 @@ function exceedsOriginal(lines: LineInput[], original: Order): Refusal | null {
 async function findExtendable(db: D1Database, input: unknown): Promise<Order | Refusal> {
 	const parsed = extensionInputSchema.safeParse(input);
 	if (!parsed.success) {
-		return invalidOrder(parsed.error);
+		return invalid(parsed.error);
 	}
 	const row = await findRow(db, parsed.data.parent_order_id);
 	if (null === row) {
@@ -883,7 +859,7 @@ export async function createExtension(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.orders);
 	const original = await findExtendable(db, input);
 	if ('ok' in original) {
@@ -894,7 +870,7 @@ export async function createExtension(
 	const deliveryDate = addDays(original.pickupDate, 1);
 	const parsed = orderInputSchema.safeParse({ ...(input as object), delivery_date: deliveryDate });
 	if (!parsed.success) {
-		return invalidOrder(parsed.error);
+		return invalid(parsed.error);
 	}
 	const exceeded = exceedsOriginal(parsed.data.order_items, original);
 	if (null !== exceeded) {
@@ -1115,11 +1091,9 @@ const advanceSchema = transitionSchema.extend({
 	notes: z.string().trim().optional()
 });
 
-const ILLEGAL_TRANSITION: Refusal = {
-	ok: false,
-	message: 'El pedido no puede pasar a ese estado desde el que tiene',
-	errors: {}
-};
+const ILLEGAL_TRANSITION: Refusal = messageRefusal(
+	'El pedido no puede pasar a ese estado desde el que tiene'
+);
 
 type Transition = {
 	id: number;
@@ -1168,7 +1142,7 @@ async function applyTransition(
 	db: D1Database,
 	actor: Actor,
 	transition: Transition
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	const row = await findRow(db, transition.id);
 	if (null === row) {
 		return NOT_FOUND;
@@ -1188,11 +1162,11 @@ export async function cancelOrder(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.orders);
 	const parsed = cancellationSchema.safeParse(input);
 	if (!parsed.success) {
-		return invalidOrder(parsed.error);
+		return invalid(parsed.error);
 	}
 	const { id, reason } = parsed.data;
 	return applyTransition(db, actor, { id, to: 'CANCELLED', action: 'CANCELLED', reason });
@@ -1206,11 +1180,11 @@ export async function advanceOrder(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.anyLogin);
 	const parsed = advanceSchema.safeParse(input);
 	if (!parsed.success) {
-		return invalidOrder(parsed.error);
+		return invalid(parsed.error);
 	}
 	const { id, status, notes } = parsed.data;
 	return applyTransition(db, actor, { id, to: status, action: 'STATUS_CHANGED', notes });
@@ -1803,7 +1777,7 @@ function payeeOf(order: Order, payment: PaymentInput): string | Refusal {
 	}
 	const carriers = carriersOf(order);
 	if (0 === carriers.length) {
-		return { ok: false, message: 'Este pedido no tiene transportador.', errors: {} };
+		return messageRefusal('Este pedido no tiene transportador.');
 	}
 	const chosen =
 		1 === carriers.length ? carriers[0] : carriers.find((entry) => entry.trip === payment.trip);
@@ -1817,10 +1791,10 @@ function payeeOf(order: Order, payment: PaymentInput): string | Refusal {
 async function installmentRefusal(db: D1Database, order: Order): Promise<Refusal | null> {
 	if (null !== order.receivableId) {
 		const message = `El pago va en la cuenta de cobro Nº ${order.receivableId}.`;
-		return { ok: false, message, errors: {} };
+		return messageRefusal(message);
 	}
 	const { balanceDue } = await findBalances(db, order.id);
-	return 0 < balanceDue ? null : { ok: false, message: 'Este pedido ya está pagado.', errors: {} };
+	return 0 < balanceDue ? null : messageRefusal('Este pedido ya está pagado.');
 }
 
 type Retention = { concept: CashConcept; available: number; message: string };
@@ -1835,11 +1809,7 @@ async function feeRetention(
 	source: FeeSource | undefined
 ): Promise<Retention | undefined | Refusal> {
 	if ('CANCELLED' !== order.status) {
-		return {
-			ok: false,
-			message: 'Solo un pedido cancelado tiene cargo por cancelación.',
-			errors: {}
-		};
+		return messageRefusal('Solo un pedido cancelado tiene cargo por cancelación.');
 	}
 	if (undefined === source) {
 		return refusal('fee_source', 'Escoge de dónde sale el cargo');
@@ -1912,11 +1882,11 @@ export async function recordOrderPayment(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.recordsPayments);
 	const parsed = paymentInputSchema.safeParse(input);
 	if (!parsed.success) {
-		return invalidOrder(parsed.error);
+		return invalid(parsed.error);
 	}
 	const { concept } = parsed.data;
 	const isOfficeEntry = hasAnyRole(actor, officeRolesFor(concept));
@@ -1925,7 +1895,7 @@ export async function recordOrderPayment(
 	}
 	const row = await findRow(db, parsed.data.order_id);
 	if (null === row) {
-		return { ok: false, message: 'Ese pedido no existe.', errors: {} };
+		return messageRefusal('Ese pedido no existe.');
 	}
 	const order = toOrder(row);
 	if (!isOfficeEntry) {

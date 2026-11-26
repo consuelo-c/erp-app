@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { POLICIES } from '$lib/roles';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, nowInSeconds } from '../audit';
-import type { SaveResult } from './orders';
+import { fieldsRefusal, invalid, messageRefusal, type Refusal, type SaveResult } from '../result';
 
 export const INVENTORY_COUNT_STATUSES = [
 	'PENDING_APPROVAL',
@@ -79,15 +79,6 @@ const countSchema = z.object({
 		.refine(hasDistinctProducts, ONCE_PER_COUNT)
 });
 
-type Refusal = Extract<SaveResult, { ok: false }>;
-
-function invalid(error: z.ZodError): Refusal {
-	const errors = Object.fromEntries(
-		error.issues.map((issue) => [issue.path.join('.'), issue.message])
-	);
-	return { ok: false, message: 'Revisa los campos marcados', errors };
-}
-
 type ProductNow = { id: number; name: string; total_quantity: number };
 
 // Each item's product as it is now, by id.
@@ -125,7 +116,7 @@ async function resolveItems(
 		};
 	});
 	if (0 < Object.keys(errors).length) {
-		return { ok: false, message: 'Revisa los campos marcados', errors };
+		return fieldsRefusal(errors);
 	}
 	return inventoryItemsSchema.parse(resolved);
 }
@@ -138,7 +129,7 @@ export async function submitCount(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.inventoryCount);
 	const parsed = countSchema.safeParse(input);
 	if (!parsed.success) {
@@ -204,7 +195,7 @@ async function findOverlaps(
 function editItems(items: InventoryItem[], edits: Edits): InventoryItem[] | Refusal {
 	const byProduct = new Map(edits.map((edit) => [edit.product_id, edit]));
 	if (edits.some((edit) => items.every((item) => item.product_id !== edit.product_id))) {
-		return { ok: false, message: 'Ese producto no está en el conteo', errors: {} };
+		return messageRefusal('Ese producto no está en el conteo');
 	}
 	return items.map((item) => {
 		const edit = byProduct.get(item.product_id);
@@ -277,11 +268,7 @@ function staleCorrection({ items, stale }: Plan): Refusal | null {
 	);
 	return undefined === corrected
 		? null
-		: {
-				ok: false,
-				message: `${corrected.name} está desactualizado: solo se puede eliminar`,
-				errors: {}
-			};
+		: messageRefusal(`${corrected.name} está desactualizado: solo se puede eliminar`);
 }
 
 type CountRow = {
@@ -322,11 +309,9 @@ async function findPending(db: D1Database, id: number): Promise<CountRow | Refus
 		.bind(id)
 		.first<CountRow>();
 	if (null === row) {
-		return { ok: false, message: 'Ese conteo no existe', errors: {} };
+		return messageRefusal('Ese conteo no existe');
 	}
-	return 'PENDING_APPROVAL' === row.status
-		? row
-		: { ok: false, message: 'Ese conteo ya fue revisado', errors: {} };
+	return 'PENDING_APPROVAL' === row.status ? row : messageRefusal('Ese conteo ya fue revisado');
 }
 
 // A pending count's plan with the reviewer's edits on it, or why it can't be approved as edited.
@@ -447,13 +432,13 @@ async function approve(
 	db: D1Database,
 	{ row, note, edits }: { row: CountRow; note: string | null; edits: Edits },
 	actor: Actor
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	const plan = await planReview(db, row, edits);
 	if ('ok' in plan) {
 		return plan;
 	}
 	if (plan.items.every((item) => !item.applied)) {
-		return { ok: false, message: NOTHING_APPLIED, errors: {} };
+		return messageRefusal(NOTHING_APPLIED);
 	}
 	await db.batch([
 		...reviewStatements(db, actor, { row, status: 'APPROVED', note, items: plan.items }),
@@ -473,7 +458,7 @@ export async function approveCount(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.inventoryReview);
 	const parsed = approvalSchema.safeParse(input);
 	if (!parsed.success) {
@@ -489,7 +474,7 @@ export async function rejectCount(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.inventoryReview);
 	const parsed = reviewSchema.safeParse(input);
 	if (!parsed.success) {
@@ -512,7 +497,7 @@ export async function submitAndApproveCount(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.inventoryReview);
 	const parsed = z.object({ note: noteSchema }).safeParse(input);
 	if (!parsed.success) {
@@ -615,7 +600,7 @@ export async function reverseCount(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.inventoryReview);
 	const parsed = reversalSchema.safeParse(input);
 	if (!parsed.success) {
@@ -624,11 +609,11 @@ export async function reverseCount(
 	const { id, reason } = parsed.data;
 	const row = await findReversible(db, id);
 	if (null === row) {
-		return { ok: false, message: 'Ese conteo no existe', errors: {} };
+		return messageRefusal('Ese conteo no existe');
 	}
 	const block = await reversalBlock(db, row);
 	if (null !== block) {
-		return { ok: false, message: block, errors: {} };
+		return messageRefusal(block);
 	}
 	await db.batch(await reversalStatements(db, actor, { row, reason }));
 	return { ok: true, id };
