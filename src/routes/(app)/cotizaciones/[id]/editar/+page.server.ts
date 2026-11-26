@@ -5,7 +5,7 @@ import { requireRole } from '$lib/server/actor';
 import { getDb } from '$lib/server/platform';
 import { isBannedClient } from '$lib/server/services/contacts';
 import { getQuote, getQuoteFormOptions, updateQuote } from '$lib/server/services/quotes';
-import { readPostedJson } from '../../../pedidos/order-form';
+import { readPostedJson } from '$lib/server/posted-json';
 import type { Actions, PageServerLoad } from './$types';
 
 // A converted quote is read-only: its detail, not the form.

@@ -10,7 +10,7 @@ import {
 	getQuoteDuplicate,
 	getQuoteFormOptions
 } from '$lib/server/services/quotes';
-import { readPostedJson } from '../../pedidos/order-form';
+import { readPostedJson } from '$lib/server/posted-json';
 import type { Actions, PageServerLoad } from './$types';
 
 // `?desde=12` is «Duplicar», from quote #12; `?pedido=1060` is «Cotizar de nuevo», from order #1060.

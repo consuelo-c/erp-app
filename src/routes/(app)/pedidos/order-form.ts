@@ -1,13 +1,3 @@
-// The order and quote forms post the whole record as JSON in one field: its lines are a list the
-// browser builds as the salesperson types. The service validates it like any other input.
-export function readPostedJson(formData: FormData, field: string): unknown {
-	try {
-		return JSON.parse(String(formData.get(field)));
-	} catch {
-		return null;
-	}
-}
-
 /**
  * A search's results by keyboard: the up and down arrows move the focus from the search into its
  * results and through them, and up from the first goes back to the search.

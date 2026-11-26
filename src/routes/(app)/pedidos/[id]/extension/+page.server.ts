@@ -5,7 +5,7 @@ import { requireRole } from '$lib/server/actor';
 import { getDb } from '$lib/server/platform';
 import { isBannedClient } from '$lib/server/services/contacts';
 import { createExtension, getOrderDetail, getOrderFormOptions } from '$lib/server/services/orders';
-import { readPostedJson } from '../../order-form';
+import { readPostedJson } from '$lib/server/posted-json';
 import type { Actions, PageServerLoad } from './$types';
 
 // Only a delivered order is extended: any other goes back to its detail.
