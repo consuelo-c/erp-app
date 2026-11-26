@@ -1,6 +1,7 @@
-import { error, json } from '@sveltejs/kit';
+import { json } from '@sveltejs/kit';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
+import { getDb } from '$lib/server/platform';
 import { previewApproval } from '$lib/server/services/inventory';
 import type { RequestHandler } from './$types';
 
@@ -9,8 +10,6 @@ import type { RequestHandler } from './$types';
 // pending counts share its products.
 export const POST: RequestHandler = async ({ locals, platform, request }) => {
 	requireRole(locals.user, POLICIES.inventoryReview);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
-	return json(await previewApproval(platform.env.DB, await request.json(), locals.user));
+	const db = getDb(platform);
+	return json(await previewApproval(db, await request.json(), locals.user));
 };

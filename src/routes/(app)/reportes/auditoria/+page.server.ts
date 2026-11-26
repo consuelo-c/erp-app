@@ -1,8 +1,8 @@
-import { error } from '@sveltejs/kit';
 import { getTodaysDate } from '$lib/datetime';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { rememberFilters } from '$lib/server/list-filters';
+import { getDb } from '$lib/server/platform';
 import { getAuditLog } from '$lib/server/services/reports';
 import type { PageServerLoad } from './$types';
 
@@ -12,9 +12,7 @@ import type { PageServerLoad } from './$types';
 export const load: PageServerLoad = async ({ cookies, locals, platform, url }) => {
 	requireRole(locals.user, POLICIES.reports);
 	rememberFilters('auditoria', url, cookies);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
+	const db = getDb(platform);
 	const params = url.searchParams;
 	const input = {
 		from: params.get('desde'),
@@ -24,6 +22,6 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 		action: params.get('accion'),
 		page: params.get('pagina') ?? undefined
 	};
-	const log = await getAuditLog(platform.env.DB, input, locals.user);
+	const log = await getAuditLog(db, input, locals.user);
 	return { ...log, today: getTodaysDate() };
 };

@@ -1,32 +1,29 @@
-import { error, fail, redirect } from '@sveltejs/kit';
+import { fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
+import { getDb, getEnv } from '$lib/server/platform';
 import { listEmployeesWithoutLogin, reassignLogin } from '$lib/server/services/logins';
 import type { Actions, PageServerLoad } from './$types';
 
 // The login is loaded by ../+layout.server.ts; this adds who it can pass to.
 export const load: PageServerLoad = async ({ locals, platform }) => {
 	requireRole(locals.user, POLICIES.logins);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
-	return { employees: await listEmployeesWithoutLogin(platform.env.DB, locals.user) };
+	const db = getDb(platform);
+	return { employees: await listEmployeesWithoutLogin(db, locals.user) };
 };
 
 export const actions: Actions = {
 	default: async ({ locals, platform, request, params }) => {
 		requireRole(locals.user, POLICIES.logins);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
+		const { DB, PASSWORD_PEPPER } = getEnv(platform);
 		const formData = await request.formData();
 		const input = {
 			id: params.id,
 			employee_id: formData.get('employee_id'),
 			password: formData.get('password')
 		};
-		const env = { db: platform.env.DB, pepper: platform.env.PASSWORD_PEPPER };
+		const env = { db: DB, pepper: PASSWORD_PEPPER };
 		const result = await reassignLogin(env, input, locals.user);
 		if (!result.ok) {
 			return fail(400, { message: result.message });

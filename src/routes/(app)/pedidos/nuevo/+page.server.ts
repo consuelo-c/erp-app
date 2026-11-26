@@ -1,7 +1,8 @@
-import { error, fail, redirect } from '@sveltejs/kit';
+import { fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
+import { getDb } from '$lib/server/platform';
 import { getOrderFormOptions } from '$lib/server/services/orders';
 import { convertQuote, getQuoteConversion } from '$lib/server/services/quotes';
 import { readPostedJson } from '../order-form';
@@ -12,10 +13,7 @@ import type { Actions, PageServerLoad } from './$types';
 // that's expired or converted shows why, and no form.
 export const load: PageServerLoad = async ({ locals, platform, url }) => {
 	requireRole(locals.user, POLICIES.orders);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
-	const db = platform.env.DB;
+	const db = getDb(platform);
 	const quoteId = url.searchParams.get('cotizacion');
 	if (null === quoteId) {
 		return { refusal: 'Un pedido se crea al convertir una cotización.', quoteId: null };
@@ -39,14 +37,12 @@ export const load: PageServerLoad = async ({ locals, platform, url }) => {
 export const actions: Actions = {
 	default: async ({ locals, platform, request, url }) => {
 		requireRole(locals.user, POLICIES.orders);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
+		const db = getDb(platform);
 		const formData = await request.formData();
 		const order = readPostedJson(formData, 'order');
 		const force = '1' === formData.get('force');
 		const quote = url.searchParams.get('cotizacion');
-		const result = await convertQuote(platform.env.DB, { quote, order, force }, locals.user);
+		const result = await convertQuote(db, { quote, order, force }, locals.user);
 		if (!result.ok) {
 			return fail(400, result);
 		}

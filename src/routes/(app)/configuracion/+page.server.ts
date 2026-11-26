@@ -1,6 +1,7 @@
-import { error, fail } from '@sveltejs/kit';
+import { fail } from '@sveltejs/kit';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
+import { getDb } from '$lib/server/platform';
 import { getSystemSettings, updateSystemSettings } from '$lib/server/services/settings';
 import type { SettingModule } from '$lib/settings';
 import type { Actions, PageServerLoad } from './$types';
@@ -10,24 +11,16 @@ const MODULES: SettingModule[] = ['COMPANY', 'QUOTES'];
 
 export const load: PageServerLoad = async ({ locals, platform }) => {
 	requireRole(locals.user, POLICIES.settings);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
-	return { settings: await getSystemSettings(platform.env.DB, MODULES, locals.user) };
+	const db = getDb(platform);
+	return { settings: await getSystemSettings(db, MODULES, locals.user) };
 };
 
 export const actions: Actions = {
 	default: async ({ locals, platform, request }) => {
 		requireRole(locals.user, POLICIES.settings);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
+		const db = getDb(platform);
 		const values = Object.fromEntries(await request.formData());
-		const result = await updateSystemSettings(
-			platform.env.DB,
-			{ modules: MODULES, values },
-			locals.user
-		);
+		const result = await updateSystemSettings(db, { modules: MODULES, values }, locals.user);
 		return result.ok ? { saved: true } : fail(400, { errors: result.errors, values });
 	}
 };

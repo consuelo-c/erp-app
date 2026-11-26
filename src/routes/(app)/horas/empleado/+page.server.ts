@@ -1,8 +1,9 @@
-import { error, fail } from '@sveltejs/kit';
+import { fail } from '@sveltejs/kit';
 import { getTodaysDate } from '$lib/datetime';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { rememberEmployee } from '$lib/server/chosen-employee';
+import { getDb } from '$lib/server/platform';
 import { listEmployees } from '$lib/server/services/employees';
 import {
 	clearEmployeeDay,
@@ -16,10 +17,8 @@ import type { Actions, PageServerLoad } from './$types';
 // day and week as Mis horas.
 export const load: PageServerLoad = async ({ cookies, locals, platform, url }) => {
 	requireRole(locals.user, POLICIES.everyonesHours);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
-	const employees = await listEmployees(platform.env.DB, locals.user);
+	const db = getDb(platform);
+	const employees = await listEmployees(db, locals.user);
 	const employeeId =
 		rememberEmployee(url, cookies) ?? locals.user.employeeId ?? employees[0]?.id ?? null;
 	const today = getTodaysDate();
@@ -41,7 +40,7 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 	return {
 		today,
 		employees: options,
-		hours: await getEmployeeHours(platform.env.DB, input, locals.user)
+		hours: await getEmployeeHours(db, input, locals.user)
 	};
 };
 
@@ -49,11 +48,9 @@ export const actions: Actions = {
 	// The time dialog: one punch of the employee in the form's `employee_id`.
 	marcar: async ({ locals, platform, request }) => {
 		requireRole(locals.user, POLICIES.everyonesHours);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
+		const db = getDb(platform);
 		const input = Object.fromEntries(await request.formData());
-		const result = await saveEmployeePunch(platform.env.DB, input, locals.user);
+		const result = await saveEmployeePunch(db, input, locals.user);
 		if (!result.ok) {
 			return fail(400, { message: result.message });
 		}
@@ -62,11 +59,9 @@ export const actions: Actions = {
 	// «Borrar marcas del día»: the four punches of that day back to empty.
 	borrar: async ({ locals, platform, request }) => {
 		requireRole(locals.user, POLICIES.everyonesHours);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
+		const db = getDb(platform);
 		const input = Object.fromEntries(await request.formData());
-		const result = await clearEmployeeDay(platform.env.DB, input, locals.user);
+		const result = await clearEmployeeDay(db, input, locals.user);
 		if (!result.ok) {
 			return fail(400, { message: result.message });
 		}

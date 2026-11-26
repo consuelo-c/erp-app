@@ -1,5 +1,6 @@
-import { error, fail, redirect } from '@sveltejs/kit';
+import { fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
+import { getEnv } from '$lib/server/platform';
 import { logIn } from '$lib/server/services/auth';
 import { setSessionCookie } from '$lib/server/session-cookie';
 import type { Actions } from './$types';
@@ -7,12 +8,10 @@ import type { Actions } from './$types';
 // Public route: no requireRole.
 export const actions: Actions = {
 	default: async ({ request, platform, cookies, getClientAddress }) => {
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
+		const env = getEnv(platform);
 		const credentials = Object.fromEntries(await request.formData());
-		const session = await logIn(platform.env.DB, credentials, {
-			secrets: { pepper: platform.env.PASSWORD_PEPPER, adminPassword: platform.env.ADMIN_PASSWORD },
+		const session = await logIn(env.DB, credentials, {
+			secrets: { pepper: env.PASSWORD_PEPPER, adminPassword: env.ADMIN_PASSWORD },
 			request: { ip: getClientAddress(), userAgent: request.headers.get('user-agent') }
 		});
 		if (null === session) {

@@ -1,7 +1,7 @@
-import { error } from '@sveltejs/kit';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { rememberFilters } from '$lib/server/list-filters';
+import { getDb } from '$lib/server/platform';
 import { listQuotes } from '$lib/server/services/quotes';
 import type { PageServerLoad } from './$types';
 
@@ -10,14 +10,12 @@ import type { PageServerLoad } from './$types';
 export const load: PageServerLoad = async ({ cookies, locals, platform, url }) => {
 	requireRole(locals.user, POLICIES.quotes);
 	rememberFilters('cotizaciones', url, cookies);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
+	const db = getDb(platform);
 	const params = url.searchParams;
 	const input = {
 		text: params.get('texto'),
 		state: params.get('estado'),
 		page: params.get('pagina') ?? undefined
 	};
-	return listQuotes(platform.env.DB, input, locals.user);
+	return listQuotes(db, input, locals.user);
 };

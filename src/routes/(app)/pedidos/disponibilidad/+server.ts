@@ -1,6 +1,7 @@
-import { error, json } from '@sveltejs/kit';
+import { json } from '@sveltejs/kit';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
+import { getDb } from '$lib/server/platform';
 import { checkOrderSchedule } from '$lib/server/services/orders';
 import type { RequestHandler } from './$types';
 
@@ -8,9 +9,7 @@ import type { RequestHandler } from './$types';
 // warn about. `?pedido=` is the order being edited: its own lines and trips don't count.
 export const GET: RequestHandler = async ({ locals, platform, url }) => {
 	requireRole(locals.user, POLICIES.orders);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
+	const db = getDb(platform);
 	const params = url.searchParams;
 	const input = {
 		order_id: params.get('pedido'),
@@ -19,5 +18,5 @@ export const GET: RequestHandler = async ({ locals, platform, url }) => {
 		delivery_time: params.get('hora_entrega'),
 		pickup_time: params.get('hora_recogida')
 	};
-	return json(await checkOrderSchedule(platform.env.DB, input, locals.user));
+	return json(await checkOrderSchedule(db, input, locals.user));
 };

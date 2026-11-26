@@ -2,6 +2,7 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
+import { getDb } from '$lib/server/platform';
 import { isBannedClient } from '$lib/server/services/contacts';
 import {
 	createQuote,
@@ -16,10 +17,7 @@ import type { Actions, PageServerLoad } from './$types';
 // The form opens filled, and nothing is written until saved.
 export const load: PageServerLoad = async ({ locals, platform, url }) => {
 	requireRole(locals.user, POLICIES.quotes);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
-	const db = platform.env.DB;
+	const db = getDb(platform);
 	const options = await getQuoteFormOptions(db, locals.user);
 	const from = url.searchParams.get('desde');
 	const order = url.searchParams.get('pedido');
@@ -45,11 +43,9 @@ export const load: PageServerLoad = async ({ locals, platform, url }) => {
 export const actions: Actions = {
 	default: async ({ locals, platform, request }) => {
 		requireRole(locals.user, POLICIES.quotes);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
+		const db = getDb(platform);
 		const quote = readPostedJson(await request.formData(), 'quote');
-		const result = await createQuote(platform.env.DB, quote, locals.user);
+		const result = await createQuote(db, quote, locals.user);
 		if (!result.ok) {
 			return fail(400, result);
 		}

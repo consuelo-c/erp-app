@@ -1,6 +1,6 @@
-import { error } from '@sveltejs/kit';
 import { POLICIES } from '$lib/roles';
 import { hasAnyRole, requireRole } from '$lib/server/actor';
+import { getDb } from '$lib/server/platform';
 import { getReceipt } from '$lib/server/services/cash';
 import type { PageServerLoad } from './$types';
 
@@ -8,11 +8,9 @@ import type { PageServerLoad } from './$types';
 // order movement's from the order and a cuenta movement's from the cuenta, and goes back to it.
 export const load: PageServerLoad = async ({ locals, platform, url }) => {
 	requireRole(locals.user, POLICIES.paymentReceipts);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
+	const db = getDb(platform);
 	return {
-		receipt: await getReceipt(platform.env.DB, url.searchParams.get('movimiento'), locals.user),
+		receipt: await getReceipt(db, url.searchParams.get('movimiento'), locals.user),
 		opensCashBook: hasAnyRole(locals.user, POLICIES.cashBookLink)
 	};
 };

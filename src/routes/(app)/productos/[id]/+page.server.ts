@@ -2,17 +2,16 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
+import { getDb } from '$lib/server/platform';
 import { getProduct, listVariantGroups, updateProduct } from '$lib/server/services/products';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, platform, params }) => {
 	requireRole(locals.user, POLICIES.manageProducts);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
+	const db = getDb(platform);
 	const [product, groups] = await Promise.all([
-		getProduct(platform.env.DB, Number(params.id), locals.user),
-		listVariantGroups(platform.env.DB, locals.user)
+		getProduct(db, Number(params.id), locals.user),
+		listVariantGroups(db, locals.user)
 	]);
 	if (null === product) {
 		error(404, 'Ese producto no existe');
@@ -23,12 +22,10 @@ export const load: PageServerLoad = async ({ locals, platform, params }) => {
 export const actions: Actions = {
 	default: async ({ locals, platform, request, params }) => {
 		requireRole(locals.user, POLICIES.manageProducts);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
+		const db = getDb(platform);
 		const values = Object.fromEntries(await request.formData());
 		// The id always comes from the URL.
-		const result = await updateProduct(platform.env.DB, { ...values, id: params.id }, locals.user);
+		const result = await updateProduct(db, { ...values, id: params.id }, locals.user);
 		if (!result.ok) {
 			return fail(400, { ...result, values });
 		}

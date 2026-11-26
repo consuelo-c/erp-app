@@ -1,29 +1,26 @@
-import { error, fail, redirect } from '@sveltejs/kit';
+import { fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { POLICIES } from '$lib/roles';
 import { hasAnyRole, requireRole } from '$lib/server/actor';
+import { getDb } from '$lib/server/platform';
 import { createContact, listContactLabels } from '$lib/server/services/contacts';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, platform }) => {
 	requireRole(locals.user, POLICIES.contacts);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
-	const labels = await listContactLabels(platform.env.DB, locals.user);
+	const db = getDb(platform);
+	const labels = await listContactLabels(db, locals.user);
 	return { isManager: hasAnyRole(locals.user, POLICIES.lockedContactFields), labels };
 };
 
 export const actions: Actions = {
 	default: async ({ locals, platform, request }) => {
 		requireRole(locals.user, POLICIES.contacts);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
+		const db = getDb(platform);
 		const formData = await request.formData();
 		// Etiquetas are checkboxes: one entry per etiqueta picked.
 		const values = { ...Object.fromEntries(formData), labels: formData.getAll('labels') };
-		const result = await createContact(platform.env.DB, values, locals.user);
+		const result = await createContact(db, values, locals.user);
 		if (!result.ok) {
 			return fail(400, { ...result, values });
 		}

@@ -1,6 +1,7 @@
-import { error, fail, type RequestEvent } from '@sveltejs/kit';
+import { fail, type RequestEvent } from '@sveltejs/kit';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
+import { getDb } from '$lib/server/platform';
 import {
 	createLabel,
 	deleteLabel,
@@ -12,10 +13,8 @@ import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, platform }) => {
 	requireRole(locals.user, POLICIES.contactLabels);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
-	return { labels: await listLabelRows(platform.env.DB, locals.user) };
+	const db = getDb(platform);
+	return { labels: await listLabelRows(db, locals.user) };
 };
 
 type LabelWrite = typeof createLabel;
@@ -24,11 +23,9 @@ type LabelWrite = typeof createLabel;
 function labelAction(action: string, write: LabelWrite) {
 	return async ({ locals, platform, request }: RequestEvent) => {
 		requireRole(locals.user, POLICIES.contactLabels);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
+		const db = getDb(platform);
 		const values = Object.fromEntries(await request.formData());
-		const result: LabelResult = await write(platform.env.DB, values, locals.user);
+		const result: LabelResult = await write(db, values, locals.user);
 		return result.ok ? { saved: action } : fail(400, { action, message: result.message });
 	};
 }

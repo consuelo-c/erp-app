@@ -1,7 +1,8 @@
-import { error, fail, redirect } from '@sveltejs/kit';
+import { fail, redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
+import { getEnv } from '$lib/server/platform';
 import { setPassword } from '$lib/server/services/logins';
 import type { Actions } from './$types';
 
@@ -9,11 +10,9 @@ import type { Actions } from './$types';
 export const actions: Actions = {
 	default: async ({ locals, platform, request, params }) => {
 		requireRole(locals.user, POLICIES.logins);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
+		const { DB, PASSWORD_PEPPER } = getEnv(platform);
 		const password = (await request.formData()).get('password');
-		const env = { db: platform.env.DB, pepper: platform.env.PASSWORD_PEPPER };
+		const env = { db: DB, pepper: PASSWORD_PEPPER };
 		const result = await setPassword(env, { id: params.id, password }, locals.user);
 		if (!result.ok) {
 			return fail(400, { message: result.message });

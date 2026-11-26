@@ -1,8 +1,9 @@
-import { error, fail } from '@sveltejs/kit';
+import { fail } from '@sveltejs/kit';
 import { getTodaysDate } from '$lib/datetime';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { rememberEmployee } from '$lib/server/chosen-employee';
+import { getDb } from '$lib/server/platform';
 import { openWeek, recordPayment, saveDraft } from '$lib/server/services/payroll';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -11,9 +12,7 @@ import type { Actions, PageServerLoad } from './$types';
 // (this one by default).
 export const load: PageServerLoad = async ({ cookies, locals, platform, url }) => {
 	requireRole(locals.user, POLICIES.payroll);
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
+	const db = getDb(platform);
 	const input = {
 		employeeId: url.searchParams.get('empleado'),
 		preferredEmployeeId: rememberEmployee(url, cookies),
@@ -21,7 +20,7 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 	};
 	return {
 		today: getTodaysDate(),
-		week: await openWeek(platform.env.DB, input, locals.user)
+		week: await openWeek(db, input, locals.user)
 	};
 };
 
@@ -31,11 +30,9 @@ type Write = typeof saveDraft;
 function action(write: Write, done: Record<string, true>): Actions[string] {
 	return async ({ locals, platform, request }) => {
 		requireRole(locals.user, POLICIES.payroll);
-		if (undefined === platform) {
-			error(500, 'Sin acceso a la base de datos');
-		}
+		const db = getDb(platform);
 		const values = Object.fromEntries(await request.formData());
-		const result = await write(platform.env.DB, values, locals.user);
+		const result = await write(db, values, locals.user);
 		return result.ok ? done : fail(400, { message: result.message, errors: result.errors, values });
 	};
 }

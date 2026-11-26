@@ -3,6 +3,7 @@ import { resolve } from '$app/paths';
 import { POLICIES } from '$lib/roles';
 import { hasAnyRole } from '$lib/server/actor';
 import { renderTerms } from '$lib/server/markdown';
+import { getDb } from '$lib/server/platform';
 import {
 	findOrderIdByToken,
 	getClientTerms,
@@ -13,10 +14,7 @@ import type { PageServerLoad } from './$types';
 // Public: no `requireRole`. An employee, who opens it from the client's WhatsApp, goes to the
 // order in the dashboard instead; the session is only read.
 export const load: PageServerLoad = async ({ locals, params, platform }) => {
-	if (undefined === platform) {
-		error(500, 'Sin acceso a la base de datos');
-	}
-	const db = platform.env.DB;
+	const db = getDb(platform);
 	if (null !== locals.user) {
 		const id = await findOrderIdByToken(db, params.token);
 		if (null !== id) {
