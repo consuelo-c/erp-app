@@ -162,18 +162,13 @@ Every run, the workflow does these steps in order:
 
 1. Installs the dependencies with `npm ci`.
 1. Runs the tests. If one fails, it stops there, before touching the database.
-1. Compares the migrations applied in D1 with those in `migrations/` and, if they no longer match, wipes the database (see the warning below).
+1. Compares the migrations applied in D1 with those in `migrations/` and, if they no longer match, fails the deploy (see the note below).
 1. Applies the pending migrations to D1.
 1. Loads the default `settings` from `scripts/settings-defaults.sql`.
 1. Builds the app and publishes it with `wrangler deploy`.
 
-> [!WARNING]
-> Before launch, migrations can be squashed. When that happens, the migrations applied in D1 stop matching those in `migrations/`, and the deploy reacts according to the `orders` table:
->
-> - If `orders` is empty or doesn't exist, it **drops every production table** and creates them again. That includes the logins, the product catalog and the numbering sequences.
-> - If `orders` has rows, the deploy fails and deletes nothing.
->
-> So data loaded by hand must be loaded after the last deploy with squashed migrations.
+> [!NOTE]
+> Before the November 23, 2026 launch, migrations were squashed freely, and a deploy with squashed migrations dropped every production table while `orders` was empty. Since launch, `migrations/` is append-only and `orders` has rows: if the applied migrations ever stop matching `migrations/`, the deploy fails and deletes nothing. The drift is fixed in `migrations/`.
 
 ### Environment variables and secrets
 
@@ -285,7 +280,7 @@ Two things don't live in the repository and are set once from the dashboard. The
 
 ### Step 5: Load the initial data
 
-Last, load the data done by hand, described in [Initial data](#initial-data). As the warning in [What the deploy does](#what-the-deploy-does) explains, this must happen after the last deploy with squashed migrations, or that data is lost.
+Last, load the data done by hand, described in [Initial data](#initial-data).
 
 ### Verify the deploy
 
@@ -316,7 +311,7 @@ The `settings` table must have rows:
 npx wrangler d1 execute consueloc-erp-db --remote --command "SELECT count(*) AS total FROM settings"
 ```
 
-This query lists the company details still empty. Before launch it must return no rows:
+This query lists the company details still empty. It must return no rows:
 
 ```bash
 npx wrangler d1 execute consueloc-erp-db --remote --command "SELECT key FROM settings WHERE key IN ('COMPANY_WHATSAPP', 'TERMS_CONDITIONS') AND value = ''"
@@ -342,7 +337,7 @@ Then check in the browser at `https://app.consueloc.com`.
 - [ ] _Configuración_ shows the company's details
 
 > [!WARNING]
-> Don't create test orders in production. An order takes a number from the `orders` sequence, and once `orders` has rows the deploy can no longer wipe the database after squashing migrations.
+> Don't create test orders in production. An order takes a number from the `orders` sequence, and production's orders are the company's real ones.
 
 ## Back up the database
 
@@ -522,13 +517,12 @@ openssl rand -base64 32 | npx wrangler secret put PASSWORD_PEPPER
 
 ## Load the catalog
 
-The real catalog is in `scripts/catalog.sql`, built by hand once from the WooCommerce export and the tablecloth inventory. From then on the catalog is kept in _Productos_, not in WooCommerce. In development, `npm run db:seed` loads it. In production it's loaded once, by hand, with the `products` table empty:
+The real catalog is in `scripts/catalog.sql`, built by hand once from the WooCommerce export and the tablecloth inventory. From then on the catalog is kept in _Productos_, not in WooCommerce. In development, `npm run db:seed` loads it. In production it was loaded once, by hand, at launch, with the `products` table empty:
 
 ```bash
 npx wrangler d1 execute consueloc-erp-db --remote --file scripts/catalog.sql
 ```
 
-- Run it after the last deploy with squashed migrations, because that deploy wipes the database while `orders` is empty.
 - `deploy.yml` never applies it: a product renamed in _Productos_ would come back as a duplicate.
 - It can run several times: a product whose name already exists (case-insensitive) is skipped.
 
@@ -536,7 +530,7 @@ npx wrangler d1 execute consueloc-erp-db --remote --file scripts/catalog.sql
 
 So the app's first order follows the paper numbering, the `orders` sequence is set once in production to the last paper number.
 
-Do it before the first real order and after the last deploy with squashed migrations: while `orders` is empty, that deploy wipes the database and the sequence with it.
+Done once at launch, before the first real order. It's only needed again on a new or rebuilt database.
 
 > [!NOTE]
 > Replace `NNNN` with the last paper number:
@@ -554,7 +548,7 @@ npx wrangler d1 execute consueloc-erp-db --remote --command "SELECT seq FROM sql
 
 So the app's first receivable follows the paper numbering, the `receivables` sequence is set once in production to the last paper number.
 
-Do it after launch and before issuing the first receivable.
+Do it once, before issuing the first receivable.
 
 > [!NOTE]
 > Replace `NNNN` with the last paper number:

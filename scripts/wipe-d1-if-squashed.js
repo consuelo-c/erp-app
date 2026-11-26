@@ -1,7 +1,7 @@
-// Wipes the D1 database when migrations/ was squashed, so the deploy can apply it from scratch.
-// Run by the deploy workflow before `wrangler d1 migrations apply`. Before launch, migrations/ is
-// squashed freely, and the migrations D1 has applied stop being a prefix of migrations/. The wipe
-// only happens if `orders` is missing or empty: the first real order freezes the schema.
+// The deploy's guard, run by the deploy workflow before `wrangler d1 migrations apply`. Since the
+// November 23, 2026 launch, migrations/ is append-only and production's `orders` has rows, so when
+// the migrations D1 has applied stop being a prefix of migrations/, it fails the deploy and drops
+// nothing. It still wipes a database whose `orders` is empty or missing (a new or rebuilt one).
 // Usage: node scripts/wipe-d1-if-squashed.js --remote | --local [--yes]
 import { execFileSync } from 'node:child_process';
 import { readdirSync } from 'node:fs';
@@ -107,7 +107,7 @@ function refuseWipe(database) {
 	console.error('Applied migrations no longer match migrations/, but `orders` has rows:');
 	printQuery(database, 'select id, created_at from orders');
 	console.error(
-		'Refusing to wipe. If, and only if, these are test rows: run `delete from orders` and re-run.'
+		'Refusing to wipe. Migrations are append-only since launch: fix the drift in migrations/.'
 	);
 	process.exit(1);
 }

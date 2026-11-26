@@ -6,4 +6,4 @@ paths:
 
 # Schema rules
 
-- Before launch (the first real order), `migrations/` is squashed freely, carrying the hand-written `events` triggers over by hand. After launch it's append-only.
+- `migrations/` is append-only: the app launched on November 23, 2026. A schema change is a new migration, never an edit to or a squash of an existing one.
