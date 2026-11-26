@@ -573,11 +573,13 @@ test('«Nueva etiqueta» adds one sorted by name; a blank or repeated name is re
 	expect((await listLabelRows(db, MANAGER)).map(({ key }) => key)).toContain('PROVEEDOR_DE_CARPAS');
 	expect(await createLabel(db, { name: '   ' }, MANAGER)).toEqual({
 		ok: false,
-		message: 'Escribe el nombre'
+		message: 'Escribe el nombre',
+		errors: {}
 	});
 	expect(await createLabel(db, { name: 'vetado' }, MANAGER)).toEqual({
 		ok: false,
-		message: 'Ya existe una etiqueta con ese nombre'
+		message: 'Ya existe una etiqueta con ese nombre',
+		errors: {}
 	});
 	expect(settingsEvents()).toEqual([
 		[{ value: '[]' }, { value: '[{"key":"PROVEEDOR_DE_CARPAS","name":"Proveedor de carpas"}]' }]

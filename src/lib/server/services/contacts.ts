@@ -20,6 +20,7 @@ import { INVALID_WHATSAPP, normalizeWhatsapp } from '$lib/whatsapp';
 import { POLICIES } from '$lib/roles';
 import { hasAnyRole, requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
+import { invalid, messageRefusal, refusal, type Refusal, type SaveResult } from '../result';
 import { containing, foldedSql } from './cash';
 import { readSettings } from './settings';
 
@@ -57,9 +58,6 @@ export type Contact = {
 	isEmployee: boolean;
 };
 
-export type SaveResult =
-	{ ok: true; id: number } | { ok: false; message: string; errors: Record<string, string> };
-
 /** The columns as typed: `document_id` is null only on a contact not saved yet. */
 type Columns = {
 	phone: string | null;
@@ -71,8 +69,6 @@ type Columns = {
 };
 
 type ContactRow = Columns & { id: number; document_id: string; is_employee: number };
-
-const CHECK_FIELDS = 'Revisa los campos marcados en rojo antes de guardar.';
 
 export const INVALID_PHONE =
 	'Número no válido. Un número de Colombia tiene 10 dígitos; uno de otro país empieza con +.';
@@ -278,16 +274,8 @@ function requireLockedFieldsKept(actor: Actor, current: Columns, next: Columns):
 	}
 }
 
-/** Each field's first message, for the form to show under it. */
-export function invalidForm(zodError: z.ZodError): SaveResult {
-	const errors = Object.fromEntries(
-		zodError.issues.map((issue) => [String(issue.path[0]), issue.message])
-	);
-	return { ok: false, message: CHECK_FIELDS, errors };
-}
-
-function documentRefusal(message: string): SaveResult {
-	return { ok: false, message: CHECK_FIELDS, errors: { document_id: message } };
+function documentRefusal(message: string): Refusal {
+	return refusal('document_id', message);
 }
 
 /** Why a document number can't be saved on contact `exceptId`: another contact has it. */
@@ -295,7 +283,7 @@ export async function documentTakenRefusal(
 	db: D1Database,
 	documentId: string,
 	exceptId: number
-): Promise<SaveResult | null> {
+): Promise<Refusal | null> {
 	// The UNIQUE column still guards a race; this turns the common case into a message, not a 500.
 	const owner = await db
 		.prepare('select full_name from contacts where document_id = ? and id != ?')
@@ -315,7 +303,7 @@ async function documentRefusalOf(
 	db: D1Database,
 	documentId: string,
 	exceptId: number
-): Promise<SaveResult | null> {
+): Promise<Refusal | null> {
 	if (isAutoDocument(documentId)) {
 		return AUTO_DOCUMENT_TYPED;
 	}
@@ -337,7 +325,7 @@ export async function listContactLabels(
 }
 
 // A key the form posts must still be in the setting: one deleted meanwhile, or forged, isn't saved.
-async function unknownLabelRefusal(db: D1Database, labels: string[]): Promise<SaveResult | null> {
+async function unknownLabelRefusal(db: D1Database, labels: string[]): Promise<Refusal | null> {
 	if (0 === labels.length) {
 		return null;
 	}
@@ -345,7 +333,7 @@ async function unknownLabelRefusal(db: D1Database, labels: string[]): Promise<Sa
 	if (labels.every((key) => known.has(key))) {
 		return null;
 	}
-	return { ok: false, message: CHECK_FIELDS, errors: { labels: 'Esa etiqueta ya no existe' } };
+	return refusal('labels', 'Esa etiqueta ya no existe');
 }
 
 async function findRow(db: D1Database, id: number): Promise<ContactRow | null> {
@@ -378,11 +366,11 @@ export async function createContact(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.contacts);
 	const parsed = formSchema.safeParse(input);
 	if (!parsed.success) {
-		return invalidForm(parsed.error);
+		return invalid(parsed.error);
 	}
 	const columns = toColumns({ ...parsed.data, full_name: capitalizeName(parsed.data.full_name) });
 	requireLockedFieldsKept(actor, NEW_CONTACT, columns);
@@ -407,7 +395,7 @@ async function applyEdit(
 	db: D1Database,
 	actor: Actor,
 	{ row, columns }: { row: ContactRow; columns: Columns }
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	const statements = auditedUpdate(db, {
 		table: 'contacts',
 		entityType: 'CONTACT',
@@ -423,18 +411,18 @@ async function applyEdit(
 	return { ok: true, id: row.id };
 }
 
-const NOT_FOUND: SaveResult = { ok: false, message: 'Ese contacto no existe', errors: {} };
+const NOT_FOUND = messageRefusal('Ese contacto no existe');
 
 /** The whole form: a locked field Sales can't change still arrives, with its current value. */
 export async function updateContact(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.contacts);
 	const parsed = updateSchema.safeParse(input);
 	if (!parsed.success) {
-		return invalidForm(parsed.error);
+		return invalid(parsed.error);
 	}
 	const { id, ...form } = parsed.data;
 	const row = await findRow(db, id);
@@ -748,12 +736,10 @@ const BUILT_IN_LABELS: readonly string[] = [TRANSPORTER, BANNED];
 
 export type LabelRow = ContactLabel & { contactCount: number; isBuiltIn: boolean };
 
-export type LabelResult = { ok: true } | { ok: false; message: string };
-
 const nameSchema = z.object({ name: z.string().trim().min(1, 'Escribe el nombre') });
 const keySchema = z.object({ key: z.string().min(1) });
 
-const UNKNOWN_LABEL: LabelResult = { ok: false, message: 'Esa etiqueta ya no existe' };
+const UNKNOWN_LABEL = messageRefusal('Esa etiqueta ya no existe');
 
 /** Every etiqueta, A–Z, with how many contacts carry it. */
 export async function listLabelRows(db: D1Database, actor: Actor | null): Promise<LabelRow[]> {
@@ -779,11 +765,11 @@ export async function createLabel(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<LabelResult> {
+): Promise<SaveResult> {
 	requireRole(actor, POLICIES.contactLabels);
 	const parsed = nameSchema.safeParse(input);
 	if (!parsed.success) {
-		return { ok: false, message: parsed.error.issues[0].message };
+		return messageRefusal(parsed.error.issues[0].message);
 	}
 	const current = await readContactLabels(db);
 	const created = { key: makeLabelKey(parsed.data.name, current), name: parsed.data.name };
@@ -799,11 +785,11 @@ export async function renameLabel(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<LabelResult> {
+): Promise<SaveResult> {
 	requireRole(actor, POLICIES.contactLabels);
 	const parsed = keySchema.extend(nameSchema.shape).safeParse(input);
 	if (!parsed.success) {
-		return { ok: false, message: parsed.error.issues[0].message };
+		return messageRefusal(parsed.error.issues[0].message);
 	}
 	const { key, name } = parsed.data;
 	const current = await readContactLabels(db);
@@ -827,11 +813,11 @@ export async function deleteLabel(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<LabelResult> {
+): Promise<SaveResult> {
 	requireRole(actor, POLICIES.contactLabels);
 	const { key } = keySchema.parse(input);
 	if (BUILT_IN_LABELS.includes(key)) {
-		return { ok: false, message: 'Transportador y Vetado no se eliminan' };
+		return messageRefusal('Transportador y Vetado no se eliminan');
 	}
 	const current = await readContactLabels(db);
 	const deleted = current.find((label) => key === label.key);
@@ -879,10 +865,10 @@ type LabelsWrite = {
 };
 
 // Sorted here, so the setting's schema has only a repeated name left to refuse.
-async function saveLabels(db: D1Database, actor: Actor, write: LabelsWrite): Promise<LabelResult> {
+async function saveLabels(db: D1Database, actor: Actor, write: LabelsWrite): Promise<SaveResult> {
 	const parsed = contactLabelsSchema.safeParse(sortByName(write.labels));
 	if (!parsed.success) {
-		return { ok: false, message: parsed.error.issues[0].message };
+		return messageRefusal(parsed.error.issues[0].message);
 	}
 	const settingStatements = auditedUpdate(db, {
 		table: 'settings',

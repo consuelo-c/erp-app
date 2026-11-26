@@ -6,9 +6,9 @@ import {
 	createLabel,
 	deleteLabel,
 	listLabelRows,
-	renameLabel,
-	type LabelResult
+	renameLabel
 } from '$lib/server/services/contacts';
+import type { SaveResult } from '$lib/server/result';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, platform }) => {
@@ -25,7 +25,7 @@ function labelAction(action: string, write: LabelWrite) {
 		requireRole(locals.user, POLICIES.contactLabels);
 		const db = getDb(platform);
 		const values = Object.fromEntries(await request.formData());
-		const result: LabelResult = await write(db, values, locals.user);
+		const result: SaveResult = await write(db, values, locals.user);
 		return result.ok ? { saved: action } : fail(400, { action, message: result.message });
 	};
 }

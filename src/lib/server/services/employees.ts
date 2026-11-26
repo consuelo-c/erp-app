@@ -6,12 +6,12 @@ import { z } from 'zod';
 import { POLICIES } from '$lib/roles';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
+import { invalid as invalidForm } from '../result';
 import { containing } from './cash';
 import {
 	capitalizeName,
 	documentIdSchema,
 	documentTakenRefusal,
-	invalidForm,
 	isAutoDocument,
 	phoneSchema,
 	whatsappClause,
