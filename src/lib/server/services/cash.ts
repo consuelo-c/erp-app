@@ -8,6 +8,7 @@ import { parsePesos } from '$lib/payroll';
 import { POLICIES } from '$lib/roles';
 import { hasCashTab, requireRole, rolesSchema, type Actor } from '../actor';
 import { auditedInsert } from '../audit';
+import { invalid, messageRefusal, type SaveResult } from '../result';
 import { COMPANY_SETTINGS, readSettings, type CompanySettings } from './settings';
 
 export const CASH_CONCEPTS = [
@@ -111,9 +112,6 @@ export function movementStatements(
 
 export const DIRECTIONS = ['IN', 'OUT'] as const;
 
-export type RecordResult =
-	{ ok: true; id: number } | { ok: false; message: string; errors: Record<string, string> };
-
 const directionSchema = z.object({
 	direction: z.enum(DIRECTIONS, 'Escoge si es una entrada o una salida')
 });
@@ -191,22 +189,11 @@ function toAttributes(
 	};
 }
 
-function invalid(error: z.ZodError): RecordResult {
-	const errors = Object.fromEntries(
-		error.issues.map((issue) => [String(issue.path[0]), issue.message])
-	);
-	return { ok: false, message: 'Revisa los campos marcados en rojo antes de guardar.', errors };
-}
-
-function refuse(message: string): RecordResult {
-	return { ok: false, message, errors: {} };
-}
-
 async function insertMovement(
 	db: D1Database,
 	actor: Actor,
 	movement: Movement
-): Promise<RecordResult> {
+): Promise<SaveResult<{ id: number }>> {
 	const [inserted] = await db.batch(movementStatements(db, actor, movement));
 	return { ok: true, id: inserted.meta.last_row_id };
 }
@@ -262,7 +249,7 @@ export async function recordMovement(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<RecordResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.managesCash);
 	const direction = directionSchema.safeParse(input);
 	if (!direction.success) {
@@ -341,7 +328,7 @@ export async function recordLinkedMovement(
 	db: D1Database,
 	movement: LinkedMovement,
 	actor: Actor
-): Promise<RecordResult> {
+): Promise<SaveResult<{ id: number }>> {
 	const isInflow = INFLOW_CONCEPTS.includes(movement.concept);
 	const schema = checkMethod(isInflow, entryBase.extend({ amount: amountSchema }));
 	const form = schema.safeParse(movement.form);
@@ -430,18 +417,18 @@ export async function recordOffset(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<RecordResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.managesCash);
 	const original = await findOriginal(db, (input as { reverses_id?: unknown })?.reverses_id);
 	if (null === original) {
-		return refuse('Ese movimiento no existe.');
+		return messageRefusal('Ese movimiento no existe.');
 	}
 	const refusal = offsetRefusal({
 		isOffset: null !== original.reverses_id,
 		isCorrected: null !== original.corrected_by
 	});
 	if (null !== refusal) {
-		return refuse(refusal);
+		return messageRefusal(refusal);
 	}
 	const isInflow = original.amount < 0;
 	const form = offsetSchema(isInflow, original).safeParse(input);

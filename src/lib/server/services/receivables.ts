@@ -10,10 +10,10 @@ import { parsePesos } from '$lib/payroll';
 import { POLICIES } from '$lib/roles';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, type Diff } from '../audit';
+import { invalid, messageRefusal, type Refusal, type SaveResult } from '../result';
 import { optional, recordLinkedMovement } from './cash';
 import { contactAttributesSchema, isAutoDocument, searchClause } from './contacts';
 import {
-	invalidOrder,
 	orderItemsSchema,
 	RECEIVABLE_BALANCE_SQL,
 	RECEIVABLE_PAID_MOVEMENT_SQL,
@@ -23,9 +23,7 @@ import {
 	toPayment,
 	type OrderItem,
 	type OrderPayment,
-	type PaymentRow,
-	type Refusal,
-	type SaveResult
+	type PaymentRow
 } from './orders';
 import { COMPANY_SETTINGS, readSettings, type CompanySettings } from './settings';
 
@@ -56,7 +54,7 @@ type EligibleOrder = {
 
 type ReceivableRow = { id: number; client_id: number; attributes: string };
 
-const NOT_FOUND: Refusal = { ok: false, message: 'Esa cuenta de cobro no existe', errors: {} };
+const NOT_FOUND: Refusal = messageRefusal('Esa cuenta de cobro no existe');
 
 const NOT_ELIGIBLE_MESSAGE =
 	'Solo se incluyen pedidos de este cliente que no estén cancelados ni en otra cuenta de cobro';
@@ -168,11 +166,11 @@ export async function issueReceivable(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.receivables);
 	const parsed = issueInputSchema.safeParse(input);
 	if (!parsed.success) {
-		return invalidOrder(parsed.error);
+		return invalid(parsed.error);
 	}
 	const { orders: orderIds, payment_terms: paymentTerms } = parsed.data;
 	const clientId = await findClientOf(db, orderIds[0]);
@@ -268,11 +266,11 @@ export async function updateReceivable(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.receivables);
 	const parsed = editInputSchema.safeParse(input);
 	if (!parsed.success) {
-		return invalidOrder(parsed.error);
+		return invalid(parsed.error);
 	}
 	const { id, orders: orderIds, payment_terms: paymentTerms } = parsed.data;
 	const row = await findRow(db, id);
@@ -308,16 +306,16 @@ async function paymentRefusal(
 		.first<{ balance: number; is_void: number }>();
 	const balance = row?.balance ?? 0;
 	if (1 === row?.is_void) {
-		return { ok: false, message: 'Esta cuenta de cobro está anulada.', errors: {} };
+		return messageRefusal('Esta cuenta de cobro está anulada.');
 	}
 	if (balance <= 0) {
-		return { ok: false, message: 'Esta cuenta de cobro ya está pagada.', errors: {} };
+		return messageRefusal('Esta cuenta de cobro ya está pagada.');
 	}
 	if (parsePesos(typedAmount) === balance) {
 		return null;
 	}
 	const message = `La cuenta de cobro se paga completa: ${formatPesos(balance)}.`;
-	return { ok: false, message, errors: {} };
+	return messageRefusal(message);
 }
 
 /**
@@ -328,7 +326,7 @@ export async function recordReceivablePayment(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<SaveResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.receivables);
 	const parsed = paymentInputSchema.safeParse(input);
 	if (!parsed.success) {

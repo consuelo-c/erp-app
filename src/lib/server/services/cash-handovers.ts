@@ -9,14 +9,8 @@ import { parsePesos } from '$lib/payroll';
 import { POLICIES } from '$lib/roles';
 import { hasAnyRole, hasCashTab, requireRole, type Actor } from '../actor';
 import { auditedInsert } from '../audit';
-import {
-	movementAttributesSchema,
-	optional,
-	type CashConcept,
-	type PaymentMethod,
-	type RecordResult
-} from './cash';
-import { invalidForm } from './contacts';
+import { invalid, type SaveResult } from '../result';
+import { movementAttributesSchema, optional, type CashConcept, type PaymentMethod } from './cash';
 import { SELECT_LOGIN, toLogin, type Login, type LoginRow } from './logins';
 
 // Whose tab a movement is on, the one rule every reader of Efectivo por entregar shares. An
@@ -275,11 +269,11 @@ export async function recordHandover(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<RecordResult> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.managesCash);
 	const form = handoverSchema.safeParse(input);
 	if (!form.success) {
-		return invalidForm(form.error);
+		return invalid(form.error);
 	}
 	const login = await findLoginWithTab(db, form.data.username);
 	if (null === login) {
