@@ -26,7 +26,7 @@ export const actions: Actions = {
 		const env = { db: DB, pepper: PASSWORD_PEPPER };
 		const result = await reassignLogin(env, input, locals.user);
 		if (!result.ok) {
-			return fail(400, { message: result.message });
+			return fail(400, { message: result.message, errors: result.errors });
 		}
 		redirect(303, `${resolve('/logins')}?aviso=reasignado`);
 	}

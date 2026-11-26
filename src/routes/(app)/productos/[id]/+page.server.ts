@@ -27,7 +27,7 @@ export const actions: Actions = {
 		// The id always comes from the URL.
 		const result = await updateProduct(db, { ...values, id: params.id }, locals.user);
 		if (!result.ok) {
-			return fail(400, { ...result, values });
+			return fail(400, { message: result.message, errors: result.errors, values });
 		}
 		redirect(303, `${resolve('/productos')}?guardado`);
 	}

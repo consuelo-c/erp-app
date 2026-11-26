@@ -18,6 +18,7 @@ import {
 } from './logins';
 
 const pepper = TEST_PEPPER;
+const CHECK_FIELDS = 'Revisa los campos marcados en rojo antes de guardar.';
 
 let db: D1Database;
 let database: DatabaseSync;
@@ -108,20 +109,36 @@ test('rejects the reserved username, a taken one, no roles and a short password'
 	await create(bodega);
 	expect(await create({ ...bodega, username: 'SYSTEM' })).toEqual({
 		ok: false,
-		message: 'Ese usuario está reservado'
+		message: CHECK_FIELDS,
+		errors: { username: 'Ese usuario está reservado' }
 	});
 	expect(await create({ ...bodega, username: 'BODEGA' })).toEqual({
 		ok: false,
-		message: 'Ya existe un login con ese usuario'
+		message: 'Ya existe un login con ese usuario',
+		errors: {}
 	});
 	expect(await create({ ...bodega, username: 'ventas', roles: [] })).toEqual({
 		ok: false,
-		message: 'Escoge al menos un rol'
+		message: CHECK_FIELDS,
+		errors: { roles: 'Escoge al menos un rol' }
 	});
 	expect(await create({ ...bodega, username: 'ventas', password: 'corta' })).toEqual({
 		ok: false,
-		message: 'La contraseña debe tener al menos 8 caracteres'
+		message: CHECK_FIELDS,
+		errors: { password: 'La contraseña debe tener al menos 8 caracteres' }
 	});
+});
+
+test('a short password is marked on its field when setting or reassigning', async () => {
+	const id = await created(bodega);
+	const marked = {
+		ok: false,
+		message: CHECK_FIELDS,
+		errors: { password: 'La contraseña debe tener al menos 8 caracteres' }
+	};
+	expect(await setPassword({ db, pepper }, { id, password: 'corta' }, ADMIN)).toEqual(marked);
+	const input = { id, employee_id: '', password: 'corta' };
+	expect(await reassignLogin({ db, pepper }, input, ADMIN)).toEqual(marked);
 });
 
 test('changing roles logs the old and new set, in ROLES order', async () => {
@@ -139,7 +156,8 @@ test('an admin cannot drop ADMIN from their own login', async () => {
 	const id = await created({ ...bodega, username: 'admin', roles: ['ADMIN'] });
 	expect(await updateRoles(db, { id, roles: ['MANAGER'] }, ADMIN)).toEqual({
 		ok: false,
-		message: 'No puedes quitarte el rol de Administrador'
+		message: 'No puedes quitarte el rol de Administrador',
+		errors: {}
 	});
 });
 
@@ -154,7 +172,8 @@ test('only the currently employed without a login can be given one', async () =>
 	for (const employeeId of [carlos, jorge]) {
 		expect(await create({ ...bodega, username: 'otro', employee_id: String(employeeId) })).toEqual({
 			ok: false,
-			message: 'Ese empleado ya tiene login o no está trabajando'
+			message: 'Ese empleado ya tiene login o no está trabajando',
+			errors: {}
 		});
 	}
 });
@@ -202,7 +221,8 @@ test('reassigning to the same employee is rejected', async () => {
 	const input = { id, employee_id: '', password: 'clave-nueva' };
 	expect(await reassignLogin({ db, pepper }, input, ADMIN)).toEqual({
 		ok: false,
-		message: 'Escoge un empleado distinto al actual'
+		message: 'Escoge un empleado distinto al actual',
+		errors: {}
 	});
 });
 
@@ -216,7 +236,8 @@ test('deactivating keeps the row with active = 0 and ends its sessions', async (
 	expect(await logInAs('bodega', 'clave-bodega')).toBeNull();
 	expect(await deactivateLogin(db, { id }, ADMIN)).toEqual({
 		ok: false,
-		message: 'Este login ya está inactivo'
+		message: 'Este login ya está inactivo',
+		errors: {}
 	});
 });
 
@@ -224,7 +245,8 @@ test('reactivating lets the login in again with its password', async () => {
 	const id = await created(bodega);
 	expect(await reactivateLogin(db, { id }, ADMIN)).toEqual({
 		ok: false,
-		message: 'Este login ya está activo'
+		message: 'Este login ya está activo',
+		errors: {}
 	});
 	await deactivateLogin(db, { id }, ADMIN);
 	expect((await reactivateLogin(db, { id }, ADMIN)).ok).toBe(true);
@@ -239,7 +261,8 @@ test('an admin cannot deactivate their own login', async () => {
 	const id = await created({ ...bodega, username: 'admin', roles: ['ADMIN'] });
 	expect(await deactivateLogin(db, { id }, ADMIN)).toEqual({
 		ok: false,
-		message: 'No puedes desactivar tu propio login'
+		message: 'No puedes desactivar tu propio login',
+		errors: {}
 	});
 });
 

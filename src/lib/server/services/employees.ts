@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { POLICIES } from '$lib/roles';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
-import { invalid as invalidForm } from '../result';
+import { invalid, messageRefusal, type Refusal, type SaveResult } from '../result';
 import { containing } from './cash';
 import {
 	capitalizeName,
@@ -67,9 +67,6 @@ export type Employee = {
 	isEmployed: boolean;
 };
 
-export type Result =
-	{ ok: true; id: number } | { ok: false; message: string; errors?: Record<string, string> };
-
 type EmployeeRow = {
 	id: number;
 	contact_id: number;
@@ -124,10 +121,6 @@ const createSchema = detailsSchema.extend({
 const updateSchema = detailsSchema.extend({ id: idSchema });
 const endSchema = z.object({ id: idSchema, end: z.iso.date('Escoge la fecha de retiro') });
 const rehireSchema = z.object({ id: idSchema, start: z.iso.date('Escoge la fecha de ingreso') });
-
-function invalid(error: z.ZodError): Result {
-	return { ok: false, message: error.issues[0].message };
-}
 
 // Always the same key order, so an edit that changes nothing produces the same text and logs nothing.
 function attributesJson(attributes: Attributes): string {
@@ -267,17 +260,17 @@ export async function searchContactCandidates(
 }
 
 // A contact is at most one employee: `contact_id` is UNIQUE.
-function alreadyEmployed(fullName: string): Result {
-	return { ok: false, message: `${fullName} ya está en Personal` };
+function alreadyEmployed(fullName: string): Refusal {
+	return messageRefusal(`${fullName} ya está en Personal`);
 }
 
-const CONTACT_NOT_FOUND: Result = { ok: false, message: 'Ese contacto no existe' };
+const CONTACT_NOT_FOUND = messageRefusal('Ese contacto no existe');
 
 // The picked contact, if any, and whether it can be this employee's.
 async function pickedContact(
 	db: D1Database,
 	contactId: number | undefined
-): Promise<{ picked: CandidateRow | null; refusal: Result | null }> {
+): Promise<{ picked: CandidateRow | null; refusal: Refusal | null }> {
 	if (undefined === contactId) {
 		return { picked: null, refusal: null };
 	}
@@ -299,11 +292,11 @@ export async function createEmployee(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<Result> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.employees);
 	const parsed = createSchema.safeParse(input);
 	if (!parsed.success) {
-		return invalidForm(parsed.error);
+		return invalid(parsed.error);
 	}
 	const { contact_id, phone, whatsapp, full_name, document_id, start, ...details } = parsed.data;
 	const { picked, refusal } = await pickedContact(db, contact_id);
@@ -375,14 +368,18 @@ function attributesUpdate(
 }
 
 // An edit that changes nothing writes nothing.
-async function run(db: D1Database, statements: D1PreparedStatement[], id: number): Promise<Result> {
+async function run(
+	db: D1Database,
+	statements: D1PreparedStatement[],
+	id: number
+): Promise<SaveResult<{ id: number }>> {
 	if (0 < statements.length) {
 		await db.batch(statements);
 	}
 	return { ok: true, id };
 }
 
-const NOT_FOUND: Result = { ok: false, message: 'Ese empleado no existe' };
+const NOT_FOUND = messageRefusal('Ese empleado no existe');
 
 /**
  * Name, ID number, phone and WhatsApp username, saved on the employee's own contact (never relinked to another), and
@@ -392,11 +389,11 @@ export async function updateEmployee(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<Result> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.employees);
 	const parsed = updateSchema.safeParse(input);
 	if (!parsed.success) {
-		return invalidForm(parsed.error);
+		return invalid(parsed.error);
 	}
 	const { id, phone, whatsapp, full_name, document_id, ...details } = parsed.data;
 	const row = await findRow(db, id);
@@ -424,7 +421,7 @@ async function changeEmployment(
 	db: D1Database,
 	actor: Actor,
 	{ id, change }: { id: number; change: (employee: Employee) => Period[] | string }
-): Promise<Result> {
+): Promise<SaveResult<{ id: number }>> {
 	const row = await findRow(db, id);
 	if (null === row) {
 		return NOT_FOUND;
@@ -432,7 +429,7 @@ async function changeEmployment(
 	const employee = toEmployee(row);
 	const employment = change(employee);
 	if ('string' === typeof employment) {
-		return { ok: false, message: employment };
+		return messageRefusal(employment);
 	}
 	const attributes = { ...employeeAttributesSchema.parse(JSON.parse(row.attributes)), employment };
 	return run(db, attributesUpdate(db, actor, { row, attributes }), id);
@@ -443,7 +440,7 @@ export async function endEmployment(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<Result> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.employees);
 	const parsed = endSchema.safeParse(input);
 	if (!parsed.success) {
@@ -466,7 +463,11 @@ export async function endEmployment(
 }
 
 /** Appends a new open period to the same row: a rehire is never a second employee. */
-export async function rehire(db: D1Database, input: unknown, actor: Actor | null): Promise<Result> {
+export async function rehire(
+	db: D1Database,
+	input: unknown,
+	actor: Actor | null
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.employees);
 	const parsed = rehireSchema.safeParse(input);
 	if (!parsed.success) {

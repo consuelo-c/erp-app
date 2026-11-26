@@ -12,6 +12,8 @@
 	import type { PageProps } from './$types';
 
 	let { data, form }: PageProps = $props();
+
+	const errorOf = (name: string): string | undefined => form?.errors?.[name];
 </script>
 
 <svelte:head>
@@ -39,11 +41,13 @@
 			label="Nueva contraseña"
 			id="password_input"
 			hint="Entrégasela a la persona directamente."
+			error={errorOf('password')}
 		>
 			<Input
 				id="password_input"
 				name="password"
 				type="password"
+				aria-invalid={undefined !== errorOf('password')}
 				autocomplete="new-password"
 				minlength={8}
 				required

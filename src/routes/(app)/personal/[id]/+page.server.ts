@@ -3,13 +3,8 @@ import { getTodaysDate } from '$lib/datetime';
 import { POLICIES } from '$lib/roles';
 import { requireRole } from '$lib/server/actor';
 import { getDb } from '$lib/server/platform';
-import {
-	endEmployment,
-	getEmployee,
-	rehire,
-	updateEmployee,
-	type Result
-} from '$lib/server/services/employees';
+import type { SaveResult } from '$lib/server/result';
+import { endEmployment, getEmployee, rehire, updateEmployee } from '$lib/server/services/employees';
 import type { Actions, PageServerLoad, RequestEvent } from './$types';
 
 export const load: PageServerLoad = async ({ locals, platform, params }) => {
@@ -22,7 +17,7 @@ export const load: PageServerLoad = async ({ locals, platform, params }) => {
 	return { employee, today: getTodaysDate() };
 };
 
-type Service = (db: D1Database, input: unknown, actor: App.Locals['user']) => Promise<Result>;
+type Service = (db: D1Database, input: unknown, actor: App.Locals['user']) => Promise<SaveResult>;
 
 // The three forms differ only in the service they call; the id always comes from the URL.
 async function submit({ locals, platform, request, params }: RequestEvent, service: Service) {

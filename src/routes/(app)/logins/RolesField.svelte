@@ -3,7 +3,7 @@
 	import { ROLE_LABELS } from '$lib/labels';
 
 	// One checkbox chip per role, all posted as `roles`; `chosen` are the ones already checked.
-	let { chosen }: { chosen: readonly string[] } = $props();
+	let { chosen, error }: { chosen: readonly string[]; error?: string } = $props();
 </script>
 
 <fieldset class="roles">
@@ -13,6 +13,9 @@
 			<Chip name="roles" value={role} {label} checked={chosen.includes(role)} />
 		{/each}
 	</div>
+	{#if error}
+		<p class="roles__error">{error}</p>
+	{/if}
 </fieldset>
 
 <style>
@@ -29,6 +32,14 @@
 		margin-bottom: var(--space-3);
 		font: var(--type-label);
 		color: var(--text-secondary);
+	}
+
+	/* The same look as a Field's error. */
+	.roles__error {
+		margin: var(--space-3) 0 0;
+		font-size: var(--text-label);
+		font-weight: var(--weight-semibold);
+		color: var(--error-fg);
 	}
 
 	/* Five roles wrap instead of scrolling: all of them must be visible to choose. */

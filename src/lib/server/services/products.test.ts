@@ -23,6 +23,8 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
+const CHECK_FIELDS = 'Revisa los campos marcados en rojo antes de guardar.';
+
 const chair = {
 	name: 'Silla Tiffany',
 	category: 'CHAIRS_TABLES',
@@ -108,8 +110,8 @@ test('an address that is not https, or not an address, is rejected on its field'
 	for (const address of ['http://x', 'no es una url']) {
 		expect(await createProduct(db, { ...chair, website_url: address }, MANAGER)).toEqual({
 			ok: false,
-			message: 'Escribe una dirección web válida, que empiece con https://',
-			field: 'website_url'
+			message: CHECK_FIELDS,
+			errors: { website_url: 'Escribe una dirección web válida, que empiece con https://' }
 		});
 	}
 });
@@ -164,9 +166,17 @@ test('the picker lists each group once, with its category', async () => {
 
 test('a variant group and a variant name go together', async () => {
 	const withoutName = await createProduct(db, { ...golden, variant_name: '' }, MANAGER);
-	expect(withoutName).toMatchObject({ ok: false, field: 'variant_name' });
+	expect(withoutName).toMatchObject({
+		ok: false,
+		message: CHECK_FIELDS,
+		errors: { variant_name: 'Escribe la variante' }
+	});
 	const withoutGroup = await createProduct(db, { ...golden, new_variant_group: '' }, MANAGER);
-	expect(withoutGroup).toMatchObject({ ok: false, field: 'variant_group' });
+	expect(withoutGroup).toMatchObject({
+		ok: false,
+		message: CHECK_FIELDS,
+		errors: { variant_group: 'Escoge el grupo de la variante' }
+	});
 });
 
 test('a variant already in its group, ignoring case, fails on the UNIQUE index with a message on Variante', async () => {
@@ -175,8 +185,8 @@ test('a variant already in its group, ignoring case, fails on the UNIQUE index w
 	const result = await createProduct(db, { ...picked, variant_name: 'DORADO' }, MANAGER);
 	expect(result).toEqual({
 		ok: false,
-		message: 'Esa variante ya existe en el grupo',
-		field: 'variant_name'
+		message: CHECK_FIELDS,
+		errors: { variant_name: 'Esa variante ya existe en el grupo' }
 	});
 	expect((await product({ ...picked, variant_name: 'Rojo' })) > 0).toBe(true);
 });
@@ -188,7 +198,11 @@ test('a new group matching an existing one, ignoring case, must be picked from t
 		{ ...golden, new_variant_group: 'MANTEL cuadrado 50×50', variant_name: 'Rojo' },
 		MANAGER
 	);
-	expect(result).toMatchObject({ ok: false, field: 'new_variant_group' });
+	expect(result).toEqual({
+		ok: false,
+		message: CHECK_FIELDS,
+		errors: { new_variant_group: 'Ese grupo ya existe: escógelo de la lista' }
+	});
 });
 
 test('a picked group that does not exist is rejected', async () => {
@@ -197,12 +211,20 @@ test('a picked group that does not exist is rejected', async () => {
 		{ ...golden, new_variant_group: '', variant_group: 'Mantel redondo' },
 		MANAGER
 	);
-	expect(result).toMatchObject({ ok: false, field: 'variant_group' });
+	expect(result).toEqual({
+		ok: false,
+		message: CHECK_FIELDS,
+		errors: { variant_group: 'Escoge un grupo de la lista' }
+	});
 });
 
 test('the price per day must be above zero; the total quantity may be zero', async () => {
 	const free = await createProduct(db, { ...chair, rental_price: '0' }, MANAGER);
-	expect(free).toMatchObject({ ok: false, field: 'rental_price' });
+	expect(free).toEqual({
+		ok: false,
+		message: CHECK_FIELDS,
+		errors: { rental_price: 'El precio por día debe ser mayor que cero' }
+	});
 	expect((await product({ ...chair, total_quantity: '0' })) > 0).toBe(true);
 });
 
@@ -292,8 +314,8 @@ test('a replacement cost that is not whole pesos above zero is refused on its fi
 	for (const typed of ['0', '$0', '-5.000', '95.000,50', '95,5', '12.5', 'mucho']) {
 		expect(await createProduct(db, { ...chair, replacement_cost: typed }, MANAGER)).toEqual({
 			ok: false,
-			message: 'Escribe el costo en pesos enteros, mayor que cero',
-			field: 'replacement_cost'
+			message: CHECK_FIELDS,
+			errors: { replacement_cost: 'Escribe el costo en pesos enteros, mayor que cero' }
 		});
 	}
 });

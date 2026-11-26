@@ -13,6 +13,8 @@
 	import type { PageProps } from './$types';
 
 	let { data, form }: PageProps = $props();
+
+	const errorOf = (name: string): string | undefined => form?.errors?.[name];
 </script>
 
 <svelte:head>
@@ -32,31 +34,38 @@
 		{#if form?.message}
 			<Notice tone="error">{form.message}</Notice>
 		{/if}
-		<Field label="Usuario" id="username">
+		<Field label="Usuario" id="username" error={errorOf('username')}>
 			<Input
 				id="username"
 				name="username"
 				value={form?.values.username ?? ''}
+				aria-invalid={undefined !== errorOf('username')}
 				placeholder="Ej. bodega"
 				autocapitalize="none"
 				autocomplete="off"
 				required
 			/>
 		</Field>
-		<RolesField chosen={form?.values.roles ?? []} />
-		<Field label="Empleado (opcional)" id="employee_id">
-			<Select id="employee_id" name="employee_id" value={form?.values.employee_id ?? ''}>
+		<RolesField chosen={form?.values.roles ?? []} error={errorOf('roles')} />
+		<Field label="Empleado (opcional)" id="employee_id" error={errorOf('employee_id')}>
+			<Select
+				id="employee_id"
+				name="employee_id"
+				value={form?.values.employee_id ?? ''}
+				aria-invalid={undefined !== errorOf('employee_id')}
+			>
 				<option value="">Sin empleado</option>
 				{#each data.employees as employee (employee.id)}
 					<option value={String(employee.id)}>{employee.fullName}</option>
 				{/each}
 			</Select>
 		</Field>
-		<Field label="Contraseña" id="password">
+		<Field label="Contraseña" id="password" error={errorOf('password')}>
 			<Input
 				id="password"
 				name="password"
 				type="password"
+				aria-invalid={undefined !== errorOf('password')}
 				placeholder="Contraseña inicial"
 				autocomplete="new-password"
 				minlength={8}
