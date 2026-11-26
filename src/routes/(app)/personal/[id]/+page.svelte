@@ -156,8 +156,16 @@
 		title="Terminar contrato"
 		body="Cierra el período de {employee.fullName} que empezó el {formatCivilDate(current.start)}."
 	>
-		<Field label="Fecha de retiro" id="end_date">
-			<Input id="end_date" name="end" type="date" form="end" value={data.today} required />
+		<Field label="Fecha de retiro" id="end_date" error={errorOf('end')}>
+			<Input
+				id="end_date"
+				name="end"
+				type="date"
+				form="end"
+				value={data.today}
+				aria-invalid={undefined !== errorOf('end')}
+				required
+			/>
 		</Field>
 		{#snippet actions()}
 			<Button type="button" variant="secondary" onclick={() => (endOpen = false)}>Cancelar</Button>
@@ -171,8 +179,16 @@
 		title="Reingresar"
 		body="Se agrega un período nuevo al historial de {employee.fullName}. No se crea otro empleado."
 	>
-		<Field label="Fecha de ingreso" id="rehire_date">
-			<Input id="rehire_date" name="start" type="date" form="rehire" value={data.today} required />
+		<Field label="Fecha de ingreso" id="rehire_date" error={errorOf('start')}>
+			<Input
+				id="rehire_date"
+				name="start"
+				type="date"
+				form="rehire"
+				value={data.today}
+				aria-invalid={undefined !== errorOf('start')}
+				required
+			/>
 		</Field>
 		{#snippet actions()}
 			<Button type="button" variant="secondary" onclick={() => (rehireOpen = false)}>

@@ -17,6 +17,8 @@
 	const login = $derived(data.login);
 	const id = $derived(String(login.id));
 
+	const errorOf = (name: string): string | undefined => form?.errors?.[name];
+
 	let deactivateOpen = $state(false);
 
 	// The dialog closes once the server answers; an error shows above the roles.
@@ -52,7 +54,7 @@
 		{#if form?.message}
 			<Notice tone="error">{form.message}</Notice>
 		{/if}
-		<RolesField chosen={form?.roles ?? login.roles} />
+		<RolesField chosen={form?.roles ?? login.roles} error={errorOf('roles')} />
 	</form>
 
 	<form id="deactivate" method="POST" action="?/deactivate" use:enhance={closeDialog} hidden></form>

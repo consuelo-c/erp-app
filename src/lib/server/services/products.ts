@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { POLICIES } from '$lib/roles';
 import { requireRole, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate } from '../audit';
+import { invalid, messageRefusal, refusal, type Refusal, type SaveResult } from '../result';
 import { fold } from '$lib/format';
 
 /** Fixed, like the CHECK on `products.category`: a new category is a code change. */
@@ -38,9 +39,6 @@ export type Product = {
 
 /** A variant group the form's picker offers, with the category its variants are in. */
 export type VariantGroup = { name: string; category: Category };
-
-type Failure = { ok: false; message: string; field?: string };
-export type Result = { ok: true; id: number } | Failure;
 
 /** A catalog row: when its `total_quantity` last changed (epoch seconds), for the list's ℹ. */
 export type ListedProduct = Product & { quantityUpdatedAt: number };
@@ -186,11 +184,6 @@ const SELECT_PRODUCT = `select ${PRODUCT_COLUMNS} from products`;
 // event's `after`: the latest such event, or the creation for a seeded product with none.
 const SELECT_LISTED_PRODUCT = `select ${PRODUCT_COLUMNS}, coalesce((select max(events.created_at) from events where events.entity_type = 'PRODUCT' and events.entity_id = products.id and json_extract(events.after, '$.total_quantity') is not null), products.created_at) as quantity_updated_at from products`;
 
-function invalid(error: z.ZodError): Failure {
-	const [issue] = error.issues;
-	return { ok: false, message: issue.message, field: issue.path.join('.') };
-}
-
 function toProduct(row: ProductRow): Product {
 	const attributes = productAttributesSchema.parse(JSON.parse(row.attributes));
 	return {
@@ -224,26 +217,21 @@ async function groupExists(db: D1Database, group: string): Promise<boolean> {
 async function findGroupProblem(
 	db: D1Database,
 	{ columns, isNewGroup }: ParsedProduct
-): Promise<Failure | null> {
+): Promise<Refusal | null> {
 	if (null === columns.variant_group) {
 		return null;
 	}
 	const exists = await groupExists(db, columns.variant_group);
 	if (isNewGroup && exists) {
-		const message = 'Ese grupo ya existe: escógelo de la lista';
-		return { ok: false, message, field: 'new_variant_group' };
+		return refusal('new_variant_group', 'Ese grupo ya existe: escógelo de la lista');
 	}
 	if (!isNewGroup && !exists) {
-		return { ok: false, message: 'Escoge un grupo de la lista', field: 'variant_group' };
+		return refusal('variant_group', 'Escoge un grupo de la lista');
 	}
 	return null;
 }
 
-const DUPLICATE_VARIANT: Failure = {
-	ok: false,
-	message: 'Esa variante ya existe en el grupo',
-	field: 'variant_name'
-};
+const DUPLICATE_VARIANT = refusal('variant_name', 'Esa variante ya existe en el grupo');
 
 // The UNIQUE index is the check: its error is turned into a message on Variante, not a 500.
 async function batchUnlessDuplicateVariant(
@@ -328,7 +316,7 @@ export async function createProduct(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<Result> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.manageProducts);
 	const parsed = newProductSchema.safeParse(input);
 	if (!parsed.success) {
@@ -355,9 +343,9 @@ async function applyEdit(
 	db: D1Database,
 	actor: Actor,
 	{ row, product }: { row: ProductRow; product: ParsedProduct }
-): Promise<Result> {
+): Promise<SaveResult<{ id: number }>> {
 	const { id, ...current } = row;
-	const saved: Result = { ok: true, id };
+	const saved = { ok: true as const, id };
 	const statements = auditedUpdate(db, {
 		table: 'products',
 		entityType: 'PRODUCT',
@@ -379,7 +367,7 @@ export async function updateProduct(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<Result> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.manageProducts);
 	const parsedId = idSchema.safeParse(input);
 	const parsed = productSchema.safeParse(input);
@@ -391,7 +379,7 @@ export async function updateProduct(
 	}
 	const row = await findRow(db, parsedId.data.id);
 	if (null === row) {
-		return { ok: false, message: 'Ese producto no existe' };
+		return messageRefusal('Ese producto no existe');
 	}
 	const groupProblem = await findGroupProblem(db, parsed.data);
 	if (null !== groupProblem) {

@@ -11,8 +11,12 @@
 	import { CATEGORY_LABELS } from '$lib/labels';
 	import type { Product, VariantGroup } from '$lib/server/services/products';
 
-	// A failed save: its message, the field it belongs to, what was typed.
-	type Submitted = { message: string; field?: string; values: Record<string, unknown> };
+	// A failed save: its banner, each marked field's message, what was typed.
+	type Submitted = {
+		message: string;
+		errors: Record<string, string>;
+		values: Record<string, unknown>;
+	};
 
 	interface Props {
 		/** Null for a new product. */
@@ -26,7 +30,7 @@
 	// The picker's last option. While it's picked the picker posts nothing: the typed name does.
 	const NEW_GROUP = '__nuevo';
 
-	const errorOf = (name: string) => (name === form?.field ? form.message : undefined);
+	const errorOf = (name: string): string | undefined => form?.errors[name];
 
 	function compose(group: string, variant: string): string {
 		return '' === group || '' === variant.trim() ? '' : `${group} — ${variant.trim()}`;
@@ -287,7 +291,7 @@
 		<Chip type="radio" name="active" value="off" label="Inactivo" checked={!fields.isActive} />
 	</Choice>
 
-	{#if form && undefined === form.field}
+	{#if form}
 		<Notice tone="error">{form.message}</Notice>
 	{/if}
 </form>

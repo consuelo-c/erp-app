@@ -19,6 +19,8 @@
 	const login = $derived(data.login);
 	const current = $derived(login.employee?.fullName ?? null);
 
+	const errorOf = (name: string): string | undefined => form?.errors?.[name];
+
 	let employeeId = $state('');
 	let confirmOpen = $state(false);
 
@@ -76,19 +78,25 @@
 		{#if form?.message}
 			<Notice tone="error">{form.message}</Notice>
 		{/if}
-		<Field label="Nuevo empleado" id="employee_id">
-			<Select id="employee_id" name="employee_id" bind:value={employeeId}>
+		<Field label="Nuevo empleado" id="employee_id" error={errorOf('employee_id')}>
+			<Select
+				id="employee_id"
+				name="employee_id"
+				bind:value={employeeId}
+				aria-invalid={undefined !== errorOf('employee_id')}
+			>
 				<option value="">Sin empleado</option>
 				{#each data.employees as employee (employee.id)}
 					<option value={String(employee.id)}>{employee.fullName}</option>
 				{/each}
 			</Select>
 		</Field>
-		<Field label="Nueva contraseña" id="password">
+		<Field label="Nueva contraseña" id="password" error={errorOf('password')}>
 			<Input
 				id="password"
 				name="password"
 				type="password"
+				aria-invalid={undefined !== errorOf('password')}
 				autocomplete="new-password"
 				minlength={8}
 				required

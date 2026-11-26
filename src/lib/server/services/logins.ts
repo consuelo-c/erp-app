@@ -6,7 +6,8 @@ import { POLICIES, ROLES, type Role } from '$lib/roles';
 import { requireRole, rolesSchema, type Actor } from '../actor';
 import { auditedInsert, auditedUpdate, type Row } from '../audit';
 import { hashPassword } from '../password';
-import { listEmployees, type Result } from './employees';
+import { invalid, messageRefusal, type SaveResult } from '../result';
+import { listEmployees } from './employees';
 
 /** Hashing a password needs the pepper, which lives only in the Worker's secrets. */
 type Environment = { db: D1Database; pepper: string };
@@ -154,16 +155,16 @@ export async function createLogin(
 	{ db, pepper }: Environment,
 	input: unknown,
 	actor: Actor | null
-): Promise<Result> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.logins);
 	const parsed = createSchema.safeParse(input);
 	if (!parsed.success) {
-		return { ok: false, message: parsed.error.issues[0].message };
+		return invalid(parsed.error);
 	}
 	const { username, roles, employee_id, password } = parsed.data;
 	const conflict = await findConflict(db, { username, employeeId: employee_id }, actor);
 	if (null !== conflict) {
-		return { ok: false, message: conflict };
+		return messageRefusal(conflict);
 	}
 	const [insert, event] = auditedInsert(db, {
 		table: 'users',
@@ -202,17 +203,17 @@ export async function updateRoles(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<Result> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.logins);
 	const parsed = rolesUpdateSchema.safeParse(input);
 	if (!parsed.success) {
-		return { ok: false, message: parsed.error.issues[0].message };
+		return invalid(parsed.error);
 	}
 	const { id, roles } = parsed.data;
 	const login = await getLogin(db, id, actor);
 	const problem = findRolesProblem(login, roles, actor);
 	if (null !== problem) {
-		return { ok: false, message: problem };
+		return messageRefusal(problem);
 	}
 	const statements = auditedUpdate(db, {
 		table: 'users',
@@ -242,7 +243,7 @@ async function applySessionEndingWrite(
 	db: D1Database,
 	actor: Actor,
 	{ login, ...write }: SessionEndingWrite
-): Promise<Result> {
+): Promise<SaveResult<{ id: number }>> {
 	const update = auditedUpdate(db, {
 		table: 'users',
 		entityType: 'USER',
@@ -260,15 +261,15 @@ export async function setPassword(
 	{ db, pepper }: Environment,
 	input: unknown,
 	actor: Actor | null
-): Promise<Result> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.logins);
 	const parsed = passwordUpdateSchema.safeParse(input);
 	if (!parsed.success) {
-		return { ok: false, message: parsed.error.issues[0].message };
+		return invalid(parsed.error);
 	}
 	const login = await getLogin(db, parsed.data.id, actor);
 	if (null === login) {
-		return { ok: false, message: NOT_FOUND };
+		return messageRefusal(NOT_FOUND);
 	}
 	return applySessionEndingWrite(db, actor, {
 		login,
@@ -301,17 +302,17 @@ export async function reassignLogin(
 	{ db, pepper }: Environment,
 	input: unknown,
 	actor: Actor | null
-): Promise<Result> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.logins);
 	const parsed = reassignSchema.safeParse(input);
 	if (!parsed.success) {
-		return { ok: false, message: parsed.error.issues[0].message };
+		return invalid(parsed.error);
 	}
 	const { id, employee_id, password } = parsed.data;
 	const login = await getLogin(db, id, actor);
 	const problem = await findReassignProblem(db, { login, employeeId: employee_id }, actor);
 	if (null !== problem) {
-		return { ok: false, message: problem };
+		return messageRefusal(problem);
 	}
 	return applySessionEndingWrite(db, actor, {
 		login: login!,
@@ -340,16 +341,16 @@ export async function deactivateLogin(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<Result> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.logins);
 	const parsed = loginIdSchema.safeParse(input);
 	if (!parsed.success) {
-		return { ok: false, message: parsed.error.issues[0].message };
+		return invalid(parsed.error);
 	}
 	const login = await getLogin(db, parsed.data.id, actor);
 	const problem = findDeactivateProblem(login, actor);
 	if (null !== problem) {
-		return { ok: false, message: problem };
+		return messageRefusal(problem);
 	}
 	return applySessionEndingWrite(db, actor, {
 		login: login!,
@@ -363,18 +364,18 @@ export async function reactivateLogin(
 	db: D1Database,
 	input: unknown,
 	actor: Actor | null
-): Promise<Result> {
+): Promise<SaveResult<{ id: number }>> {
 	requireRole(actor, POLICIES.logins);
 	const parsed = loginIdSchema.safeParse(input);
 	if (!parsed.success) {
-		return { ok: false, message: parsed.error.issues[0].message };
+		return invalid(parsed.error);
 	}
 	const login = await getLogin(db, parsed.data.id, actor);
 	if (null === login) {
-		return { ok: false, message: NOT_FOUND };
+		return messageRefusal(NOT_FOUND);
 	}
 	if (login.isActive) {
-		return { ok: false, message: 'Este login ya está activo' };
+		return messageRefusal('Este login ya está activo');
 	}
 	const write = { table: 'users', entityType: 'USER', actor, id: login.id };
 	await db.batch(auditedUpdate(db, { ...write, current: { active: 0 }, changes: { active: 1 } }));

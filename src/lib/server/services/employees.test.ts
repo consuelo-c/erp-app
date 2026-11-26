@@ -143,7 +143,7 @@ test('a new contact gets its name capitalized; a picked one keeps the name as ty
 test("a contact that's already another employee's is refused naming them", async () => {
 	const employee = await getEmployee(db, await hire(), MANAGER);
 	const picked = { ...carlos, document_id: '1', contact_id: String(employee?.contactId) };
-	const refusal = { ok: false, message: 'Carlos Vélez ya está en Personal' };
+	const refusal = { ok: false, message: 'Carlos Vélez ya está en Personal', errors: {} };
 	expect(await createEmployee(db, picked, MANAGER)).toEqual(refusal);
 	expect(count('employees')).toBe(1);
 });
@@ -203,7 +203,7 @@ test('name and ID number are required; the phone and the username are not', asyn
 	);
 	expect(result).toEqual({
 		ok: false,
-		message: expect.any(String),
+		message: 'Revisa los campos marcados en rojo antes de guardar.',
 		errors: {
 			full_name: 'Escribe el nombre completo',
 			document_id: 'Escribe la cédula'
@@ -303,7 +303,8 @@ test('ending sets the last period end; rehiring appends a period to the same row
 	const early = await rehire(db, { id, start: '2025-06-30' }, MANAGER);
 	expect(early).toEqual({
 		ok: false,
-		message: 'La fecha de ingreso debe ser posterior al último retiro'
+		message: 'La fecha de ingreso debe ser posterior al último retiro',
+		errors: {}
 	});
 	expect((await rehire(db, { id, start: '2026-01-13' }, MANAGER)).ok).toBe(true);
 
@@ -320,7 +321,23 @@ test('an employment cannot end before it started', async () => {
 	const result = await endEmployment(db, { id, end: '2024-07-14' }, MANAGER);
 	expect(result).toEqual({
 		ok: false,
-		message: 'La fecha de retiro no puede ser anterior al ingreso'
+		message: 'La fecha de retiro no puede ser anterior al ingreso',
+		errors: {}
+	});
+});
+
+test('a missing end or rehire date is marked on its field under the default banner', async () => {
+	const id = await hire();
+	expect(await endEmployment(db, { id, end: '' }, MANAGER)).toEqual({
+		ok: false,
+		message: 'Revisa los campos marcados en rojo antes de guardar.',
+		errors: { end: 'Escoge la fecha de retiro' }
+	});
+	await endEmployment(db, { id, end: '2025-06-30' }, MANAGER);
+	expect(await rehire(db, { id, start: '' }, MANAGER)).toEqual({
+		ok: false,
+		message: 'Revisa los campos marcados en rojo antes de guardar.',
+		errors: { start: 'Escoge la fecha de ingreso' }
 	});
 });
 

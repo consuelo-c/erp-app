@@ -27,7 +27,7 @@ export const actions: Actions = {
 		const env = { db: DB, pepper: PASSWORD_PEPPER };
 		const result = await createLogin(env, input, locals.user);
 		if (!result.ok) {
-			return fail(400, { message: result.message, values });
+			return fail(400, { message: result.message, errors: result.errors, values });
 		}
 		redirect(303, `${resolve('/logins')}?aviso=creado`);
 	}

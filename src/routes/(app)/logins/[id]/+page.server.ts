@@ -14,7 +14,7 @@ export const actions: Actions = {
 		const roles = (await request.formData()).getAll('roles').map(String);
 		const result = await updateRoles(db, { id: params.id, roles }, locals.user);
 		if (!result.ok) {
-			return fail(400, { message: result.message, roles });
+			return fail(400, { message: result.message, errors: result.errors, roles });
 		}
 		redirect(303, `${resolve('/logins')}?aviso=actualizado`);
 	},

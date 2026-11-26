@@ -19,7 +19,7 @@ export const actions: Actions = {
 		const values = Object.fromEntries(await request.formData());
 		const result = await createProduct(db, values, locals.user);
 		if (!result.ok) {
-			return fail(400, { ...result, values });
+			return fail(400, { message: result.message, errors: result.errors, values });
 		}
 		// Back to the list, with the saved notice.
 		redirect(303, `${resolve('/productos')}?guardado`);
