@@ -19,18 +19,9 @@ _Avoid_: mockups, design file
 A canvas file of kind `page`, one per section of the app, found by its name.
 _Avoid_: canvas screen
 
-**Component page**:
-A canvas file of kind `component` that pages embed. Not a Svelte component.
-
 **Frame**:
 One drawn screen or state on a page.
 _Avoid_: artboard
-
-**Frame ID**:
-A frame's label, `<page>-<frame>` with two digits each (`07-12` is page 07's twelfth frame); a new frame takes its page's next free number.
-
-**Design-system copy**:
-The Design System as frozen into the canvas, under `project/_ds/`. Where it disagrees with the brand or the code, it loses.
 
 **Screen**:
 One route of the app, drawn in one or more frames.
@@ -117,3 +108,7 @@ _Avoid_: borrowing, «préstamo»
 **Event**:
 The record of one change to a record, or one access to the app, by whom and when: what was saved, never edited or deleted. Listed in the «Auditoría» report; never the client's party, which is what «evento» means to the company's staff and clients.
 _Avoid_: log, history, «evento» in the UI
+
+**Launch**:
+The first real order taken in production. From then on, production data is the company's record and is never deleted or truncated.
+_Avoid_: go-live, release

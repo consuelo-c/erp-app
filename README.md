@@ -152,6 +152,9 @@ gh api repos/:owner/:repo/milestones --jq '.[].title'
 
 ## Deploy to Cloudflare
 
+> [!NOTE]
+> The app has been in production since launch (the first real order). Production data is the company's record: nothing deletes or truncates it, and `migrations/` is append-only.
+
 This section explains how to put the app in production, what data it needs to work, and how to check that the deploy went well. It assumes the steps in [Cloudflare](#cloudflare) and [GitHub](#github) are done: the database, the bucket, the `API Token` and the repository exist.
 
 There is a single environment: no staging (see [Set up a staging environment](#set-up-a-staging-environment)), so `main` is production. Deploys aren't run by hand from the terminal but through GitHub Actions' `.github/workflows/deploy.yml` workflow. A manual `npx wrangler deploy` only makes sense to debug a specific problem.
@@ -162,18 +165,9 @@ Every run, the workflow does these steps in order:
 
 1. Installs the dependencies with `npm ci`.
 1. Runs the tests. If one fails, it stops there, before touching the database.
-1. Compares the migrations applied in D1 with those in `migrations/` and, if they no longer match, wipes the database (see the warning below).
 1. Applies the pending migrations to D1.
 1. Loads the default `settings` from `scripts/settings-defaults.sql`.
 1. Builds the app and publishes it with `wrangler deploy`.
-
-> [!WARNING]
-> Before launch, migrations can be squashed. When that happens, the migrations applied in D1 stop matching those in `migrations/`, and the deploy reacts according to the `orders` table:
->
-> - If `orders` is empty or doesn't exist, it **drops every production table** and creates them again. That includes the logins, the product catalog and the numbering sequences.
-> - If `orders` has rows, the deploy fails and deletes nothing.
->
-> So data loaded by hand must be loaded after the last deploy with squashed migrations.
 
 ### Environment variables and secrets
 
@@ -285,7 +279,7 @@ Two things don't live in the repository and are set once from the dashboard. The
 
 ### Step 5: Load the initial data
 
-Last, load the data done by hand, described in [Initial data](#initial-data). As the warning in [What the deploy does](#what-the-deploy-does) explains, this must happen after the last deploy with squashed migrations, or that data is lost.
+Last, load the data done by hand, described in [Initial data](#initial-data). This is only for a fresh, empty database, before the first order.
 
 ### Verify the deploy
 
@@ -342,7 +336,7 @@ Then check in the browser at `https://app.consueloc.com`.
 - [ ] _Configuración_ shows the company's details
 
 > [!WARNING]
-> Don't create test orders in production. An order takes a number from the `orders` sequence, and once `orders` has rows the deploy can no longer wipe the database after squashing migrations.
+> Don't create test orders in production. An order takes a number from the `orders` sequence, so a test order would leave a gap in the paper numbering, and it would stay in the company's record, which is never deleted.
 
 ## Back up the database
 
@@ -412,7 +406,7 @@ This section is a recipe: **none of it is built**. Until someone follows it, the
 
 Staging is deployed from the terminal, not from GitHub Actions: `npm run deploy:staging`, run from the branch to show, runs the tests, builds and deploys with `--env staging`.
 
-**Every deploy starts from a fresh copy of production's D1.** The script exports the production database, empties staging's, imports the export, applies the branch's migrations and then deploys. Everything done in staging is lost on the next deploy. The step reads production and never writes to it, and the only thing it empties is staging's database. `scripts/wipe-d1-if-squashed.js` isn't used in staging, because the copy already replaces the whole database.
+**Every deploy starts from a fresh copy of production's D1.** The script exports the production database, empties staging's, imports the export, applies the branch's migrations and then deploys. Everything done in staging is lost on the next deploy. The step reads production and never writes to it, and the only thing it empties is staging's database. `scripts/wipe-d1-if-squashed.js` isn't needed there, because the copy already replaces the whole database.
 
 > [!WARNING]
 > Risks of deploying from the terminal:
@@ -522,13 +516,12 @@ openssl rand -base64 32 | npx wrangler secret put PASSWORD_PEPPER
 
 ## Load the catalog
 
-The real catalog is in `scripts/catalog.sql`, built by hand once from the WooCommerce export and the tablecloth inventory. From then on the catalog is kept in _Productos_, not in WooCommerce. In development, `npm run db:seed` loads it. In production it's loaded once, by hand, with the `products` table empty:
+The real catalog is in `scripts/catalog.sql`, built by hand once from the WooCommerce export and the tablecloth inventory. From then on the catalog is kept in _Productos_, not in WooCommerce. In development, `npm run db:seed` loads it. In production it's loaded once, by hand, only on an empty database, before the first order:
 
 ```bash
 npx wrangler d1 execute consueloc-erp-db --remote --file scripts/catalog.sql
 ```
 
-- Run it after the last deploy with squashed migrations, because that deploy wipes the database while `orders` is empty.
 - `deploy.yml` never applies it: a product renamed in _Productos_ would come back as a duplicate.
 - It can run several times: a product whose name already exists (case-insensitive) is skipped.
 
@@ -536,7 +529,7 @@ npx wrangler d1 execute consueloc-erp-db --remote --file scripts/catalog.sql
 
 So the app's first order follows the paper numbering, the `orders` sequence is set once in production to the last paper number.
 
-Do it before the first real order and after the last deploy with squashed migrations: while `orders` is empty, that deploy wipes the database and the sequence with it.
+Do it only on an empty database, before the first order.
 
 > [!NOTE]
 > Replace `NNNN` with the last paper number:

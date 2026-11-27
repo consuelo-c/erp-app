@@ -68,8 +68,8 @@ Where things live and which helper to reuse. What a screen or service does is re
 - `src/lib/server/services/` — business logic, one file per module; its `README.md` has the rule. The only rules for what they name: `cash.ts`' `movementStatements` (every insert into `cash_movements`), `orders.ts`' `getAvailability` and `MODIFIED_AFTER_STAGING_AT`, `inventory.ts`' `isStale`, `reversalBlock` and `getUnitsOnRent`, `receivables.ts`' `findEligibleOrders` and `canJoin`. `public-orders.ts` is the client's side: no actor, no writes
 - `src/lib/server/db/` — `schema.ts`, Drizzle, source of `migrations/`; `memory-d1.ts`, the tests' D1 over `node:sqlite`
 - `src/service-worker.ts` — the PWA shell cache, never a data response (hence `paths.relative: false`)
-- `migrations/` — generated SQL; squashed freely until launch, append-only after
-- `scripts/` — `settings-defaults.sql`, `catalog.sql`, `sample-data.sql`, `wipe-d1-if-squashed.js` (the deploy's pre-launch wipe)
+- `migrations/` — generated SQL; append-only since launch (see `.claude/rules/schema.md`)
+- `scripts/` — `settings-defaults.sql`, `catalog.sql`, `sample-data.sql`, `wipe-d1-if-squashed.js` (a manual tool no workflow runs)
 - `.github/workflows/` — `verify.yml` (PRs), `deploy.yml` (merge to `main`); `.husky/` — `pre-commit`, `commit-msg`; `.claude/` — the allow and deny lists and the hooks; `docs/agents/` — the issue tracker, triage labels and domain docs the Agent skills read
 
 ## Agent skills
