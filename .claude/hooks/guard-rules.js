@@ -453,7 +453,19 @@ function checkMove(words, context) {
 	return firstReason(operands(words), (target) => checkDeleteTarget(target, context, 'mv'));
 }
 
+// Production's database is the company's record: wrangler and the wipe script are the developer's.
+// The deny list only matches the typed prefix, so this catches them behind a runner's flags.
+const WRANGLER_RUNNERS = ['npx', 'npm', 'pnpm', 'pnpx', 'yarn', 'bun', 'bunx', 'node'];
+const WRANGLER_WORD = /^(wrangler(@.*)?|wrangler\.js|wipe-d1-if-squashed\.js)$/;
+
+function checkWrangler(words) {
+	const word = words.find((word) => WRANGLER_WORD.test(basename(word.text)));
+	return word ? `${word.text} is the developer's to run; propose the exact command.` : null;
+}
+
 const VERB_CHECKS = {
+	wrangler: () => "wrangler is the developer's; propose the exact command.",
+	...Object.fromEntries(WRANGLER_RUNNERS.map((runner) => [runner, checkWrangler])),
 	find: checkFind,
 	git: checkGit,
 	gh: (words) => checkGh(words),

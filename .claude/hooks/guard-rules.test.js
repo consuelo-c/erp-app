@@ -103,3 +103,19 @@ test('mentioning the safety rules is not writing them', () => {
 	).toBeNull();
 	expect(check('git status --short .claude && echo done > /tmp/guard-temp/log')).toBeNull();
 });
+
+test("wrangler and the wipe script are the developer's, however they are run", () => {
+	expect(check('wrangler d1 list')).toMatch(/wrangler/);
+	expect(check('npx --yes wrangler d1 execute db --remote')).toMatch(/wrangler/);
+	expect(check('npm exec -- wrangler deploy')).toMatch(/wrangler/);
+	expect(check('npm exec wrangler@4 deploy')).toMatch(/wrangler/);
+	expect(check('pnpm dlx wrangler deploy')).toMatch(/wrangler/);
+	expect(check('./node_modules/.bin/wrangler deploy')).toMatch(/wrangler/);
+	expect(check('node node_modules/wrangler/bin/wrangler.js deploy')).toMatch(/wrangler/);
+	expect(check('env CI=1 npx wrangler deploy')).toMatch(/wrangler/);
+	expect(check(`bash -c 'npx -y wrangler deploy'`)).toMatch(/wrangler/);
+	expect(check('node ./scripts/wipe-d1-if-squashed.js --remote --yes')).toMatch(/wipe-d1/);
+	expect(check('npm run typecheck')).toBeNull();
+	expect(check('npx vitest run')).toBeNull();
+	expect(check('rg wrangler src')).toBeNull();
+});
