@@ -153,7 +153,7 @@ gh api repos/:owner/:repo/milestones --jq '.[].title'
 ## Deploy to Cloudflare
 
 > [!NOTE]
-> The app has been in production since launch (the first real order). Production data is the company's record: nothing deletes or truncates it, and `migrations/` is append-only.
+> The app has been in production since launch (the first real order). Production data is the company's record: nothing wipes or truncates it, and `migrations/` is append-only.
 
 This section explains how to put the app in production, what data it needs to work, and how to check that the deploy went well. It assumes the steps in [Cloudflare](#cloudflare) and [GitHub](#github) are done: the database, the bucket, the `API Token` and the repository exist.
 
