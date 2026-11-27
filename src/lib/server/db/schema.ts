@@ -25,8 +25,8 @@ export const settings = sqliteTable('settings', {
 });
 
 // Append-only. Drizzle can't express triggers, so the initial migration appends two by hand that
-// abort any UPDATE or DELETE: re-add them whenever migrations/ is squashed or a migration recreates
-// the table (drizzle does, to add a CHECK).
+// abort any UPDATE or DELETE: re-add them whenever a migration recreates the table (drizzle does, to
+// add a CHECK).
 export const events = sqliteTable(
 	'events',
 	{
